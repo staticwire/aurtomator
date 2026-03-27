@@ -313,7 +313,7 @@ upstream:
   project: owner/repo
 ```
 
-See [docs/WORKFLOW.md](WORKFLOW.md) for detailed YAML examples for all 12 strategies.
+See [docs/WORKFLOW.md](WORKFLOW.md) for detailed YAML examples for all 13 strategies.
 
 ### 3. Validate the config
 

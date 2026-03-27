@@ -3,6 +3,7 @@
 # Available strategies:
 #   github-release  — GitHub Releases API (upstream.project: owner/repo)
 #   github-tag      — GitHub Tags API (upstream.project, optional upstream.tag_pattern)
+#   github-nightly  — GitHub nightly/prerelease builds (upstream.project, upstream.nightly_tag, upstream.version_source)
 #   gitlab-tag      — GitLab Tags API (upstream.host, upstream.project)
 #   gitea-tag       — Gitea/Forgejo/Codeberg Tags (upstream.host, upstream.project)
 #   git-latest      — bare git clone, rCOUNT.HASH (upstream.type, upstream.project or upstream.url)

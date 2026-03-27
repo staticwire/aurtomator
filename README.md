@@ -49,22 +49,23 @@ See [docs/SETUP.md](docs/SETUP.md) for the full setup guide.
 
 ## Strategies
 
-12 built-in version detection strategies:
+13 built-in version detection strategies:
 
-| Strategy         | Source              | Use for                              |
-|------------------|---------------------|--------------------------------------|
-| `github-release` | GitHub Releases API | GitHub-hosted projects with releases |
-| `github-tag`     | GitHub Tags API     | GitHub projects without releases     |
-| `gitlab-tag`     | GitLab Tags API     | Any GitLab instance                  |
-| `gitea-tag`      | Gitea/Forgejo API   | Codeberg, self-hosted Gitea          |
-| `git-latest`     | `git clone --bare`  | `-git` packages, any git repo        |
-| `pypi`           | PyPI JSON API       | Python packages                      |
-| `npm`            | npm registry        | Node.js packages                     |
-| `crates`         | crates.io API       | Rust crates                          |
-| `repology`       | Repology API        | Universal fallback (120+ repos)      |
-| `archpkg`        | Arch repos API      | Rebuild triggers, dependency tracking|
-| `webpage-scrape` | URL + regex         | Anything not covered above           |
-| `kde-tarball`    | download.kde.org    | KDE/Plasma packages                  |
+| Strategy           | Source              | Use for                              |
+|--------------------|---------------------|--------------------------------------|
+| `github-release`   | GitHub Releases API | GitHub-hosted projects with releases |
+| `github-tag`       | GitHub Tags API     | GitHub projects without releases     |
+| `github-nightly`   | GitHub Releases API | Nightly/prerelease builds (4 patterns) |
+| `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                  |
+| `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea          |
+| `git-latest`       | `git clone --bare`  | `-git` packages, any git repo        |
+| `pypi`             | PyPI JSON API       | Python packages                      |
+| `npm`              | npm registry        | Node.js packages                     |
+| `crates`           | crates.io API       | Rust crates                          |
+| `repology`         | Repology API        | Universal fallback (120+ repos)      |
+| `archpkg`          | Arch repos API      | Rebuild triggers, dependency tracking|
+| `webpage-scrape`   | URL + regex         | Anything not covered above           |
+| `kde-tarball`      | download.kde.org    | KDE/Plasma packages                  |
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for strategy details, YAML examples, and how to write custom strategies.
 

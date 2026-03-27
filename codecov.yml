@@ -8,5 +8,9 @@ coverage:
       default:
         target: 60%
 
+comment:
+  layout: "condensed_header, condensed_files, condensed_footer"
+  require_changes: true
+
 ignore:
   - "tests/**"

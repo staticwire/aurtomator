@@ -164,6 +164,64 @@ teardown() {
   [[ "$output" =~ ^r3\.[0-9a-f]{7}$ ]]
 }
 
+# === github-nightly ===
+
+@test "github-nightly: pattern A — fixed tag, version from body" {
+  create_test_package "test-nightly-a" "github-nightly" "upstream:
+  project: owner/nightly-repo
+  nightly_tag: nightly
+  version_source: release_body
+  version_pattern: 'NVIM v\\K\\S+'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-a"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"0.12.0"* ]]
+}
+
+@test "github-nightly: pattern B — dated tags" {
+  create_test_package "test-nightly-b" "github-nightly" "upstream:
+  project: owner/dated-repo
+  nightly_tag: 'nightly-'
+  version_source: tag_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-b"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.03.26" ]
+}
+
+@test "github-nightly: pattern C — separate nightly repo" {
+  create_test_package "test-nightly-c" "github-nightly" "upstream:
+  project: owner/nightly-builds
+  nightly_tag: latest
+  version_source: tag"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-c"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.0.0" ]
+}
+
+@test "github-nightly: pattern D — channel filter" {
+  create_test_package "test-nightly-d" "github-nightly" "upstream:
+  project: owner/multi-channel
+  channel: Nightly
+  version_source: tag"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "nightly-2026-03-26" ]]
+}
+
+@test "github-nightly: published_date version source" {
+  create_test_package "test-nightly-date" "github-nightly" "upstream:
+  project: owner/nightly-repo
+  nightly_tag: nightly
+  version_source: published_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-date"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.03.27" ]
+}
+
 # === Error handling: unknown package ===
 
 @test "strategy fails gracefully on unknown package" {
