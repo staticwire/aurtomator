@@ -14,7 +14,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 
 readonly VALID_STRATEGIES=(
-  github-release github-tag gitlab-tag gitea-tag git-latest
+  github-release github-tag github-nightly gitlab-tag gitea-tag git-latest
   pypi npm crates repology archpkg kde-tarball webpage-scrape
 )
 
@@ -78,7 +78,7 @@ validate_pkg() {
   fi
 
   case "$strategy" in
-    github-release | github-tag)
+    github-release | github-tag | github-nightly)
       local project
       project=$(pkg_get "$file" '.upstream.project // ""')
       if [[ -z "$project" || "$project" == "null" ]]; then

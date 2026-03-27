@@ -124,7 +124,7 @@ current: "2.1.0"
 
 ## 3. Strategies
 
-Aurtomator ships 12 built-in strategies. Each strategy is a standalone bash script in
+Aurtomator ships 13 built-in strategies. Each strategy is a standalone bash script in
 `strategies/` that receives a package name, reads the package YAML for upstream
 config, queries the upstream source, and outputs a single version string to stdout.
 
@@ -201,7 +201,68 @@ upstream:
 
 ---
 
-### 3.3 gitlab-tag
+### 3.3 github-nightly
+
+Detects versions from GitHub nightly/prerelease builds. Supports 4 patterns:
+
+**Pattern A: Fixed tag** (default) — a single tag force-pushed daily (neovim, ghostty, yazi):
+
+```yaml
+name: neovim-nightly-bin
+strategy: github-nightly
+upstream:
+  project: neovim/neovim
+  nightly_tag: nightly
+  version_source: release_body
+  version_pattern: 'NVIM v\K\S+'
+```
+
+**Pattern B: Dated tags** — tags like `nightly-2026-03-26` (ruffle, servo):
+
+```yaml
+name: ruffle-nightly-bin
+strategy: github-nightly
+upstream:
+  project: nicknisi/ruffle-builds
+  nightly_tag: "nightly-"
+  version_source: tag_date
+```
+
+**Pattern C: Separate nightly repo** — standard `/releases/latest` on a dedicated build repo (yt-dlp):
+
+```yaml
+name: yt-dlp-nightly-bin
+strategy: github-nightly
+upstream:
+  project: yt-dlp/yt-dlp-nightly-builds
+  nightly_tag: latest
+  version_source: tag
+```
+
+**Pattern D: Channel filter** — filter releases by name containing a channel string (brave):
+
+```yaml
+name: brave-nightly-bin
+strategy: github-nightly
+upstream:
+  project: brave/brave-browser
+  channel: Nightly
+  version_source: tag
+```
+
+**Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `upstream.project` | yes | `owner/repo` |
+| `upstream.nightly_tag` | no | Tag name or prefix (default: `"nightly"`, use `"latest"` for pattern C) |
+| `upstream.version_source` | no | `"tag"` (default), `"release_body"`, `"tag_date"`, `"published_date"` |
+| `upstream.version_pattern` | for `release_body` | Perl regex to extract version from release body |
+| `upstream.channel` | for pattern D | Filter releases by name containing this string |
+
+---
+
+### 3.4 gitlab-tag
 
 **What it checks:** GitLab Tags API (`/api/v4/projects/{id}/repository/tags`).
 
@@ -232,7 +293,7 @@ upstream:
 
 ---
 
-### 3.4 gitea-tag
+### 3.5 gitea-tag
 
 **What it checks:** Gitea/Forgejo Tags API (`/api/v1/repos/{owner}/{repo}/tags`).
 
@@ -263,7 +324,7 @@ upstream:
 
 ---
 
-### 3.5 git-latest
+### 3.6 git-latest
 
 **What it checks:** Any git repository via bare clone.
 
@@ -320,7 +381,7 @@ upstream:
 
 ---
 
-### 3.6 pypi
+### 3.7 pypi
 
 **What it checks:** PyPI JSON API (`https://pypi.org/pypi/{package}/json`).
 
@@ -347,7 +408,7 @@ upstream:
 
 ---
 
-### 3.7 npm
+### 3.8 npm
 
 **What it checks:** npm registry (`https://registry.npmjs.org/{package}/latest`).
 
@@ -373,7 +434,7 @@ upstream:
 
 ---
 
-### 3.8 crates
+### 3.9 crates
 
 **What it checks:** crates.io API (`https://crates.io/api/v1/crates/{crate}`).
 
@@ -402,7 +463,7 @@ upstream:
 
 ---
 
-### 3.9 repology
+### 3.10 repology
 
 **What it checks:** Repology API (`https://repology.org/api/v1/project/{name}`).
 
@@ -440,7 +501,7 @@ upstream: {}
 
 ---
 
-### 3.10 archpkg
+### 3.11 archpkg
 
 **What it checks:** Arch Linux official package search API
 (`https://archlinux.org/packages/search/json/?name={name}`).
@@ -469,7 +530,7 @@ upstream:
 
 ---
 
-### 3.11 webpage-scrape
+### 3.12 webpage-scrape
 
 **What it checks:** Any HTTPS webpage, using a regex pattern to extract version strings.
 
@@ -522,7 +583,7 @@ upstream:
 
 ---
 
-### 3.12 kde-tarball
+### 3.13 kde-tarball
 
 **What it checks:** KDE download server directory listing
 (`https://download.kde.org/stable/{name}/`).
