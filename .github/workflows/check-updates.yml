@@ -1,0 +1,183 @@
+name: Check AUR Package Updates
+
+on:
+  schedule:
+    - cron: "0 * * * *" # every hour
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Skip schedule matching, check all packages now"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 30
+
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed sudo git github-cli openssh gnupg namcap jq go-yq
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup workspace
+        env:
+          AUR_GIT_NAME: ${{ secrets.AUR_GIT_NAME }}
+          AUR_GIT_EMAIL: ${{ secrets.AUR_GIT_EMAIL }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          sudo -u builder git config --global user.name "${AUR_GIT_NAME:-aurtomator}"
+          sudo -u builder git config --global user.email "${AUR_GIT_EMAIL:-aurtomator@users.noreply.github.com}"
+          chown -R builder:builder .
+
+      - name: Setup AUR SSH
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          SSH_DIR="/home/builder/.ssh"
+          mkdir -m 0700 "$SSH_DIR"
+          echo "$AUR_SSH_KEY" > "$SSH_DIR/aur"
+          chmod 600 "$SSH_DIR/aur"
+          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> "$SSH_DIR/known_hosts" 2>&1
+          printf '%s\n' \
+            "Host aur.archlinux.org" \
+            "  IdentityFile $SSH_DIR/aur" \
+            "  User aur" \
+            "  StrictHostKeyChecking accept-new" \
+            > "$SSH_DIR/config"
+          chown -R builder:builder "$SSH_DIR"
+          # Verify SSH access to AUR (AUR always exits 1, check for "Welcome" in output)
+          SSH_TEST=$(sudo -u builder ssh -o BatchMode=yes -o ConnectTimeout=5 aur@aur.archlinux.org 2>&1 || true)
+          if echo "$SSH_TEST" | grep -qi "welcome"; then
+            echo "SSH to AUR: OK"
+          else
+            echo "::error::SSH to AUR failed. Run ./scripts/setup.sh to configure secrets."
+            exit 1
+          fi
+
+      - name: Setup GPG
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          if [[ -z "$GPG_SIGNING_KEY" ]]; then
+            echo "No GPG key configured, skipping signing"
+            exit 0
+          fi
+          echo "$GPG_SIGNING_KEY" | sudo -u builder gpg --batch --import
+          GPG_KEY_ID=$(sudo -u builder gpg --list-secret-keys --keyid-format long | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> "$GITHUB_ENV"
+          sudo -u builder git config --global user.signingkey "$GPG_KEY_ID"
+          sudo -u builder git config --global commit.gpgsign true
+
+      - name: Check and update packages
+        env:
+          AUR_GIT_NAME: ${{ secrets.AUR_GIT_NAME }}
+          AUR_GIT_EMAIL: ${{ secrets.AUR_GIT_EMAIL }}
+        run: |
+          sudo -u builder env \
+            GPG_KEY_ID="${GPG_KEY_ID:-}" \
+            GIT_AUTHOR_NAME="${AUR_GIT_NAME:-aurtomator}" \
+            GIT_AUTHOR_EMAIL="${AUR_GIT_EMAIL:-aurtomator@users.noreply.github.com}" \
+            ./scripts/check-all.sh --update
+
+      - name: Update README status table
+        run: sudo -u builder ./scripts/update-readme.sh
+
+      - name: Commit changes via API (verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          REPO="${{ github.repository }}"
+          BRANCH="${{ github.ref_name }}"
+          MESSAGE="chore: update package versions [skip ci]"
+
+          HEAD_SHA=$(gh api "repos/$REPO/git/ref/heads/$BRANCH" --jq '.object.sha')
+          BASE_TREE=$(gh api "repos/$REPO/git/commits/$HEAD_SHA" --jq '.tree.sha')
+
+          TREE_ENTRIES="[]"
+          for file in $(git diff --name-only); do
+            CONTENT=$(base64 -w0 "$file")
+            BLOB_SHA=$(gh api "repos/$REPO/git/blobs" \
+              -f content="$CONTENT" \
+              -f encoding="base64" \
+              --jq '.sha')
+            TREE_ENTRIES=$(echo "$TREE_ENTRIES" | jq \
+              --arg path "$file" \
+              --arg sha "$BLOB_SHA" \
+              '. + [{"path": $path, "mode": "100644", "type": "blob", "sha": $sha}]')
+          done
+
+          TREE_SHA=$(echo "$TREE_ENTRIES" | gh api "repos/$REPO/git/trees" \
+            --input - \
+            -f base_tree="$BASE_TREE" \
+            --jq '.sha' \
+            --method POST \
+            -H "Content-Type: application/json" \
+            --input <(jq -n --arg base "$BASE_TREE" --argjson tree "$TREE_ENTRIES" \
+              '{base_tree: $base, tree: $tree}'))
+
+          COMMIT_SHA=$(gh api "repos/$REPO/git/commits" \
+            -f message="$MESSAGE" \
+            -f tree="$TREE_SHA" \
+            -f "parents[]=$HEAD_SHA" \
+            --jq '.sha')
+
+          gh api "repos/$REPO/git/refs/heads/$BRANCH" \
+            -f sha="$COMMIT_SHA" \
+            -F force=false \
+            --method PATCH
+
+          echo "Committed: $COMMIT_SHA (verified)"
+
+      - name: Create issues for failed packages
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          STATUS_DIR=".status"
+          [[ -d "$STATUS_DIR" ]] || exit 0
+
+          for status_file in "$STATUS_DIR"/*; do
+            [[ -f "$status_file" ]] || continue
+            pkg_name=$(basename "$status_file")
+            [[ "$pkg_name" == _* ]] && continue
+
+            status=$(cat "$status_file")
+            case "$status" in
+              check_failed:*|update_failed:*)
+                error_msg="${status#*: }"
+
+                gh label create "auto-update" --color "d73a4a" --description "Automated update failure" 2>/dev/null || true
+
+                existing=$(gh issue list --label "auto-update" --search "$pkg_name failed" --state open --json number --jq 'length')
+                if [[ "$existing" -gt 0 ]]; then
+                  echo "Issue already open for $pkg_name, skipping"
+                  continue
+                fi
+
+                ISSUE_BODY=$(printf "Package: %s\nError: %s\nRun: %s\n\nAuto-created by update workflow. Close after fixing." \
+                  "$pkg_name" "$status" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+
+                gh issue create \
+                  --title "❌ $pkg_name: update failed" \
+                  --label "auto-update" \
+                  --body "$ISSUE_BODY" || echo "Warning: could not create issue (issues may be disabled)"
+                echo "Created issue for $pkg_name"
+                ;;
+            esac
+          done

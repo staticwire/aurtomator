@@ -1,0 +1,22 @@
+# Example package config — copy to packages/<name>.yml and edit
+#
+# Available strategies:
+#   github-release  — GitHub Releases API (upstream.project: owner/repo)
+#   github-tag      — GitHub Tags API (upstream.project, optional upstream.tag_pattern)
+#   gitlab-tag      — GitLab Tags API (upstream.host, upstream.project)
+#   gitea-tag       — Gitea/Forgejo/Codeberg Tags (upstream.host, upstream.project)
+#   git-latest      — bare git clone, rCOUNT.HASH (upstream.type, upstream.project or upstream.url)
+#   pypi            — PyPI registry (upstream.registry)
+#   npm             — npm registry (upstream.registry)
+#   crates          — crates.io registry (upstream.registry)
+#   repology        — Repology API (optional upstream.repology, defaults to name)
+#   archpkg         — Arch official repos (optional upstream.archpkg, defaults to name)
+#   kde-tarball     — download.kde.org tarball listing (uses name)
+#   webpage-scrape  — HTML scraping with regex (upstream.url, upstream.pattern)
+#
+# See docs/WORKFLOW.md for detailed examples of each strategy.
+
+name: my-package
+strategy: github-release
+upstream:
+  project: owner/repo

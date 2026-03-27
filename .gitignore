@@ -1,0 +1,14 @@
+# Runtime
+logs/
+*.log
+/tmp/
+.status/
+
+# Per-fork config
+.aurtomator.conf
+
+# Coverage reports
+coverage/
+
+# Gitignore
+.gitignore
