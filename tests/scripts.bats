@@ -748,3 +748,54 @@ MOCKGIT
   run env PATH="$MOCK_DIR:/usr/bin" "$TEST_TMPDIR/scripts/update-pkg.sh" "test-checksums" "2.0.0"
   [ "$status" -ne 0 ]
 }
+
+@test "update-pkg: skips checksums for VCS packages (SKIP pattern)" {
+  create_test_package "test-vcs" "git-latest" "upstream:
+  type: git
+  url: https://example.com/repo.git
+current: 'r100.abc1234'"
+
+  # Create a fake AUR repo with VCS PKGBUILD (sha256sums=SKIP)
+  aur_dir="$TEST_TMPDIR/aur-test-vcs"
+  mkdir -p "$aur_dir"
+  git -C "$aur_dir" init -q
+  git -C "$aur_dir" config user.name "test"
+  git -C "$aur_dir" config user.email "test@test"
+  git -C "$aur_dir" config commit.gpgsign false
+  cat > "$aur_dir/PKGBUILD" <<'EOF'
+pkgname=test-vcs
+pkgver=r100.abc1234
+pkgrel=1
+pkgdesc="test VCS"
+arch=('any')
+url="https://example.com"
+license=('MIT')
+source=("git+https://example.com/repo.git")
+sha256sums=('SKIP')
+EOF
+  git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
+
+  # Mock git clone
+  cat > "$MOCK_DIR/git" <<MOCKGIT
+#!/usr/bin/env bash
+if [[ "\$1" == "clone" ]]; then
+  cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
+  exit 0
+fi
+exec /usr/bin/git "\$@"
+MOCKGIT
+  chmod +x "$MOCK_DIR/git"
+
+  # Mock makepkg --printsrcinfo
+  cat > "$MOCK_DIR/makepkg" <<'EOF'
+#!/usr/bin/env bash
+echo "pkgbase = test-vcs"
+echo "pkgname = test-vcs"
+EOF
+  chmod +x "$MOCK_DIR/makepkg"
+
+  # Should skip updpkgsums and not fail
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-vcs" "r200.def5678"
+  # Will fail at git push (no remote) but should get past checksums
+  [[ "$output" == *"VCS package, skipping checksums"* ]] || [[ "$output" == *"Generating .SRCINFO"* ]]
+}
