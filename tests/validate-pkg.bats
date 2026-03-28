@@ -347,3 +347,31 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"not valid as regex"* ]]
 }
+
+# === tag_version_regex validation ===
+
+@test "validate: tag_version_regex valid with capture group passes" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: 'MeshLab-(.*)'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: tag_version_regex invalid regex rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: '([invalid)'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not valid ERE regex"* ]]
+}
+
+@test "validate: tag_version_regex without capture group rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: 'MeshLab-.*'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"capture group"* ]]
+}

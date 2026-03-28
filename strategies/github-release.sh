@@ -20,6 +20,7 @@ source "${SCRIPT_DIR}/../scripts/lib.sh"
 
 pkg_file=$(pkg_file "$NAME")
 owner_repo=$(pkg_get "$pkg_file" .upstream.project)
+tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 
 # Build auth header if token available
 auth_header=()
@@ -40,5 +41,15 @@ if [[ -z "$version" || "$version" == "null" ]]; then
   exit 1
 fi
 
-# Strip v prefix
-echo "${version#v}"
+# Extract version from tag
+if [[ -n "$tag_version_regex" ]]; then
+  extracted=$(echo "$version" | sed -nE "s|${tag_version_regex}|\\1|p" | head -1)
+  if [[ -z "$extracted" ]]; then
+    echo "tag_version_regex '${tag_version_regex}' did not match tag '${version}'" >&2
+    exit 1
+  fi
+  echo "$extracted"
+else
+  # Default: strip v prefix
+  echo "${version#v}"
+fi

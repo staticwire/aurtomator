@@ -21,3 +21,8 @@ name: my-package
 strategy: github-release
 upstream:
   project: owner/repo
+
+# Optional: custom tag format (e.g. "MeshLab-2025.07" or "0.1.8-stable")
+# Use an ERE regex with a capture group to extract the version:
+#   tag_version_regex: 'MeshLab-(.*)'
+#   tag_version_regex: '(.+)-stable'

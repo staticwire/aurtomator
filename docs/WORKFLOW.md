@@ -162,9 +162,22 @@ Bearer token. Not required for public repos but avoids rate limits.
 name: my-package
 strategy: github-release
 upstream:
-  type: github
   project: owner/repo
 ```
+
+**Custom tag format** — for projects with non-standard tags (e.g., `MeshLab-2025.07`,
+`0.1.8-stable`), use `tag_version_regex` with an ERE capture group:
+
+```yaml
+name: meshlab-bin
+strategy: github-release
+upstream:
+  project: cnr-isti-vclab/meshlab
+  tag_version_regex: 'MeshLab-(.*)'
+```
+
+The captured group becomes the version. If omitted, the default `v` prefix strip applies.
+This field also works with `github-tag` and `github-nightly` strategies.
 
 ---
 

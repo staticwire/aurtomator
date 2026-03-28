@@ -22,6 +22,35 @@ teardown() {
   [ "$output" = "2.0.0" ]
 }
 
+@test "github-release: tag_version_regex strips prefix" {
+  create_test_package "test-regex-prefix" "github-release" "upstream:
+  project: custom-prefix/repo
+  tag_version_regex: 'MeshLab-(.*)'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-regex-prefix"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2025.07" ]
+}
+
+@test "github-release: tag_version_regex strips suffix" {
+  create_test_package "test-regex-suffix" "github-release" "upstream:
+  project: custom-suffix/repo
+  tag_version_regex: '(.+)-stable'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-regex-suffix"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.1.8" ]
+}
+
+@test "github-release: tag_version_regex non-matching fails" {
+  create_test_package "test-nomatch" "github-release" "upstream:
+  project: custom-suffix/repo
+  tag_version_regex: 'docker-v(.*)'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-nomatch"
+  [ "$status" -ne 0 ]
+}
+
 # === github-tag ===
 
 @test "github-tag: returns latest tag sorted by semver" {
@@ -32,6 +61,16 @@ teardown() {
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
   [ "$status" -eq 0 ]
   [ "$output" = "2.0.0" ]
+}
+
+@test "github-tag: tag_version_regex extracts from prefixed tags" {
+  create_test_package "test-tag-regex" "github-tag" "upstream:
+  project: custom-prefix/repo
+  tag_version_regex: 'bun-v(.*)'"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-tag-regex"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.3.11" ]
 }
 
 # === gitlab-tag ===
@@ -220,6 +259,18 @@ teardown() {
   run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-date"
   [ "$status" -eq 0 ]
   [ "$output" = "2026.03.27" ]
+}
+
+@test "github-nightly: tag_version_regex with version_source=tag" {
+  create_test_package "test-nightly-regex" "github-nightly" "upstream:
+  project: custom-nightly/repo
+  nightly_tag: nightly
+  version_source: tag
+  tag_version_regex: 'nightly-v([0-9]+\\.[0-9]+\\.[0-9]+).*'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
+  [ "$status" -eq 0 ]
+  [ "$output" = "3.5.0" ]
 }
 
 # === Error handling: unknown package ===

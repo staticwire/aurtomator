@@ -34,6 +34,7 @@ nightly_tag=$(pkg_get "$pkg_file" '.upstream.nightly_tag // "nightly"')
 version_source=$(pkg_get "$pkg_file" '.upstream.version_source // "tag"')
 channel=$(pkg_get "$pkg_file" '.upstream.channel // ""')
 version_pattern=$(pkg_get "$pkg_file" '.upstream.version_pattern // ""')
+tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 
 auth_header=()
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
@@ -88,7 +89,16 @@ fi
 case "$version_source" in
   tag)
     version=$(echo "$release" | yq -r '.tag_name')
-    version="${version#v}"
+    if [[ -n "$tag_version_regex" ]]; then
+      extracted=$(echo "$version" | sed -nE "s|${tag_version_regex}|\\1|p" | head -1)
+      if [[ -z "$extracted" ]]; then
+        echo "tag_version_regex '${tag_version_regex}' did not match tag '${version}'" >&2
+        exit 1
+      fi
+      version="$extracted"
+    else
+      version="${version#v}"
+    fi
     ;;
   tag_date)
     tag=$(echo "$release" | yq -r '.tag_name')

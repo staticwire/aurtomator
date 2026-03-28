@@ -77,6 +77,21 @@ validate_pkg() {
     fi
   fi
 
+  # Validate optional tag_version_regex (used by github-release, github-tag, github-nightly)
+  local tag_version_regex
+  tag_version_regex=$(pkg_get "$file" '.upstream.tag_version_regex // ""')
+  if [[ -n "$tag_version_regex" && "$tag_version_regex" != "null" ]]; then
+    # Check capture group first (must have parentheses)
+    if ! echo "$tag_version_regex" | grep -qE '\([^)]*\)'; then
+      log_err "$file: upstream.tag_version_regex must contain a capture group (): $tag_version_regex"
+      ((errors++))
+    # Then check valid regex syntax
+    elif ! echo "test" | sed -nE "s|${tag_version_regex}|\\1|p" >/dev/null 2>&1; then
+      log_err "$file: upstream.tag_version_regex is not valid ERE regex: $tag_version_regex"
+      ((errors++))
+    fi
+  fi
+
   case "$strategy" in
     github-release | github-tag | github-nightly)
       local project
