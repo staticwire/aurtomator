@@ -136,7 +136,7 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
   fi
 
   table_rows+="
-| \`${name}\` | ${current} | ${strategy} | ${last_updated} | ${status} |"
+| [${name}](https://aur.archlinux.org/packages/${name}) | ${current} | ${strategy} | ${last_updated} | ${status} |"
   ((pkg_count++)) || true
 done
 
