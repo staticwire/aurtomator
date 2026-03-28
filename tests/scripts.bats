@@ -700,3 +700,51 @@ MOCKEOF
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "bad-pkg"
   [ "$status" -ne 0 ]
 }
+
+# === updpkgsums dependency ===
+
+@test "update-pkg: fails if updpkgsums missing for non-VCS package" {
+  create_test_package "test-checksums" "github-release" "upstream:
+  type: github
+  project: owner/repo
+current: '1.0.0'"
+
+  # Create a fake AUR repo with PKGBUILD that has real checksums
+  aur_dir="$TEST_TMPDIR/aur-test-checksums"
+  mkdir -p "$aur_dir"
+  git -C "$aur_dir" init -q
+  git -C "$aur_dir" config user.name "test"
+  git -C "$aur_dir" config user.email "test@test"
+  git -C "$aur_dir" config commit.gpgsign false
+  cat > "$aur_dir/PKGBUILD" <<'EOF'
+pkgname=test-checksums
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('any')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/test-1.0.0.tar.gz")
+b2sums=('abc123')
+EOF
+  git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
+
+  # Remove updpkgsums from PATH to simulate CI without pacman-contrib
+  CLEAN_PATH=$(echo "$PATH" | tr ':' '\n' | grep -v mock | tr '\n' ':')
+  
+  # Mock git clone to return our fake AUR dir
+  mkdir -p "$MOCK_DIR"
+  cat > "$MOCK_DIR/git" <<MOCKGIT
+#!/usr/bin/env bash
+if [[ "\$1" == "clone" ]]; then
+  cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
+  exit 0
+fi
+exec /usr/bin/git "\$@"
+MOCKGIT
+  chmod +x "$MOCK_DIR/git"
+
+  # Run update-pkg without updpkgsums — should fail
+  run env PATH="$MOCK_DIR:/usr/bin" "$TEST_TMPDIR/scripts/update-pkg.sh" "test-checksums" "2.0.0"
+  [ "$status" -ne 0 ]
+}

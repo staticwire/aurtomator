@@ -66,13 +66,21 @@ fi
 # UPDATE CHECKSUMS
 # =============================================================================
 
-# Skip checksums for VCS packages (sha256sums=SKIP)
-if grep -q "sha256sums=('SKIP')" "${aur_dir}/PKGBUILD"; then
+# Skip checksums for VCS packages (any checksum type with SKIP)
+if grep -qP "(md5|sha\d+|b2)sums=\('SKIP'\)" "${aur_dir}/PKGBUILD"; then
   log_info "VCS package, skipping checksums"
 else
+  require_cmd updpkgsums
   log_info "Updating checksums"
-  (cd "$aur_dir" && updpkgsums 2>/dev/null) || {
-    log_warn "updpkgsums failed or not available, checksums may need manual update"
+  (cd "$aur_dir" && updpkgsums) || {
+    log_err "updpkgsums failed — refusing to push with stale checksums"
+    exit 1
+  }
+  # Verify checksums are correct before pushing
+  log_info "Verifying checksums"
+  (cd "$aur_dir" && makepkg --verifysource --skippgpcheck) || {
+    log_err "Checksum verification failed — aborting"
+    exit 1
   }
 fi
 
