@@ -56,6 +56,10 @@ case "$url" in
   *example.com/empty-page*)
     echo '<html><body>No downloads here</body></html>'
     ;;
+  # GitHub Asset - release tag missing (404 body)
+  *api.github.com/repos/null-owner/null-repo/releases/tags/*)
+    echo '{"message": "Not Found"}'
+    ;;
 
   # --- GitHub Nightly patterns (before wildcards) ---
 
@@ -70,6 +74,13 @@ case "$url" in
   # Pattern B+D: releases list (for dated tags and channel filter)
   *api.github.com/repos/*/releases\?per_page=20)
     echo '[{"tag_name": "nightly-2026-03-26", "name": "Nightly v9.0.1", "published_at": "2026-03-26T00:00:00Z"}, {"tag_name": "nightly-2026-03-25", "name": "Stable v8.0.0", "published_at": "2026-03-25T00:00:00Z"}]'
+    ;;
+
+  # --- GitHub Asset pattern (before wildcards) ---
+
+  # Fixed release tag whose assets get re-uploaded
+  *api.github.com/repos/*/releases/tags/models)
+    echo '{"tag_name": "models", "assets": [{"name": "voice-a.tar.bz2", "updated_at": "2025-12-02T06:55:38Z"}, {"name": "voice-b.tar.bz2", "updated_at": "2026-01-15T10:00:00Z"}, {"name": "voice-c.tar.bz2", "updated_at": "2024-03-09T00:00:00Z"}]}'
     ;;
 
   # --- tag_version_regex test patterns (must be before wildcards) ---

@@ -124,9 +124,7 @@ current: "2.1.0"
 
 ## 3. Strategies
 
-Aurtomator ships 13 built-in strategies. Each strategy is a standalone bash script in
-`strategies/` that receives a package name, reads the package YAML for upstream
-config, queries the upstream source, and outputs a single version string to stdout.
+Aurtomator ships 14 built-in strategies. Each strategy is a standalone bash script in `strategies/` that receives a package name, reads the package YAML for upstream config, queries the upstream source, and outputs a single version string to stdout.
 
 All strategies:
 
@@ -275,7 +273,43 @@ upstream:
 
 ---
 
-### 3.4 gitlab-tag
+### 3.4 github-asset
+
+**What it checks:** one GitHub release by tag (`/repos/{owner}/{repo}/releases/tags/{tag}`) and the `updated_at` of the assets listed in the package YAML.
+
+**When to use:** releases whose tag never moves while the assets behind it are replaced, such as a model zoo or a rolling download tag. A PKGBUILD for such a release points at fixed URLs, so an update changes `pkgver` and the checksums and nothing else.
+
+**YAML fields:**
+
+| Field              | Required | Description                                  |
+|--------------------|----------|----------------------------------------------|
+| `upstream.project` | yes      | `owner/repo` format                          |
+| `upstream.tag`     | yes      | Release tag that carries the assets          |
+| `upstream.assets`  | yes      | List of exact asset file names, at least one |
+
+**How version is extracted:**
+Every listed asset must be present in the release, otherwise the strategy fails and names the missing one. The newest `updated_at` among them becomes the version, rendered as `YYYYMMDD` (for example `20251202`). A re-upload of any listed asset moves the date forward.
+
+**Authentication:** Same as `github-release`.
+
+**Example YAML:**
+
+```yaml
+name: sherpa-onnx-piper-voices-ru
+strategy: github-asset
+upstream:
+  project: k2-fsa/sherpa-onnx
+  tag: tts-models
+  assets:
+    - vits-piper-ru_RU-denis-medium.tar.bz2
+    - vits-piper-ru_RU-dmitri-medium.tar.bz2
+```
+
+The release object lists only assets in state `uploaded`, so one request covers every downloadable asset and no pagination is needed.
+
+---
+
+### 3.5 gitlab-tag
 
 **What it checks:** GitLab Tags API (`/api/v4/projects/{id}/repository/tags`).
 
@@ -306,7 +340,7 @@ upstream:
 
 ---
 
-### 3.5 gitea-tag
+### 3.6 gitea-tag
 
 **What it checks:** Gitea/Forgejo Tags API (`/api/v1/repos/{owner}/{repo}/tags`).
 
@@ -337,7 +371,7 @@ upstream:
 
 ---
 
-### 3.6 git-latest
+### 3.7 git-latest
 
 **What it checks:** Any git repository via bare clone.
 
@@ -394,7 +428,7 @@ upstream:
 
 ---
 
-### 3.7 pypi
+### 3.8 pypi
 
 **What it checks:** PyPI JSON API (`https://pypi.org/pypi/{package}/json`).
 
@@ -421,7 +455,7 @@ upstream:
 
 ---
 
-### 3.8 npm
+### 3.9 npm
 
 **What it checks:** npm registry (`https://registry.npmjs.org/{package}/latest`).
 
@@ -447,7 +481,7 @@ upstream:
 
 ---
 
-### 3.9 crates
+### 3.10 crates
 
 **What it checks:** crates.io API (`https://crates.io/api/v1/crates/{crate}`).
 
@@ -476,7 +510,7 @@ upstream:
 
 ---
 
-### 3.10 repology
+### 3.11 repology
 
 **What it checks:** Repology API (`https://repology.org/api/v1/project/{name}`).
 
@@ -514,7 +548,7 @@ upstream: {}
 
 ---
 
-### 3.11 archpkg
+### 3.12 archpkg
 
 **What it checks:** Arch Linux official package search API
 (`https://archlinux.org/packages/search/json/?name={name}`).
@@ -543,7 +577,7 @@ upstream:
 
 ---
 
-### 3.12 webpage-scrape
+### 3.13 webpage-scrape
 
 **What it checks:** Any HTTPS webpage, using a regex pattern to extract version strings.
 
@@ -596,7 +630,7 @@ upstream:
 
 ---
 
-### 3.13 kde-tarball
+### 3.14 kde-tarball
 
 **What it checks:** KDE download server directory listing
 (`https://download.kde.org/stable/{name}/`).

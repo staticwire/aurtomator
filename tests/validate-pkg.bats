@@ -115,6 +115,16 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "validate: github-asset passes" {
+  create_test_package "mypkg" "github-asset" "upstream:
+  project: owner/repo
+  tag: models
+  assets:
+    - voice-a.tar.bz2"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
 # === Missing core fields ===
 
 @test "validate: fails on missing name" {
@@ -162,6 +172,45 @@ EOF
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -ne 0 ]
   [[ "$output" == *"requires 'upstream.project'"* ]]
+}
+
+@test "validate: github-asset fails without upstream.tag" {
+  create_test_package "mypkg" "github-asset" "upstream:
+  project: owner/repo
+  assets:
+    - voice-a.tar.bz2"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"requires 'upstream.tag'"* ]]
+}
+
+@test "validate: github-asset fails without upstream.assets" {
+  create_test_package "mypkg" "github-asset" "upstream:
+  project: owner/repo
+  tag: models"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"requires 'upstream.assets'"* ]]
+}
+
+@test "validate: github-asset fails when upstream.assets is not a list" {
+  create_test_package "mypkg" "github-asset" "upstream:
+  project: owner/repo
+  tag: models
+  assets: voice-a.tar.bz2"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"requires 'upstream.assets'"* ]]
+}
+
+@test "validate: github-asset fails when upstream.assets is empty" {
+  create_test_package "mypkg" "github-asset" "upstream:
+  project: owner/repo
+  tag: models
+  assets: []"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"requires 'upstream.assets'"* ]]
 }
 
 @test "validate: gitlab-tag fails without upstream.host" {

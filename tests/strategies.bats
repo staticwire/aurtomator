@@ -273,6 +273,81 @@ teardown() {
   [ "$output" = "3.5.0" ]
 }
 
+# === github-asset ===
+
+@test "github-asset: single asset, version is its updated_at as YYYYMMDD" {
+  create_test_package "test-asset-one" "github-asset" "upstream:
+  project: owner/models-repo
+  tag: models
+  assets:
+    - voice-a.tar.bz2"
+
+  run "$TEST_TMPDIR/strategies/github-asset.sh" "test-asset-one"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20251202" ]
+}
+
+@test "github-asset: several assets, newest updated_at wins" {
+  create_test_package "test-asset-many" "github-asset" "upstream:
+  project: owner/models-repo
+  tag: models
+  assets:
+    - voice-a.tar.bz2
+    - voice-c.tar.bz2
+    - voice-b.tar.bz2"
+
+  run "$TEST_TMPDIR/strategies/github-asset.sh" "test-asset-many"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20260115" ]
+}
+
+@test "github-asset: fails when a listed asset is missing from the release" {
+  create_test_package "test-asset-missing" "github-asset" "upstream:
+  project: owner/models-repo
+  tag: models
+  assets:
+    - voice-a.tar.bz2
+    - voice-x.tar.bz2"
+
+  run "$TEST_TMPDIR/strategies/github-asset.sh" "test-asset-missing"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"voice-x.tar.bz2"* ]]
+  [[ "$output" == *"not found"* ]]
+}
+
+@test "github-asset: fails when the release tag does not exist" {
+  create_test_package "test-asset-404" "github-asset" "upstream:
+  project: null-owner/null-repo
+  tag: models
+  assets:
+    - voice-a.tar.bz2"
+
+  run "$TEST_TMPDIR/strategies/github-asset.sh" "test-asset-404"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No release found"* ]]
+}
+
+@test "github-asset: fails without upstream.tag" {
+  create_test_package "test-asset-notag" "github-asset" "upstream:
+  project: owner/models-repo
+  assets:
+    - voice-a.tar.bz2"
+
+  run "$TEST_TMPDIR/strategies/github-asset.sh" "test-asset-notag"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.tag"* ]]
+}
+
+@test "github-asset: fails without upstream.assets" {
+  create_test_package "test-asset-noassets" "github-asset" "upstream:
+  project: owner/models-repo
+  tag: models"
+
+  run "$TEST_TMPDIR/strategies/github-asset.sh" "test-asset-noassets"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.assets"* ]]
+}
+
 # === Error handling: unknown package ===
 
 @test "strategy fails gracefully on unknown package" {

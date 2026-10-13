@@ -47,13 +47,14 @@ See [docs/SETUP.md](docs/SETUP.md) for the full setup guide.
 
 ## Strategies
 
-13 built-in version detection strategies:
+14 built-in version detection strategies:
 
 | Strategy           | Source              | Use for                              |
 |--------------------|---------------------|--------------------------------------|
 | `github-release`   | GitHub Releases API | GitHub-hosted projects with releases |
 | `github-tag`       | GitHub Tags API     | GitHub projects without releases     |
 | `github-nightly`   | GitHub Releases API | Nightly/prerelease builds (4 patterns) |
+| `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag    |
 | `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                  |
 | `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea          |
 | `git-latest`       | `git clone --bare`  | `-git` packages, any git repo        |

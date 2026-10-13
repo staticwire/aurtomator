@@ -246,14 +246,14 @@ manually.
 
 ## Version detection strategies
 
-aurtomator includes 13 version detection strategies. Choose based on
-where your upstream publishes releases:
+aurtomator includes 14 version detection strategies. Choose based on where your upstream publishes releases:
 
 | Strategy | Source | Best for | Pre-release filter |
 |---|---|---|---|
 | `github-release` | GitHub Releases API | Most GitHub projects | Auto (excludes pre-releases) |
 | `github-tag` | GitHub Tags API | Projects without formal releases | Manual (`tag_pattern`) |
 | `github-nightly` | GitHub Releases API | Nightly/dev builds (4 patterns) | Nightly-specific |
+| `github-asset` | GitHub Releases API | Assets re-uploaded on a fixed tag (model zoos) | N/A (fixed tag) |
 | `gitlab-tag` | GitLab Tags API | GitLab.com, invent.kde.org, self-hosted | Manual (`tag_pattern`) |
 | `gitea-tag` | Gitea/Forgejo Tags API | Codeberg, self-hosted Gitea | Manual (`tag_pattern`) |
 | `git-latest` | Bare git clone | `-git` packages (commit tracking) | N/A |
@@ -295,7 +295,7 @@ These require `webpage-scrape` or a custom strategy:
 
 | Tool | Detection | Update | Push | Approach |
 |---|---|---|---|---|
-| **aurtomator** | 13 built-in strategies | pkgver sed + updpkgsums | Auto push to AUR | Fully automated, self-hosted |
+| **aurtomator** | 14 built-in strategies | pkgver sed + updpkgsums | Auto push to AUR | Fully automated, self-hosted |
 | **nvchecker** | 40+ sources, TOML config | No | No | Detection only (standard tool) |
 | **aurpublish** | No | No | git subtree push | Workflow tool for maintainers |
 | **aur-auto-update** | nvchecker | pkgver bump | Auto push | Centralized bot (add as co-maintainer) |

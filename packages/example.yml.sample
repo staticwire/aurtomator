@@ -13,6 +13,7 @@
 #   github-release   GitHub Releases API
 #   github-tag       GitHub Tags API
 #   github-nightly   GitHub nightly/prerelease builds (4 patterns)
+#   github-asset     GitHub release assets re-uploaded on a fixed tag
 #   gitlab-tag       GitLab Tags API (gitlab.com, invent.kde.org, self-hosted)
 #   gitea-tag        Gitea / Forgejo / Codeberg Tags
 #   git-latest       bare git clone, produces rCOUNT.HASH (for -git packages)
@@ -87,6 +88,19 @@ upstream:
 #   version_pattern: 'NVIM v\K\S+'         # required if version_source=release_body
 #   channel: Nightly                       # optional — filter by release name
 #   tag_version_regex: '(.+)'              # optional
+
+# --- github-asset -----------------------------------------------------------
+# Tracks assets on a release whose tag never moves (model zoos, rolling
+# download tags). Fetches /repos/{project}/releases/tags/{tag}; the newest
+# updated_at among the listed assets becomes the version as YYYYMMDD.
+#
+# strategy: github-asset
+# upstream:
+#   project: owner/repo                    # required
+#   tag: models                            # required - release tag that holds the assets
+#   assets:                                # required - exact asset file names, at least one
+#     - voice-a.tar.bz2
+#     - voice-b.tar.bz2
 
 # --- gitlab-tag -------------------------------------------------------------
 # Any GitLab instance (public API only — no auth yet).

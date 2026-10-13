@@ -14,8 +14,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 
 readonly VALID_STRATEGIES=(
-  github-release github-tag github-nightly gitlab-tag gitea-tag git-latest
-  pypi npm crates repology archpkg kde-tarball webpage-scrape
+  github-release github-tag github-nightly github-asset gitlab-tag gitea-tag
+  git-latest pypi npm crates repology archpkg kde-tarball webpage-scrape
 )
 
 # Validate a single package YAML file
@@ -98,6 +98,24 @@ validate_pkg() {
       project=$(pkg_get "$file" '.upstream.project // ""')
       if [[ -z "$project" || "$project" == "null" ]]; then
         log_err "$file: strategy '$strategy' requires 'upstream.project'"
+        ((errors++))
+      fi
+      ;;
+    github-asset)
+      local project tag assets_type
+      project=$(pkg_get "$file" '.upstream.project // ""')
+      tag=$(pkg_get "$file" '.upstream.tag // ""')
+      assets_type=$(pkg_get "$file" '.upstream.assets | tag')
+      if [[ -z "$project" || "$project" == "null" ]]; then
+        log_err "$file: strategy 'github-asset' requires 'upstream.project'"
+        ((errors++))
+      fi
+      if [[ -z "$tag" || "$tag" == "null" ]]; then
+        log_err "$file: strategy 'github-asset' requires 'upstream.tag'"
+        ((errors++))
+      fi
+      if [[ "$assets_type" != "!!seq" || $(pkg_get "$file" '.upstream.assets | length') -eq 0 ]]; then
+        log_err "$file: strategy 'github-asset' requires 'upstream.assets' as a non-empty list"
         ((errors++))
       fi
       ;;
