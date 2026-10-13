@@ -79,6 +79,30 @@ warn_maintainer_line() {
 }
 
 # =============================================================================
+# VERSION VALIDATION
+# =============================================================================
+
+# Reject a version string before it is written into a PKGBUILD.
+# update-pkg.sh writes the value with sed and makepkg then sources the
+# file, so a shell metacharacter in an upstream tag would execute in CI.
+# The allowlist is narrower than makepkg's own pkgver check on purpose:
+# makepkg only forbids whitespace, '/', ':', '-' and non-ASCII.
+# Args: $1=version string
+# Returns: 0=ok, 1=rejected (reason on stderr)
+validate_pkgver() {
+  local ver="$1"
+  local LC_ALL=C
+  if [[ -z "$ver" ]]; then
+    log_err "Version string is empty"
+    return 1
+  fi
+  if [[ ! "$ver" =~ ^[A-Za-z0-9._+]+$ ]]; then
+    log_err "Version string rejected, only A-Za-z0-9 . _ + are allowed: ${ver@Q}"
+    return 1
+  fi
+}
+
+# =============================================================================
 # PKGBUILD AUDIT
 # =============================================================================
 

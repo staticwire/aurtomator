@@ -261,6 +261,66 @@ current: '2.0.0'"
   [ "$status" -ne 0 ]
 }
 
+# === validate_pkgver ===
+
+@test "lib.sh: validate_pkgver accepts versions the strategies produce" {
+  for v in 1.13.8 0.13.0+dev+1321+gb169d9376c r480.f0d1962 20260731 2.50 1.0.0_rc1; do
+    run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" "$v"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "lib.sh: validate_pkgver rejects shell metacharacters" {
+  for v in '1.0$(id)' '1.0`id`' '1.0;id' '1.0|id' '1.0&id' '1.0>x' '1.0 2' "1.0'x" '1.0"x' '1.0\x' $'1.0\nx'; do
+    run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" "$v"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"rejected"* ]]
+  done
+}
+
+@test "lib.sh: validate_pkgver rejects what makepkg forbids in pkgver" {
+  for v in '1.0-1' '1:2.0' '1.0/2' ''; do
+    run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" "$v"
+    [ "$status" -eq 1 ]
+  done
+}
+
+@test "lib.sh: validate_pkgver rejects non-ASCII" {
+  run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" '1.0в'
+  [ "$status" -eq 1 ]
+}
+
+@test "check-update: rejects an injected version from the strategy" {
+  cat >"$TEST_TMPDIR/strategies/injected.sh" <<'EOF'
+#!/usr/bin/env bash
+echo '1.0$(touch "$AURTOMATOR_DIR/pwned")'
+EOF
+  chmod +x "$TEST_TMPDIR/strategies/injected.sh"
+  create_test_package "mypkg" "injected" "current: '1.0'"
+
+  run "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rejected"* ]]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
+@test "update-pkg: refuses an injected version before any git call" {
+  cat >"$TEST_TMPDIR/mock-bin/git" <<'EOF'
+#!/usr/bin/env bash
+touch "$AURTOMATOR_DIR/git-was-called"
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/git"
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0'"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" "mypkg" '1.0$(touch pwned)'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rejected"* ]]
+  [ ! -e "$TEST_TMPDIR/git-was-called" ]
+}
+
 # === check-all.sh ===
 
 @test "check-all: processes multiple packages" {

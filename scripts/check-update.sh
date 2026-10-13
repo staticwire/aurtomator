@@ -38,6 +38,8 @@ if [[ -z "$latest" ]]; then
   exit 1
 fi
 
+validate_pkgver "$latest" || exit 1
+
 if [[ "$latest" == "$current" ]]; then
   log_ok "$PKG_NAME is up to date ($current)"
   exit 0

@@ -15,6 +15,7 @@ require_cmd yq
 readonly PKG_NAME="${1:?Usage: update-pkg.sh <package-name> <new-version> [--dry-run]}"
 readonly NEW_VERSION="${2:?Usage: update-pkg.sh <package-name> <new-version> [--dry-run]}"
 readonly DRY_RUN="${3:-}"
+validate_pkgver "$NEW_VERSION" || exit 1
 PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
 
