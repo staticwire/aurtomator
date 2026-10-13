@@ -261,6 +261,36 @@ current: '2.0.0'"
   [ "$status" -ne 0 ]
 }
 
+# === validate_source_urls ===
+
+@test "lib.sh: validate_source_urls checks every source_<arch> array" {
+  cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
+pkgname=test-arches
+pkgver=1.0.0
+pkgrel=1
+arch=('armv7h' 'riscv64')
+source_armv7h=("https://example.com/test-1.0.0-armv7h.tar.gz")
+source_riscv64=("https://example.com/test-1.0.0-riscv64.tar.gz")
+sha256sums_armv7h=('abc123')
+sha256sums_riscv64=('abc123')
+EOF
+
+  # HEAD requests get an HTML answer and every URL asked for is logged
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+echo "\${@: -1}" >>"$TEST_TMPDIR/curl-urls.log"
+printf "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\n"
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+
+  run bash -c 'source "$0/scripts/lib.sh"; validate_source_urls "$1"' "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"test-1.0.0-armv7h.tar.gz"* ]]
+  [[ "$output" == *"test-1.0.0-riscv64.tar.gz"* ]]
+  grep -q "test-1.0.0-armv7h.tar.gz" "$TEST_TMPDIR/curl-urls.log"
+  grep -q "test-1.0.0-riscv64.tar.gz" "$TEST_TMPDIR/curl-urls.log"
+}
+
 # === validate_pkgver ===
 
 @test "lib.sh: validate_pkgver accepts versions the strategies produce" {

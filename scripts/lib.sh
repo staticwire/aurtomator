@@ -185,6 +185,7 @@ audit_pkgbuild() {
 }
 
 # Validate source URLs return expected content (not HTML error pages).
+# Covers source and every source_<arch> array the PKGBUILD defines.
 # Args: $1=pkgbuild path
 # Returns: 0=ok, non-zero=errors found
 validate_source_urls() {
@@ -194,9 +195,12 @@ validate_source_urls() {
   local urls
   urls=$(bash -c '
     source "$1" 2>/dev/null
-    for s in "${source[@]}" "${source_x86_64[@]}" "${source_aarch64[@]}"; do
-      url="${s##*::}"
-      [[ "$url" == http* ]] && [[ "$url" != git+* ]] && echo "$url"
+    for arr in source $(compgen -A variable | grep "^source_"); do
+      declare -n ref="$arr"
+      for s in "${ref[@]}"; do
+        url="${s##*::}"
+        [[ "$url" == http* ]] && [[ "$url" != git+* ]] && echo "$url"
+      done
     done
   ' -- "$pkgbuild" 2>/dev/null || true)
 
