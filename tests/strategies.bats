@@ -348,6 +348,20 @@ teardown() {
   [[ "$output" == *"upstream.assets"* ]]
 }
 
+@test "github-asset: fails on malformed updated_at" {
+  create_test_package "test-asset-baddate" "github-asset" "upstream:
+  project: owner/models-repo
+  tag: models
+  assets:
+    - voice-a.tar.bz2
+    - voice-d.tar.bz2"
+
+  run "$TEST_TMPDIR/strategies/github-asset.sh" "test-asset-baddate"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Unexpected updated_at"* ]]
+  [[ "$output" == *"voice-d.tar.bz2"* ]]
+}
+
 # === Error handling: unknown package ===
 
 @test "strategy fails gracefully on unknown package" {
@@ -520,6 +534,25 @@ EOF
   run "$TEST_TMPDIR/strategies/github-release.sh" "test-neterr"
   [ "$status" -ne 0 ]
   [[ "$output" == *"Failed to fetch"* ]]
+}
+
+@test "github-asset: fails on curl network error" {
+  create_test_package "test-asset-neterr" "github-asset" "upstream:
+  project: owner/models-repo
+  tag: models
+  assets:
+    - voice-a.tar.bz2"
+
+  cat >"$TEST_TMPDIR/mock-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+echo "curl: (7) Failed to connect" >&2
+exit 7
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/curl"
+
+  run "$TEST_TMPDIR/strategies/github-asset.sh" "test-asset-neterr"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Failed to fetch release tag 'models'"* ]]
 }
 
 @test "github-tag: tag_pattern filters out all tags" {

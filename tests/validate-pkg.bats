@@ -174,6 +174,16 @@ EOF
   [[ "$output" == *"requires 'upstream.project'"* ]]
 }
 
+@test "validate: github-asset fails without upstream.project" {
+  create_test_package "mypkg" "github-asset" "upstream:
+  tag: models
+  assets:
+    - voice-a.tar.bz2"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"requires 'upstream.project'"* ]]
+}
+
 @test "validate: github-asset fails without upstream.tag" {
   create_test_package "mypkg" "github-asset" "upstream:
   project: owner/repo
