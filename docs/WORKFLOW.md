@@ -605,7 +605,7 @@ The workflow has `contents: write` for the status commit and `issues: write` for
 
 ### 5.3 Steps
 
-1. **Install dependencies:** `sudo git github-cli openssh gnupg namcap jq go-yq pacman-contrib`, and the `builder` user with passwordless `sudo`.
+1. **Install dependencies:** `sudo git github-cli openssh gnupg namcap jq go-yq pacman-contrib`, and the `builder` user. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`.
 2. **Checkout:** `actions/checkout`, pinned by commit SHA like every action in this repository.
 3. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
 4. **Setup AUR SSH:** writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. When the AUR changes its host key, update the key in `check-updates.yml`.

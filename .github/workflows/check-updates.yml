@@ -27,7 +27,6 @@ jobs:
           pacman-key --init
           pacman -Syu --noconfirm --needed sudo git github-cli openssh gnupg namcap jq go-yq pacman-contrib
           useradd -m builder
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
