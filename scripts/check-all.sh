@@ -6,13 +6,14 @@
 #
 # Without a mode: only checks and reports
 # With --update: runs update-pkg.sh for each outdated package
-# With --prepare <dir>: runs update-pkg.sh --prepare <dir> instead
-# With --publish <dir>: runs publish-pkg.sh for each package prepared in <dir>
+# With --prepare <dir>: runs update-pkg.sh --prepare <dir>/prepared instead
+#   and copies the statuses to <dir>/status
+# With --publish <dir>: runs publish-pkg.sh for each package in <dir>/prepared
+#   and takes the other statuses from <dir>/status
 # With --dry-run: runs update-pkg.sh or publish-pkg.sh in dry-run mode
 #
 # Writes per-package status to .status/ directory for README generation
-# and auto-issue creation. --publish keeps the statuses of the packages it
-# does not publish.
+# and auto-issue creation.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -44,7 +45,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '3,15p' "$0"
+      sed -n '3,16p' "$0"
       exit 0
       ;;
     *)
@@ -56,48 +57,39 @@ done
 
 # Status directory for per-package results
 STATUS_DIR="${AURTOMATOR_DIR}/.status"
-if [[ "$MODE" != "publish" || -L "$STATUS_DIR" ]]; then
-  rm -rf "$STATUS_DIR"
-fi
+rm -rf "$STATUS_DIR"
 mkdir -p "$STATUS_DIR"
 
-# --publish keeps the statuses the prepare run wrote, and that run executes
-# PKGBUILDs. Keep only statuses of known packages, in the forms that run
-# writes, so that update-readme.sh and the issue step read nothing else.
-if [[ "$MODE" == "publish" ]]; then
+# --publish takes the statuses from the prepare run, which executed
+# PKGBUILDs while it wrote them. Only statuses of known packages, in the
+# forms that run writes, are copied. When this script stops early, .status/
+# stays empty, so the steps after it read nothing from that run.
+if [[ "$MODE" == "publish" && -d "${WORK_DIR}/status" && ! -L "${WORK_DIR}/status" ]]; then
   known_names=$(for f in "${AURTOMATOR_DIR}"/packages/*.yml; do
     [[ -f "$f" ]] && pkg_get "$f" .name
   done)
-  for status_file in "$STATUS_DIR"/*; do
-    # Every write below goes to a regular file in this directory, never
-    # through a link
-    if [[ -L "$status_file" ]] || [[ -e "$status_file" && ! -f "$status_file" ]]; then
-      rm -rf "$status_file"
-      continue
-    fi
-    [[ -f "$status_file" ]] || continue
+  for status_file in "${WORK_DIR}/status"/*; do
+    [[ -f "$status_file" && ! -L "$status_file" ]] || continue
     name="${status_file##*/}"
-    [[ "$name" == "_error_count" ]] && continue
     if [[ ! "$name" =~ ^[A-Za-z0-9@._+-]+$ ]] || ! grep -qxF -- "$name" <<<"$known_names"; then
-      rm -f "$status_file"
       continue
     fi
-    if _has_nul "$status_file"; then
-      echo "check_failed: invalid status from the prepare run" >"$status_file"
-      continue
+    status="check_failed: invalid status from the prepare run"
+    if ! _has_nul "$status_file"; then
+      # The whole file, as update-readme.sh and the issue step read it
+      handed_over=$(<"$status_file")
+      case "$handed_over" in
+        up_to_date | check_failed:* | update_failed:*)
+          status="$handed_over"
+          ;;
+        "new_version: "* | "available_downgrade: "*)
+          if validate_pkgver "${handed_over#*: }" 2>/dev/null; then
+            status="$handed_over"
+          fi
+          ;;
+      esac
     fi
-    # The whole file, as update-readme.sh and the issue step read it
-    status=$(<"$status_file")
-    case "$status" in
-      up_to_date | check_failed:* | update_failed:*) ;;
-      "new_version: "* | "available_downgrade: "*)
-        validate_pkgver "${status#*: }" 2>/dev/null ||
-          echo "check_failed: invalid status from the prepare run" >"$status_file"
-        ;;
-      *)
-        echo "check_failed: invalid status from the prepare run" >"$status_file"
-        ;;
-    esac
+    printf '%s\n' "$status" >"${STATUS_DIR}/${name}"
   done
 fi
 
@@ -110,7 +102,8 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
 
   pkg_name=$(pkg_get "$pkg_file" .name)
   # Only package names from packages/ reach a path, never a name from WORK_DIR
-  if [[ "$MODE" == "publish" && ! -d "${WORK_DIR}/${pkg_name}" ]]; then
+  if [[ "$MODE" == "publish" ]] &&
+    [[ -L "${WORK_DIR}/prepared" || ! -d "${WORK_DIR}/prepared/${pkg_name}" ]]; then
     continue
   fi
   ((checked++)) || true
@@ -163,11 +156,11 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
       ;;
     prepare)
       log_info "Preparing $pkg_name $latest"
-      cmd=("${AURTOMATOR_DIR}/scripts/update-pkg.sh" "$pkg_name" "$latest" --prepare "$WORK_DIR")
+      cmd=("${AURTOMATOR_DIR}/scripts/update-pkg.sh" "$pkg_name" "$latest" --prepare "${WORK_DIR}/prepared")
       ;;
     publish)
       log_info "Publishing $pkg_name $latest"
-      cmd=("${AURTOMATOR_DIR}/scripts/publish-pkg.sh" "$pkg_name" "$latest" "${WORK_DIR}/${pkg_name}" ${DRY_RUN:+"$DRY_RUN"})
+      cmd=("${AURTOMATOR_DIR}/scripts/publish-pkg.sh" "$pkg_name" "$latest" "${WORK_DIR}/prepared/${pkg_name}" ${DRY_RUN:+"$DRY_RUN"})
       ;;
   esac
 
@@ -207,8 +200,9 @@ log_info "Checked: $checked, Updated: $updated, Errors: $errors"
 
 # --publish adds its errors to those of the prepare run. The file comes from
 # that run, so it is read only when it holds a plain number.
-if [[ "$MODE" == "publish" && -f "${STATUS_DIR}/_error_count" ]]; then
-  prepare_errors=$(<"${STATUS_DIR}/_error_count")
+handed_count="${WORK_DIR}/status/_error_count"
+if [[ "$MODE" == "publish" && -f "$handed_count" && ! -L "$handed_count" && ! -L "${WORK_DIR}/status" ]]; then
+  prepare_errors=$(<"$handed_count")
   if [[ "$prepare_errors" =~ ^[0-9]+$ ]]; then
     errors=$((errors + prepare_errors))
   fi
@@ -216,3 +210,9 @@ fi
 
 # Write summary for downstream steps
 echo "${errors}" >"${STATUS_DIR}/_error_count"
+
+# Hand the statuses to the publish run
+if [[ "$MODE" == "prepare" ]]; then
+  mkdir -p "${WORK_DIR}/status"
+  cp "${STATUS_DIR}"/* "${WORK_DIR}/status/"
+fi
