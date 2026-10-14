@@ -177,6 +177,44 @@ EOF
   chmod +x "$TEST_TMPDIR/mock-bin/gh"
 }
 
+# Helper: gpg for the passphrase strip flow on PASSKEY003. The main keyring
+# exports the key with its passphrase, the temporary keyring (--homedir)
+# exports the copy
+mock_gpg_strip_flow() {
+  cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *--with-keygrip*)
+    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
+    echo "      Keygrip = 0123456789ABCDEF0123456789ABCDEF01234567"
+    ;;
+  *--homedir*--export-secret-subkeys*)
+    echo "-----BEGIN PGP PRIVATE KEY BLOCK-----"
+    echo "mocked-passphrase-free"
+    echo "-----END PGP PRIVATE KEY BLOCK-----"
+    ;;
+  *--export-secret-subkeys*)
+    echo "-----BEGIN PGP PRIVATE KEY BLOCK-----"
+    echo "mocked-encrypted"
+    echo "-----END PGP PRIVATE KEY BLOCK-----"
+    ;;
+  *--import*) cat >/dev/null ;;
+  *--list-secret-keys*)
+    echo "sec   ed25519/MASTERXXX 2026-01-01 [SC]"
+    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
+    ;;
+  *--sign*) exit 2 ;;
+esac
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/gpg"
+  cat >"$TEST_TMPDIR/mock-bin/gpg-connect-agent" <<'EOF'
+#!/usr/bin/env bash
+echo "OK"
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/gpg-connect-agent"
+}
+
 # === Argument parsing ===
 
 @test "setup: --help exits 0" {
@@ -436,42 +474,8 @@ EOF
 
 @test "setup gpg secrets: manual path prints the passphrase-free copy" {
   mock_gh_unavailable
+  mock_gpg_strip_flow
   write_full_config "PASSKEY003"
-
-  # gpg for the passphrase strip flow: the main keyring exports the key with
-  # its passphrase, the temporary keyring (--homedir) exports the copy
-  cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'
-#!/usr/bin/env bash
-case "$*" in
-  *--with-keygrip*)
-    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
-    echo "      Keygrip = 0123456789ABCDEF0123456789ABCDEF01234567"
-    ;;
-  *--homedir*--export-secret-subkeys*)
-    echo "-----BEGIN PGP PRIVATE KEY BLOCK-----"
-    echo "mocked-passphrase-free"
-    echo "-----END PGP PRIVATE KEY BLOCK-----"
-    ;;
-  *--export-secret-subkeys*)
-    echo "-----BEGIN PGP PRIVATE KEY BLOCK-----"
-    echo "mocked-encrypted"
-    echo "-----END PGP PRIVATE KEY BLOCK-----"
-    ;;
-  *--import*) cat >/dev/null ;;
-  *--list-secret-keys*)
-    echo "sec   ed25519/MASTERXXX 2026-01-01 [SC]"
-    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
-    ;;
-  *--sign*) exit 2 ;;
-esac
-exit 0
-EOF
-  chmod +x "$TEST_TMPDIR/mock-bin/gpg"
-  cat >"$TEST_TMPDIR/mock-bin/gpg-connect-agent" <<'EOF'
-#!/usr/bin/env bash
-echo "OK"
-EOF
-  chmod +x "$TEST_TMPDIR/mock-bin/gpg-connect-agent"
 
   # Answer "y" to "Proceed? (Y/n)"
   run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<"y"
@@ -480,6 +484,48 @@ EOF
   [[ "$output" == *"mocked-passphrase-free"* ]]
   [[ "$output" != *"mocked-encrypted"* ]]
   [[ "$output" != *"gpg --export-secret-subkeys"* ]]
+}
+
+@test "setup gpg secrets: gh stores the passphrase-free copy" {
+  mock_gpg_strip_flow
+  write_full_config "PASSKEY003"
+
+  # gh that keeps each secret it is given in a file named after the secret
+  cat >"$TEST_TMPDIR/mock-bin/gh" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  api) echo "testuser" ;;
+  secret) cat >"$TEST_TMPDIR/secret-\$3" ;;
+esac
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/gh"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<"y"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"GPG_SIGNING_KEY (passphrase-free copy)"* ]]
+  grep -q "mocked-passphrase-free" "$TEST_TMPDIR/secret-GPG_SIGNING_KEY"
+}
+
+@test "setup gpg secrets: reports a failed upload of the passphrase-free copy" {
+  mock_gpg_strip_flow
+  write_full_config "PASSKEY003"
+
+  # gh that is logged in but fails to set any secret
+  cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  api) echo "testuser" ;;
+  secret) cat >/dev/null; exit 1 ;;
+esac
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/gh"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<"y"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"✗ GPG_SIGNING_KEY"* ]]
+  [[ "$output" != *"✓ GPG_SIGNING_KEY"* ]]
 }
 
 # === ANSI colors ===
