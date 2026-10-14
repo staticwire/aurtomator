@@ -607,14 +607,14 @@ A PKGBUILD is a bash script, and every step that reads it executes it: the audit
 
 **Publish**, `publish-pkg.sh <package-name> <version> <dir>/<package-name>`, never sources the PKGBUILD and never runs `makepkg`. It treats the prepared files as untrusted:
 
-1. `PKGBUILD`, `.SRCINFO` and `base` must be regular files, and `base` a commit id.
+1. The prepared directory must not be a symlink, `PKGBUILD`, `.SRCINFO` and `base` must be regular files, and `base` a commit id.
 2. When the prepared `pkgver` is not `<version>`, upstream moved after the update was prepared: exit code 3.
 3. Clone over SSH. When `HEAD` is not `base`, the AUR repo moved after the update was prepared: exit code 3.
 4. The prepared `PKGBUILD` may differ from the AUR copy only in `pkgver=`, which must be `<version>`, in `pkgrel=`, which must be `1`, and in the values of the checksum arrays. The arrays keep their names and lengths, hold only quoted hex checksums or `SKIP`, and have a `SKIP` exactly where the AUR copy has one.
 5. Each line of the prepared `.SRCINFO` must be the line of the AUR copy with the old version replaced by `<version>`. `pkgrel` and the checksums follow the rules of step 4.
-6. Any other difference stops the publish with exit code 1. Otherwise steps 10 to 13 of [4.2](#42-step-by-step) follow. When the prepared files equal the AUR copy, only `current` is written to the YAML and the exit code is 2.
+6. Any other difference, and a NUL byte in either file, stops the publish with exit code 1. Otherwise steps 10 to 13 of [4.2](#42-step-by-step) follow. When the prepared files equal the AUR copy, only `current` is written to the YAML and the exit code is 2.
 
-`check-all.sh --prepare <dir>` prepares every package with a new version. Its status becomes `new_version` or `available_downgrade`, and `update_failed` when preparing fails. `check-all.sh --publish <dir>` takes every package in `packages/` that has a directory in `<dir>`, runs its strategy once more and publishes with the version the strategy reports now. The statuses of the other packages stay as they are. Exit code 3 leaves the status at `new_version` or `available_downgrade` without an error, and the next run prepares the package again.
+`check-all.sh --prepare <dir>` prepares every package with a new version. Its status becomes `new_version` or `available_downgrade`, and `update_failed` when preparing fails. `check-all.sh --publish <dir>` takes every package in `packages/` that has a directory in `<dir>`, runs its strategy once more and publishes with the version the strategy reports now. The statuses of the other packages stay as they are, after a check: the prepare run executes PKGBUILDs, so only statuses of packages in `packages/` are kept, in the forms that run writes, and any other content becomes `check_failed`. Exit code 3 leaves the status at `new_version` or `available_downgrade` without an error, and the next run prepares the package again.
 
 ## 5. CI Workflow: check-updates.yml
 

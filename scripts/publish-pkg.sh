@@ -28,6 +28,10 @@ load_config
 
 strategy=$(pkg_get "$PKG_FILE" .strategy)
 
+if [[ -L "$PREPARED" || ! -d "$PREPARED" ]]; then
+  log_err "Prepared directory is missing or a symlink: $PREPARED"
+  exit 1
+fi
 for f in PKGBUILD .SRCINFO base; do
   if [[ ! -f "${PREPARED}/${f}" || -L "${PREPARED}/${f}" ]]; then
     log_err "Prepared $f is missing or not a regular file"

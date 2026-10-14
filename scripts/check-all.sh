@@ -61,6 +61,35 @@ if [[ "$MODE" != "publish" ]]; then
 fi
 mkdir -p "$STATUS_DIR"
 
+# --publish keeps the statuses the prepare run wrote, and that run executes
+# PKGBUILDs. Keep only statuses of known packages, in the forms that run
+# writes, so that update-readme.sh and the issue step read nothing else.
+if [[ "$MODE" == "publish" ]]; then
+  known_names=$(for f in "${AURTOMATOR_DIR}"/packages/*.yml; do
+    [[ -f "$f" ]] && pkg_get "$f" .name
+  done)
+  for status_file in "$STATUS_DIR"/*; do
+    [[ -f "$status_file" ]] || continue
+    name="${status_file##*/}"
+    [[ "$name" == "_error_count" ]] && continue
+    if [[ ! "$name" =~ ^[A-Za-z0-9@._+-]+$ ]] || ! grep -qxF -- "$name" <<<"$known_names"; then
+      rm -f "$status_file"
+      continue
+    fi
+    status=$(head -n 1 "$status_file")
+    case "$status" in
+      up_to_date | check_failed:* | update_failed:*) ;;
+      "new_version: "* | "available_downgrade: "*)
+        validate_pkgver "${status#*: }" 2>/dev/null ||
+          echo "check_failed: invalid status from the prepare run" >"$status_file"
+        ;;
+      *)
+        echo "check_failed: invalid status from the prepare run" >"$status_file"
+        ;;
+    esac
+  done
+fi
+
 updated=0
 checked=0
 errors=0

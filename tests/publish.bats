@@ -184,6 +184,15 @@ current: '1.0.0'"
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
+@test "publish-pkg: refuses a prepared directory that is a symlink" {
+  setup_publish
+  mv "$PREPARED" "$TEST_TMPDIR/real-prepared"
+  ln -s "$TEST_TMPDIR/real-prepared" "$PREPARED"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
 @test "publish-pkg: refuses an unsafe version before any git call" {
   setup_publish
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo '1.1.0;id' "$PREPARED"
@@ -320,6 +329,35 @@ current: '2.0.0'"
   [ ! -f "$TEST_TMPDIR/.status/evil" ]
 }
 
+@test "check-all --publish: drops statuses of names that are not packages" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  echo "update_failed: spoofed" >"$TEST_TMPDIR/.status/evil"
+  echo "up_to_date" >"$TEST_TMPDIR/.status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ ! -e "$TEST_TMPDIR/.status/evil" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "up_to_date" ]
+}
+
+@test "check-all --publish: replaces a status the prepare run does not write" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  echo "updated: 9.9.9" >"$TEST_TMPDIR/.status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "check_failed:"* ]]
+}
+
+@test "check-all --publish: replaces a status with an unsafe version" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  echo "new_version: 1.0](https://evil.example)" >"$TEST_TMPDIR/.status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "check_failed:"* ]]
+}
+
 @test "check-all --publish: ignores an error count that is not a number" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
@@ -411,6 +449,22 @@ b2sums=('$H3' '$H4')"
   [[ "$output" == *"pkgrel"* ]]
 }
 
+@test "check_prepared_pkgbuild: rejects a NUL byte" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  sed -i 's|^url="https://example.com"$|url="https://example.com\x00"|' "$NEW"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
+@test "check_prepared_srcinfo: rejects a NUL byte" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  sed -i $'s/^\tlicense = MIT$/\tlicense = MIT\\x00 extra/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
 @test "check_prepared_pkgbuild: rejects when a file cannot be read" {
   write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
   run check_prepared_pkgbuild "$OLD" "$TEST_TMPDIR/missing.PKGBUILD" 1.1.0
@@ -431,6 +485,14 @@ b2sums=('$H3' '$H4')"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
   sed -i $'s/^\tlicense = MIT$/\tlicense = MIT\\n\tdepends = evil-pkg/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
+@test "check_prepared_srcinfo: rejects a line turned into an unknown checksum key" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  sed -i $'s/^\tlicense = MIT$/\tlicensesums = abc/' "$TEST_TMPDIR/new.SRCINFO"
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
 }

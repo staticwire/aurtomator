@@ -330,6 +330,14 @@ aur_commit_push() {
 # from the AUR copy in pkgver, pkgrel and checksum values. None of these
 # checks sources the file.
 
+# awk keeps a NUL byte, $(...) drops it and mapfile cuts the line at it, so
+# a file with one is compared as something it is not
+# Args: $1=file
+# Returns: 0 when the file holds a NUL byte
+_has_nul() {
+  [[ "$(tr -d '\000' <"$1" | wc -c)" -ne "$(wc -c <"$1")" ]]
+}
+
 # Split a PKGBUILD into lines of four kinds, without executing it:
 #   SKEL<TAB>line          every line, with pkgver=, pkgrel= and each
 #                          top-level checksum array replaced by a placeholder
@@ -386,6 +394,10 @@ check_prepared_pkgbuild() {
     log_err "Could not read the PKGBUILD to compare"
     return 1
   fi
+  if _has_nul "$2"; then
+    log_err "Prepared PKGBUILD holds a NUL byte"
+    return 1
+  fi
 
   if grep -q $'^BAD\t' <<<"$new_parts"; then
     log_err "Prepared PKGBUILD has more than quoted checksums in a checksum array:"
@@ -426,6 +438,10 @@ check_prepared_srcinfo() {
     log_err "Could not read the .SRCINFO to compare"
     return 1
   fi
+  if _has_nul "$2"; then
+    log_err "Prepared .SRCINFO holds a NUL byte"
+    return 1
+  fi
   local -a old_lines new_lines
   mapfile -t old_lines <"$1"
   mapfile -t new_lines <"$2"
@@ -437,7 +453,7 @@ check_prepared_srcinfo() {
   local old_ver
   old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
 
-  local i old new key old_val new_val
+  local i old new key kind old_val new_val
   for i in "${!new_lines[@]}"; do
     old="${old_lines[$i]}"
     new="${new_lines[$i]}"
@@ -445,14 +461,18 @@ check_prepared_srcinfo() {
     key="${key#"${key%%[![:space:]]*}"}"
     new_val="${new#* = }"
     old_val="${old#* = }"
-    if [[ "$key" == "pkgver" || "$key" == "pkgrel" ]] ||
-      [[ "$key" =~ ^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$ ]]; then
-      if [[ "${old%% = *}" != "${new%% = *}" ]]; then
-        log_err "Prepared .SRCINFO line $((i + 1)) has another key than the AUR copy: $new"
-        return 1
-      fi
+    if [[ "$key" == "pkgver" || "$key" == "pkgrel" ]]; then
+      kind="$key"
+    elif [[ "$key" =~ ^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$ ]]; then
+      kind=sums
+    else
+      kind=other
     fi
-    case "$key" in
+    if [[ "$kind" != "other" && "${old%% = *}" != "${new%% = *}" ]]; then
+      log_err "Prepared .SRCINFO line $((i + 1)) has another key than the AUR copy: $new"
+      return 1
+    fi
+    case "$kind" in
       pkgver)
         [[ "$new_val" == "$version" ]] || {
           log_err "Prepared .SRCINFO has pkgver = ${new_val}, expected ${version}"
@@ -465,7 +485,7 @@ check_prepared_srcinfo() {
           return 1
         }
         ;;
-      *sums | *sums_*)
+      sums)
         if [[ ! "$new_val" =~ ^([0-9a-fA-F]+|SKIP)$ ]] ||
           [[ "$new_val" == "SKIP" && "$old_val" != "SKIP" ]] ||
           [[ "$new_val" != "SKIP" && "$old_val" == "SKIP" ]]; then
