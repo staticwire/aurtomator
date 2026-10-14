@@ -72,6 +72,14 @@ fi
 # CHECK AND PUSH
 # =============================================================================
 
+# git keeps symlinks, and cp writes through one
+for f in PKGBUILD .SRCINFO; do
+  if [[ -L "${aur_dir}/${f}" || ! -f "${aur_dir}/${f}" ]]; then
+    log_err "$f in the AUR repo of $PKG_NAME is missing, a symlink or not a regular file"
+    exit 1
+  fi
+done
+
 check_prepared_pkgbuild "${aur_dir}/PKGBUILD" "${PREPARED}/PKGBUILD" "$VERSION" || exit 1
 check_prepared_srcinfo "${aur_dir}/.SRCINFO" "${PREPARED}/.SRCINFO" "$VERSION" || exit 1
 cp "${PREPARED}/PKGBUILD" "${PREPARED}/.SRCINFO" "$aur_dir/"

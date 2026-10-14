@@ -193,6 +193,24 @@ current: '1.0.0'"
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
+@test "publish-pkg: refuses an AUR repo whose PKGBUILD is a symlink" {
+  setup_publish
+  local work="$TEST_TMPDIR/aur-work-demo"
+  cp "$OLD" "$TEST_TMPDIR/outside.PKGBUILD"
+  git -C "$work" rm -q PKGBUILD
+  ln -s "$TEST_TMPDIR/outside.PKGBUILD" "$work/PKGBUILD"
+  git -C "$work" add PKGBUILD
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid \
+    -c commit.gpgsign=false commit -qm "symlink"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  git -C "$AUR_REMOTE" rev-parse HEAD >"$PREPARED/base"
+
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"symlink"* ]]
+  cmp "$OLD" "$TEST_TMPDIR/outside.PKGBUILD"
+}
+
 @test "publish-pkg: refuses an unsafe version before any git call" {
   setup_publish
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo '1.1.0;id' "$PREPARED"
@@ -356,6 +374,46 @@ current: '2.0.0'"
   echo "new_version: 1.0](https://evil.example)" >"$TEST_TMPDIR/.status/pkg"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "check_failed:"* ]]
+}
+
+@test "check-all --publish: replaces a status with extra lines" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  printf 'new_version: 2.0.0\n| [x](https://evil.example) |\n' >"$TEST_TMPDIR/.status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "check_failed:"* ]]
+  ! grep -q evil "$TEST_TMPDIR/.status/pkg"
+}
+
+@test "check-all --publish: does not write through symlinks in the status directory" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  mkdir -p "$TEST_TMPDIR/out/pkg"
+  echo "keep" >"$TEST_TMPDIR/target-status"
+  echo "keep" >"$TEST_TMPDIR/target-count"
+  ln -s "$TEST_TMPDIR/target-status" "$TEST_TMPDIR/.status/pkg"
+  ln -s "$TEST_TMPDIR/target-count" "$TEST_TMPDIR/.status/_error_count"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/target-status")" = "keep" ]
+  [ "$(cat "$TEST_TMPDIR/target-count")" = "keep" ]
+  [ ! -L "$TEST_TMPDIR/.status/pkg" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
+}
+
+@test "check-all --publish: replaces a status directory that is a symlink" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  rm -rf "$TEST_TMPDIR/.status"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  ln -s "$TEST_TMPDIR/elsewhere" "$TEST_TMPDIR/.status"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ ! -L "$TEST_TMPDIR/.status" ]
+  [ -d "$TEST_TMPDIR/.status" ]
+  [ -z "$(ls -A "$TEST_TMPDIR/elsewhere")" ]
 }
 
 @test "check-all --publish: ignores an error count that is not a number" {

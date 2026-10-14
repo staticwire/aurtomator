@@ -56,7 +56,7 @@ done
 
 # Status directory for per-package results
 STATUS_DIR="${AURTOMATOR_DIR}/.status"
-if [[ "$MODE" != "publish" ]]; then
+if [[ "$MODE" != "publish" || -L "$STATUS_DIR" ]]; then
   rm -rf "$STATUS_DIR"
 fi
 mkdir -p "$STATUS_DIR"
@@ -69,6 +69,12 @@ if [[ "$MODE" == "publish" ]]; then
     [[ -f "$f" ]] && pkg_get "$f" .name
   done)
   for status_file in "$STATUS_DIR"/*; do
+    # Every write below goes to a regular file in this directory, never
+    # through a link
+    if [[ -L "$status_file" ]] || [[ -e "$status_file" && ! -f "$status_file" ]]; then
+      rm -rf "$status_file"
+      continue
+    fi
     [[ -f "$status_file" ]] || continue
     name="${status_file##*/}"
     [[ "$name" == "_error_count" ]] && continue
@@ -76,7 +82,12 @@ if [[ "$MODE" == "publish" ]]; then
       rm -f "$status_file"
       continue
     fi
-    status=$(head -n 1 "$status_file")
+    if _has_nul "$status_file"; then
+      echo "check_failed: invalid status from the prepare run" >"$status_file"
+      continue
+    fi
+    # The whole file, as update-readme.sh and the issue step read it
+    status=$(<"$status_file")
     case "$status" in
       up_to_date | check_failed:* | update_failed:*) ;;
       "new_version: "* | "available_downgrade: "*)
