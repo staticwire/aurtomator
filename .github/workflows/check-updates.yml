@@ -64,16 +64,21 @@ jobs:
           pkill -KILL -u builder || true
           while pgrep -u builder >/dev/null; do sleep 1; done
 
-          # Copy regular files from the expected paths only. find does not
-          # follow symlinks, and nothing else gets uploaded.
+          # Copy regular files from the expected paths only, and nothing
+          # else gets uploaded. find does not follow symlinks; -print0,
+          # because a name may hold a newline. A package name never starts
+          # with a dot, so . and .. do not match.
           mkdir upload
           if [[ -d handoff && ! -L handoff ]]; then
-            (cd handoff && find prepared status -type f 2>/dev/null) | while IFS= read -r f; do
-              if [[ "$f" =~ ^prepared/[A-Za-z0-9@._+-]+/(PKGBUILD|\.SRCINFO|base)$ ]] ||
-                [[ "$f" =~ ^status/[A-Za-z0-9@._+-]+$ ]]; then
-                install -D -m 0644 "handoff/$f" "upload/$f"
-              fi
-            done
+            pkg_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
+            (cd handoff && find prepared status -type f -print0 2>/dev/null) |
+              while IFS= read -r -d '' f; do
+                if [[ "$f" =~ ^prepared/${pkg_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
+                  [[ "$f" =~ ^status/${pkg_re}$ ]]; then
+                  [[ -f "handoff/$f" && ! -L "handoff/$f" ]] || continue
+                  install -D -m 0644 "handoff/$f" "upload/$f"
+                fi
+              done
           fi
 
           if [[ "$work" == "true" ]]; then
