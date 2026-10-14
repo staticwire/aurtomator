@@ -50,20 +50,15 @@ jobs:
           mkdir -m 0700 "$SSH_DIR"
           echo "$AUR_SSH_KEY" > "$SSH_DIR/aur"
           chmod 600 "$SSH_DIR/aur"
-          # Populate known_hosts with retry (AUR SSH can be intermittently slow)
-          for attempt in 1 2 3; do
-            if ssh-keyscan -T 10 -t ed25519 aur.archlinux.org >> "$SSH_DIR/known_hosts" 2>/dev/null; then
-              break
-            fi
-            echo "ssh-keyscan attempt $attempt failed, retrying in 5s..."
-            sleep 5
-          done
+          # Host key published at https://aur.archlinux.org as
+          # Ed25519 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
+          echo "aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN" > "$SSH_DIR/known_hosts"
 
           printf '%s\n' \
             "Host aur.archlinux.org" \
             "  IdentityFile $SSH_DIR/aur" \
             "  User aur" \
-            "  StrictHostKeyChecking accept-new" \
+            "  StrictHostKeyChecking yes" \
             "  ControlMaster auto" \
             "  ControlPath $SSH_DIR/cm-%r@%h:%p" \
             "  ControlPersist 600" \

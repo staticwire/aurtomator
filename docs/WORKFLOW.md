@@ -608,7 +608,7 @@ The workflow has `contents: write` for the status commit and `issues: write` for
 1. **Install dependencies:** `sudo git github-cli openssh gnupg namcap jq go-yq pacman-contrib`, and the `builder` user with passwordless `sudo`.
 2. **Checkout:** `actions/checkout`, pinned by commit SHA like every action in this repository.
 3. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
-4. **Setup AUR SSH:** writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, adds the AUR host key with `ssh-keyscan` (3 attempts), and writes an SSH config with connection multiplexing.
+4. **Setup AUR SSH:** writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. When the AUR changes its host key, update the key in `check-updates.yml`.
 5. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
 6. **Check and update packages:** runs `check-all.sh --update` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GITHUB_TOKEN` set to the workflow token.
 7. **Update README status table:** runs `update-readme.sh` as `builder`.
