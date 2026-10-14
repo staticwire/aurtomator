@@ -464,6 +464,9 @@ verify_all() {
 # ARGUMENT PARSING
 # =============================================================================
 
+# Saved values first, so that flags override them
+load_config
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     identity | ssh | gpg | secrets | verify)
@@ -511,8 +514,6 @@ fi
 # =============================================================================
 
 printf "%saurtomator setup%s\n" "$BOLD" "$RESET"
-
-load_config
 
 FULL_SETUP=false
 if [[ ${#STEPS[@]} -eq 5 ]]; then

@@ -248,7 +248,7 @@ AUR_SSH_KEY="/home/jane/.ssh/aur_ed25519"
 | `GPG_KEY_ID`       | GPG key ID for commit signing. Empty string if not used.   |
 | `AUR_SSH_KEY`      | Absolute path to the SSH private key for AUR.              |
 
-A re-run of `setup.sh` loads this file first and does not ask again for the values it holds. The file is in `.gitignore` because it holds local paths.
+A re-run of `setup.sh` loads this file first and does not ask again for the values it holds. A command line option overrides the saved value, and the new value is saved. The file is in `.gitignore` because it holds local paths.
 
 ## Adding your first package
 

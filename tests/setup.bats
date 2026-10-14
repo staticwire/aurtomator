@@ -314,6 +314,40 @@ EOF
   grep -q "GIT_AUTHOR_EMAIL" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
+@test "setup identity: CLI flags override saved config" {
+  write_full_config
+
+  run "$TEST_TMPDIR/scripts/setup.sh" identity \
+    --git-name "Jane Doe" --git-email "jane@example.com" \
+    --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Git author: Jane Doe <jane@example.com>"* ]]
+  grep -q 'GIT_AUTHOR_NAME="Jane Doe"' "$TEST_TMPDIR/.aurtomator.conf"
+  grep -q 'GIT_AUTHOR_EMAIL="jane@example.com"' "$TEST_TMPDIR/.aurtomator.conf"
+}
+
+@test "setup gpg: --gpg-key overrides saved key" {
+  write_full_config "BADKEY999"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key VALIDKEY123 --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"GPG key: VALIDKEY123"* ]]
+  grep -q 'GPG_KEY_ID="VALIDKEY123"' "$TEST_TMPDIR/.aurtomator.conf"
+}
+
+@test "setup ssh: --ssh-key overrides saved path" {
+  cat >"$TEST_TMPDIR/.aurtomator.conf" <<EOF
+AUR_SSH_KEY="/nonexistent/path/key.pem"
+EOF
+
+  run "$TEST_TMPDIR/scripts/setup.sh" ssh \
+    --ssh-key "$TEST_TMPDIR/ssh/aur.pem" \
+    --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SSH key: $TEST_TMPDIR/ssh/aur.pem"* ]]
+  grep -q "AUR_SSH_KEY=\"$TEST_TMPDIR/ssh/aur.pem\"" "$TEST_TMPDIR/.aurtomator.conf"
+}
+
 # === Verify step ===
 
 @test "setup verify: all green with valid config" {
