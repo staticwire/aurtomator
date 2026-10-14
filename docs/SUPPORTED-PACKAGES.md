@@ -197,7 +197,7 @@ aurtomator includes 14 version detection strategies. Choose by where your upstre
 
 ### Strategy limitations
 
-- **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow does not set it, so requests from CI are unauthenticated and limited to 60 per hour.
+- **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without a token, the limit is 60 requests per hour.
 - **No retry on API failure:** strategies make one attempt. A transient failure fails the package for that run.
 - **Tag strategies include pre-releases:** `github-tag`, `gitlab-tag` and `gitea-tag` pick the highest tag with `sort -V`, which places `1.0.0-rc1` above `1.0.0`. Filter with `tag_pattern`.
 - **`gitea-tag` fetches at most 50 tags:** there is no pagination.

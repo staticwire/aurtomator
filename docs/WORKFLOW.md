@@ -94,7 +94,7 @@ aurtomator ships 14 strategies. A strategy is a bash script in `strategies/`. It
 
 **How the version is extracted:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases.
 
-**Authentication:** when `GITHUB_TOKEN` is set in the environment, it is sent as a Bearer token. The `check-updates` workflow does not set it, so CI requests are unauthenticated and limited to 60 per hour.
+**Authentication:** when `GITHUB_TOKEN` is set in the environment, it is sent as a Bearer token. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without it, for example in a local run, the limit is 60 requests per hour.
 
 **Example YAML:**
 
@@ -610,7 +610,7 @@ The workflow has `contents: write` for the status commit and `issues: write` for
 3. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
 4. **Setup AUR SSH:** writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, adds the AUR host key with `ssh-keyscan` (3 attempts), and writes an SSH config with connection multiplexing.
 5. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
-6. **Check and update packages:** runs `check-all.sh --update` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`.
+6. **Check and update packages:** runs `check-all.sh --update` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GITHUB_TOKEN` set to the workflow token.
 7. **Update README status table:** runs `update-readme.sh` as `builder`.
 8. **Commit changes via API (verified):** see [5.5](#55-verified-commit).
 9. **Create issues for failed packages:** see [5.6](#56-failure-issues).
