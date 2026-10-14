@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# setup.sh — First-time aurtomator configuration
+# setup.sh - First-time aurtomator configuration
 #
 # Usage:
 #   ./scripts/setup.sh              # full setup (all steps)
@@ -147,7 +147,7 @@ setup_ssh() {
     return 1
   fi
 
-  # Validate it's actually a private key
+  # Check that it is a private key
   local key_check
   key_check=$(ssh-keygen -y -f "$AUR_SSH_KEY" -P "" 2>&1) || true
   if [[ "$key_check" == ssh-* ]]; then
@@ -169,7 +169,7 @@ setup_ssh() {
 setup_gpg() {
   header "gpg" "Sign AUR commits with GPG (optional)"
 
-  # Yes/no gate — skip unless user explicitly wants GPG or provided --gpg-key
+  # Yes/no gate: skip unless the user wants GPG or passed --gpg-key
   if [[ -z "$GPG_KEY_ID" ]]; then
     if [[ "$NON_INTERACTIVE" == "true" ]]; then
       ok "GPG signing skipped (no --gpg-key provided)"
@@ -201,7 +201,7 @@ setup_gpg() {
   fi
 
   if ! echo "$key_info" | grep -q '\[S'; then
-    warn "Key may not have signing capability — verify manually"
+    warn "Key may not have signing capability, verify manually"
   fi
 
   # Check if master key
@@ -222,8 +222,8 @@ setup_gpg() {
     fi
   fi
 
-  # Check passphrase — flush agent cache, then try signing without pinentry.
-  # If gpg succeeds (exit 0), key has no passphrase. If it fails, passphrase required.
+  # Check the passphrase: flush the agent cache, then sign without pinentry.
+  # Success means the key has no passphrase.
   gpgconf --kill gpg-agent 2>/dev/null || true
   if echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$GPG_KEY_ID" >/dev/null 2>&1; then
     ok "GPG key: $GPG_KEY_ID (no passphrase, ready for CI)"
@@ -236,9 +236,9 @@ setup_gpg() {
     fi
     printf "\n  Create a passphrase-free copy for CI? Your original key stays unchanged.\n\n"
     printf "  Three pinentry dialogs will open:\n"
-    printf "    %s1st%s — current passphrase (to export the key)\n" "$BOLD" "$RESET"
-    printf "    %s2nd%s — current passphrase again (isolated copy, separate keyring)\n" "$BOLD" "$RESET"
-    printf "    %s3rd%s — leave empty, press OK (set no passphrase for CI)\n\n" "$BOLD" "$RESET"
+    printf "    %s1st%s: current passphrase (to export the key)\n" "$BOLD" "$RESET"
+    printf "    %s2nd%s: current passphrase again (isolated copy, separate keyring)\n" "$BOLD" "$RESET"
+    printf "    %s3rd%s: leave empty, press OK (set no passphrase for CI)\n\n" "$BOLD" "$RESET"
     local strip
     strip=$(ask "Proceed? (Y/n)")
     if [[ "$strip" == "n" || "$strip" == "N" ]]; then
@@ -294,7 +294,7 @@ setup_gpg() {
       return 0
     fi
 
-    # Export clean key — store for secrets step
+    # Export the clean key for the secrets step
     GPG_CLEAN_KEY=$(gpg --homedir "$tmp_gnupg" --batch --pinentry-mode loopback \
       --passphrase "" --export-secret-subkeys --armor "${GPG_KEY_ID}!" 2>/dev/null) || true
     gpgconf --homedir "$tmp_gnupg" --kill gpg-agent 2>/dev/null || true
@@ -321,7 +321,7 @@ setup_secrets() {
     ok "gh CLI authenticated ($gh_user)"
   else
     warn "gh CLI not available or not authenticated"
-    warn "You'll need to set secrets manually"
+    warn "Set the secrets manually"
   fi
 
   if [[ "$has_gh" == "true" ]]; then

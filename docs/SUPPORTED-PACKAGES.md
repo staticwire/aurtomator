@@ -4,58 +4,45 @@ What aurtomator can automate, what it cannot, and how to avoid breaking things.
 
 ## How aurtomator updates packages
 
-Understanding the update mechanism is essential to knowing which packages
-are safe to automate. For every update, aurtomator does exactly this:
+For every update, aurtomator does exactly this:
 
 1. Clone the existing AUR git repo
-2. **Audit PKGBUILD** for unsupported features (blocks or warns)
+2. **Audit the PKGBUILD** for unsupported features (blocks or warns)
 3. `sed` replaces `pkgver=` with the new version
 4. Reset `pkgrel=1`
-5. **Validate source URLs** (HEAD request, Content-Type check)
-6. Run `updpkgsums` (or skip for VCS checksums)
+5. **Validate source URLs** (HEAD request, HTTP status and `Content-Type` check)
+6. Run `updpkgsums`, or skip it for VCS checksums
 7. Run `makepkg --verifysource` to verify checksums
-8. **Lint with `namcap`** (fatal on errors, warns on warnings)
+8. **Lint with `namcap`** when it is installed (errors are fatal, warnings are not)
 9. Run `makepkg --printsrcinfo` to regenerate `.SRCINFO`
-10. Commit and push to AUR
+10. Commit and push to the AUR
 
-aurtomator does not build packages. It does not check runtime
-dependencies — that requires `ldd`/`readelf` on built binaries, which
-is outside the scope of this tool. Dependency correctness is the
-maintainer's responsibility when creating the PKGBUILD.
+aurtomator does not build packages and does not check runtime dependencies. That needs `ldd` or `readelf` on built binaries and is out of scope. Dependency correctness is the maintainer's responsibility.
 
 ## Supported
 
-These package types work reliably with aurtomator:
-
 ### Simple binary packages (-bin)
 
-Packages that download pre-built binaries and install them.
-The source URL contains `${pkgver}` and the binary format doesn't change
-between versions.
+Packages that download prebuilt binaries and install them. The source URL contains `${pkgver}`, and the binary format stays the same between versions.
 
 ```bash
 source=("https://github.com/user/app/releases/download/v${pkgver}/app-${pkgver}-linux-x86_64.tar.gz")
 ```
 
-**Why it works:** Only `pkgver` changes. The URL pattern, binary format,
-and installation steps remain the same. `updpkgsums` downloads the new
-binary and updates checksums.
-
-**Examples:** any `-bin` package with a stable download URL pattern.
+**Why it works:** only `pkgver` changes. The URL pattern, binary format and installation steps stay the same, and `updpkgsums` downloads the new binary and updates the checksums.
 
 ### Packages with arch-specific sources
 
-Packages with different source URLs per architecture:
+Packages with a different source URL per architecture:
 
 ```bash
 source_x86_64=("https://example.com/app-${pkgver}-x86_64.tar.gz")
 source_aarch64=("https://example.com/app-${pkgver}-aarch64.tar.gz")
 ```
 
-**Why it works:** `updpkgsums` handles arch-specific checksum arrays.
-As long as the URL pattern is stable, the bump works.
+**Why it works:** `updpkgsums` handles arch-specific checksum arrays, and source URL validation covers every `source_<arch>` array. A stable URL pattern is enough.
 
-### VCS packages (-git) via git-latest strategy
+### VCS packages (-git) with the git-latest strategy
 
 Packages that track the latest commit of an upstream repository:
 
@@ -67,47 +54,27 @@ upstream:
   project: group/project
 ```
 
-**Why it works:** The `git-latest` strategy performs a bare clone and
-computes `r{count}.{hash}` (e.g., `r435.abc1234`). This matches the
-standard AUR convention for `-git` package versions. aurtomator replaces
-`pkgver=` with this computed value, skips checksums (SKIP), and pushes.
+**Why it works:** `git-latest` makes a bare clone and computes `r{count}.{hash}`, for example `r435.abc1234`, the usual AUR format for `-git` versions. aurtomator writes this value to `pkgver=`, skips `SKIP` checksums and pushes.
 
-If the PKGBUILD contains a `pkgver()` function, that's fine — it will
-use the same `r{count}.{hash}` format. When users build the package,
-`makepkg` runs `pkgver()` and may get a slightly newer version (if
-upstream advanced since aurtomator's check). This is normal for all
-`-git` packages on AUR.
-
-**Examples:** any `-git` package using the `r{count}.{hash}` version format.
+A `pkgver()` function in the PKGBUILD is fine: it produces the same `r{count}.{hash}` format. A user who builds the package later gets a newer value when upstream has moved on, as with every `-git` package on the AUR.
 
 ### Packages with VCS checksums (SKIP)
 
-Packages where **all** checksums in an array are `SKIP`:
+Packages whose checksum array starts with `SKIP`:
 
 ```bash
 sha256sums=('SKIP')
 ```
 
-Or with arch-specific arrays:
+**Why it works:** aurtomator matches `md5sums=('SKIP'`, `sha*sums=('SKIP'` and `b2sums=('SKIP'` and then skips `updpkgsums`, which would otherwise replace `SKIP` with a real hash.
 
-```bash
-b2sums_x86_64=('SKIP')
-b2sums_aarch64=('SKIP')
-```
+Arch-specific arrays such as `b2sums_x86_64=('SKIP')` are not matched, so `updpkgsums` runs on them.
 
-**Why it works:** aurtomator detects `*sums=('SKIP'` and skips
-`updpkgsums` entirely. This prevents updpkgsums from replacing SKIP
-with a real hash, which would break nightly/VCS rebuilds.
+`updpkgsums` is all-or-nothing: it recalculates every checksum or none. A real hash next to `SKIP` for a remote source is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
 
-**Important:** `updpkgsums` is all-or-nothing — it either recalculates
-all checksums or none. Packages where a single checksum array mixes
-SKIP and real hashes (e.g., `sha256sums=('SKIP' 'realhash')`) are
-**not supported** and will be blocked by the PKGBUILD audit. See
-"Mixed SKIP and real checksums" below.
+### Non-standard tag formats (tag_version_regex)
 
-### Non-standard tag formats (via tag_version_regex)
-
-Upstream projects that use unusual tag names:
+`github-release`, `github-tag` and `github-nightly` accept `tag_version_regex` for unusual tag names:
 
 ```yaml
 upstream:
@@ -115,138 +82,101 @@ upstream:
   tag_version_regex: '^release-v?([0-9.]+)-stable$'
 ```
 
-**Why it works:** `tag_version_regex` applies an ERE capture group to
-extract the version from any tag format (e.g., `0.1.8-stable`,
-`release-v2.3.0`, `app/v1.5.0`).
+**Why it works:** the ERE capture group extracts the version from any tag format, for example `0.1.8-stable`, `release-v2.3.0` or `app/v1.5.0`.
 
-### Nightly/prerelease packages
+### Nightly and prerelease packages
 
-Packages tracking nightly builds with 4 supported patterns:
+`github-nightly` tracks nightly builds in 4 patterns:
 
-- **Fixed tag** (e.g., neovim `nightly` tag, force-pushed daily)
-- **Dated tags** (e.g., `nightly-2026-03-26`)
-- **Separate nightly repo** (e.g., yt-dlp-nightly-builds)
-- **Channel filter** (e.g., brave-browser Nightly channel)
+- **Fixed tag**, for example the neovim `nightly` tag, moved daily
+- **Dated tags**, for example `nightly-2026-03-26`
+- **Separate nightly repo**, for example yt-dlp-nightly-builds
+- **Channel filter**, for example the brave-browser Nightly channel
 
-Version can be extracted from tag name, release body, tag date, or
-publish date. See `strategies/github-nightly.sh` for details.
+The version comes from the tag name, the release body, the tag date or the publish date. `strategies/github-nightly.sh` lists the fields.
 
 ## Not supported (blocked or detected)
 
-aurtomator actively detects these cases and either blocks the update
-or warns the maintainer.
+aurtomator detects these cases and blocks the update or warns.
 
 ### Split packages (BLOCKED)
 
-Packages with `pkgname=(foo foo-libs foo-doc)` and multiple
-`package_*()` functions.
+Packages with `pkgname=(foo foo-libs foo-doc)` and several `package_*()` functions.
 
 **Detection:** `audit_pkgbuild()` checks for `pkgname=(` and blocks.
 
-**Why:** aurtomator updates `pkgver` correctly, but cannot detect when
-subpackages need different `depends`, or when the `pkgname` array itself
-needs to change (subpackage added or removed upstream).
+**Why:** aurtomator can update `pkgver`, but it cannot tell when subpackages need different `depends` or when the `pkgname` array itself changes upstream.
 
-### pkgver() with wrong strategy (BLOCKED)
+### pkgver() with the wrong strategy (BLOCKED)
 
-VCS packages with a `pkgver()` function paired with a non-`git-latest`
-strategy (e.g., `github-release`).
+A PKGBUILD with a `pkgver()` function and a strategy other than `git-latest` or `github-nightly`, for example `github-release`.
 
-**Detection:** `audit_pkgbuild()` checks for `pkgver()` function and
-verifies the strategy is `git-latest`. Other strategies detect versions
-from releases/tags, not commits — the version format won't match what
-`pkgver()` produces at build time.
+**Detection:** `audit_pkgbuild()` checks for a `pkgver()` function and the strategy. Release and tag strategies report release versions, which do not match what `pkgver()` computes at build time.
 
-**Correct approach:** Use `strategy: git-latest` for packages with
-`pkgver()`.
+**Correct approach:** use `strategy: git-latest` for packages with `pkgver()`.
 
 ### Mixed SKIP and real checksums (BLOCKED)
 
-Packages where a single checksum array contains both SKIP and real
-hash values:
+A checksum array that starts with `SKIP` and also holds a real hash for a remote source:
 
 ```bash
+source=("git+https://example.com/app.git" "https://example.com/data.tar.gz")
 sha256sums=('SKIP'
             'abc123def456...')
 ```
 
-**Detection:** `audit_pkgbuild()` sources the PKGBUILD, iterates each
-checksum array, and blocks if any array has both SKIP and non-SKIP
-entries.
+**Detection:** `audit_pkgbuild()` sources the PKGBUILD and pairs each entry of `md5sums`, `sha1sums`, `sha256sums`, `sha512sums` and `b2sums` with the matching `source` entry. A real hash for a URL with `://` blocks the update. A real hash for a local file is allowed, because that file lives in the AUR repo and does not change between versions.
 
-**Why:** `updpkgsums` is all-or-nothing. If aurtomator sees SKIP, it
-skips `updpkgsums` entirely — meaning the real hash in the same array
-becomes stale on version bump. This would push a broken package.
+**Why:** when aurtomator sees `SKIP`, it skips `updpkgsums`, so the real hash of the remote source would be stale after the version bump.
 
 ### Source URL returns HTML (BLOCKED)
 
-When upstream moves or renames a release and the old URL redirects to
-an HTML error or download page.
+Upstream moves or renames a release, and the old URL now redirects to an HTML error or download page.
 
-**Detection:** `validate_source_urls()` sends a HEAD request to each
-source URL and checks the Content-Type header. `text/html` indicates
-an error page, not a binary/archive.
+**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array. HTTP status 400 or above, or `Content-Type: text/html`, blocks the update.
 
-**Why:** Without this check, `updpkgsums` would hash the HTML page
-content. The checksums would "pass" but the package would fail to
-install.
+**Why:** without this check, `updpkgsums` would hash the HTML page. The checksums would match and the package would fail to install.
 
 ### Packages with patches (WARNING)
 
-Packages that include `.patch` or `.diff` files in `source=()`.
+Packages with `.patch` or `.diff` files in `source=()`.
 
-**Detection:** `audit_pkgbuild()` warns but does not block. Patches
-often apply cleanly across minor version bumps, but can break on major
-changes. The maintainer accepts this risk.
+**Detection:** `audit_pkgbuild()` warns and does not block. Patches often survive a minor version bump and can break on a major one. The maintainer accepts that risk.
 
-## Not supported (not detected, requires maintainer awareness)
+## Not supported (not detected)
 
-These scenarios cannot be automatically detected and require the
-maintainer to monitor their packages.
+aurtomator cannot detect these cases. The maintainer has to watch for them.
 
-### Packages needing pkgrel bump
+### Packages needing a pkgrel bump
 
-When `pkgver` stays the same but the PKGBUILD changes (dependency fix,
-build flag change, patch update), `pkgrel` should be incremented, not
-reset to 1. aurtomator always sets `pkgrel=1`. pkgrel-only bumps
-require human judgment.
+When `pkgver` stays the same and the PKGBUILD changes (dependency fix, build flag, patch update), `pkgrel` has to be incremented. aurtomator always sets `pkgrel=1`. A pkgrel-only bump needs a human decision.
 
 ### Packages with changing source URLs
 
 When upstream changes the download URL format:
 
 - GitHub to GitLab migration
-- `.tar.gz` to `.tar.zst` format change
+- `.tar.gz` to `.tar.zst`
 - Binary renamed: `app-linux-x86_64` to `app-linux-amd64`
 - Major version path change: `v1/app.tar.gz` to `v2/app.tar.gz`
 
-aurtomator doesn't modify `source=()`. If the URL pattern changed,
-the source URL validation or `updpkgsums` will fail and aurtomator
-refuses to push. This is a safe failure.
+aurtomator does not modify `source=()`. After such a change, source URL validation or `updpkgsums` fails and aurtomator refuses to push. That failure is safe.
 
 ### Packages with changing dependencies
 
-aurtomator doesn't modify `depends`, `makedepends`, or `optdepends`.
-If a new version requires a library that wasn't previously listed,
-users may encounter runtime errors. Dependency correctness is the
-maintainer's responsibility.
+aurtomator does not modify `depends`, `makedepends` or `optdepends`. When a new version needs a library that was not listed before, users can hit runtime errors.
 
 ### Packages requiring epoch
 
-When upstream changes versioning scheme (CalVer to SemVer) and the new
-version is numerically "lower" than the old one, `epoch` is needed.
-aurtomator doesn't detect or set epoch. Setting epoch is irreversible
-and requires maintainer judgment.
+When upstream changes its versioning scheme, for example from CalVer to SemVer, and the new version compares lower than the old one, `epoch` is needed. aurtomator does not detect or set `epoch`. Setting it cannot be undone and needs maintainer judgment.
 
 ### Packages with version-dependent install scripts
 
-aurtomator doesn't touch `.install` files. If a new version requires
-migration steps in `post_upgrade()`, the maintainer must update these
-manually.
+aurtomator does not touch `.install` files. When a new version needs migration steps in `post_upgrade()`, the maintainer updates them by hand.
 
 ## Version detection strategies
 
-aurtomator includes 14 version detection strategies. Choose based on where your upstream publishes releases:
+aurtomator includes 14 version detection strategies. Choose by where your upstream publishes releases:
 
 | Strategy | Source | Best for | Pre-release filter |
 |---|---|---|---|
@@ -258,35 +188,26 @@ aurtomator includes 14 version detection strategies. Choose based on where your 
 | `gitea-tag` | Gitea/Forgejo Tags API | Codeberg, self-hosted Gitea | Manual (`tag_pattern`) |
 | `git-latest` | Bare git clone | `-git` packages (commit tracking) | N/A |
 | `pypi` | PyPI JSON API | Python packages | Auto (stable only) |
-| `npm` | npm registry | Node.js packages | Auto (latest tag) |
+| `npm` | npm registry | Node.js packages | Auto (`latest` tag) |
 | `crates` | crates.io API | Rust packages | Auto (stable only) |
-| `repology` | Repology API | Fallback (120+ repos) | Varies |
-| `archpkg` | Arch package search | Track official repo versions | Auto |
+| `repology` | Repology API | Fallback across distro repositories | Varies |
+| `archpkg` | Arch package search | Track official repo versions | N/A |
 | `webpage-scrape` | Any HTTPS page + regex | No API available | None (depends on regex) |
 | `kde-tarball` | download.kde.org | KDE/Plasma packages | None |
 
 ### Strategy limitations
 
-- **GitHub rate limit:** GitHub Actions provides `GITHUB_TOKEN`
-  automatically (5000 requests/hour). If running outside CI, set the
-  token manually for repos with >10 GitHub packages.
-- **No retry on API failure:** Strategies make one attempt. Transient
-  failures become permanent for that run.
-- **`github-tag` includes pre-releases:** Tags like `v1.0-rc1` will be
-  picked up if they sort higher than stable. Use `tag_pattern` to filter.
-- **`gitea-tag` fetches max 50 tags:** No pagination. Projects with 50+
-  tags may miss older versions (not a problem since we want the latest).
-- **`gitlab-tag` has no auth:** Private GitLab projects cannot be queried.
-  No authentication support yet.
-- **`sort -V` edge cases:** Calendar versioning (`2024.12` vs `2024.2`)
-  may sort incorrectly. Use `tag_version_regex` to normalize.
+- **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow does not set it, so requests from CI are unauthenticated and limited to 60 per hour.
+- **No retry on API failure:** strategies make one attempt. A transient failure fails the package for that run.
+- **Tag strategies include pre-releases:** `github-tag`, `gitlab-tag` and `gitea-tag` pick the highest tag with `sort -V`, which places `1.0.0-rc1` above `1.0.0`. Filter with `tag_pattern`.
+- **`gitea-tag` fetches at most 50 tags:** there is no pagination.
+- **`gitlab-tag` has no authentication:** private GitLab projects cannot be queried.
 
 ### Upstream sources not covered
 
-These require `webpage-scrape` or a custom strategy:
+These need `webpage-scrape` or a custom strategy:
 
-- SourceHut (git.sr.ht) — no dedicated API strategy
-- Docker Hub — no image tag detection (not relevant for AUR packages)
+- SourceHut (git.sr.ht)
 - Go module proxy (proxy.golang.org)
 - Private registries (GitLab, npm, PyPI)
 - FTP servers
@@ -296,34 +217,19 @@ These require `webpage-scrape` or a custom strategy:
 | Tool | Detection | Update | Push | Approach |
 |---|---|---|---|---|
 | **aurtomator** | 14 built-in strategies | pkgver sed + updpkgsums | Auto push to AUR | Fully automated, self-hosted |
-| **nvchecker** | 40+ sources, TOML config | No | No | Detection only (standard tool) |
+| **nvchecker** | 40+ sources, TOML config | No | No | Detection only |
 | **aurpublish** | No | No | git subtree push | Workflow tool for maintainers |
 | **aur-auto-update** | nvchecker | pkgver bump | Auto push | Centralized bot (add as co-maintainer) |
 | **aurupbot** | Git clone | Runs `makepkg` for pkgver() | Auto push | VCS packages only |
 | **Renovate** | Regex manager | PR-based | Separate action | PR workflow with human review |
 
-**Key difference:** aurtomator bundles detection + update + push in one
-tool, runs self-hosted via GitHub Actions, and requires no external
-services. nvchecker is the industry standard for detection but doesn't
-update or push.
+aurtomator combines detection, update and push in one tool that runs in your own GitHub Actions and needs no external service. nvchecker covers more sources but does not update or push.
 
 ## Rules for safe automation
 
-1. **Only automate packages you actively maintain.** If something breaks,
-   you need to fix it manually.
-
-2. **Only automate packages where pkgver is the only thing that changes.**
-   If upstream frequently changes dependencies, source URLs, or build
-   system — don't automate.
-
-3. **Monitor your pipeline.** aurtomator creates GitHub Issues on failure.
-   Don't ignore them.
-
-4. **Test new packages manually first.** Before adding a package to
-   aurtomator, build and install it once to verify the PKGBUILD works.
-
-5. **Don't automate packages with patches** unless you're certain the
-   patches will apply cleanly across versions (rare).
-
-6. **Review the AUR after automated pushes.** Periodically install your
-   packages with `makepkg -si` to verify they actually build and work.
+1. **Only automate packages you actively maintain.** When something breaks, you fix it by hand.
+2. **Only automate packages where pkgver is the only thing that changes.** Do not automate a package whose upstream often changes dependencies, source URLs or the build system.
+3. **Watch your issues.** aurtomator opens a GitHub Issue for every failure.
+4. **Test a new package by hand first.** Build and install it once before adding it to aurtomator.
+5. **Do not automate packages with patches** unless the patches are known to apply across versions.
+6. **Check your packages after automated pushes.** Build them now and then with `makepkg -si` to confirm they build and work.

@@ -44,7 +44,7 @@ Passphrase: testpass123
 Expire-Date: 0
 GPGEOF
 
-  # Extract key IDs for withpass key — use fingerprint matching
+  # Extract the key IDs of the withpass key by fingerprint
   local withpass_fpr
   withpass_fpr=$(gpg --list-secret-keys --keyid-format long 2>/dev/null | grep -B2 "Test Withpass" | grep "^sec" | head -1 | awk '{print $2}' | cut -d'/' -f2)
   WITHPASS_MASTER_ID="$withpass_fpr"
@@ -76,7 +76,7 @@ EOF
   mkdir -p "$TEST_TMPDIR/ssh"
   ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh/aur.pem" -N "" -q
 
-  # Mock gh and ssh (setup.sh needs them, but we test GPG not secrets)
+  # Mock gh and ssh: setup.sh calls them, and this test covers GPG only
   cat >"$TEST_TMPDIR/mock-bin/gh" <<'MOCKEOF'
 #!/usr/bin/env bash
 case "$1" in
@@ -197,9 +197,9 @@ teardown() {
 
 @test "gpg-real: no-passphrase key needs no stripping" {
   gpgconf --kill gpg-agent 2>/dev/null || true
-  # pinentry-mode error should succeed — key has no passphrase
+  # pinentry-mode error succeeds because the key has no passphrase
   echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$NOPASS_SUBKEY_ID" >/dev/null 2>&1
-  # This is the "happy path" — setup.sh says "no passphrase, ready for CI"
+  # The happy path: setup.sh reports "no passphrase, ready for CI"
 }
 
 # =============================================================================

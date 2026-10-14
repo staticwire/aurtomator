@@ -1,95 +1,75 @@
 # Setup Guide
 
-Complete setup instructions for aurtomator. Covers identity, SSH keys, optional GPG signing, GitHub Secrets, and adding your first package.
-
----
-
 ## Prerequisites
 
-**Required:**
+Required:
 
-- **Arch Linux** (or an Arch-based system with `makepkg` and `updpkgsums`)
-- **git**
-- **yq** -- the [Go version by mikefarah](https://github.com/mikefarah/yq), not the Python wrapper
-- **ssh-keygen** (from `openssh`)
-- **An AUR account** at <https://aur.archlinux.org> with at least one package you maintain
-- **curl**
+- Arch Linux, or an Arch-based system with `makepkg` and `updpkgsums`
+- `git`
+- `yq`: the [Go version by mikefarah](https://github.com/mikefarah/yq), not the Python wrapper
+- `ssh-keygen` from `openssh`
+- `curl`
+- An AUR account at <https://aur.archlinux.org> with at least one package you maintain
 
-**Optional but recommended:**
+Optional:
 
-- **gh** (GitHub CLI) -- automates GitHub Secrets setup. Without it, you set secrets manually via the web UI. Both paths are documented below.
-- **GPG key** -- for signed commits on AUR. Optional; see [GPG signing](#gpg-signing-optional).
-- **namcap** -- for linting PKGBUILDs before pushing
+- `gh` (GitHub CLI) sets the GitHub Secrets for you. Without it, you set them in the web UI. Both paths are described below.
+- A GPG key, to sign AUR commits. See [GPG signing](#gpg-signing-optional).
+- `namcap`, to lint PKGBUILDs before pushing.
 
 Install everything at once:
 
 ```bash
-sudo pacman -S --needed git openssh go-yq curl namcap github-cli gnupg
+sudo pacman -S --needed git openssh go-yq curl pacman-contrib namcap github-cli gnupg
 ```
-
----
 
 ## After forking
 
-After forking aurtomator (or using it as a template), configure your repository:
-
 ### Required
 
-1. **Enable GitHub Actions** -- go to your fork's Actions tab and enable workflows. GitHub disables Actions on forks by default.
-2. **Enable Check AUR Package Updates workflow** -- after enabling Actions, go to the "Check AUR Package Updates" workflow and click "Enable workflow". Scheduled workflows require per-workflow activation on forks.
-3. **Enable Issues** -- Settings → General → Features → Issues. Required for automatic failure notifications.
-4. **Run setup** -- `./scripts/setup.sh` configures identity, SSH, GPG, and GitHub Secrets (see below).
+1. **Enable GitHub Actions**: open the Actions tab of your fork and enable workflows. GitHub disables Actions on forks by default.
+2. **Enable the "Check AUR Package Updates" workflow**: open it in the Actions tab and click "Enable workflow". A fork needs this for every scheduled workflow.
+3. **Enable Issues**: Settings > General > Features > Issues. Failures are reported as issues.
+4. **Run setup**: `./scripts/setup.sh` configures identity, SSH, GPG and GitHub Secrets, as described below.
 
 ### Recommended
 
-- **Set repository topics** -- helps discoverability if your fork is public.
+- Set repository topics if your fork is public.
 
 ### Badges
 
-README badges (CI, Codecov) auto-update to match your fork via `update-readme.sh`. Two things to know:
+`update-readme.sh` points the README badges (CI, Codecov) at your fork.
 
-- **Public repos only** -- Codecov badge requires a public repository. Private forks show the upstream aurtomator badge instead.
-- **Activate after first push** -- on a fresh fork, badges show "no status" / "unknown". They activate automatically after your first commit to main (e.g., adding a package). This is normal.
-
----
+- **Codecov needs a public repository.** A private fork shows the upstream aurtomator badge.
+- **A fresh fork shows "no status".** The badges activate after your first commit to `main`, for example adding a package.
 
 ## Quick setup (with gh CLI)
 
-If you have `gh` installed and authenticated (`gh auth login`), setup is a single command:
+With `gh` installed and authenticated (`gh auth login`), setup is one command:
 
 ```bash
 ./scripts/setup.sh
 ```
 
-This runs all five steps in order:
+It runs five steps in order:
 
-1. **identity** -- asks your name and email for AUR git commits
-2. **ssh** -- prompts for an existing SSH key for AUR
-3. **gpg** -- asks whether you want GPG commit signing (optional)
-4. **secrets** -- pushes `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` (and optionally `GPG_SIGNING_KEY`) to your GitHub repo
-5. **verify** -- tests identity, SSH connectivity to AUR, GPG signing, and secret presence
+1. **identity**: your name and email for AUR git commits
+2. **ssh**: an existing SSH key for the AUR
+3. **gpg**: optional GPG commit signing
+4. **secrets**: pushes `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY` to your GitHub repo
+5. **verify**: checks identity, SSH access to the AUR, GPG signing and the secrets
 
-The script detects your GitHub repo from the `origin` remote. If detection fails, it prompts for `owner/repo`.
-
-After setup completes, the script saves your choices to `.aurtomator.conf` so re-runs preserve your settings.
-
----
+The script reads the GitHub repo from the `origin` remote and asks for `owner/repo` when that fails. It saves your answers to `.aurtomator.conf`.
 
 ## Identity
 
-The `identity` step sets your git author name and email for AUR commits. This is what appears in `git log` on your AUR package repos.
+The `identity` step sets the git author name and email of your AUR commits, as `git log` shows them in your AUR package repos. They are pushed to GitHub Secrets as `AUR_GIT_NAME` and `AUR_GIT_EMAIL`, so CI commits under the same identity.
 
-These are pushed to GitHub Secrets as `AUR_GIT_NAME` / `AUR_GIT_EMAIL` so CI uses the same identity.
+The `# Maintainer:` line in your PKGBUILD is yours to manage. aurtomator does not change it and warns during an update when it is missing.
 
-**Note:** The `# Maintainer:` comment in your PKGBUILD is separate -- you manage it yourself when you first publish to AUR. aurtomator does not modify it, but warns if it is missing during updates.
-
-If you enable **GPG signing**, your GPG key signs the AUR commits. AUR users can verify signatures with `git log --show-signature`.
-
----
+With GPG signing enabled, your key signs the AUR commits, and AUR users can check them with `git log --show-signature`.
 
 ## Manual setup (without gh CLI)
-
-If you don't have `gh` or prefer not to use it, follow these steps.
 
 ### 1. Generate an SSH key for AUR
 
@@ -97,17 +77,15 @@ If you don't have `gh` or prefer not to use it, follow these steps.
 ssh-keygen -t ed25519 -f ~/.ssh/aur_ed25519 -C "aurtomator@aur"
 ```
 
-Do not set a passphrase -- the key will be used non-interactively in CI.
+Leave the passphrase empty: CI uses the key without a prompt.
 
 ### 2. Add the public key to your AUR account
-
-Copy the public key:
 
 ```bash
 cat ~/.ssh/aur_ed25519.pub
 ```
 
-Go to <https://aur.archlinux.org> -> My Account -> SSH Public Key. Paste the key and save.
+On <https://aur.archlinux.org>, open My Account > SSH Public Key, paste the key and save.
 
 ### 3. Test SSH access
 
@@ -115,13 +93,11 @@ Go to <https://aur.archlinux.org> -> My Account -> SSH Public Key. Paste the key
 ssh -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org
 ```
 
-You should see a "Welcome" message (the connection will close immediately -- this is normal).
+A "Welcome" message means it works. The connection then closes, which is expected.
 
-### 4. Set GitHub Secrets via web UI
+### 4. Set GitHub Secrets in the web UI
 
-Go to your fork's GitHub page -> Settings -> Secrets and variables -> Actions -> New repository secret.
-
-Create these secrets:
+In your fork, open Settings > Secrets and variables > Actions > New repository secret, and create:
 
 | Secret name      | Value                                                 |
 |------------------|-------------------------------------------------------|
@@ -129,7 +105,7 @@ Create these secrets:
 | `AUR_GIT_EMAIL`  | Your email (e.g., `jane@example.com`)                 |
 | `AUR_SSH_KEY`    | Full contents of `~/.ssh/aur_ed25519` (the **private** key) |
 
-If you configured GPG signing, also create:
+With GPG signing, also create:
 
 | Secret name       | Value                                                      |
 |-------------------|------------------------------------------------------------|
@@ -141,23 +117,13 @@ If you configured GPG signing, also create:
 ./scripts/setup.sh verify
 ```
 
-This checks identity, SSH connectivity, GPG signing (if configured), and secret presence (if `gh` is available).
-
----
+It checks identity, SSH access, GPG signing when configured, and the secrets when `gh` is available.
 
 ## GPG signing (optional)
 
-GPG-signed commits on AUR provide verification that updates came from you and not from a compromised CI pipeline. This is **entirely optional** -- aurtomator works without it.
-
-### Why bother
-
-- AUR users running `git log --show-signature` on your package repo can verify authenticity
-- Protects your packages if your GitHub account or CI secrets are compromised
-- Some AUR helpers display signature status
+aurtomator works without GPG. With it, every AUR commit is signed with your key, and AUR users can check the signature with `git log --show-signature`. The signing key is stored as a CI secret, so a leak of the CI secrets exposes it as well. A dedicated subkey limits the damage: you revoke the subkey and keep your master key.
 
 ### Create a dedicated signing subkey
-
-Using a subkey (rather than your master key) limits exposure. If compromised, you revoke only the subkey.
 
 ```bash
 # List your master key fingerprint
@@ -173,47 +139,41 @@ gpg --list-keys --keyid-format long your-email@example.com
 
 ### Export for CI
 
-The setup script handles this automatically with `gh`. To do it manually:
+With `gh`, the setup script does this. By hand:
 
 ```bash
 gpg --export-secret-subkeys --armor <subkey-id>
 ```
 
-Paste the full output (including `-----BEGIN PGP PRIVATE KEY BLOCK-----` and `-----END PGP PRIVATE KEY BLOCK-----`) as the `GPG_SIGNING_KEY` GitHub secret.
+Paste the full output, including the `-----BEGIN PGP PRIVATE KEY BLOCK-----` and `-----END PGP PRIVATE KEY BLOCK-----` lines, as the `GPG_SIGNING_KEY` secret.
 
 ### Configure in setup
 
-Either pass it directly:
+Pass the key ID:
 
 ```bash
 ./scripts/setup.sh --gpg-key <subkey-id>
 ```
 
-Or run the GPG step interactively:
+Or run the GPG step and answer `y` to "Enable GPG commit signing? (y/N)":
 
 ```bash
 ./scripts/setup.sh gpg
 ```
 
-The script asks "Enable GPG commit signing?" -- answer `y` and enter your key ID.
-
 ### Passphrase stripping (3 pinentry dialogs)
 
-If your signing subkey has a passphrase, the setup script creates a passphrase-free copy for CI. This involves three pinentry dialogs that may look confusing -- here is what happens and why:
+CI needs a key without a passphrase. When your subkey has one, the setup script makes a passphrase-free copy in a temporary keyring, and three pinentry dialogs open:
 
 | Dialog | What to enter | Why |
 |--------|--------------|-----|
 | **1st** | Your current passphrase | Exports the signing subkey from your main keyring |
-| **2nd** | Your current passphrase again | Unlocks the key in an isolated temporary keyring (separate GPG agent, no shared cache) |
-| **3rd** | Leave empty, press OK | Sets the new passphrase to empty -- this is the CI-ready copy |
+| **2nd** | Your current passphrase again | Unlocks the key in the temporary keyring |
+| **3rd** | Leave empty, press OK | Sets an empty passphrase on the copy for CI |
 
-**Why enter the passphrase twice?** The script uses an isolated temporary keyring to avoid modifying your real keys. Each keyring has its own GPG agent with its own passphrase cache. The first agent (your main keyring) caches the passphrase for export, but the second agent (temporary keyring) has never seen it -- so it asks again.
+The second dialog asks again because the temporary keyring runs its own GPG agent, and that agent has not cached the passphrase. The passphrase only goes through pinentry: it never appears in shell variables, command arguments, environment variables or pipes.
 
-**Why not pass the passphrase programmatically?** Security. Your passphrase never appears in shell variables, command arguments, environment variables, or pipe buffers. Every entry goes through pinentry (a dedicated secure input program). This is the same approach GPG itself uses internally.
-
-**Your original key is not modified.** The passphrase is only removed from the copy in the temporary keyring. The copy is then exported and stored as the `GPG_SIGNING_KEY` GitHub secret. The temporary keyring is deleted immediately after.
-
----
+Your original key is not modified. With `gh`, the copy is stored as the `GPG_SIGNING_KEY` secret. The temporary keyring is deleted right after.
 
 ## Setup script reference
 
@@ -223,15 +183,15 @@ If your signing subkey has a passphrase, the setup script creates a passphrase-f
 
 ### Steps
 
-Run with no arguments to execute all steps in order.
+Without a step, all of them run in order.
 
 | Step       | Description                                      |
 |------------|--------------------------------------------------|
-| `identity` | Configure git author name/email and PKGBUILD maintainer |
-| `ssh`      | Configure SSH key for AUR access                 |
-| `gpg`      | Configure GPG signing key (yes/no prompt)        |
-| `secrets`  | Push secrets to GitHub (or print manual instructions) |
-| `verify`   | Test identity, SSH, GPG, and secret configuration |
+| `identity` | Git author name and email for AUR commits        |
+| `ssh`      | SSH key for AUR access                           |
+| `gpg`      | GPG signing key (yes/no prompt)                  |
+| `secrets`  | Push secrets to GitHub, or print manual instructions |
+| `verify`   | Check identity, SSH, GPG and secrets             |
 
 Steps can be combined:
 
@@ -247,9 +207,9 @@ Steps can be combined:
 | `--git-name <name>`    | Git author name for AUR commits                       |
 | `--git-email <email>`  | Git author email for AUR commits                      |
 | `--gpg-key <id>`       | Use this GPG key ID, skip the GPG prompt              |
-| `--ssh-key <path>`     | Use this SSH private key path, skip the SSH prompt     |
-| `--non-interactive`    | No prompts. Uses defaults or fails if a value is missing. Useful for CI. |
-| `-h`, `--help`         | Print usage summary                                   |
+| `--ssh-key <path>`     | Use this SSH private key, skip the SSH prompt         |
+| `--non-interactive`    | No prompts. A missing required value is an error, and GPG is skipped without `--gpg-key`. |
+| `-h`, `--help`         | Print a usage summary                                 |
 
 ### Examples
 
@@ -270,11 +230,9 @@ Steps can be combined:
 ./scripts/setup.sh verify
 ```
 
----
-
 ## Configuration file
 
-Setup saves its state to `.aurtomator.conf` in the project root. This is a plain shell file sourced by the scripts.
+Setup saves its state to `.aurtomator.conf` in the project root. The scripts source it as a shell file.
 
 ```bash
 GIT_AUTHOR_NAME="Jane Doe"
@@ -290,11 +248,7 @@ AUR_SSH_KEY="/home/jane/.ssh/aur_ed25519"
 | `GPG_KEY_ID`       | GPG key ID for commit signing. Empty string if not used.   |
 | `AUR_SSH_KEY`      | Absolute path to the SSH private key for AUR.              |
 
-**Re-runs:** when you run `setup.sh` again, it loads this file first. Any previously saved values become the defaults, so you only need to change what differs.
-
-**Git:** this file is listed in `.gitignore`. It contains local paths and should not be committed.
-
----
+A re-run of `setup.sh` loads this file first and does not ask again for the values it holds. The file is in `.gitignore` because it holds local paths.
 
 ## Adding your first package
 
@@ -313,7 +267,7 @@ upstream:
   project: owner/repo
 ```
 
-See [docs/WORKFLOW.md](WORKFLOW.md) for detailed YAML examples for all 14 strategies.
+[docs/WORKFLOW.md](WORKFLOW.md) has YAML examples for all 14 strategies.
 
 ### 3. Validate the config
 
@@ -321,7 +275,7 @@ See [docs/WORKFLOW.md](WORKFLOW.md) for detailed YAML examples for all 14 strate
 ./scripts/validate-pkg.sh my-package
 ```
 
-This checks YAML syntax, required fields, and strategy-specific field requirements.
+It checks the YAML syntax, the required fields and the fields each strategy needs.
 
 ### 4. Test the version check
 
@@ -329,7 +283,7 @@ This checks YAML syntax, required fields, and strategy-specific field requiremen
 ./scripts/check-update.sh my-package
 ```
 
-This runs the strategy and prints the latest upstream version. If the package YAML has no `current` field yet, it reports the latest version as a new find.
+It runs the strategy and prints the latest upstream version. Without a `current` field in the YAML, it also reports that no current version is set.
 
 ### 5. Test the update (dry run)
 
@@ -337,13 +291,11 @@ This runs the strategy and prints the latest upstream version. If the package YA
 ./scripts/update-pkg.sh my-package 1.2.3 --dry-run
 ```
 
-This clones the AUR repo, patches `pkgver`, regenerates checksums and `.SRCINFO`, then shows the diff **without pushing**. Use this to verify everything looks correct before going live.
+It clones the AUR repo, sets `pkgver`, regenerates checksums and `.SRCINFO`, runs `namcap` when it is installed, and shows the PKGBUILD diff **without pushing**.
 
 ### 6. Push and let CI take over
 
-Commit your new package YAML and push to your fork. The `check-updates` workflow runs hourly (configurable in `.github/workflows/check-updates.yml`) and can also be triggered manually via `workflow_dispatch`.
-
----
+Commit the package YAML and push to your fork. The `check-updates` workflow runs hourly, as set in `.github/workflows/check-updates.yml`, and can be started by hand through `workflow_dispatch`.
 
 ## Troubleshooting
 
@@ -353,9 +305,9 @@ Commit your new package YAML and push to your fork. The `check-updates` workflow
 
 **Causes:**
 
-1. Public key not added to AUR account. Go to <https://aur.archlinux.org> -> My Account -> SSH Public Key.
-2. Wrong key being used. Specify explicitly: `ssh -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org`
-3. Key permissions too open. Fix with: `chmod 600 ~/.ssh/aur_ed25519`
+1. The public key is not on your AUR account. Add it under My Account > SSH Public Key on <https://aur.archlinux.org>.
+2. SSH picks the wrong key. Name it explicitly: `ssh -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org`
+3. The key file permissions are too open. Fix them with `chmod 600 ~/.ssh/aur_ed25519`.
 
 ### GPG: No secret key / unusable secret key
 
@@ -363,9 +315,9 @@ Commit your new package YAML and push to your fork. The `check-updates` workflow
 
 **Causes:**
 
-1. Key ID is wrong. List your keys: `gpg --list-secret-keys --keyid-format long`
-2. Subkey expired. Check expiry: `gpg --list-keys <key-id>`. Extend if needed: `gpg --quick-set-expire <fpr> 1y`
-3. Key not in the current keyring (e.g., different `GNUPGHOME`).
+1. The key ID is wrong. List your keys: `gpg --list-secret-keys --keyid-format long`
+2. The subkey expired. Check with `gpg --list-keys <key-id>` and extend with `gpg --quick-set-expire <fpr> 1y`.
+3. The key is in another keyring, for example under a different `GNUPGHOME`.
 
 ### gh: not logged in / authentication failed
 
@@ -374,19 +326,19 @@ Commit your new package YAML and push to your fork. The `check-updates` workflow
 **Fixes:**
 
 1. Run `gh auth login` and complete the flow.
-2. Ensure the token has `repo` scope. Check with: `gh auth status`
-3. If using a fine-grained token, it needs "Secrets" write permission on the repository.
+2. Check that the token has the `repo` scope: `gh auth status`
+3. A fine-grained token needs write access to "Secrets" on the repository.
 
-You can skip `gh` entirely and set secrets via the web UI -- see [Manual setup](#manual-setup-without-gh-cli).
+Without `gh`, set the secrets in the web UI: see [Manual setup](#manual-setup-without-gh-cli).
 
 ### Secrets not set / workflow fails with missing secret
 
-**Symptom:** CI fails with "secret not found" or SSH key errors in the workflow.
+**Symptom:** CI fails with "secret not found" or with SSH key errors.
 
 **Fixes:**
 
-1. Verify secrets exist: go to your repo -> Settings -> Secrets and variables -> Actions. You should see `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` (and optionally `GPG_SIGNING_KEY`).
-2. Re-run `./scripts/setup.sh secrets` to re-push them.
+1. Open Settings > Secrets and variables > Actions in your repo. It lists `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`.
+2. Run `./scripts/setup.sh secrets` to push them again.
 3. Secret names are case-sensitive.
 
 ### check-update.sh fails: "Strategy not found"
@@ -395,21 +347,21 @@ You can skip `gh` entirely and set secrets via the web UI -- see [Manual setup](
 
 **Fixes:**
 
-1. Check that the `strategy` field in your package YAML matches one of the files in `strategies/`. Run `ls strategies/` to see available options.
-2. Ensure strategy scripts are executable: `chmod +x strategies/*.sh`
-3. Run `./scripts/validate-pkg.sh my-package` to catch config errors before runtime.
+1. The `strategy` field in your package YAML must match a file in `strategies/`. `ls strategies/` lists them.
+2. Strategy scripts must be executable: `chmod +x strategies/*.sh`
+3. `./scripts/validate-pkg.sh my-package` catches config errors before a run.
 
 ### update-pkg.sh fails: "No PKGBUILD found"
 
-**Symptom:** Clone succeeds but the script reports no PKGBUILD.
+**Symptom:** The clone succeeds, and the script reports `No PKGBUILD found in AUR repo`.
 
-**Cause:** The package does not exist on AUR yet. aurtomator updates **existing** AUR packages -- it does not create new ones. Push your initial PKGBUILD to AUR manually first.
+**Cause:** The package does not exist on the AUR yet. aurtomator updates **existing** AUR packages and does not create new ones. Push your first PKGBUILD to the AUR by hand.
 
 ### updpkgsums fails
 
-**Symptom:** Warning about checksums needing manual update.
+**Symptom:** `Required command not found: updpkgsums`, or `updpkgsums failed` with a refusal to push.
 
 **Causes:**
 
-1. `updpkgsums` not installed. Install with: `sudo pacman -S --needed pacman-contrib`
-2. Source URL in PKGBUILD uses variables that don't resolve correctly after the version bump. Check the PKGBUILD's `source=()` array.
+1. `updpkgsums` is not installed. Install it with `sudo pacman -S --needed pacman-contrib`.
+2. A source URL in the PKGBUILD uses variables that do not resolve after the version bump. Check the `source=()` array.

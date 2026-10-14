@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# pypi — Detect latest version from PyPI
+# pypi - Detect latest version from PyPI
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string

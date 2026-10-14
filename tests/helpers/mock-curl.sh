@@ -12,47 +12,47 @@ done
 case "$url" in
   # --- Specific error/null patterns (must be before wildcards) ---
 
-  # GitHub Release — null tag_name (404 response)
+  # GitHub Release: null tag_name (404 response)
   *api.github.com/repos/null-owner/null-repo/releases/latest)
     echo '{"message": "Not Found"}'
     ;;
-  # GitHub Tags — empty array
+  # GitHub Tags: empty array
   *api.github.com/repos/empty-owner/empty-repo/tags*)
     echo '[]'
     ;;
-  # GitLab Tags — empty array
+  # GitLab Tags: empty array
   *gitlab.com/api/v4/projects/empty-group%2Fempty-project/repository/tags*)
     echo '[]'
     ;;
-  # Gitea Tags — empty array
+  # Gitea Tags: empty array
   *codeberg.org/api/v1/repos/empty-owner/empty-repo/tags*)
     echo '[]'
     ;;
-  # PyPI — null version
+  # PyPI: null version
   *pypi.org/pypi/null-package/json)
     echo '{"info": {"version": null}}'
     ;;
-  # npm — null version
+  # npm: null version
   *registry.npmjs.org/null-package/latest)
     echo '{"version": null}'
     ;;
-  # crates.io — null version
+  # crates.io: null version
   *crates.io/api/v1/crates/null-crate)
     echo '{"crate": {"max_stable_version": null}}'
     ;;
-  # Repology — no newest status
+  # Repology: no newest status
   *repology.org/api/v1/project/no-newest)
     echo '[{"status": "outdated", "version": "1.0"}, {"status": "devel", "version": "2.0-rc1"}]'
     ;;
-  # Arch repos — empty results
+  # Arch repos: empty results
   *archlinux.org/packages/search/json*name=no-such-pkg*)
     echo '{"results": []}'
     ;;
-  # KDE tarball — no versions in listing
+  # KDE tarball: no versions in listing
   *download.kde.org/stable/no-versions-here/*)
     echo '<html><body>Parent Directory</body></html>'
     ;;
-  # Webpage scrape — no matching versions
+  # Webpage scrape: no matching versions
   *example.com/empty-page*)
     echo '<html><body>No downloads here</body></html>'
     ;;
@@ -148,7 +148,7 @@ case "$url" in
     echo '<a href="/download/test-scrape-7.0.0.tar.gz">test-scrape-7.0.0.tar.gz</a>'
     ;;
 
-  # Fallback — error (simulates network failure)
+  # Fallback: error, simulates a network failure
   *)
     echo "Mock curl: unknown URL: $url" >&2
     exit 1

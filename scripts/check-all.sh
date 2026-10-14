@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# check-all.sh — Check all packages for updates, optionally update them
+# check-all.sh - Check all packages for updates, optionally update them
 #
 # Usage: ./scripts/check-all.sh [--update] [--dry-run]
 #

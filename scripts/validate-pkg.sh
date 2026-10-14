@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# validate-pkg.sh — Validate package YAML configuration
+# validate-pkg.sh - Validate package YAML configuration
 #
 # Usage: ./scripts/validate-pkg.sh <package-name>
 #        ./scripts/validate-pkg.sh --all
@@ -43,7 +43,7 @@ validate_pkg() {
   if [[ -z "$strategy" || "$strategy" == "null" ]]; then
     log_err "$file: missing required field 'strategy'"
     ((errors++))
-    # Can't validate strategy-specific fields without strategy
+    # Strategy-specific fields cannot be checked without a strategy
     return 1
   fi
 

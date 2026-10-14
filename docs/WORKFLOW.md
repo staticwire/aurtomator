@@ -1,10 +1,5 @@
 # Aurtomator Workflow Reference
 
-Comprehensive documentation for aurtomator -- an automated AUR package update system.
-Target audience: Arch Linux power users and AUR maintainers.
-
----
-
 ## Table of Contents
 
 1. [Overview](#1-overview)
@@ -16,13 +11,9 @@ Target audience: Arch Linux power users and AUR maintainers.
 7. [Local Testing](#7-local-testing)
 8. [Writing Custom Strategies](#8-writing-custom-strategies)
 
----
-
 ## 1. Overview
 
-Aurtomator automates version bumps for AUR packages you already maintain. It does
-**not** generate PKGBUILDs from scratch -- it patches the `pkgver` in an existing
-PKGBUILD on AUR, regenerates checksums and `.SRCINFO`, and pushes the update.
+aurtomator bumps the version of AUR packages you already maintain. It does **not** generate PKGBUILDs: it changes `pkgver` in the existing PKGBUILD on the AUR, regenerates checksums and `.SRCINFO`, and pushes the update.
 
 ### End-to-end flow
 
@@ -36,11 +27,12 @@ flowchart TD
     F -->|same| G[write up_to_date]
     F -->|new version| H[update-pkg.sh]
     H --> H1[clone AUR repo via SSH]
-    H1 --> H2[sed pkgver, reset pkgrel=1]
-    H2 --> H3[updpkgsums]
-    H3 --> H4[makepkg --printsrcinfo]
-    H4 --> H5[git commit + push to AUR]
-    H5 --> K
+    H1 --> H2[audit PKGBUILD]
+    H2 --> H3[sed pkgver, reset pkgrel=1]
+    H3 --> H4[validate URLs, updpkgsums, verify sources]
+    H4 --> H5[namcap, makepkg --printsrcinfo]
+    H5 --> H6[git commit + push to AUR]
+    H6 --> K
     H -->|failure| J[write error to .status/]
     D -->|failure| J
     J --> K
@@ -55,104 +47,54 @@ flowchart TD
 
 ### Key design decisions
 
-- **One YAML per package.** No monolithic config file. Easy to add/remove packages.
-- **Strategy-based version detection.** Each upstream source type has its own script.
-  Adding a new source is just adding a new script -- no core code changes needed.
-- **Patch, not generate.** Aurtomator trusts your existing PKGBUILD. It only changes
-  `pkgver`, `pkgrel`, checksums, and `.SRCINFO`. Build systems, dependencies, install
-  files -- all untouched.
-- **Single workflow run.** All packages are checked in one CI job. One Arch container,
-  one SSH/GPG setup. A version check is one HTTP request per package.
-- **Failure isolation.** A broken package does not block others. Errors are logged per
-  package and result in GitHub Issues.
-
----
+- **One YAML per package.** Adding or removing a package is one file.
+- **Strategy-based version detection.** Each type of upstream source has its own script. A new source is a new script plus its entry in `scripts/validate-pkg.sh`.
+- **Patch, do not generate.** aurtomator trusts your PKGBUILD and changes only `pkgver`, `pkgrel`, checksums and `.SRCINFO`. Build steps, dependencies and install files stay untouched.
+- **One workflow run.** All packages are checked in one CI job, with one Arch container and one SSH and GPG setup.
+- **Failure isolation.** A broken package does not block the others. Each failure is logged for its package and opens a GitHub Issue.
 
 ## 2. Package YAML Format
 
-Each package has a file at `packages/<name>.yml`. The filename must match the `name`
-field and the AUR package name.
+Each package has a file at `packages/<name>.yml`. The file name, the `name` field and the AUR package name are the same.
 
-### Required fields
+| Field          | Required | Description                                                                 |
+|----------------|----------|-----------------------------------------------------------------------------|
+| `name`         | yes      | AUR package name, equal to the file name without `.yml`                     |
+| `strategy`     | yes      | Version detection strategy: a script name in `strategies/` without `.sh`    |
+| `upstream`     | depends  | Strategy-specific settings. `archpkg`, `repology` and `kde-tarball` need none. |
+| `current`      | no       | Currently tracked version. Written after every push.                        |
+| `last_updated` | no       | Date of the last push, `YYYY-MM-DD`. Written after every push.              |
 
-| Field      | Type   | Description                                                  |
-|------------|--------|--------------------------------------------------------------|
-| `name`     | string | AUR package name (must match filename)                       |
-| `strategy` | string | Version detection strategy (see [Strategies](#3-strategies)) |
-| `upstream` | object | Strategy-specific upstream configuration                     |
-
-### Optional fields
-
-| Field     | Type   | Description                                                    |
-|-----------|--------|----------------------------------------------------------------|
-| `current` | string | Currently tracked version. Updated automatically after pushes. |
-
-### Upstream fields by strategy
-
-The `upstream` object varies depending on the strategy. See each strategy section
-below for the exact fields required.
-
-### Minimal example
+Example:
 
 ```yaml
 name: my-package
 strategy: github-release
 upstream:
-  type: github
-  project: owner/repo
-```
-
-### Full example with current version
-
-```yaml
-name: my-package
-strategy: github-release
-upstream:
-  type: github
   project: owner/repo
 current: "2.1.0"
 ```
 
-### Naming rules
-
-- The YAML filename must be `packages/<name>.yml` where `<name>` is the exact AUR
-  package name.
-- The `name` field inside the YAML must match the filename (without `.yml`).
-- Strategy names correspond to scripts in `strategies/` (without `.sh`).
-
----
-
 ## 3. Strategies
 
-Aurtomator ships 14 built-in strategies. Each strategy is a standalone bash script in `strategies/` that receives a package name, reads the package YAML for upstream config, queries the upstream source, and outputs a single version string to stdout.
-
-All strategies:
-
-- Source `scripts/lib.sh` for YAML helpers and logging
-- Use `curl` for HTTP requests (30-second timeout)
-- Strip `v` prefixes from version tags where applicable
-- Exit non-zero on failure with error messages on stderr
-
----
+aurtomator ships 14 strategies. A strategy is a bash script in `strategies/`. It takes the package name, reads its settings from the package YAML, queries the upstream, and prints one version string on stdout. On failure it prints an error to stderr and exits non-zero. The HTTP-based strategies use `curl` with a 30-second timeout, and the tag-based ones strip a leading `v`.
 
 ### 3.1 github-release
 
 **What it checks:** GitHub Releases API (`/repos/{owner}/{repo}/releases/latest`).
 
-**When to use:** GitHub-hosted projects that publish formal releases.
+**When to use:** GitHub projects that publish releases.
 
 **YAML fields:**
 
-| Field              | Required | Description               |
-|--------------------|----------|---------------------------|
-| `upstream.type`    | no       | `github`                  |
-| `upstream.project` | yes      | `owner/repo` format       |
+| Field                        | Required | Description                         |
+|------------------------------|----------|-------------------------------------|
+| `upstream.project`           | yes      | `owner/repo` format                 |
+| `upstream.tag_version_regex` | no       | ERE with one capture group, see below |
 
-**How version is extracted:**
-Fetches the latest release object, reads `.tag_name`, strips leading `v`.
+**How the version is extracted:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases.
 
-**Authentication:** If `GITHUB_TOKEN` is set in the environment, it is sent as a
-Bearer token. Not required for public repos but avoids rate limits.
+**Authentication:** when `GITHUB_TOKEN` is set in the environment, it is sent as a Bearer token. The `check-updates` workflow does not set it, so CI requests are unauthenticated and limited to 60 per hour.
 
 **Example YAML:**
 
@@ -163,8 +105,7 @@ upstream:
   project: owner/repo
 ```
 
-**Custom tag format** — for projects with non-standard tags (e.g., `MeshLab-2025.07`,
-`0.1.8-stable`), use `tag_version_regex` with an ERE capture group:
+**Custom tag format:** for tags like `MeshLab-2025.07` or `0.1.8-stable`, set `tag_version_regex`. The text of its capture group becomes the version. It also works with `github-tag` and `github-nightly`.
 
 ```yaml
 name: meshlab-bin
@@ -174,30 +115,23 @@ upstream:
   tag_version_regex: 'MeshLab-(.*)'
 ```
 
-The captured group becomes the version. If omitted, the default `v` prefix strip applies.
-This field also works with `github-tag` and `github-nightly` strategies.
-
----
-
 ### 3.2 github-tag
 
 **What it checks:** GitHub Tags API (`/repos/{owner}/{repo}/tags`).
 
-**When to use:** GitHub projects that use git tags but do not publish formal releases.
+**When to use:** GitHub projects with tags and no releases.
 
 **YAML fields:**
 
-| Field                  | Required | Description                             |
-|------------------------|----------|-----------------------------------------|
-| `upstream.type`        | no       | `github`                                |
-| `upstream.project`     | yes      | `owner/repo` format                     |
-| `upstream.tag_pattern` | no       | Glob pattern to filter tags (e.g. `v*`) |
+| Field                        | Required | Description                              |
+|------------------------------|----------|------------------------------------------|
+| `upstream.project`           | yes      | `owner/repo` format                      |
+| `upstream.tag_pattern`       | no       | Glob to filter tags (e.g. `v*`)          |
+| `upstream.tag_version_regex` | no       | ERE with one capture group               |
 
-**How version is extracted:**
-Fetches the latest 100 tags, optionally filters by `tag_pattern` (converted to regex),
-strips `v` prefix, sorts with `sort -V` (version sort), and returns the highest.
+**How the version is extracted:** fetches the first 100 tags and filters them by `tag_pattern`, where `*` matches anything and the match is anchored at the start. It strips a leading `v`, or applies `tag_version_regex`, and returns the highest tag by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so filter pre-release tags with `tag_pattern`.
 
-**Authentication:** Same as `github-release`.
+**Authentication:** same as `github-release`.
 
 **Example YAML:**
 
@@ -205,18 +139,20 @@ strips `v` prefix, sorts with `sort -V` (version sort), and returns the highest.
 name: my-package
 strategy: github-tag
 upstream:
-  type: github
   project: owner/repo
   tag_pattern: "v*"
 ```
 
----
-
 ### 3.3 github-nightly
 
-Detects versions from GitHub nightly/prerelease builds. Supports 4 patterns:
+**What it checks:** GitHub releases of nightly or prerelease builds, in 4 patterns. The fields select the pattern:
 
-**Pattern A: Fixed tag** (default) — a single tag force-pushed daily (neovim, ghostty, yazi):
+- **Pattern A, fixed tag** (default): `nightly_tag` names one tag that moves, as in neovim, ghostty or yazi.
+- **Pattern B, dated tags**: `nightly_tag` is a prefix with a dash, such as `nightly-`. The newest of the last 20 releases whose tag contains it wins (ruffle, servo).
+- **Pattern C, separate nightly repo**: `nightly_tag: latest` reads `/releases/latest` of a dedicated build repo (yt-dlp).
+- **Pattern D, channel filter**: `channel` picks the newest of the last 20 releases whose name contains it (brave).
+
+Pattern A:
 
 ```yaml
 name: myapp-nightly-bin
@@ -228,7 +164,7 @@ upstream:
   version_pattern: 'APP v\K\S+'
 ```
 
-**Pattern B: Dated tags** — tags like `nightly-2026-03-26` (ruffle, servo):
+Pattern B:
 
 ```yaml
 name: myapp-nightly-bin
@@ -239,7 +175,7 @@ upstream:
   version_source: tag_date
 ```
 
-**Pattern C: Separate nightly repo** — standard `/releases/latest` on a dedicated build repo (yt-dlp):
+Pattern C:
 
 ```yaml
 name: myapp-nightly-bin
@@ -250,7 +186,7 @@ upstream:
   version_source: tag
 ```
 
-**Pattern D: Channel filter** — filter releases by name containing a channel string (brave):
+Pattern D:
 
 ```yaml
 name: myapp-nightly-bin
@@ -261,17 +197,20 @@ upstream:
   version_source: tag
 ```
 
-**Fields:**
+**YAML fields:**
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `upstream.project` | yes | `owner/repo` |
-| `upstream.nightly_tag` | no | Tag name or prefix (default: `"nightly"`, use `"latest"` for pattern C) |
+| `upstream.nightly_tag` | no | Tag name or prefix (default: `"nightly"`, `"latest"` for pattern C) |
 | `upstream.version_source` | no | `"tag"` (default), `"release_body"`, `"tag_date"`, `"published_date"` |
-| `upstream.version_pattern` | for `release_body` | Perl regex to extract version from release body |
-| `upstream.channel` | for pattern D | Filter releases by name containing this string |
+| `upstream.version_pattern` | for `release_body` | Perl regex for the version in the release body. Dashes in the match become `+`. |
+| `upstream.tag_version_regex` | no | ERE with one capture group, for `version_source: tag` |
+| `upstream.channel` | for pattern D | Text that the release name must contain |
 
----
+`tag_date` takes the `YYYY-MM-DD` date in the tag and `published_date` the release date, both rendered as `YYYY.MM.DD`.
+
+**Authentication:** same as `github-release`.
 
 ### 3.4 github-asset
 
@@ -287,10 +226,9 @@ upstream:
 | `upstream.tag`     | yes      | Release tag that carries the assets          |
 | `upstream.assets`  | yes      | List of exact asset file names, at least one |
 
-**How version is extracted:**
-Every listed asset must be present in the release, otherwise the strategy fails and names the missing one. The newest `updated_at` among them becomes the version, rendered as `YYYYMMDD` (for example `20251202`). A re-upload of any listed asset moves the date forward.
+**How the version is extracted:** every listed asset must be present in the release, otherwise the strategy fails and names the missing one. The newest `updated_at` among them becomes the version, rendered as `YYYYMMDD` (for example `20251202`). A re-upload of any listed asset moves the date forward. The release object lists only assets in state `uploaded`, so one request covers every downloadable asset.
 
-**Authentication:** Same as `github-release`.
+**Authentication:** same as `github-release`.
 
 **Example YAML:**
 
@@ -305,15 +243,11 @@ upstream:
     - vits-piper-ru_RU-dmitri-medium.tar.bz2
 ```
 
-The release object lists only assets in state `uploaded`, so one request covers every downloadable asset and no pagination is needed.
-
----
-
 ### 3.5 gitlab-tag
 
 **What it checks:** GitLab Tags API (`/api/v4/projects/{id}/repository/tags`).
 
-**When to use:** Any GitLab instance -- gitlab.com, invent.kde.org, self-hosted, etc.
+**When to use:** any GitLab instance: gitlab.com, invent.kde.org, self-hosted.
 
 **YAML fields:**
 
@@ -321,11 +255,9 @@ The release object lists only assets in state `uploaded`, so one request covers 
 |------------------------|----------|-------------------------------------------------------|
 | `upstream.host`        | yes      | GitLab hostname (e.g. `invent.kde.org`, `gitlab.com`) |
 | `upstream.project`     | yes      | Project path (e.g. `network/my-kde-app`)              |
-| `upstream.tag_pattern` | no       | Glob pattern to filter tags                           |
+| `upstream.tag_pattern` | no       | Glob to filter tags                                   |
 
-**How version is extracted:**
-URL-encodes the project path (`/` becomes `%2F`), fetches the latest 100 tags,
-optionally filters by pattern, strips `v` prefix, version-sorts, returns the highest.
+**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`), fetches the first 100 tags, filters them by `tag_pattern`, strips a leading `v` and returns the highest by `sort -V`. There is no authentication, so private projects cannot be queried.
 
 **Example YAML:**
 
@@ -333,18 +265,15 @@ optionally filters by pattern, strips `v` prefix, version-sorts, returns the hig
 name: my-kde-app
 strategy: gitlab-tag
 upstream:
-  type: gitlab
   host: invent.kde.org
   project: network/my-kde-app
 ```
-
----
 
 ### 3.6 gitea-tag
 
 **What it checks:** Gitea/Forgejo Tags API (`/api/v1/repos/{owner}/{repo}/tags`).
 
-**When to use:** Codeberg, self-hosted Gitea/Forgejo instances.
+**When to use:** Codeberg and self-hosted Gitea or Forgejo instances.
 
 **YAML fields:**
 
@@ -352,11 +281,9 @@ upstream:
 |------------------------|----------|------------------------------------------|
 | `upstream.host`        | yes      | Instance hostname (e.g. `codeberg.org`)  |
 | `upstream.project`     | yes      | `owner/repo` format                      |
-| `upstream.tag_pattern` | no       | Glob pattern to filter tags              |
+| `upstream.tag_pattern` | no       | Glob to filter tags                      |
 
-**How version is extracted:**
-Fetches the latest 50 tags, optionally filters by pattern, strips `v` prefix,
-version-sorts, returns the highest.
+**How the version is extracted:** fetches up to 50 tags without pagination, filters them by `tag_pattern`, strips a leading `v` and returns the highest by `sort -V`.
 
 **Example YAML:**
 
@@ -364,36 +291,26 @@ version-sorts, returns the highest.
 name: my-package
 strategy: gitea-tag
 upstream:
-  type: gitea
   host: codeberg.org
   project: owner/repo
 ```
 
----
-
 ### 3.7 git-latest
 
-**What it checks:** Any git repository via bare clone.
+**What it checks:** any git repository, through a bare clone.
 
-**When to use:** `-git` AUR packages that track the latest commit on a branch.
+**When to use:** `-git` AUR packages that track the latest commit.
 
 **YAML fields:**
 
-| Field              | Required | Description                                                   |
-|--------------------|----------|---------------------------------------------------------------|
-| `upstream.type`    | yes      | One of: `github`, `gitlab`, `git`                             |
-| `upstream.host`    | depends  | Required for `gitlab` type                                    |
-| `upstream.project` | depends  | Required for `github` and `gitlab` types                      |
-| `upstream.url`     | depends  | Required for `git` type -- full clone URL                     |
+| Field              | Required | Description                                  |
+|--------------------|----------|----------------------------------------------|
+| `upstream.type`    | yes      | One of: `github`, `gitlab`, `git`            |
+| `upstream.host`    | depends  | Required for the `gitlab` type               |
+| `upstream.project` | depends  | Required for the `github` and `gitlab` types |
+| `upstream.url`     | depends  | Required for the `git` type: full clone URL  |
 
-**How version is extracted:**
-Clones the repo as a bare repository into a temporary directory, counts all commits on
-HEAD (`git rev-list --count HEAD`), gets the short hash (`git rev-parse --short=7 HEAD`),
-and outputs in the standard `-git` pkgver format: `r<count>.<shorthash>`.
-
-Example output: `r431.66db9ce`
-
-**Cleanup:** The temporary bare clone is removed via `trap` on exit.
+**How the version is extracted:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the short hash (`git rev-parse --short=7 HEAD`) and prints the usual `-git` format `r<count>.<shorthash>`, for example `r431.66db9ce`.
 
 **Example YAML (GitHub):**
 
@@ -416,7 +333,7 @@ upstream:
   project: network/my-kde-app
 ```
 
-**Example YAML (arbitrary git URL):**
+**Example YAML (any git URL):**
 
 ```yaml
 name: my-package-git
@@ -425,8 +342,6 @@ upstream:
   type: git
   url: "https://git.sr.ht/~user/repo"
 ```
-
----
 
 ### 3.8 pypi
 
@@ -440,9 +355,7 @@ upstream:
 |---------------------|----------|----------------------------------------------|
 | `upstream.registry` | yes      | PyPI package name (e.g. `requests`, `flask`) |
 
-**How version is extracted:**
-Fetches the package JSON, reads `.info.version` which is the latest stable release
-on PyPI.
+**How the version is extracted:** reads `.info.version`, the latest stable release on PyPI.
 
 **Example YAML:**
 
@@ -452,8 +365,6 @@ strategy: pypi
 upstream:
   registry: requests
 ```
-
----
 
 ### 3.9 npm
 
@@ -467,8 +378,7 @@ upstream:
 |---------------------|----------|----------------------------------------------|
 | `upstream.registry` | yes      | npm package name (e.g. `express`, `webpack`) |
 
-**How version is extracted:**
-Fetches the `latest` tag metadata, reads `.version`.
+**How the version is extracted:** reads `.version` of the `latest` tag.
 
 **Example YAML:**
 
@@ -478,8 +388,6 @@ strategy: npm
 upstream:
   registry: express
 ```
-
----
 
 ### 3.10 crates
 
@@ -493,11 +401,7 @@ upstream:
 |---------------------|----------|------------------------------------|
 | `upstream.registry` | yes      | Crate name (e.g. `serde`, `tokio`) |
 
-**How version is extracted:**
-Fetches the crate metadata, reads `.crate.max_stable_version`. This ensures
-pre-release versions are excluded.
-
-**Note:** Sends `User-Agent: aurtomator/1.0` as required by the crates.io API policy.
+**How the version is extracted:** reads `.crate.max_stable_version`, which excludes pre-releases. The request sends `User-Agent: aurtomator/1.0`, as the crates.io API policy requires.
 
 **Example YAML:**
 
@@ -508,26 +412,19 @@ upstream:
   registry: serde
 ```
 
----
-
 ### 3.11 repology
 
 **What it checks:** Repology API (`https://repology.org/api/v1/project/{name}`).
 
-**When to use:** Universal fallback. Repology tracks versions across 120+ package
-repositories. Good for packages where no other strategy fits.
+**When to use:** as a fallback when no other strategy fits. Repology tracks versions across many distribution repositories.
 
 **YAML fields:**
 
-| Field               | Required | Description                                                       |
-|---------------------|----------|-------------------------------------------------------------------|
-| `upstream.repology` | no       | Repology project name. Defaults to the package `name` if omitted. |
+| Field               | Required | Description                                                  |
+|---------------------|----------|--------------------------------------------------------------|
+| `upstream.repology` | no       | Repology project name. Defaults to the package `name`.       |
 
-**How version is extracted:**
-Fetches the project's entries from all tracked repositories, filters for entries with
-`status == "newest"`, and returns the version from the first match.
-
-**Note:** Sends `User-Agent: aurtomator/1.0` as requested by Repology API guidelines.
+**How the version is extracted:** returns the version of the first entry with `status == "newest"`. The request sends `User-Agent: aurtomator/1.0`, as Repology asks.
 
 **Example YAML:**
 
@@ -538,33 +435,26 @@ upstream:
   repology: my-package
 ```
 
-**Example YAML (using package name as default):**
+Without `upstream.repology`, the package name is used:
 
 ```yaml
 name: my-package
 strategy: repology
-upstream: {}
 ```
-
----
 
 ### 3.12 archpkg
 
-**What it checks:** Arch Linux official package search API
-(`https://archlinux.org/packages/search/json/?name={name}`).
+**What it checks:** Arch Linux package search API (`https://archlinux.org/packages/search/json/?name={name}`).
 
-**When to use:** AUR packages that track versions of official Arch packages -- for
-example, packages that need rebuilds when a dependency in the official repos is updated.
+**When to use:** AUR packages that follow an official Arch package, for example a package that needs a rebuild when a dependency in the official repos is updated.
 
 **YAML fields:**
 
-| Field              | Required | Description                                                                |
-|--------------------|----------|----------------------------------------------------------------------------|
-| `upstream.archpkg` | no       | Package name in official repos. Defaults to the package `name` if omitted. |
+| Field              | Required | Description                                                    |
+|--------------------|----------|----------------------------------------------------------------|
+| `upstream.archpkg` | no       | Package name in the official repos. Defaults to the package `name`. |
 
-**How version is extracted:**
-Fetches the search results, reads `.results[0].pkgver`. Returns the version without
-the pkgrel component.
+**How the version is extracted:** reads `.results[0].pkgver`, the version without `pkgrel`.
 
 **Example YAML:**
 
@@ -575,34 +465,25 @@ upstream:
   archpkg: qt6-base
 ```
 
----
-
 ### 3.13 webpage-scrape
 
-**What it checks:** Any HTTPS webpage, using a regex pattern to extract version strings.
+**What it checks:** any HTTPS page, with a regex that matches the version.
 
-**When to use:** Upstream sources that do not provide a structured API -- project
-download pages, directory listings, changelogs, etc.
+**When to use:** upstreams without a structured API: download pages, directory listings, changelogs.
 
 **YAML fields:**
 
-| Field              | Required | Description                                                              |
-|--------------------|----------|--------------------------------------------------------------------------|
-| `upstream.url`     | yes      | HTTPS URL of the page to scrape                                          |
-| `upstream.pattern` | yes      | ERE (Extended Regular Expression) with one capture group for the version |
+| Field              | Required | Description                                          |
+|--------------------|----------|------------------------------------------------------|
+| `upstream.url`     | yes      | HTTPS URL of the page                                |
+| `upstream.pattern` | yes      | ERE whose first capture group is the version         |
 
-**How version is extracted:**
+**How the version is extracted:**
 
-1. Fetches the page (HTTPS only, max 5 redirects, max 5 MB).
-2. Runs `grep -oE` with the pattern to find all matches.
-3. Runs `sed -E` to extract the capture group (the version).
-4. Sorts with `sort -Vu` (version sort, unique).
-5. Returns the last (highest) version.
-
-**Security:** Only HTTPS URLs are accepted. HTTP is rejected.
-
-**Pattern rules:** The pattern must be a valid ERE regex with exactly one capture group
-`(...)` that captures the version string.
+1. Fetches the page: HTTPS only, at most 5 redirects and 5 MB.
+2. Finds every match with `grep -oE`.
+3. Extracts the first capture group with `sed -E`.
+4. Sorts with `sort -Vu` and returns the highest version.
 
 **Example YAML:**
 
@@ -610,7 +491,6 @@ download pages, directory listings, changelogs, etc.
 name: my-scrape-pkg
 strategy: webpage-scrape
 upstream:
-  type: webpage
   url: "https://www.example.com/~maintainer/my-scrape-pkg/"
   pattern: "my-scrape-pkg-([0-9.]+)\\.tar\\.gz"
 ```
@@ -628,48 +508,26 @@ upstream:
 "/download/v([0-9.]+)/"
 ```
 
----
-
 ### 3.14 kde-tarball
 
-**What it checks:** KDE download server directory listing
-(`https://download.kde.org/stable/{name}/`).
+**What it checks:** the KDE download server listing (`https://download.kde.org/stable/{name}/`).
 
-**When to use:** KDE/Plasma packages that publish release tarballs on download.kde.org.
+**When to use:** KDE and Plasma packages that publish release tarballs on download.kde.org.
 
-**YAML fields:**
+**YAML fields:** none. The package `name` is the directory on the server.
 
-No upstream fields are required beyond the standard `name`. The package name is used
-directly to construct the download URL.
-
-**How version is extracted:**
-
-1. Fetches `https://download.kde.org/stable/{name}/`.
-2. Uses a Perl-compatible regex to match `{name}-{version}.tar.xz` links.
-3. Extracts the version part (digits and dots: `[0-9]+\.[0-9]+(\.[0-9]+)*`).
-4. Sorts with `sort -Vu` and returns the highest.
+**How the version is extracted:** matches `{name}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`), and returns the highest by `sort -Vu`.
 
 **Example YAML:**
 
 ```yaml
 name: my-kde-app
 strategy: kde-tarball
-upstream:
-  type: gitlab
-  host: invent.kde.org
-  project: network/my-kde-app
 ```
-
-Note: the `upstream` fields here are metadata for reference (and used by `git-latest`
-if you have a companion `-git` package). The `kde-tarball` strategy itself only uses
-the package `name`.
-
----
 
 ## 4. Update Process
 
-When `check-all.sh --update` determines a package has a new version, it calls
-`update-pkg.sh`. Here is what happens step by step.
+`check-all.sh --update` calls `update-pkg.sh` for every package with a new version.
 
 ### 4.1 Arguments
 
@@ -679,437 +537,179 @@ update-pkg.sh <package-name> <new-version> [--dry-run]
 
 ### 4.2 Step-by-step
 
-#### 1. Load configuration
-
-Reads `.aurtomator.conf` if present. This sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
-`GPG_KEY_ID`, and other variables. In CI, these are passed as environment variables
-from GitHub Secrets (`AUR_GIT_NAME`, `AUR_GIT_EMAIL`).
-
-#### 2. Create temporary directory
-
-```bash
-tmp_dir=$(mktemp -d)
-trap 'rm -rf "$tmp_dir"' EXIT
-```
-
-A trap ensures cleanup even on error.
-
-#### 3. Clone AUR repository
-
-```bash
-git clone ssh://aur@aur.archlinux.org/<package-name>.git "$aur_dir"
-```
-
-Uses SSH authentication. The SSH key must be configured for the `aur` user on
-aur.archlinux.org (see the setup script).
-
-#### 4. Verify PKGBUILD exists
-
-Checks that `PKGBUILD` is present in the cloned repo. Exits with an error if missing.
-
-#### 5. Update pkgver and reset pkgrel
-
-```bash
-sed -i "s/^pkgver=.*/pkgver=<new-version>/" PKGBUILD
-sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-```
-
-Simple `sed` replacements. `pkgrel` is always reset to `1` on a version bump, per
-Arch packaging convention.
-
-#### 6. Regenerate checksums
-
-```bash
-updpkgsums
-```
-
-Downloads the source files and recalculates integrity arrays (sha256sums, etc.).
-If `updpkgsums` fails (e.g. not available), a warning is logged but the process
-continues.
-
-#### 7. Regenerate .SRCINFO
-
-```bash
-makepkg --printsrcinfo > .SRCINFO
-```
-
-This is mandatory. AUR requires `.SRCINFO` to match the PKGBUILD. It is never
-edited manually.
-
-#### 8. Dry run check
-
-If `--dry-run` was passed, the script prints the PKGBUILD diff and exits without
-pushing:
-
-```text
-[DRY RUN] Would push my-package 2.0.0 to AUR
-```
-
-#### 9. Configure commit identity
-
-```bash
-git config user.name "${GIT_AUTHOR_NAME:-aurtomator}"
-git config user.email "${GIT_AUTHOR_EMAIL:-aurtomator@users.noreply.github.com}"
-```
-
-Uses the identity configured during `setup.sh identity`. Falls back to `aurtomator`
-if not set.
-
-#### 10. Commit and push
-
-```bash
-git add PKGBUILD .SRCINFO
-git commit -m "<new-version> release from <strategy>"
-```
-
-The commit message follows AUR convention: `"<version> release from <source>"`.
-
-If `GPG_KEY_ID` is set, the commit is amended with GPG signing:
-
-```bash
-git -c user.signingkey="$GPG_KEY_ID" -c commit.gpgsign=true \
-  commit --amend --no-edit
-```
-
-Then pushed to AUR:
-
-```bash
-git push
-```
-
-#### 11. Update package YAML
-
-```bash
-yq -i '.current = "<new-version>"' packages/<name>.yml
-```
-
-This updates the `current` field so the next check knows the package is at this
-version.
+1. Load `.aurtomator.conf` when it exists. In CI, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GPG_KEY_ID` come from the workflow environment.
+2. Clone `ssh://aur@aur.archlinux.org/<package-name>.git` into a temporary directory, with up to 3 attempts. A clone without a PKGBUILD stops the update.
+3. When the clone lands on a detached `HEAD`, reset `master` to `origin/master`, so the push is a fast-forward.
+4. Warn when the PKGBUILD has no `# Maintainer:` line.
+5. Audit the PKGBUILD. Split packages, `pkgver()` with the wrong strategy and mixed checksums block the update. Patches only warn. See [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md).
+6. Set `pkgver` with `sed` and reset `pkgrel=1`. When the PKGBUILD does not change, the AUR already has this version: the script writes it to `current` and exits with code 2.
+7. Unless a checksum array starts with `SKIP`, validate every source URL, run `updpkgsums`, and verify the result with `makepkg --verifysource --skippgpcheck`. Any failure stops the update.
+8. Run `namcap` when it is installed. Errors stop the update. Warnings are printed.
+9. Regenerate `.SRCINFO` with `makepkg --printsrcinfo`.
+10. With `--dry-run`, print the PKGBUILD diff and stop.
+11. Commit `PKGBUILD` and `.SRCINFO` as `<new-version> release from <strategy>`, authored by `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL` (default `aurtomator`). With `GPG_KEY_ID` set, the commit is amended with a signature. When signing fails, the commit is pushed unsigned.
+12. Push, with up to 3 attempts.
+13. Write `current` and `last_updated` to the package YAML.
 
 ### 4.3 Downgrade behavior
 
-Aurtomator **mirrors upstream blindly**. If upstream publishes a version
-`older` than what the package currently tracks, aurtomator follows — it does
-**not** block the change. The rationale: upstream is the source of truth. If
-they re-published an older release (deleted and recreated a tag, rolled back
-a broken release, etc.), a downstream packager that refuses to follow only
-drifts out of sync.
-
-Downgrades are logged and rendered, but not treated as failures.
+aurtomator follows upstream when it publishes a version older than the tracked one, and does **not** block it. Upstream is the source of truth: a packager that refuses a re-published older release only drifts out of sync. A downgrade is logged and shown, and it does not count as a failure.
 
 #### When does this happen?
 
-- Upstream deletes and recreates a release tag. During the gap, GitHub's
-  `/releases/latest` endpoint auto-promotes the previous release, so a single
-  version cycle like `v1.2.1 → v1.2.0 → v1.2.1` can complete within minutes
-  without aurtomator doing anything wrong.
-- Upstream rolls back a broken release and removes the tag.
-- Upstream's "latest" pointer flips to an older semver branch (for example,
-  a 2.x release line is deprecated and 1.x becomes "latest" again
-  temporarily).
+- Upstream deletes and recreates a release tag. In the gap, `/releases/latest` returns the previous release, so a cycle like `v1.2.1 → v1.2.0 → v1.2.1` can take only minutes.
+- Upstream rolls back a broken release and removes its tag.
+- Upstream marks an older release line as latest again, for example when a 2.x release is pulled and 1.x becomes the newest release.
 
 #### How to detect downgrades in logs
 
-Every script that performs comparison logs the literal token `DOWNGRADE`
-whenever `vercmp "$current" "$latest"` returns `1` (current is newer).
-Grep for it:
-
-```bash
-grep DOWNGRADE workflow-run.log
-```
-
-Two log lines are emitted for a single downgrade event — one from
-`check-update.sh` per package:
-
-```text
-! myapp-bin: DOWNGRADE 1.2.1 → 1.2.0
-```
-
-and one from `check-all.sh` as it routes the update:
+Every comparison that finds the current version newer than the latest one (`vercmp "$current" "$latest"` returns `1`) logs the literal token `DOWNGRADE`. In a CI run, `check-all.sh` logs:
 
 ```text
 ! myapp-bin: DOWNGRADE detected 1.2.1 → 1.2.0 (mirroring upstream)
 ```
 
+`check-update.sh` run on its own logs:
+
+```text
+! myapp-bin: DOWNGRADE 1.2.1 → 1.2.0
+```
+
+`grep DOWNGRADE` on a downloaded run log finds both.
+
 #### Status values and README icons
 
-`check-all.sh` writes two additional status tokens to `.status/<pkg>`:
+`check-all.sh` writes two status tokens for downgrades to `.status/<pkg>`:
 
 | Token                         | Meaning                                           |
 |-------------------------------|---------------------------------------------------|
-| `downgrade: <version>`        | `--update` mode: downgrade was pushed to AUR      |
-| `available_downgrade: <ver>`  | Check-only mode: downgrade available, not applied |
+| `downgrade: <version>`        | `--update` mode: the downgrade was pushed to the AUR |
+| `available_downgrade: <ver>`  | Check-only mode: a downgrade is available and not applied |
 
-`update-readme.sh` renders these as:
+`update-readme.sh` renders them as:
 
 - `downgrade: 1.2.0` → `⬇️ downgraded to 1.2.0`
 - `available_downgrade: 1.2.0` → `⬇️ 1.2.0 available (downgrade)`
 
-Both statuses count toward `pkg_ok`, so the packages badge stays
-`brightgreen`. A downgrade is expected behavior, not a failure — the red
-badge is reserved for `check_failed` and `update_failed`.
-
----
+Both count toward `pkg_ok`, so the packages badge stays `brightgreen`. Only `check_failed` and `update_failed` turn it red.
 
 ## 5. CI Workflow: check-updates.yml
 
-The main CI workflow runs on a schedule and handles the full update cycle.
-
 ### 5.1 Trigger
 
-```yaml
-on:
-  schedule:
-    - cron: "0 * * * *"  # every hour
-  workflow_dispatch:
-    inputs:
-      force:
-        description: "Skip schedule matching, check all packages now"
-        type: boolean
-        default: true
-```
+The workflow runs every hour (`cron: "0 * * * *"`) and by hand through `workflow_dispatch`. The `check-updates` concurrency group serializes runs: a new run waits for the running one.
 
-Runs hourly by default. Can be triggered manually from the GitHub Actions UI with
-the `force` flag.
+### 5.2 Permissions and container
 
-### 5.2 Permissions
+The workflow has `contents: write` for the status commit and `issues: write` for failure issues, and nothing else. The job runs in `archlinux:base-devel` on `ubuntu-latest` with a 30-minute timeout. `makepkg` refuses to run as root, so the steps that touch packages run as a `builder` user.
 
-```yaml
-permissions:
-  contents: write   # for committing changes
-  issues: write     # for creating failure issues
-```
+### 5.3 Steps
 
-Minimal permissions. No `packages`, no `deployments`, no admin access.
+1. **Install dependencies:** `sudo git github-cli openssh gnupg namcap jq go-yq pacman-contrib`, and the `builder` user with passwordless `sudo`.
+2. **Checkout:** `actions/checkout`, pinned by commit SHA like every action in this repository.
+3. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
+4. **Setup AUR SSH:** writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, adds the AUR host key with `ssh-keyscan` (3 attempts), and writes an SSH config with connection multiplexing.
+5. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
+6. **Check and update packages:** runs `check-all.sh --update` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`.
+7. **Update README status table:** runs `update-readme.sh` as `builder`.
+8. **Commit changes via API (verified):** see [5.5](#55-verified-commit).
+9. **Create issues for failed packages:** see [5.6](#56-failure-issues).
 
-### 5.3 Container
+Steps 8 and 9 run as root with `GH_TOKEN` set to the workflow token, `github.token`.
 
-```yaml
-runs-on: ubuntu-latest
-container: archlinux:base-devel
-timeout-minutes: 30
-```
+### 5.4 README update
 
-Runs in an official Arch Linux container with `base-devel` (which includes `makepkg`,
-`pacman`, etc.). The 30-minute timeout prevents stuck jobs from consuming minutes.
+`update-readme.sh` rewrites two blocks of `README.md`:
 
-### 5.4 Step: Install dependencies
-
-```bash
-pacman -Syu --noconfirm --needed sudo git github-cli openssh gnupg namcap jq go-yq
-useradd -m builder
-echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-```
-
-Installs all required tools and creates a non-root `builder` user. `makepkg` refuses
-to run as root, so the `builder` user handles package operations.
-
-### 5.5 Step: Checkout
-
-```yaml
-uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-```
-
-Action versions are pinned by full commit SHA (not tag) for supply chain security.
-The version tag is noted in a comment for human readability.
-
-### 5.6 Step: Setup AUR SSH
-
-Configures SSH access to `aur.archlinux.org` for the `builder` user only:
-
-1. Writes the `AUR_SSH_KEY` secret to `/home/builder/.ssh/aur`.
-2. Runs `ssh-keyscan` to populate `known_hosts`.
-3. Creates `~builder/.ssh/config` with `IdentityFile`, `User`, and `StrictHostKeyChecking`
-   directives.
-4. Tests the connection with `sudo -u builder ssh -o BatchMode=yes aur@aur.archlinux.org`.
-
-All scripts (`check-all.sh`, `update-pkg.sh`, `update-readme.sh`) run as `builder`.
-Only the GitHub API commit and issue creation steps run as root (they use `GH_TOKEN`, not SSH).
-`GH_TOKEN` is automatically provided by GitHub for every workflow run -- no setup required.
-It is a short-lived token scoped to this repository with the permissions declared in the
-workflow (`contents: write`, `issues: write`). It expires when the run finishes.
-
-### 5.7 Step: Setup GPG
-
-If the `GPG_SIGNING_KEY` secret is configured:
-
-1. Imports the private key into the builder's GPG keyring.
-2. Extracts the key ID.
-3. Sets `GPG_KEY_ID` in `$GITHUB_ENV` for downstream steps.
-4. Configures `git` to use this key for commit signing.
-
-If no GPG key is configured, this step is silently skipped.
-
-### 5.8 Step: Check and update packages
-
-```bash
-sudo -u builder env \
-  GPG_KEY_ID="${GPG_KEY_ID:-}" \
-  GIT_AUTHOR_NAME="${AUR_GIT_NAME:-aurtomator}" \
-  GIT_AUTHOR_EMAIL="${AUR_GIT_EMAIL:-aurtomator@users.noreply.github.com}" \
-  ./scripts/check-all.sh --update
-```
-
-Runs `check-all.sh` as the `builder` user with the `--update` flag, which both checks
-and pushes updates to AUR. Identity environment variables `AUR_GIT_NAME` and
-`AUR_GIT_EMAIL` are passed from GitHub Secrets (configured during `setup.sh identity`).
-If not set, falls back to `aurtomator` as the commit author.
-
-### 5.9 Step: Update README badges and status table
-
-```bash
-./scripts/update-readme.sh
-```
-
-Updates two sections in `README.md`:
-
-1. **Badges** (between `<!-- BADGES:START -->` / `<!-- BADGES:END -->`) — auto-detects
-   the repo from git origin and generates CI, Codecov, and static badges. For public
-   repos, Codecov badge uses a tokenless URL. This makes badges work automatically in
-   forks without manual URL changes.
-
-2. **Package status table** (between `<!-- PACKAGES:START -->` / `<!-- PACKAGES:END -->`)
-   — reads the `.status/` directory written by `check-all.sh` and regenerates the table.
+1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: CI, Codecov and static badges for the repository in `origin`. A public repository gets its own tokenless Codecov badge. A private one, or a failed API call, links the upstream aurtomator badge.
+2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`.
 
 #### .status/ directory format
 
-`check-all.sh` writes one file per package in `.status/`:
+`check-all.sh` writes one file per package:
 
-| Filename               | Content                    | Meaning                          |
-|------------------------|----------------------------|----------------------------------|
-| `.status/<name>`       | `up_to_date`               | Package is at the latest version |
-| `.status/<name>`       | `updated: 2.0.0`           | Successfully pushed to AUR       |
-| `.status/<name>`       | `new_version: 2.0.0`       | Update found (check-only mode)   |
-| `.status/<name>`       | `check_failed: <error>`    | Strategy execution failed        |
-| `.status/<name>`       | `update_failed: <error>`   | AUR push failed                  |
-| `.status/_error_count` | `0`                        | Total error count for the run    |
+| Filename               | Content                          | Meaning                                  |
+|------------------------|----------------------------------|------------------------------------------|
+| `.status/<name>`       | `up_to_date`                     | The package is at the latest version     |
+| `.status/<name>`       | `updated: 2.0.0`                 | Pushed to the AUR                        |
+| `.status/<name>`       | `new_version: 2.0.0`             | Update found (check-only mode)           |
+| `.status/<name>`       | `downgrade: 1.2.0`               | Downgrade pushed to the AUR              |
+| `.status/<name>`       | `available_downgrade: 1.2.0`     | Downgrade found (check-only mode)        |
+| `.status/<name>`       | `check_failed: <error>`          | The strategy failed                      |
+| `.status/<name>`       | `update_failed: <error>`         | The update failed                        |
+| `.status/_error_count` | `0`                              | Total error count of the run             |
 
-#### Dynamic badge
-
-The README badge is dynamically generated:
+#### Packages badge
 
 ```text
 https://img.shields.io/badge/packages-<ok>%2F<total>-<color>
 ```
 
-- Green (`brightgreen`) if all packages are OK (zero failures).
-- Red (`red`) if any package failed.
+The color is `brightgreen` with no failures and `red` otherwise.
 
 #### Status table
 
-Generated between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->` markers:
-
 ```markdown
-| Package       | Version | Strategy       | Status           |
-|---------------|---------|----------------|------------------|
-| `my-package`  | 1.0.1   | kde-tarball    | up to date       |
-| `other-pkg`   | 2.0.0   | github-release | updated to 2.0.0 |
+| Package | Version | Strategy | Updated | Status |
+|---------|---------|----------|---------|--------|
+| [my-package](https://aur.archlinux.org/packages/my-package) | 1.0.1 | kde-tarball | 2026-10-01 | ✅ up to date |
+| [other-pkg](https://aur.archlinux.org/packages/other-pkg) | 2.0.0 | github-release | 2026-10-14 | 🔄 updated to 2.0.0 |
 ```
 
-### 5.10 Step: Commit changes via API (verified)
+### 5.5 Verified commit
 
-Instead of using `git commit` + `git push` (which would show as "unverified" in
-GitHub), the workflow uses the GitHub Git Data API to create a verified bot commit.
+A `git push` from the workflow would show as unverified, so the step commits through the GitHub Git Data API:
 
-The process:
+1. Stop when `git diff --quiet` finds no change.
+2. Read the branch head and its tree.
+3. Create a blob for every changed file, a tree on the base tree, and a commit.
+4. Move the branch ref with `force=false`.
 
-1. Check if there are any changes (`git diff --quiet`). Exit early if not.
-2. Get the current HEAD SHA via `gh api repos/{repo}/git/ref/heads/{branch}`.
-3. Get the base tree SHA from the HEAD commit.
-4. For each changed file:
-   - Base64-encode the file content.
-   - Create a blob via `POST /repos/{repo}/git/blobs`.
-5. Create a new tree with the blobs via `POST /repos/{repo}/git/trees`.
-6. Create a commit via `POST /repos/{repo}/git/commits`.
-7. Update the branch ref via `PATCH /repos/{repo}/git/refs/heads/{branch}`.
+The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting `ci.yml`. GitHub marks the commit as verified because the Actions bot creates it through the API.
 
-The commit message is `chore: update package versions [skip ci]`. The `[skip ci]`
-suffix prevents an infinite loop of CI runs.
+### 5.6 Failure issues
 
-The commit appears as "verified" in the GitHub UI because it is authored by the
-GitHub Actions bot through the API.
+The step runs with `if: always()`. For every `.status/` entry with `check_failed:` or `update_failed:`, it:
 
-### 5.11 Step: Create issues for failed packages
-
-Runs `if: always()` -- even if previous steps failed.
-
-For each file in `.status/` that contains `check_failed:` or `update_failed:`:
-
-1. Ensures the `auto-update` label exists (creates it if not, ignores if it already
-   exists).
-2. Checks for an existing open issue with the same package name and the `auto-update`
-   label. If one exists, skips (deduplication).
-3. Creates a new issue with:
-   - Title: the package name and failure type
-   - Label: `auto-update`
-   - Body: package name, error details, link to the failed workflow run
-
-This ensures that failures are visible and tracked, but duplicate issues are not
-created for recurring failures.
-
----
+1. Creates the `auto-update` label when it is missing.
+2. Skips the package when an open `auto-update` issue already matches `<package> failed`.
+3. Opens an issue titled `❌ <package>: update failed` with the package, the error and a link to the run.
 
 ## 6. CI Quality Gate: ci.yml
 
-The `ci.yml` workflow runs on every push and pull request to `main`. It enforces
-code quality before changes are merged.
+`ci.yml` runs on every push and pull request to `main`.
 
-### 6.1 Trigger
+### 6.1 Lint job
 
-```yaml
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-```
-
-### 6.2 Lint job
-
-Runs on `ubuntu-latest` with a 5-minute timeout.
-
-**shellcheck:**
+`ubuntu-latest`, 5-minute timeout. It installs `shellcheck` from apt and `shfmt` with `go install`, then runs:
 
 ```bash
 shellcheck -x -S warning scripts/*.sh strategies/*.sh
-```
-
-- `-x` follows `source` directives.
-- `-S warning` sets minimum severity to warning.
-
-**shfmt:**
-
-```bash
 shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
 ```
 
-- `-d` diff mode (shows what would change, fails if anything would).
-- `-i 2` enforces 2-space indentation.
-- `-ci` indents switch cases.
+`-x` follows `source` directives and `-S warning` sets the minimum severity. `-d` fails on any formatting diff, `-i 2` sets two-space indentation, and `-ci` indents `case` branches.
 
-### 6.3 Test job
+### 6.2 Test job
 
-Runs in an `archlinux:base-devel` container with a 10-minute timeout.
+`archlinux:base-devel` container, 15-minute timeout. It installs `bash bats git go-yq curl openssh ruby ruby-erb` and the `bashcov` and `simplecov-cobertura` gems, then runs:
 
 ```bash
-pacman -Syu --noconfirm --needed bash bats git go-yq curl
-bats tests/ --recursive --timing
+./scripts/validate-pkg.sh --all
+bats tests/ --recursive
+bashcov -- bats tests/ --recursive
 ```
 
-Runs all BATS test files in `tests/` recursively with timing output.
-
----
+The coverage run uploads `coverage/coverage.xml` to Codecov and never fails the job.
 
 ## 7. Local Testing
 
 ### 7.1 Prerequisites
 
-Install the required tools:
-
 ```bash
-sudo pacman -S bash git curl go-yq namcap
-# For testing:
-sudo pacman -S bats shellcheck shfmt
+sudo pacman -S --needed git curl go-yq pacman-contrib namcap
+# For tests and linting:
+sudo pacman -S --needed bats shellcheck shfmt
 ```
 
 ### 7.2 Check a single package
@@ -1118,23 +718,19 @@ sudo pacman -S bats shellcheck shfmt
 ./scripts/check-update.sh my-package
 ```
 
-Output goes to stderr (logging). If an update is available, the new version is
-printed to stdout.
-
-Example output:
+The log goes to stderr. When an update is available, the new version is printed on stdout:
 
 ```text
--> Checking my-package (strategy: github-release, current: 1.0.0)
-!  my-package: update available 1.0.0 -> 2.0.0
+→ Checking my-package (strategy: github-release, current: 1.0.0)
+! my-package: update available 1.0.0 → 2.0.0
 2.0.0
 ```
 
-If the package is up to date, only a log line is printed to stderr and stdout is
-empty:
+When the package is up to date, stdout stays empty:
 
 ```text
--> Checking my-package (strategy: github-release, current: 2.0.0)
-v  my-package is up to date (2.0.0)
+→ Checking my-package (strategy: github-release, current: 2.0.0)
+✓ my-package is up to date (2.0.0)
 ```
 
 ### 7.3 Dry-run an update
@@ -1143,36 +739,20 @@ v  my-package is up to date (2.0.0)
 ./scripts/update-pkg.sh my-package 2.0.0 --dry-run
 ```
 
-This clones the AUR repo, patches the PKGBUILD, regenerates checksums and .SRCINFO,
-then shows the diff without pushing:
+It runs the steps of [4.2](#42-step-by-step) up to `.SRCINFO`, prints the PKGBUILD diff and does not push.
 
-```text
--> Cloning AUR repo: my-package
--> Updating pkgver to 2.0.0
--> Updating checksums
--> Generating .SRCINFO
-v  .SRCINFO generated
-!  [DRY RUN] Would push my-package 2.0.0 to AUR
--> PKGBUILD diff:
--pkgver=1.0.0
-+pkgver=2.0.0
--pkgrel=3
-+pkgrel=1
-```
-
-### 7.4 Actually push an update
+### 7.4 Push an update
 
 ```bash
 ./scripts/update-pkg.sh my-package 2.0.0
 ```
 
-This performs the full update cycle including `git push` to AUR. Make sure your SSH
-key is configured for AUR access.
+It runs the full cycle, including `git push` to the AUR with your SSH key.
 
 ### 7.5 Check all packages
 
 ```bash
-# Check only (report what needs updating)
+# Check only
 ./scripts/check-all.sh
 
 # Check and push updates
@@ -1182,10 +762,10 @@ key is configured for AUR access.
 ./scripts/check-all.sh --update --dry-run
 ```
 
-Summary output:
+The last line is a summary:
 
 ```text
--> Checked: 4, Updated: 2, Errors: 0
+→ Checked: 4, Updated: 2, Errors: 0
 ```
 
 ### 7.6 Running BATS tests
@@ -1194,22 +774,13 @@ Summary output:
 # Run all tests
 bats tests/ --recursive --timing
 
-# Run a specific test file
+# Run one file
 bats tests/scripts.bats
 bats tests/strategies.bats
 bats tests/setup.bats
 ```
 
-Tests use a mock `curl` (at `tests/helpers/mock-curl.sh`) that returns predefined
-responses for each API endpoint. The test harness:
-
-1. Creates a temp directory with the project structure (symlinked scripts and
-   strategies).
-2. Puts the mock `curl` first in `PATH`.
-3. Overrides `AURTOMATOR_DIR` to point to the temp directory.
-4. Cleans up on teardown.
-
-This means tests never make real HTTP requests or touch real AUR repos.
+`tests/helpers/setup.sh` gives every test a temporary project directory with symlinked scripts and strategies. It copies `tests/helpers/mock-curl.sh` there as `curl`, puts it first in `PATH`, and removes the directory afterwards. Tests that need `git`, `ssh` or `gh` put their own mocks in the same place. The suite makes no network requests and never touches real AUR repos.
 
 ### 7.7 Linting locally
 
@@ -1224,36 +795,25 @@ shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
 shfmt -w -i 2 -ci scripts/*.sh strategies/*.sh
 ```
 
----
-
 ## 8. Writing Custom Strategies
 
-A strategy is a standalone bash script in `strategies/` that detects the latest
-upstream version for a package.
+A strategy is a bash script in `strategies/` that finds the latest upstream version of a package.
 
 ### 8.1 Interface contract
 
-**Input:** The script receives exactly one positional argument -- the package name.
+- **Input:** one positional argument, the package name.
+- **Success:** the version on stdout as one line, exit code 0.
+- **Failure:** an error on stderr, a non-zero exit code.
+- **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`.
 
-**Output:**
-
-- On success: print the version string to stdout (one line, no trailing newline from
-  `echo` is fine). Exit with code 0.
-- On failure: print an error message to stderr. Exit with a non-zero code.
-
-**Environment:** The script can assume:
-
-- `yq` is available.
-- `curl` is available.
-- `scripts/lib.sh` can be sourced for YAML helpers and logging.
-- `AURTOMATOR_DIR` is set (by `lib.sh`) to the project root.
+The script can rely on `yq` and `curl`. `scripts/lib.sh` provides YAML helpers and logging and sets `AURTOMATOR_DIR` to the project root.
 
 ### 8.2 Template
 
 ```bash
 #!/usr/bin/env bash
 #
-# my-strategy — Detect latest version from <source>
+# my-strategy - Detect latest version from <source>
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string
@@ -1269,11 +829,8 @@ readonly TIMEOUT=30
 source "${SCRIPT_DIR}/../scripts/lib.sh"
 
 pkg_file=$(pkg_file "$NAME")
-
-# Read strategy-specific fields from package YAML
 my_field=$(pkg_get "$pkg_file" .upstream.my_field)
 
-# Fetch version from upstream
 version=$(curl -sfL --max-time "$TIMEOUT" \
   "https://example.com/api/${my_field}" |
   yq -r '.version') || {
@@ -1291,61 +848,41 @@ echo "$version"
 
 ### 8.3 Checklist
 
-1. **Script location:** `strategies/<name>.sh`. The `<name>` is what goes in the
-   YAML `strategy` field.
-
-2. **Make it executable:** `chmod +x strategies/<name>.sh`.
-
-3. **Use `set -euo pipefail`** at the top.
-
-4. **Source `lib.sh`** to get `pkg_file`, `pkg_get`, and logging functions.
-
-5. **Use `curl -sfL --max-time $TIMEOUT`** for HTTP requests:
-   - `-s` silent (no progress bar).
-   - `-f` fail on HTTP errors.
-   - `-L` follow redirects.
-   - `--max-time` prevents hangs.
-
-6. **Validate the result.** Check for empty strings and `"null"` from yq.
-
-7. **Strip version prefixes** if the upstream uses `v1.0.0` format:
+1. **Location:** `strategies/<name>.sh`, executable (`chmod +x`). `<name>` is the value of the YAML `strategy` field.
+2. **Header:** `set -euo pipefail`, then source `lib.sh` for `pkg_file`, `pkg_get` and logging.
+3. **HTTP:** `curl -sfL --max-time "$TIMEOUT"`. `-f` fails on HTTP errors, `-L` follows redirects, and `--max-time` prevents hangs.
+4. **Result:** check for an empty string and for `null` from `yq`.
+5. **Prefix:** strip a leading `v` with `${version#v}` when upstream tags look like `v1.0.0`.
+6. **Validation:** add the name and its required fields to `scripts/validate-pkg.sh`.
+7. **Tests:** add the API fixture to `tests/helpers/mock-curl.sh` and tests to `tests/strategies.bats`.
+8. **Linters:**
 
    ```bash
-   echo "${version#v}"
+   shellcheck -x -S warning strategies/my-strategy.sh
+   shfmt -d -i 2 -ci strategies/my-strategy.sh
    ```
 
-8. **Add a mock response** in `tests/helpers/mock-curl.sh` for your new API endpoint.
-
-9. **Add a BATS test** in `tests/strategies.bats`.
-
-10. **Run linters:**
-
-    ```bash
-    shellcheck -x -S warning strategies/my-strategy.sh
-    shfmt -d -i 2 -ci strategies/my-strategy.sh
-    ```
+9. **Docs:** the strategies table in `README.md`, a section in this file, and an example in `packages/example.yml.sample`.
 
 ### 8.4 Available lib.sh functions
 
-| Function                        | Description                                        |
-|---------------------------------|----------------------------------------------------|
-| `pkg_file <name>`               | Resolves `packages/<name>.yml`, exits 1 if missing.|
-| `pkg_get <file> <yq-query>`     | Reads a field from a YAML file via yq.             |
-| `pkg_set <file> <query> <val>`  | Writes a field to a YAML file via yq.              |
-| `require_cmd <cmd>`             | Exits 1 if the command is not in PATH.             |
-| `load_config`                   | Sources `.aurtomator.conf` if present.             |
-| `log_ok <msg>`                  | Prints green checkmark + message to stderr.        |
-| `log_warn <msg>`                | Prints yellow exclamation + message to stderr.     |
-| `log_err <msg>`                 | Prints red X + message to stderr.                  |
-| `log_info <msg>`                | Prints bold arrow + message to stderr.             |
+| Function                        | Description                                         |
+|---------------------------------|-----------------------------------------------------|
+| `pkg_file <name>`               | Resolves `packages/<name>.yml`, returns 1 if missing |
+| `pkg_get <file> <yq-query>`     | Reads a field from a YAML file with yq              |
+| `pkg_set <file> <query> <val>`  | Writes a field to a YAML file with yq               |
+| `require_cmd <cmd>`             | Exits 1 if the command is not in `PATH`             |
+| `load_config`                   | Sources `.aurtomator.conf` if present               |
+| `log_ok <msg>`                  | Prints a green check mark and the message to stderr |
+| `log_warn <msg>`                | Prints a yellow `!` and the message to stderr       |
+| `log_err <msg>`                 | Prints a red cross and the message to stderr        |
+| `log_info <msg>`                | Prints a bold arrow and the message to stderr       |
 
-Logging functions auto-detect terminal vs pipe and omit ANSI color codes when
-output is not a TTY.
+The logging functions omit ANSI colors when stdout is not a terminal.
 
 ### 8.5 YAML conventions for custom strategies
 
-Define your custom upstream fields under the `upstream` object. Use descriptive
-field names. Document them in the strategy script header.
+Put the strategy's settings under `upstream`, with descriptive names, and list them in the header of the strategy script. Other strategies ignore fields they do not read.
 
 ```yaml
 name: my-package
@@ -1354,6 +891,3 @@ upstream:
   my_field: some-value
   another_field: another-value
 ```
-
-The package YAML schema is intentionally flexible -- strategies read whatever fields
-they need, and unknown fields are simply ignored by other strategies.

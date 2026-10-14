@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# webpage-scrape — Detect latest version by scraping a webpage with a regex
+# webpage-scrape - Detect latest version by scraping a webpage with a regex
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string
 #
 # YAML fields:
-#   upstream.url      — page URL to scrape
-#   upstream.pattern  — ERE regex with capture group: 'package-([0-9.]+)\.tar\.gz'
+#   upstream.url      - page URL to scrape
+#   upstream.pattern  - ERE whose first capture group is the version: 'package-([0-9.]+)\.tar\.gz'
 
 set -euo pipefail
 

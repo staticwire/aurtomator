@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# check-update.sh — Check a single package for upstream updates
+# check-update.sh - Check a single package for upstream updates
 #
 # Usage: ./scripts/check-update.sh <package-name>
 #        ./scripts/check-update.sh my-package

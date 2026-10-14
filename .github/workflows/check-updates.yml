@@ -14,10 +14,8 @@ permissions:
   contents: write
   issues: write
 
-# Serialize runs: prevents two concurrent pipeline instances from pushing
-# divergent commits to the same AUR repo (root cause of the 2026-04-12
-# neovim-nightly-bin HEAD/master divergence incident). A new run will wait
-# for the in-progress run to finish rather than race with it.
+# Serialize runs so that two of them never push divergent commits to the
+# same AUR repo. A new run waits for the running one to finish.
 concurrency:
   group: check-updates
   cancel-in-progress: false

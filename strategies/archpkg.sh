@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# archpkg — Detect latest version from Arch official repositories
+# archpkg - Detect latest version from Arch official repositories
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string (without pkgrel)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# update-pkg.sh — Update an existing AUR package to a new version
+# update-pkg.sh - Update an existing AUR package to a new version
 #
 # Clones the AUR repo, updates pkgver in the existing PKGBUILD,
 # regenerates checksums and .SRCINFO, commits and pushes.
@@ -56,17 +56,14 @@ if [[ ! -f "${aur_dir}/PKGBUILD" ]]; then
   exit 1
 fi
 
-# AUR git-daemon can return HEAD as a detached commit that does not match
-# refs/heads/master. This happens when two pipeline runs push concurrently
-# and the server accepts both without proper locking — HEAD and
-# refs/heads/master end up pointing at different commits with identical
-# content, and subsequent clones land in detached HEAD state.
+# The AUR can serve a HEAD that does not match refs/heads/master after two
+# runs pushed at the same time. HEAD and master then point at different
+# commits with the same content, and a clone lands on a detached HEAD.
 #
-# AUR rejects non-fast-forward pushes via pre-receive hook, so we must base
-# our commit on origin/master (server's refs/heads/master), NOT on the
-# detached HEAD. Any unique content in the detached commit is ignored —
-# a separate concurrency:group in the workflow prevents this race, but we
-# keep the self-healing clause as a safety net.
+# The AUR refuses non-fast-forward pushes, so the commit has to sit on
+# origin/master and not on the detached HEAD. Anything unique to the
+# detached commit is dropped. The workflow's concurrency group prevents
+# the race; this stays as a safety net.
 if ! git -C "$aur_dir" symbolic-ref -q HEAD >/dev/null; then
   log_warn "Detached HEAD after clone (remote HEAD != refs/heads/master)"
   log_info "Re-basing on origin/master to allow fast-forward push"
@@ -82,7 +79,7 @@ warn_maintainer_line "${aur_dir}/PKGBUILD"
 audit_rc=0
 audit_pkgbuild "${aur_dir}/PKGBUILD" "$strategy" || audit_rc=$?
 if [[ "$audit_rc" -eq 1 ]]; then
-  log_err "PKGBUILD audit failed — aborting update"
+  log_err "PKGBUILD audit failed, aborting update"
   exit 1
 fi
 
@@ -94,7 +91,7 @@ log_info "Updating pkgver to $NEW_VERSION"
 sed -i "s/^pkgver=.*/pkgver=${NEW_VERSION}/" "${aur_dir}/PKGBUILD"
 sed -i "s/^pkgrel=.*/pkgrel=1/" "${aur_dir}/PKGBUILD"
 
-# Check if anything actually changed
+# An unchanged PKGBUILD means the AUR already has this version
 if git -C "$aur_dir" diff --quiet PKGBUILD; then
   log_ok "$PKG_NAME already at $NEW_VERSION on AUR, nothing to do"
   pkg_set "$PKG_FILE" .current "\"${NEW_VERSION}\""
@@ -113,20 +110,20 @@ else
   url_rc=0
   validate_source_urls "${aur_dir}/PKGBUILD" || url_rc=$?
   if [[ "$url_rc" -gt 0 ]]; then
-    log_err "Source URL validation failed ($url_rc error(s)) — aborting"
+    log_err "Source URL validation failed ($url_rc error(s)), aborting"
     exit 1
   fi
 
   require_cmd updpkgsums
   log_info "Updating checksums"
   (cd "$aur_dir" && updpkgsums) || {
-    log_err "updpkgsums failed — refusing to push with stale checksums"
+    log_err "updpkgsums failed, refusing to push stale checksums"
     exit 1
   }
   # Verify checksums are correct before pushing
   log_info "Verifying checksums"
   (cd "$aur_dir" && makepkg --verifysource --skippgpcheck) || {
-    log_err "Checksum verification failed — aborting"
+    log_err "Checksum verification failed, aborting"
     exit 1
   }
 fi

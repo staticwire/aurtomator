@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# github-release — Detect latest version from GitHub releases
+# github-release - Detect latest version from GitHub releases
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string

@@ -578,7 +578,7 @@ EOF
 
 @test "lib.sh: log functions write to stderr" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  # Capture stderr only — stdout should be empty
+  # Capture stderr only, stdout stays empty
   stdout=$(log_ok "test message" 2>/dev/null)
   [ -z "$stdout" ]
 }
@@ -1370,9 +1370,9 @@ EOF
   project: owner/repo
 current: '1.0.0'"
 
-  # Detached HEAD but NO origin remote configured: checkout -B master
-  # origin/master must fail, set -e terminates the script. This verifies
-  # the safety-net is loud, not silently corrupting state.
+  # Detached HEAD and no origin remote: checkout -B master origin/master
+  # fails and set -e ends the script. The safety net fails loudly and
+  # leaves the state untouched.
   aur_dir="$TEST_TMPDIR/aur-test-no-origin"
   mkdir -p "$aur_dir"
   git -C "$aur_dir" init -q -b master
@@ -1474,7 +1474,7 @@ exec /usr/bin/git "\$@"
 MOCKGIT
   chmod +x "$MOCK_DIR/git"
 
-  # Run update-pkg without updpkgsums — should fail
+  # update-pkg fails without updpkgsums
   run env PATH="$MOCK_DIR:/usr/bin" "$TEST_TMPDIR/scripts/update-pkg.sh" "test-checksums" "2.0.0"
   [ "$status" -ne 0 ]
 }
@@ -1574,9 +1574,8 @@ current: '3.0.0'"
 }
 
 @test "check-all: writes 'downgrade:' status after successful --update causing downgrade" {
-  # We can't easily run a full update-pkg.sh end-to-end here, so we stub the
-  # update-pkg.sh script inside the temp workspace to always succeed. That
-  # isolates the test to check-all.sh's status-writing logic.
+  # A stub update-pkg.sh in the temp workspace always succeeds, so the test
+  # covers only how check-all.sh writes the status.
   create_test_package "pkg-down-upd" "github-release" "upstream:
   type: github
   project: owner/repo
@@ -1630,12 +1629,12 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
   grep -q "⬇️ 1.0.0 available (downgrade)" "$TEST_TMPDIR/README.md"
-  # Available downgrades also count toward pkg_ok — badge stays green.
+  # Available downgrades count toward pkg_ok too, so the badge stays green.
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
 @test "check-all: writes 'updated:' status after --update on normal upgrade (regression)" {
-  # Current 1.0.0 < latest 2.0.0 — normal upgrade path.
+  # Current 1.0.0 < latest 2.0.0: the normal upgrade path.
   # Verifies the is_downgrade=false branch of the new status-writing logic.
   create_test_package "pkg-up" "github-release" "upstream:
   type: github

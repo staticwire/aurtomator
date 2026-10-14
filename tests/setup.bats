@@ -396,7 +396,7 @@ EOF
 # === GPG prompt format ===
 
 @test "setup gpg: enable prompt uses (y/N) format" {
-  # Check the source code directly — prompt text is in the script
+  # The prompt text is in the script source, so check the source
   grep -q 'Enable GPG commit signing? (y/N)' "$TEST_TMPDIR/scripts/setup.sh"
 }
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# update-readme.sh — Generate badges and package status table in README.md
+# update-readme.sh - Generate badges and package status table in README.md
 #
 # Looks for two marker pairs in README.md:
-#   <!-- BADGES:START --> / <!-- BADGES:END -->     — header badges
-#   <!-- PACKAGES:START --> / <!-- PACKAGES:END --> — package status table
+#   <!-- BADGES:START --> / <!-- BADGES:END -->     - header badges
+#   <!-- PACKAGES:START --> / <!-- PACKAGES:END --> - package status table
 #
 # Badges auto-detect the repo from git origin and adjust for forks.
 # For public repos, Codecov badge uses tokenless URL.
@@ -42,10 +42,10 @@ if grep -q "$BADGES_START" "$README"; then
   badges=""
 
   if [[ -n "$repo_url" ]]; then
-    # CI badge — always available
+    # CI badge, always available
     badges+="[![Lint & Test](https://github.com/${repo_url}/actions/workflows/ci.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/ci.yml)"
 
-    # Codecov badge — check if repo is public via GitHub API (unauthenticated)
+    # Codecov badge: ask the GitHub API (unauthenticated) whether the repo is public
     is_public=$(curl -sfL --max-time 5 "https://api.github.com/repos/${repo_url}" 2>/dev/null |
       yq -r 'select(.private == false) | "true"' 2>/dev/null || true)
 
@@ -58,7 +58,7 @@ if grep -q "$BADGES_START" "$README"; then
     fi
   fi
 
-  # Static badges — always the same
+  # Static badges
   badges+=" [![Bash](https://img.shields.io/badge/bash-5%2B-green)](https://www.gnu.org/software/bash/)"
   badges+=" [![AUR](https://img.shields.io/badge/AUR-automation-orange)](https://aur.archlinux.org/)"
   badges+=" [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# lib.sh — Shared functions for aurtomator scripts
+# lib.sh - Shared functions for aurtomator scripts
 #
 # Usage: source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # Requires: yq (https://github.com/mikefarah/yq)
@@ -132,11 +132,11 @@ audit_pkgbuild() {
     fi
   fi
 
-  # FATAL: Mixed SKIP + real checksums for REMOTE sources.
-  # updpkgsums is all-or-nothing: if we see SKIP, we skip it entirely.
-  # Real hashes for remote sources would become stale on version bump.
-  # Real hashes for local files (no ://) are fine — they live in the AUR
-  # repo and don't change between versions.
+  # FATAL: SKIP mixed with real hashes for REMOTE sources.
+  # updpkgsums is all-or-nothing, and a SKIP array skips it entirely, so a
+  # real hash for a remote source would go stale on the version bump.
+  # Real hashes for local files (no ://) are fine: they live in the AUR
+  # repo and do not change between versions.
   if grep -qE "(md5|sha[0-9]+|b2)sums=\('SKIP'" "$pkgbuild"; then
     local stale_remote
     stale_remote=$(bash -c '
@@ -184,7 +184,7 @@ audit_pkgbuild() {
   return 0
 }
 
-# Validate source URLs return expected content (not HTML error pages).
+# Check that source URLs return files and not HTML error pages.
 # Covers source and every source_<arch> array the PKGBUILD defines.
 # Args: $1=pkgbuild path
 # Returns: 0=ok, non-zero=errors found

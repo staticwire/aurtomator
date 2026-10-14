@@ -2,13 +2,13 @@ blank_issues_enabled: false
 contact_links:
   - name: Setup help
     url: https://github.com/staticwire/aurtomator/blob/main/docs/SETUP.md
-    about: First-time configuration — identity, SSH, GPG, GitHub Secrets.
+    about: "First-time configuration: identity, SSH, GPG, GitHub Secrets."
   - name: Workflow and strategies reference
     url: https://github.com/staticwire/aurtomator/blob/main/docs/WORKFLOW.md
     about: Strategy details, update process, CI pipeline, local testing.
   - name: Supported packages
     url: https://github.com/staticwire/aurtomator/blob/main/docs/SUPPORTED-PACKAGES.md
-    about: What works, what doesn't, safety rules.
+    about: What works, what does not, safety rules.
   - name: Security issues
     url: https://github.com/staticwire/aurtomator/security/advisories/new
-    about: Report privately via GitHub's vulnerability advisory.
+    about: Report privately through a GitHub security advisory.

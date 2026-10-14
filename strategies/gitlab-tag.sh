@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# gitlab-tag — Detect latest version from GitLab tags
+# gitlab-tag - Detect latest version from GitLab tags
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string

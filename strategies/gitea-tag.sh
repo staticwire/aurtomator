@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# gitea-tag — Detect latest version from Gitea/Forgejo/Codeberg tags
+# gitea-tag - Detect latest version from Gitea/Forgejo/Codeberg tags
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string

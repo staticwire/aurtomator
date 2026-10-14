@@ -1,13 +1,13 @@
-# Example package config — copy to packages/<name>.yml and edit.
+# Example package config. Copy to packages/<name>.yml and edit.
 #
-# Required top-level fields:
-#   name       — AUR package name (must match packages/<name>.yml filename)
-#   strategy   — version detection strategy (see list below)
-#   upstream   — strategy-specific config block (see examples below)
+# Top-level fields:
+#   name       - AUR package name, equal to the packages/<name>.yml file name (required)
+#   strategy   - version detection strategy, see the list below (required)
+#   upstream   - strategy-specific settings, see the examples below
 #
-# Auto-managed fields (don't edit by hand):
-#   current      — last known upstream version, written by update-pkg.sh
-#   last_updated — ISO date of last successful AUR push, written by update-pkg.sh
+# Written by update-pkg.sh after every push, do not edit by hand:
+#   current      - last pushed version
+#   last_updated - date of the last push, YYYY-MM-DD
 #
 # Strategies:
 #   github-release   GitHub Releases API
@@ -20,13 +20,13 @@
 #   pypi             PyPI JSON API
 #   npm              npm registry
 #   crates           crates.io API
-#   repology         Repology API (fallback, 120+ tracked repos)
+#   repology         Repology API (fallback)
 #   archpkg          Arch official repos (for rebuild triggers)
 #   kde-tarball      download.kde.org directory listing
-#   webpage-scrape   arbitrary HTTPS page + regex
+#   webpage-scrape   any HTTPS page + regex
 #
-# See docs/SUPPORTED-PACKAGES.md for package types, limitations, and safety rules.
-# See docs/WORKFLOW.md for strategy internals and custom strategy authoring.
+# docs/SUPPORTED-PACKAGES.md covers package types, limitations and safety rules.
+# docs/WORKFLOW.md covers strategy details and writing a custom strategy.
 
 # =============================================================================
 # MINIMAL EXAMPLE
@@ -42,28 +42,27 @@ upstream:
 # =============================================================================
 
 # --- github-release ---------------------------------------------------------
-# Fetches the latest release from /repos/{project}/releases/latest.
-# Excludes pre-releases automatically (that's what the API returns).
+# Reads /repos/{project}/releases/latest, which skips pre-releases.
 #
 # strategy: github-release
 # upstream:
-#   project: owner/repo                    # required — "owner/repo" format
-#   tag_version_regex: '(.+)-stable'       # optional — ERE capture group
+#   project: owner/repo                    # required, "owner/repo" format
+#   tag_version_regex: '(.+)-stable'       # optional, ERE with a capture group
 
 # --- github-tag -------------------------------------------------------------
-# Fetches up to 100 tags from /repos/{project}/tags. Includes pre-release
-# tags — use tag_pattern or tag_version_regex to filter.
+# Reads up to 100 tags from /repos/{project}/tags, pre-release tags included.
+# Filter them with tag_pattern or tag_version_regex.
 #
 # strategy: github-tag
 # upstream:
 #   project: owner/repo                    # required
-#   tag_pattern: 'v*'                      # optional — glob filter
-#   tag_version_regex: 'release-(.+)'      # optional — ERE capture group
+#   tag_pattern: 'v*'                      # optional, glob filter
+#   tag_version_regex: 'release-(.+)'      # optional, ERE with a capture group
 
 # --- github-nightly ---------------------------------------------------------
-# Tracks nightly/prerelease builds. Supports four patterns:
+# Tracks nightly/prerelease builds in four patterns:
 #
-#   A) Fixed tag force-pushed daily (e.g. neovim "nightly"):
+#   A) Fixed tag that moves daily (e.g. neovim "nightly"):
 #      nightly_tag: nightly
 #      version_source: release_body
 #      version_pattern: 'NVIM v\K\S+'      # Perl regex
@@ -86,44 +85,42 @@ upstream:
 #   nightly_tag: nightly                   # optional, default "nightly"
 #   version_source: tag                    # optional: tag|release_body|tag_date|published_date
 #   version_pattern: 'NVIM v\K\S+'         # required if version_source=release_body
-#   channel: Nightly                       # optional — filter by release name
-#   tag_version_regex: '(.+)'              # optional
+#   channel: Nightly                       # optional, filter by release name
+#   tag_version_regex: '(.+)'              # optional, for version_source=tag
 
 # --- github-asset -----------------------------------------------------------
 # Tracks assets on a release whose tag never moves (model zoos, rolling
-# download tags). Fetches /repos/{project}/releases/tags/{tag}; the newest
+# download tags). Reads /repos/{project}/releases/tags/{tag}. The newest
 # updated_at among the listed assets becomes the version as YYYYMMDD.
 #
 # strategy: github-asset
 # upstream:
 #   project: owner/repo                    # required
-#   tag: models                            # required - release tag that holds the assets
-#   assets:                                # required - exact asset file names, at least one
+#   tag: models                            # required, release tag that holds the assets
+#   assets:                                # required, exact asset file names, at least one
 #     - voice-a.tar.bz2
 #     - voice-b.tar.bz2
 
 # --- gitlab-tag -------------------------------------------------------------
-# Any GitLab instance (public API only — no auth yet).
+# Any GitLab instance, public API only (no authentication).
 #
 # strategy: gitlab-tag
 # upstream:
-#   host: gitlab.com                       # required — hostname, no protocol
-#   project: group/subgroup/project        # required — full path
+#   host: gitlab.com                       # required, hostname without protocol
+#   project: group/subgroup/project        # required, full path
 #   tag_pattern: 'v*'                      # optional
-#   tag_version_regex: '(.+)'              # optional
 
 # --- gitea-tag --------------------------------------------------------------
-# Codeberg, self-hosted Gitea/Forgejo. Fetches max 50 tags.
+# Codeberg, self-hosted Gitea/Forgejo. Reads at most 50 tags.
 #
 # strategy: gitea-tag
 # upstream:
 #   host: codeberg.org                     # required
 #   project: owner/repo                    # required
 #   tag_pattern: 'v*'                      # optional
-#   tag_version_regex: '(.+)'              # optional
 
 # --- git-latest -------------------------------------------------------------
-# For -git packages. Produces rCOUNT.HASH format (e.g. r435.abc1234).
+# For -git packages. Produces rCOUNT.HASH (e.g. r435.abc1234).
 #
 # strategy: git-latest
 # upstream:
@@ -133,49 +130,48 @@ upstream:
 #   url: https://example.com/repo.git      # required for type=git
 
 # --- pypi / npm / crates ----------------------------------------------------
-# Language registries. PyPI and crates return stable-only (pre-releases
-# filtered by the registry). npm returns the "latest" dist-tag.
+# Language registries. PyPI and crates return stable releases only.
+# npm returns the "latest" dist-tag.
 #
 # strategy: pypi
 # upstream:
-#   registry: requests                     # required — PyPI package name
+#   registry: requests                     # required, PyPI package name
 #
 # strategy: npm
 # upstream:
-#   registry: express                      # required — npm package name
+#   registry: express                      # required, npm package name
 #
 # strategy: crates
 # upstream:
-#   registry: serde                        # required — crate name
+#   registry: serde                        # required, crate name
 
 # --- repology ---------------------------------------------------------------
-# Fallback when nothing else fits. Returns newest version from any of 120+
-# tracked repos (filtered by status == "newest").
+# Fallback when nothing else fits. Returns the version of the first entry
+# with status "newest".
 #
 # strategy: repology
 # upstream:
 #   repology: project-name                 # optional, defaults to `name` above
 
 # --- archpkg ----------------------------------------------------------------
-# Track versions of packages in Arch official repos. Useful for AUR packages
-# that need a rebuild when a dependency updates.
+# Follows a package in the Arch official repos. Useful for an AUR package
+# that needs a rebuild when a dependency updates.
 #
 # strategy: archpkg
 # upstream:
 #   archpkg: qt6-base                      # optional, defaults to `name` above
 
 # --- kde-tarball ------------------------------------------------------------
-# Scrapes https://download.kde.org/stable/<name>/ for *.tar.xz releases.
-# No upstream config needed — uses `name` directly.
+# Reads https://download.kde.org/stable/<name>/ for *.tar.xz releases.
+# Needs no upstream settings: the package name is the directory.
 #
 # strategy: kde-tarball
-# upstream: {}
 
 # --- webpage-scrape ---------------------------------------------------------
-# Generic HTTPS page + regex. Use when no API fits.
-# HTTPS only (HTTP is rejected). Max 5MB, 5 redirects, 30s timeout.
+# Any HTTPS page + regex, for upstreams without an API.
+# HTTPS only. At most 5 MB, 5 redirects, 30 s timeout.
 #
 # strategy: webpage-scrape
 # upstream:
-#   url: https://example.com/downloads/    # required — HTTPS only
-#   pattern: 'app-([0-9]+\.[0-9]+)\.tar\.gz'  # required — ERE, ONE capture group
+#   url: https://example.com/downloads/    # required, HTTPS only
+#   pattern: 'app-([0-9]+\.[0-9]+)\.tar\.gz'  # required, ERE, the first capture group is the version

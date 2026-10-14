@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
-# kde-tarball — Detect latest version from download.kde.org/stable/{name}/
+# kde-tarball - Detect latest version from download.kde.org/stable/{name}/
 #
 # Input: package name
 # Output: latest version string (e.g., "1.0.1")
 #
-# The KDE download server lists tarballs as {name}-{version}.tar.xz
-# We extract versions, sort with semver, return the latest.
+# The KDE download server lists tarballs as {name}-{version}.tar.xz.
 
 set -euo pipefail
 

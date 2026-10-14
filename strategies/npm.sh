@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# npm — Detect latest version from npm registry
+# npm - Detect latest version from npm registry
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string

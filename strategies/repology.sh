@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 #
-# repology — Detect latest version via Repology API
+# repology - Detect latest version via Repology API
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string
 #
-# Repology tracks versions across 120+ repositories.
 # upstream.repology: project name on repology.org (e.g. "firefox")
 
 set -euo pipefail

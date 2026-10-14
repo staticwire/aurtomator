@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# crates — Detect latest version from crates.io
+# crates - Detect latest version from crates.io
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest stable version string

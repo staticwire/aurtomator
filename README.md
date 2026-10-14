@@ -41,9 +41,7 @@ Each package has a YAML config pointing to an upstream source. When a new versio
 5. Validate: `./scripts/validate-pkg.sh <name>`
 6. Push and let CI handle the rest
 
-The setup script configures your identity (git author for AUR commits), SSH access, and GitHub Secrets. If you use [gh CLI](https://cli.github.com/), secrets are set automatically. Without it, the script prints manual instructions. GPG commit signing is optional.
-
-See [docs/SETUP.md](docs/SETUP.md) for the full setup guide.
+The setup script configures your identity (git author for AUR commits), SSH access, and GitHub Secrets. With [gh CLI](https://cli.github.com/) it sets the secrets itself. Without it, the script prints manual instructions. GPG commit signing is optional.
 
 ## Strategies
 
@@ -62,7 +60,7 @@ See [docs/SETUP.md](docs/SETUP.md) for the full setup guide.
 | `npm`              | npm registry        | Node.js packages                     |
 | `crates`           | crates.io API       | Rust crates                          |
 | `repology`         | Repology API        | Universal fallback (120+ repos)      |
-| `archpkg`          | Arch repos API      | Rebuild triggers, dependency tracking|
+| `archpkg`          | Arch repos API      | Rebuild triggers, dependency tracking |
 | `webpage-scrape`   | URL + regex         | Anything not covered above           |
 | `kde-tarball`      | download.kde.org    | KDE/Plasma packages                  |
 
@@ -70,36 +68,36 @@ See [docs/WORKFLOW.md](docs/WORKFLOW.md) for strategy details, YAML examples, an
 
 ## Limitations
 
-aurtomator only updates `pkgver`, checksums, and `.SRCINFO`. It does not build packages or check dependencies. The following are detected and blocked automatically:
+aurtomator only updates `pkgver`, checksums, and `.SRCINFO`. It does not build packages or check dependencies. These cases are detected and blocked:
 
-- **Split packages** -- `pkgname=(...)` arrays
-- **`pkgver()` with wrong strategy** -- use `git-latest` for VCS packages
-- **Mixed SKIP/real checksums** -- `updpkgsums` is all-or-nothing
-- **Source URLs returning HTML** -- detected via Content-Type check
+- **Split packages**: `pkgname=(...)` arrays
+- **`pkgver()` with the wrong strategy**: use `git-latest` for VCS packages
+- **Mixed SKIP and real checksums**: `updpkgsums` is all-or-nothing
+- **Source URLs returning HTML**: detected by the `Content-Type` check
 
-Packages with patches in `source=()` trigger a warning but are not blocked.
+Patches in `source=()` trigger a warning and are not blocked.
 
-See [docs/SUPPORTED-PACKAGES.md](docs/SUPPORTED-PACKAGES.md) for the full breakdown including safe/unsafe failure modes and comparison with other tools.
+[docs/SUPPORTED-PACKAGES.md](docs/SUPPORTED-PACKAGES.md) has the full breakdown, including safe and unsafe failure modes and a comparison with other tools.
 
 ## Downgrades
 
-aurtomator mirrors upstream blindly. If upstream publishes an older version than the one already tracked (for example, deleting and recreating a tag), aurtomator follows without blocking — upstream is the source of truth. Downgrades are logged with the literal `DOWNGRADE` keyword (grep `workflow-run.log` to find them) and rendered in the package table with a `⬇️` icon. They count as successful operations, so the badge stays green. See [docs/WORKFLOW.md §4.3](docs/WORKFLOW.md#43-downgrade-behavior) for details.
+aurtomator follows upstream when it publishes a version older than the tracked one, for example after a tag is deleted and recreated. Upstream is the source of truth. A downgrade is logged with the literal keyword `DOWNGRADE` and shown in the package table with a `⬇️` icon. It counts as a successful run, so the badge stays green. Details are in [docs/WORKFLOW.md section 4.3](docs/WORKFLOW.md#43-downgrade-behavior).
 
 ## Resource usage
 
-All packages run in a single workflow -- one Arch container, one SSH/GPG setup, one run. A version check is one HTTP request per package. This keeps GitHub Actions minutes usage minimal.
+All packages run in one workflow: one Arch container and one SSH and GPG setup per run. A version check is a few API requests per package, or a bare clone for `git-latest`.
 
 ## Documentation
 
-- [Setup guide](docs/SETUP.md) -- first-time configuration, prerequisites, troubleshooting
-- [Supported packages](docs/SUPPORTED-PACKAGES.md) -- what works, what doesn't, safety rules
-- [Workflow reference](docs/WORKFLOW.md) -- strategies, update process, CI pipeline, local testing, custom strategies
+- [Setup guide](docs/SETUP.md): first-time configuration, prerequisites, troubleshooting
+- [Supported packages](docs/SUPPORTED-PACKAGES.md): what works, what does not, safety rules
+- [Workflow reference](docs/WORKFLOW.md): strategies, update process, CI pipeline, local testing, custom strategies
 
 ## Alternatives
 
 | Tool              | Best for                 | Approach                                         |
 |-------------------|--------------------------|--------------------------------------------------|
-| [nvchecker]       | Version detection only   | Python, 42+ sources, no AUR push                 |
+| [nvchecker]       | Version detection only   | Python, 40+ sources, no AUR push                 |
 | [lilac]           | Large repos (archlinuxcn)| Full build bot, needs own infra                  |
 | [aur-auto-update] | Centralized service      | Requires bot co-maintainer on AUR                |
 | [Renovate]        | Multi-ecosystem          | Enterprise-grade, heavy config                   |

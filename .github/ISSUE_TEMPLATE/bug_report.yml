@@ -10,14 +10,14 @@ body:
 
         - You have read [`docs/SETUP.md`](https://github.com/staticwire/aurtomator/blob/main/docs/SETUP.md) and [`docs/WORKFLOW.md`](https://github.com/staticwire/aurtomator/blob/main/docs/WORKFLOW.md).
         - You have searched existing issues (open and closed) for a duplicate.
-        - This is **not** a security issue. Security-impacting bugs must be reported privately — see [`SECURITY.md`](https://github.com/staticwire/aurtomator/blob/main/SECURITY.md).
+        - This is **not** a security issue. Report security bugs privately as described in [`SECURITY.md`](https://github.com/staticwire/aurtomator/blob/main/SECURITY.md).
 
   - type: input
     id: version
     attributes:
       label: aurtomator version or commit SHA
       description: Tagged release or short SHA of the commit you are running.
-      placeholder: "v0.1.2 or abc1234"
+      placeholder: "v0.2.2 or abc1234"
     validations:
       required: true
 

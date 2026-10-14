@@ -88,7 +88,7 @@ For answers to common questions about Contributor Covenant, see the FAQ at [http
 
 aurtomator is a solo-maintained project. All conduct reports go to the maintainer through one of two private channels. Do not file a public issue for conduct concerns.
 
-1. **GitHub Private Vulnerability Advisory** — <https://github.com/staticwire/aurtomator/security/advisories/new>. This is the only repo-native private channel; it is used here for conduct reports in addition to vulnerability reports. Title the advisory with the prefix `[conduct]` so it is triaged accordingly.
-2. **GitHub's abuse reporting** — <https://github.com/contact/report-abuse?report=staticwire%2Faurtomator>. Use this when the behavior violates GitHub's Terms of Service or when the maintainer is directly involved in the incident.
+1. **GitHub Private Vulnerability Advisory**: <https://github.com/staticwire/aurtomator/security/advisories/new>. It is the only private channel on the repository itself, so conduct reports use it too. Start the advisory title with `[conduct]`.
+2. **GitHub's abuse reporting**: <https://github.com/contact/report-abuse?report=staticwire%2Faurtomator>. Use it when the behavior violates GitHub's Terms of Service or when the maintainer is involved in the incident.
 
 The maintainer may, at their discretion, issue a warning, temporarily restrict a participant's ability to interact with the project (for example by blocking from the repository), or permanently ban a participant. Decisions are final. There is no formal appeals process.

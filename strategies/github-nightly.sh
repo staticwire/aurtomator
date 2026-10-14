@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# github-nightly — Detect latest version from GitHub nightly/prerelease builds
+# github-nightly - Detect latest version from GitHub nightly/prerelease builds
 #
 # Supports 4 patterns:
 #   A) Fixed tag (default): nightly tag force-pushed daily (neovim, ghostty, yazi)
@@ -9,14 +9,14 @@
 #   D) Channel filter: filter releases by name containing channel string (brave)
 #
 # YAML fields:
-#   upstream.project        — owner/repo (required)
-#   upstream.nightly_tag    — tag name or pattern (default: "nightly")
+#   upstream.project        - owner/repo (required)
+#   upstream.nightly_tag    - tag name or pattern (default: "nightly")
 #                             use "latest" for pattern C
 #                             use prefix like "nightly-" for pattern B
-#   upstream.version_source — where to extract version from:
+#   upstream.version_source - where to extract version from:
 #                             "tag" (default), "release_body", "tag_date", "published_date"
-#   upstream.version_pattern — regex for extracting version from release body (pattern A)
-#   upstream.channel        — filter releases by name (pattern D)
+#   upstream.version_pattern - regex for extracting version from release body (pattern A)
+#   upstream.channel        - filter releases by name (pattern D)
 
 set -euo pipefail
 

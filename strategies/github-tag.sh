@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# github-tag — Detect latest version from GitHub tags
+# github-tag - Detect latest version from GitHub tags
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: latest version string

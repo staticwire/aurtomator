@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        aurtomator currently supports 13 strategies — see the strategies table in [`README.md`](https://github.com/staticwire/aurtomator/blob/main/README.md) before opening a request.
+        Check the strategies table in [`README.md`](https://github.com/staticwire/aurtomator/blob/main/README.md) before opening a request.
 
-        Please confirm that no existing strategy covers your case. In particular, if the upstream can be queried with `repology` or scraped with `webpage-scrape` (the universal fallbacks), use one of those instead of adding a new strategy.
+        Confirm that no existing strategy covers your case. If `repology` or `webpage-scrape` can read the upstream, use one of them.
 
   - type: input
     id: name
@@ -38,8 +38,8 @@ body:
   - type: textarea
     id: existing
     attributes:
-      label: Why don't existing strategies work?
-      description: List the existing strategies you evaluated (including `repology` and `webpage-scrape`) and explain why each is unsuitable for this case.
+      label: Why existing strategies do not work
+      description: List the strategies you tried, including `repology` and `webpage-scrape`, and why each one does not fit.
     validations:
       required: true
 
@@ -48,4 +48,4 @@ body:
     attributes:
       label: Contribution
       options:
-        - label: I'm willing to implement this strategy and submit a PR
+        - label: I am willing to implement this strategy and submit a PR

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# git-latest — Get latest commit info from a git repo
+# git-latest - Get latest commit info from a git repo
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: pkgver in standard -git format: r<count>.<shorthash>

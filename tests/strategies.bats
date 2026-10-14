@@ -205,7 +205,7 @@ teardown() {
 
 # === github-nightly ===
 
-@test "github-nightly: pattern A — fixed tag, version from body" {
+@test "github-nightly: pattern A, fixed tag, version from body" {
   create_test_package "test-nightly-a" "github-nightly" "upstream:
   project: owner/nightly-repo
   nightly_tag: nightly
@@ -217,7 +217,7 @@ teardown() {
   [[ "$output" == *"0.12.0"* ]]
 }
 
-@test "github-nightly: pattern B — dated tags" {
+@test "github-nightly: pattern B, dated tags" {
   create_test_package "test-nightly-b" "github-nightly" "upstream:
   project: owner/dated-repo
   nightly_tag: 'nightly-'
@@ -228,7 +228,7 @@ teardown() {
   [ "$output" = "2026.03.26" ]
 }
 
-@test "github-nightly: pattern C — separate nightly repo" {
+@test "github-nightly: pattern C, separate nightly repo" {
   create_test_package "test-nightly-c" "github-nightly" "upstream:
   project: owner/nightly-builds
   nightly_tag: latest
@@ -239,7 +239,7 @@ teardown() {
   [ "$output" = "2.0.0" ]
 }
 
-@test "github-nightly: pattern D — channel filter" {
+@test "github-nightly: pattern D, channel filter" {
   create_test_package "test-nightly-d" "github-nightly" "upstream:
   project: owner/multi-channel
   channel: Nightly
@@ -538,7 +538,6 @@ EOF
 # === Error handling: curl network failure ===
 
 @test "github-release: fails on curl network error" {
-  # Use a host that mock-curl doesn't recognize → exit 1
   create_test_package "test-neterr" "github-release" "upstream:
   project: owner/repo"
 
@@ -579,7 +578,7 @@ EOF
   project: owner/repo
   tag_pattern: 'release-*'"
 
-  # Mock returns v2.0.0, v1.9.0, v1.0.0 — none match ^release-.*
+  # The mock returns v2.0.0, v1.9.0 and v1.0.0, and none matches ^release-.*
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-filter"
   [ "$status" -ne 0 ]
   [[ "$output" == *"No matching tags"* ]]
