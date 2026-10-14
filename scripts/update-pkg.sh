@@ -102,8 +102,8 @@ fi
 # UPDATE CHECKSUMS
 # =============================================================================
 
-# Skip checksums for VCS packages (any checksum type with SKIP)
-if grep -qE "(md5|sha[0-9]+|b2)sums=\('SKIP'" "${aur_dir}/PKGBUILD"; then
+# updpkgsums would replace a SKIP in any checksum array with a real hash
+if has_skip_checksums "${aur_dir}/PKGBUILD"; then
   log_info "VCS package, skipping checksums"
 else
   # Validate source URLs before downloading

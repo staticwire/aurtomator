@@ -543,7 +543,7 @@ update-pkg.sh <package-name> <new-version> [--dry-run]
 4. Warn when the PKGBUILD has no `# Maintainer:` line.
 5. Audit the PKGBUILD. Split packages, `pkgver()` with the wrong strategy and mixed checksums block the update. Patches only warn. See [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md).
 6. Set `pkgver` with `sed` and reset `pkgrel=1`. When the PKGBUILD does not change, the AUR already has this version: the script writes it to `current` and exits with code 2.
-7. Unless a checksum array starts with `SKIP`, validate every source URL, run `updpkgsums`, and verify the result with `makepkg --verifysource --skippgpcheck`. Any failure stops the update.
+7. Unless a checksum array holds a `SKIP`, validate every source URL, run `updpkgsums`, and verify the result with `makepkg --verifysource --skippgpcheck`. Any failure stops the update.
 8. Run `namcap` when it is installed. Errors stop the update. Warnings are printed.
 9. Regenerate `.SRCINFO` with `makepkg --printsrcinfo`.
 10. With `--dry-run`, print the PKGBUILD diff and stop.

@@ -60,17 +60,22 @@ A `pkgver()` function in the PKGBUILD is fine: it produces the same `r{count}.{h
 
 ### Packages with VCS checksums (SKIP)
 
-Packages whose checksum array starts with `SKIP`:
+Packages with `SKIP` in a checksum array:
 
 ```bash
 sha256sums=('SKIP')
 ```
 
-**Why it works:** aurtomator matches `md5sums=('SKIP'`, `sha*sums=('SKIP'` and `b2sums=('SKIP'` and then skips `updpkgsums`, which would otherwise replace `SKIP` with a real hash.
+Or with arch-specific arrays:
 
-Arch-specific arrays such as `b2sums_x86_64=('SKIP')` are not matched, so `updpkgsums` runs on them.
+```bash
+b2sums_x86_64=('SKIP')
+b2sums_aarch64=('SKIP')
+```
 
-`updpkgsums` is all-or-nothing: it recalculates every checksum or none. A real hash next to `SKIP` for a remote source is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
+**Why it works:** aurtomator reads every checksum array, with and without an arch suffix. A `SKIP` at any position makes it skip `updpkgsums`, which would otherwise replace `SKIP` with a real hash.
+
+`updpkgsums` is all-or-nothing: it recalculates every checksum or none. A real hash for a remote source next to `SKIP` is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
 
 ### Non-standard tag formats (tag_version_regex)
 
@@ -117,7 +122,7 @@ A PKGBUILD with a `pkgver()` function and a strategy other than `git-latest` or 
 
 ### Mixed SKIP and real checksums (BLOCKED)
 
-A checksum array that starts with `SKIP` and also holds a real hash for a remote source:
+A PKGBUILD with a `SKIP` and a real hash for a remote source, in any order and in any checksum array:
 
 ```bash
 source=("git+https://example.com/app.git" "https://example.com/data.tar.gz")
@@ -125,7 +130,7 @@ sha256sums=('SKIP'
             'abc123def456...')
 ```
 
-**Detection:** `audit_pkgbuild()` sources the PKGBUILD and pairs each entry of `md5sums`, `sha1sums`, `sha256sums`, `sha512sums` and `b2sums` with the matching `source` entry. A real hash for a URL with `://` blocks the update. A real hash for a local file is allowed, because that file lives in the AUR repo and does not change between versions.
+**Detection:** `audit_pkgbuild()` sources the PKGBUILD and pairs every entry of every checksum array (`ck`, `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `b2`, with and without an arch suffix) with the entry at the same index of `source` or `source_<arch>`. A real hash for a URL with `://` next to a `SKIP` blocks the update. A real hash for a local file is allowed, because that file lives in the AUR repo and does not change between versions.
 
 **Why:** when aurtomator sees `SKIP`, it skips `updpkgsums`, so the real hash of the remote source would be stale after the version bump.
 

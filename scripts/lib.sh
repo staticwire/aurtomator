@@ -103,6 +103,33 @@ validate_pkgver() {
 }
 
 # =============================================================================
+# CHECKSUMS
+# =============================================================================
+
+# Print every checksum of a PKGBUILD as "<hash><TAB><source>": each array
+# makepkg knows, with and without an arch suffix, paired with the entry at
+# the same index of source or source_<arch>.
+# Args: $1=pkgbuild path
+pkgbuild_checksums() {
+  bash -c '
+    source "$1" 2>/dev/null
+    for arr in $(compgen -A variable | grep -E "^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_.+)?$"); do
+      declare -n sums_ref="$arr"
+      declare -n src_ref="source${arr#*sums}"
+      for i in "${!sums_ref[@]}"; do
+        printf "%s\t%s\n" "${sums_ref[$i]}" "${src_ref[$i]:-}"
+      done
+    done
+  ' -- "$1" 2>/dev/null || true
+}
+
+# Args: $1=pkgbuild path
+# Returns: 0 when any checksum of the PKGBUILD is SKIP, 1 otherwise
+has_skip_checksums() {
+  pkgbuild_checksums "$1" | awk -F'\t' '$1 == "SKIP" { found = 1 } END { exit !found }'
+}
+
+# =============================================================================
 # PKGBUILD AUDIT
 # =============================================================================
 
@@ -137,34 +164,14 @@ audit_pkgbuild() {
   # real hash for a remote source would go stale on the version bump.
   # Real hashes for local files (no ://) are fine: they live in the AUR
   # repo and do not change between versions.
-  if grep -qE "(md5|sha[0-9]+|b2)sums=\('SKIP'" "$pkgbuild"; then
-    local stale_remote
-    stale_remote=$(bash -c '
-      source "$1" 2>/dev/null
-      # Check each main checksum array against corresponding source
-      for arr_prefix in sha256 sha512 sha1 md5 b2; do
-        arr="${arr_prefix}sums"
-        declare -n sums_ref="$arr" 2>/dev/null || continue
-        declare -n src_ref="source" 2>/dev/null || continue
-        [[ ${#sums_ref[@]} -eq 0 ]] && continue
-        for i in "${!sums_ref[@]}"; do
-          hash="${sums_ref[$i]}"
-          src="${src_ref[$i]:-}"
-          url="${src##*::}"
-          # Non-SKIP hash + remote URL = stale after version bump
-          if [[ "$hash" != SKIP ]] && [[ "$url" == *://* ]]; then
-            echo stale
-            exit 0
-          fi
-        done
-      done
-    ' -- "$pkgbuild" 2>/dev/null || true)
-    if [[ "$stale_remote" == "stale" ]]; then
-      log_err "BLOCKED: SKIP checksums mixed with real hashes for remote sources."
-      log_err "  updpkgsums is all-or-nothing: either all checksums update or none."
-      log_err "  Remote source hashes would become stale on version bump."
-      fatals=$((fatals + 1))
-    fi
+  if pkgbuild_checksums "$pkgbuild" | awk -F'\t' '
+    $1 == "SKIP" { skip = 1 }
+    $1 != "SKIP" && $2 ~ /:\/\// { remote = 1 }
+    END { exit !(skip && remote) }'; then
+    log_err "BLOCKED: SKIP checksums mixed with real hashes for remote sources."
+    log_err "  updpkgsums is all-or-nothing: either all checksums update or none."
+    log_err "  Remote source hashes would become stale on version bump."
+    fatals=$((fatals + 1))
   fi
 
   # WARNING: Patches in source=()

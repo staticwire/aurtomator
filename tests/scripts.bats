@@ -233,6 +233,96 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "audit_pkgbuild: blocks mixed SKIP and real checksums in arch-specific arrays" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-mixed-arch
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source_x86_64=("git+https://example.com/repo.git"
+               "https://example.com/data-${pkgver}.tar.gz")
+sha256sums_x86_64=('SKIP'
+                   'abc123')
+EOF
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "git-latest"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SKIP checksums mixed with real hashes for remote"* ]]
+}
+
+@test "audit_pkgbuild: blocks a real remote hash listed before SKIP" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-mixed-order
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/data-${pkgver}.tar.gz"
+        "git+https://example.com/repo.git")
+sha256sums=('abc123'
+            'SKIP')
+EOF
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "git-latest"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SKIP checksums mixed with real hashes for remote"* ]]
+}
+
+# === has_skip_checksums ===
+
+@test "has_skip_checksums: finds SKIP in arch-specific arrays" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-arch-skip
+pkgver=1.0.0
+pkgrel=1
+arch=('x86_64' 'aarch64')
+source_x86_64=("https://example.com/nightly-x86_64.tar.gz")
+source_aarch64=("https://example.com/nightly-aarch64.tar.gz")
+b2sums_x86_64=('SKIP')
+b2sums_aarch64=('SKIP')
+EOF
+  run has_skip_checksums "$TEST_TMPDIR/test.PKGBUILD"
+  [ "$status" -eq 0 ]
+}
+
+@test "has_skip_checksums: finds SKIP after a real hash" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-late-skip
+pkgver=1.0.0
+pkgrel=1
+arch=('any')
+source=("app.desktop"
+        "https://example.com/nightly.tar.gz")
+sha256sums=('abc123'
+            'SKIP')
+EOF
+  run has_skip_checksums "$TEST_TMPDIR/test.PKGBUILD"
+  [ "$status" -eq 0 ]
+}
+
+@test "has_skip_checksums: returns 1 without SKIP" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-no-skip
+pkgver=1.0.0
+pkgrel=1
+arch=('x86_64')
+source=("https://example.com/app-${pkgver}.tar.gz")
+source_x86_64=("https://example.com/app-${pkgver}-x86_64.tar.gz")
+sha256sums=('abc123')
+sha256sums_x86_64=('def456')
+EOF
+  run has_skip_checksums "$TEST_TMPDIR/test.PKGBUILD"
+  [ "$status" -eq 1 ]
+}
+
 # === check-update.sh ===
 
 @test "check-update: detects new version" {
@@ -1528,6 +1618,54 @@ EOF
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-vcs" "r200.def5678"
   # Will fail at git push (no remote) but should get past checksums
   [[ "$output" == *"VCS package, skipping checksums"* ]] || [[ "$output" == *"Generating .SRCINFO"* ]]
+}
+
+@test "update-pkg: skips checksums for arch-specific SKIP arrays" {
+  create_test_package "test-arch-skip" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+
+  aur_dir="$TEST_TMPDIR/aur-test-arch-skip"
+  mkdir -p "$aur_dir"
+  git -C "$aur_dir" init -q
+  git -C "$aur_dir" config user.name "test"
+  git -C "$aur_dir" config user.email "test@test"
+  git -C "$aur_dir" config commit.gpgsign false
+  cat > "$aur_dir/PKGBUILD" <<'EOF'
+pkgname=test-arch-skip
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test arch-specific SKIP"
+arch=('x86_64' 'aarch64')
+url="https://example.com"
+license=('MIT')
+source_x86_64=("https://example.com/nightly-x86_64.tar.gz")
+source_aarch64=("https://example.com/nightly-aarch64.tar.gz")
+b2sums_x86_64=('SKIP')
+b2sums_aarch64=('SKIP')
+EOF
+  git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
+
+  cat > "$MOCK_DIR/git" <<MOCKGIT
+#!/usr/bin/env bash
+if [[ "\$1" == "clone" ]]; then
+  cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
+  exit 0
+fi
+exec /usr/bin/git "\$@"
+MOCKGIT
+  chmod +x "$MOCK_DIR/git"
+
+  cat > "$MOCK_DIR/makepkg" <<'EOF'
+#!/usr/bin/env bash
+echo "pkgbase = test-arch-skip"
+echo "pkgname = test-arch-skip"
+EOF
+  chmod +x "$MOCK_DIR/makepkg"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-arch-skip" "1.0.1"
+  [[ "$output" == *"VCS package, skipping checksums"* ]]
+  [[ "$output" != *"Updating checksums"* ]]
 }
 
 # === downgrade detection (observability only) ===
