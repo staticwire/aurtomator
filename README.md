@@ -23,14 +23,13 @@ Automated AUR package updates from a single GitHub repo.
 
 ```mermaid
 graph LR
-    A[GitHub Actions<br/>on schedule] -->|for each package| B[check-all.sh<br/>run strategy<br/>compare versions]
-    B -->|new version found| C[update-pkg.sh<br/>clone AUR repo<br/>sed pkgver<br/>updpkgsums<br/>makepkg --printsrcinfo<br/>git push to AUR]
-    B -->|check failed| D[create GitHub Issue<br/>with error details]
-    C -->|update failed| D
+    A[GitHub Actions<br/>on schedule] -->|for each package| B[prepare job, no secrets<br/>run strategy<br/>clone AUR repo<br/>sed pkgver<br/>updpkgsums<br/>makepkg --printsrcinfo]
+    B -->|update or status change| C[publish job<br/>check the prepared files<br/>git push to AUR]
+    C -->|check or update failed| D[create GitHub Issue<br/>with error details]
     C -->|done| E[update-readme.sh<br/>commit badges + status table]
 ```
 
-Each package has a YAML config pointing to an upstream source. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. It does not generate PKGBUILDs or modify anything else. If anything fails, a GitHub Issue is opened automatically.
+Each package has a YAML config pointing to an upstream source. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and a second job checks the result before it pushes. It does not generate PKGBUILDs or modify anything else. If anything fails, a GitHub Issue is opened automatically.
 
 ## Quick start
 

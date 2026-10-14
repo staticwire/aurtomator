@@ -19,30 +19,34 @@ aurtomator bumps the version of AUR packages you already maintain. It does **not
 
 ```mermaid
 flowchart TD
-    A[Schedule / manual trigger] --> B[check-all.sh]
+    A[Schedule / manual trigger] --> P[prepare job: no secrets, read-only token]
+    P --> B[check-all.sh --prepare]
     B --> C{for each package}
     C --> D[check-update.sh]
     D --> E[run strategy script]
     E --> F{version changed?}
     F -->|same| G[write up_to_date]
-    F -->|new version| H[update-pkg.sh]
-    H --> H1[clone AUR repo via SSH]
+    F -->|new version| H[update-pkg.sh --prepare]
+    H --> H1[clone AUR repo over HTTPS]
     H1 --> H2[audit PKGBUILD]
     H2 --> H3[sed pkgver, reset pkgrel=1]
     H3 --> H4[validate URLs, updpkgsums, verify sources]
     H4 --> H5[namcap, makepkg --printsrcinfo]
-    H5 --> H6[git commit + push to AUR]
-    H6 --> K
+    H5 --> H6[hand over PKGBUILD, .SRCINFO, AUR commit]
     H -->|failure| J[write error to .status/]
     D -->|failure| J
-    J --> K
-    C -->|all done| K[update-readme.sh]
-    K --> K1[read .status/ directory]
-    K1 --> K2[generate status table + badge]
-    K2 --> L[commit via GitHub API]
+    C -->|all done| W{update prepared or status table changed?}
+    W -->|no| O[done]
+    W -->|yes| Q[publish job: SSH key, GPG key, write token]
+    Q --> R[check-all.sh --publish]
+    R --> R1[run strategy again]
+    R1 --> R2[publish-pkg.sh: check the prepared files against the AUR copy]
+    R2 --> R3[git commit + push to AUR]
+    R3 --> K[update-readme.sh]
+    K --> L[commit via GitHub API]
     L --> M{failures in .status/?}
     M -->|yes| N[create GitHub Issue]
-    M -->|no| O[done]
+    M -->|no| O
 ```
 
 ### Key design decisions
@@ -50,7 +54,7 @@ flowchart TD
 - **One YAML per package.** Adding or removing a package is one file.
 - **Strategy-based version detection.** Each type of upstream source has its own script. A new source is a new script plus its entry in `scripts/validate-pkg.sh`.
 - **Patch, do not generate.** aurtomator trusts your PKGBUILD and changes only `pkgver`, `pkgrel`, checksums and `.SRCINFO`. Build steps, dependencies and install files stay untouched.
-- **One workflow run.** All packages are checked in one CI job, with one Arch container and one SSH and GPG setup.
+- **Two jobs, one with secrets.** A PKGBUILD is code that every step reading it executes. `prepare` checks all packages and runs those steps without secrets. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD, and checks what `prepare` hands over before it pushes. See [4.4](#44-prepare-and-publish).
 - **Failure isolation.** A broken package does not block the others. Each failure is logged for its package and opens a GitHub Issue.
 
 ## 2. Package YAML Format
@@ -624,16 +628,34 @@ The workflow runs every hour (`cron: "0 * * * *"`) and by hand through `workflow
 
 ### 5.2 Permissions and container
 
-The workflow has `contents: write` for the status commit and `issues: write` for failure issues, and nothing else. The job runs in `archlinux:base-devel` on `ubuntu-latest` with a 30-minute timeout. `makepkg` refuses to run as root, so the steps that touch packages run as a `builder` user.
+The workflow has two jobs. Both run in `archlinux:base-devel` on `ubuntu-latest` with a 30-minute timeout, and `vercmp` from pacman is the reason `publish` needs Arch too. `makepkg` refuses to run as root, so the steps that touch packages run as a `builder` user. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`.
+
+| Job | Permissions | Secrets |
+|-----|-------------|---------|
+| `prepare` | `contents: read` | none |
+| `publish` | `contents: write` for the status commit, `issues: write` for failure issues | `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` |
+
+`publish` runs only when `prepare` hands over a prepared update or a change in the status table of `README.md`. In most hours nothing changes, and `publish` is skipped.
 
 ### 5.3 Steps
 
-1. **Install dependencies:** `sudo git github-cli openssh gnupg namcap jq go-yq pacman-contrib`, and the `builder` user. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`.
-2. **Checkout:** `actions/checkout`, pinned by commit SHA like every action in this repository, with `persist-credentials: false`, so the workflow token is not written to `.git/config`. The job never pushes to GitHub with git: the status commit goes through the API.
-3. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
+Both jobs start with **Checkout:** `actions/checkout`, pinned by commit SHA like every action in this repository, with `persist-credentials: false`, so the workflow token is not written to `.git/config`. The workflow never pushes to GitHub with git: the status commit goes through the API.
+
+`prepare`:
+
+1. **Install dependencies:** `sudo git openssh namcap jq go-yq pacman-contrib`, and the `builder` user.
+2. **Prepare updates:** gives the workspace to `builder` and runs `check-all.sh --prepare handoff/prepared` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token.
+3. **Hand over:** as `builder`, copies `.status/` to `handoff/status/` and runs `update-readme.sh` to find out whether the status table changes. Code from a PKGBUILD has run in the workspace by now, `.git/config` included, so root does not touch it.
+4. **Upload handoff:** uploads `handoff/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
+
+`publish`:
+
+1. **Install dependencies:** `sudo git github-cli openssh gnupg jq go-yq`, and the `builder` user.
+2. **Download handoff:** the `handoff` artifact to `handoff/`.
+3. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`. Copies `handoff/status/` to `.status/`.
 4. **Setup AUR SSH:** writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. When the AUR changes its host key, update the key in `check-updates.yml`.
 5. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
-6. **Check and update packages:** runs `check-all.sh --update` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GITHUB_TOKEN` set to the workflow token.
+6. **Publish updates:** runs `check-all.sh --publish handoff/prepared` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GITHUB_TOKEN` set to the workflow token. It checks the statuses and the prepared files first, see [4.4](#44-prepare-and-publish).
 7. **Update README status table:** runs `update-readme.sh` as `builder`.
 8. **Commit changes via API (verified):** see [5.5](#55-verified-commit).
 9. **Create issues for failed packages:** see [5.6](#56-failure-issues).
@@ -655,9 +677,9 @@ Steps 8 and 9 run as root with `GH_TOKEN` set to the workflow token, `github.tok
 |------------------------|----------------------------------|------------------------------------------|
 | `.status/<name>`       | `up_to_date`                     | The package is at the latest version     |
 | `.status/<name>`       | `updated: 2.0.0`                 | Pushed to the AUR                        |
-| `.status/<name>`       | `new_version: 2.0.0`             | Update found (check-only mode)           |
+| `.status/<name>`       | `new_version: 2.0.0`             | Update found, not pushed yet             |
 | `.status/<name>`       | `downgrade: 1.2.0`               | Downgrade pushed to the AUR              |
-| `.status/<name>`       | `available_downgrade: 1.2.0`     | Downgrade found (check-only mode)        |
+| `.status/<name>`       | `available_downgrade: 1.2.0`     | Downgrade found, not pushed yet          |
 | `.status/<name>`       | `check_failed: <error>`          | The strategy failed                      |
 | `.status/<name>`       | `update_failed: <error>`         | The update failed                        |
 | `.status/_error_count` | `0`                              | Total error count of the run             |
@@ -697,6 +719,8 @@ The step runs with `if: always()`. For every `.status/` entry with `check_failed
 1. Creates the `auto-update` label when it is missing.
 2. Skips the package when an open `auto-update` issue already matches `<package> failed`.
 3. Opens an issue titled `❌ <package>: update failed` with the package, the error and a link to the run.
+
+The step belongs to `publish`, which runs when the status table changes. A package that keeps failing gets its issue in the run where it starts failing, and a closed issue comes back only after its status changes again.
 
 ## 6. CI Quality Gate: ci.yml
 
