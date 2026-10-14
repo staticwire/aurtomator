@@ -2,14 +2,17 @@
 #
 # check-all.sh - Check all packages for updates, optionally update them
 #
-# Usage: ./scripts/check-all.sh [--update] [--dry-run]
+# Usage: ./scripts/check-all.sh [--update | --prepare <dir> | --publish <dir>] [--dry-run]
 #
-# Without --update: only checks and reports
+# Without a mode: only checks and reports
 # With --update: runs update-pkg.sh for each outdated package
-# With --dry-run: runs update-pkg.sh in dry-run mode
+# With --prepare <dir>: runs update-pkg.sh --prepare <dir> instead
+# With --publish <dir>: runs publish-pkg.sh for each package prepared in <dir>
+# With --dry-run: runs update-pkg.sh or publish-pkg.sh in dry-run mode
 #
 # Writes per-package status to .status/ directory for README generation
-# and auto-issue creation.
+# and auto-issue creation. --publish keeps the statuses of the packages it
+# does not publish.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -17,21 +20,31 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 require_cmd vercmp
 
-UPDATE=false
+MODE=check
+WORK_DIR=""
 DRY_RUN=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --update)
-      UPDATE=true
+      MODE=update
       shift
+      ;;
+    --prepare | --publish)
+      if [[ -z "${2:-}" ]]; then
+        echo "$1 needs a directory" >&2
+        exit 1
+      fi
+      MODE="${1#--}"
+      WORK_DIR="$2"
+      shift 2
       ;;
     --dry-run)
       DRY_RUN="--dry-run"
       shift
       ;;
     -h | --help)
-      sed -n '3,9p' "$0"
+      sed -n '3,15p' "$0"
       exit 0
       ;;
     *)
@@ -43,7 +56,9 @@ done
 
 # Status directory for per-package results
 STATUS_DIR="${AURTOMATOR_DIR}/.status"
-rm -rf "$STATUS_DIR"
+if [[ "$MODE" != "publish" ]]; then
+  rm -rf "$STATUS_DIR"
+fi
 mkdir -p "$STATUS_DIR"
 
 updated=0
@@ -54,6 +69,10 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
   [[ -f "$pkg_file" ]] || continue
 
   pkg_name=$(pkg_get "$pkg_file" .name)
+  # Only package names from packages/ reach a path, never a name from WORK_DIR
+  if [[ "$MODE" == "publish" && ! -d "${WORK_DIR}/${pkg_name}" ]]; then
+    continue
+  fi
   ((checked++)) || true
 
   # Capture stderr separately for error reporting
@@ -85,45 +104,75 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
     fi
   fi
 
-  if [[ "$UPDATE" == "true" ]]; then
-    log_info "Updating $pkg_name to $latest"
-    err_file=$(mktemp)
-    update_rc=0
-    # shellcheck disable=SC2086
-    "${AURTOMATOR_DIR}/scripts/update-pkg.sh" "$pkg_name" "$latest" $DRY_RUN 2>"$err_file" || update_rc=$?
-    update_err=$(cat "$err_file")
-    rm -f "$err_file"
-
-    case "$update_rc" in
-      0)
-        if [[ "$is_downgrade" == "true" ]]; then
-          echo "downgrade: ${latest}" >"${STATUS_DIR}/${pkg_name}"
-        else
-          echo "updated: ${latest}" >"${STATUS_DIR}/${pkg_name}"
-        fi
-        ((updated++)) || true
-        ;;
-      2)
-        # AUR already at this version, YAML synced by update-pkg.sh
-        echo "up_to_date" >"${STATUS_DIR}/${pkg_name}"
-        ;;
-      *)
-        log_err "Failed to update $pkg_name to $latest"
-        echo "update_failed: ${update_err}" >"${STATUS_DIR}/${pkg_name}"
-        ((errors++)) || true
-        ;;
-    esac
+  if [[ "$is_downgrade" == "true" ]]; then
+    available="available_downgrade: ${latest}"
+    pushed="downgrade: ${latest}"
   else
-    if [[ "$is_downgrade" == "true" ]]; then
-      echo "available_downgrade: ${latest}" >"${STATUS_DIR}/${pkg_name}"
-    else
-      echo "new_version: ${latest}" >"${STATUS_DIR}/${pkg_name}"
-    fi
+    available="new_version: ${latest}"
+    pushed="updated: ${latest}"
   fi
+
+  case "$MODE" in
+    check)
+      echo "$available" >"${STATUS_DIR}/${pkg_name}"
+      continue
+      ;;
+    update)
+      log_info "Updating $pkg_name to $latest"
+      cmd=("${AURTOMATOR_DIR}/scripts/update-pkg.sh" "$pkg_name" "$latest" ${DRY_RUN:+"$DRY_RUN"})
+      ;;
+    prepare)
+      log_info "Preparing $pkg_name $latest"
+      cmd=("${AURTOMATOR_DIR}/scripts/update-pkg.sh" "$pkg_name" "$latest" --prepare "$WORK_DIR")
+      ;;
+    publish)
+      log_info "Publishing $pkg_name $latest"
+      cmd=("${AURTOMATOR_DIR}/scripts/publish-pkg.sh" "$pkg_name" "$latest" "${WORK_DIR}/${pkg_name}" ${DRY_RUN:+"$DRY_RUN"})
+      ;;
+  esac
+
+  err_file=$(mktemp)
+  update_rc=0
+  "${cmd[@]}" 2>"$err_file" || update_rc=$?
+  update_err=$(cat "$err_file")
+  rm -f "$err_file"
+
+  case "$MODE:$update_rc" in
+    prepare:0 | prepare:2)
+      # Pushed or synced later by --publish
+      echo "$available" >"${STATUS_DIR}/${pkg_name}"
+      ;;
+    *:0)
+      echo "$pushed" >"${STATUS_DIR}/${pkg_name}"
+      ((updated++)) || true
+      ;;
+    *:2)
+      # AUR already at this version, YAML synced by update-pkg.sh or publish-pkg.sh
+      echo "up_to_date" >"${STATUS_DIR}/${pkg_name}"
+      ;;
+    publish:3)
+      # The AUR or upstream moved after prepare; the next run prepares again
+      echo "$available" >"${STATUS_DIR}/${pkg_name}"
+      ;;
+    *)
+      log_err "Failed to update $pkg_name to $latest"
+      echo "update_failed: ${update_err}" >"${STATUS_DIR}/${pkg_name}"
+      ((errors++)) || true
+      ;;
+  esac
 done
 
 echo ""
 log_info "Checked: $checked, Updated: $updated, Errors: $errors"
+
+# --publish adds its errors to those of the prepare run. The file comes from
+# that run, so it is read only when it holds a plain number.
+if [[ "$MODE" == "publish" && -f "${STATUS_DIR}/_error_count" ]]; then
+  prepare_errors=$(<"${STATUS_DIR}/_error_count")
+  if [[ "$prepare_errors" =~ ^[0-9]+$ ]]; then
+    errors=$((errors + prepare_errors))
+  fi
+fi
 
 # Write summary for downstream steps
 echo "${errors}" >"${STATUS_DIR}/_error_count"

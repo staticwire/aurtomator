@@ -245,6 +245,246 @@ validate_source_urls() {
 }
 
 # =============================================================================
+# AUR GIT
+# =============================================================================
+
+# Clone an AUR repo, with 3 attempts
+# Args: $1=url, $2=destination
+aur_clone() {
+  local attempt
+  # Brief delay to reduce AUR SSH rate-limit pressure from GitHub Actions IP pool
+  sleep 2
+  for attempt in 1 2 3; do
+    if git clone "$1" "$2" 2>&1; then
+      return 0
+    fi
+    if [[ "$attempt" -eq 3 ]]; then
+      log_err "Failed to clone AUR repo $1 after 3 attempts"
+      return 1
+    fi
+    log_warn "Clone attempt $attempt failed, retrying in 5s..."
+    rm -rf "$2"
+    sleep 5
+  done
+}
+
+# The AUR can serve a HEAD that does not match refs/heads/master after two
+# runs pushed at the same time. HEAD and master then point at different
+# commits with the same content, and a clone lands on a detached HEAD.
+#
+# The AUR refuses non-fast-forward pushes, so the commit has to sit on
+# origin/master and not on the detached HEAD. Anything unique to the
+# detached commit is dropped. The workflow's concurrency group prevents
+# the race; this stays as a safety net.
+# Args: $1=clone directory
+aur_reanchor() {
+  if ! git -C "$1" symbolic-ref -q HEAD >/dev/null; then
+    log_warn "Detached HEAD after clone (remote HEAD != refs/heads/master)"
+    log_info "Re-basing on origin/master to allow fast-forward push"
+    git -C "$1" checkout -B master origin/master
+  fi
+}
+
+# Commit PKGBUILD and .SRCINFO, sign when GPG_KEY_ID is set, push with 3
+# attempts.
+# Args: $1=clone directory, $2=version, $3=strategy (for the commit message)
+aur_commit_push() {
+  local dir="$1" attempt
+  log_info "Pushing to AUR"
+  git -C "$dir" config user.name "${GIT_AUTHOR_NAME:-aurtomator}"
+  git -C "$dir" config user.email "${GIT_AUTHOR_EMAIL:-aurtomator@users.noreply.github.com}"
+  git -C "$dir" config commit.gpgsign false
+  git -C "$dir" add PKGBUILD .SRCINFO
+  git -C "$dir" commit -m "$2 release from $3" || {
+    log_err "git commit failed in $dir"
+    return 1
+  }
+
+  if [[ -n "${GPG_KEY_ID:-}" ]]; then
+    git -C "$dir" -c user.signingkey="$GPG_KEY_ID" \
+      -c commit.gpgsign=true \
+      commit --amend --no-edit || {
+      log_warn "GPG signing failed, pushing unsigned commit"
+    }
+  fi
+
+  for attempt in 1 2 3; do
+    if git -C "$dir" push 2>&1; then
+      return 0
+    fi
+    if [[ "$attempt" -eq 3 ]]; then
+      log_err "git push to AUR failed after 3 attempts"
+      return 1
+    fi
+    log_warn "Push attempt $attempt failed, retrying in 5s..."
+    sleep 5
+  done
+}
+
+# =============================================================================
+# PREPARED UPDATE CHECKS
+# =============================================================================
+
+# The job that executes a PKGBUILD holds no secrets, so the files it hands
+# over are untrusted. The job that pushes accepts them only when they differ
+# from the AUR copy in pkgver, pkgrel and checksum values. None of these
+# checks sources the file.
+
+# Split a PKGBUILD into lines of four kinds, without executing it:
+#   SKEL<TAB>line          every line, with pkgver=, pkgrel= and each
+#                          top-level checksum array replaced by a placeholder
+#   PKGVER|PKGREL<TAB>val  the value of a pkgver= or pkgrel= line
+#   SUM<TAB>array<TAB>index<TAB>HASH|SKIP  one line per checksum
+#   BAD<TAB>text           anything in a checksum array but a quoted checksum
+# Args: $1=pkgbuild path
+_pkgbuild_parts() {
+  awk '
+    function tokens(text,   n, i, t, parts) {
+      n = split(text, parts, /[ \t]+/)
+      for (i = 1; i <= n; i++) {
+        t = parts[i]
+        if (t == "") continue
+        if (t !~ /^(\047([0-9a-fA-F]+|SKIP)\047|"([0-9a-fA-F]+|SKIP)")$/) {
+          print "BAD\t" NR ": " t
+          continue
+        }
+        print "SUM\t" name "\t" idx++ "\t" (t ~ /SKIP/ ? "SKIP" : "HASH")
+      }
+    }
+    function body(text,   end) {
+      end = index(text, ")")
+      if (!end) {
+        tokens(text)
+        return 1
+      }
+      tokens(substr(text, 1, end - 1))
+      if (substr(text, end + 1) !~ /^[ \t]*$/) print "BAD\t" NR ": " substr(text, end + 1)
+      return 0
+    }
+    in_sums { in_sums = body($0); next }
+    /^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?=\(/ {
+      name = substr($0, 1, index($0, "=") - 1)
+      idx = 0
+      print "SKEL\tSUMS " name
+      in_sums = body(substr($0, index($0, "(") + 1))
+      next
+    }
+    /^pkgver=/ { print "SKEL\tPKGVER"; print "PKGVER\t" substr($0, 8); next }
+    /^pkgrel=/ { print "SKEL\tPKGREL"; print "PKGREL\t" substr($0, 8); next }
+    { print "SKEL\t" $0 }
+    END { if (in_sums) print "BAD\tunterminated " name }
+  ' "$1"
+}
+
+# Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=expected version
+# Returns: 0 when the prepared file changes only pkgver (to $3), pkgrel
+#          (to 1) and checksum values, 1 otherwise (reason on stderr)
+check_prepared_pkgbuild() {
+  local version="$3"
+  local old_parts new_parts value
+  if ! old_parts=$(_pkgbuild_parts "$1") || ! new_parts=$(_pkgbuild_parts "$2"); then
+    log_err "Could not read the PKGBUILD to compare"
+    return 1
+  fi
+
+  if grep -q $'^BAD\t' <<<"$new_parts"; then
+    log_err "Prepared PKGBUILD has more than quoted checksums in a checksum array:"
+    grep $'^BAD\t' <<<"$new_parts" | cut -f2- >&2
+    return 1
+  fi
+  if [[ "$(grep $'^SKEL\t' <<<"$old_parts")" != "$(grep $'^SKEL\t' <<<"$new_parts")" ]]; then
+    log_err "Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"
+    return 1
+  fi
+  if [[ "$(grep $'^SUM\t' <<<"$old_parts")" != "$(grep $'^SUM\t' <<<"$new_parts")" ]]; then
+    log_err "Prepared PKGBUILD changes the checksum arrays: their names, lengths or SKIP entries differ from the AUR"
+    return 1
+  fi
+  while IFS=$'\t' read -r _ value; do
+    if [[ "$value" != "$version" ]]; then
+      log_err "Prepared PKGBUILD has pkgver=${value}, expected ${version}"
+      return 1
+    fi
+  done < <(grep $'^PKGVER\t' <<<"$new_parts")
+  while IFS=$'\t' read -r _ value; do
+    if [[ "$value" != "1" ]]; then
+      log_err "Prepared PKGBUILD has pkgrel=${value}, expected 1"
+      return 1
+    fi
+  done < <(grep $'^PKGREL\t' <<<"$new_parts")
+  return 0
+}
+
+# A .SRCINFO is generated, so line N of the prepared file must be line N of
+# the AUR file with the old version replaced by the new one. pkgrel and the
+# checksum values are the exceptions.
+# Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version
+# Returns: 0 when that holds, 1 otherwise (reason on stderr)
+check_prepared_srcinfo() {
+  local version="$3"
+  if [[ ! -r "$1" || ! -r "$2" ]]; then
+    log_err "Could not read the .SRCINFO to compare"
+    return 1
+  fi
+  local -a old_lines new_lines
+  mapfile -t old_lines <"$1"
+  mapfile -t new_lines <"$2"
+  if [[ "${#old_lines[@]}" -ne "${#new_lines[@]}" ]]; then
+    log_err "Prepared .SRCINFO adds or removes lines"
+    return 1
+  fi
+
+  local old_ver
+  old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
+
+  local i old new key old_val new_val
+  for i in "${!new_lines[@]}"; do
+    old="${old_lines[$i]}"
+    new="${new_lines[$i]}"
+    key="${new%% = *}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    new_val="${new#* = }"
+    old_val="${old#* = }"
+    if [[ "$key" == "pkgver" || "$key" == "pkgrel" ]] ||
+      [[ "$key" =~ ^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$ ]]; then
+      if [[ "${old%% = *}" != "${new%% = *}" ]]; then
+        log_err "Prepared .SRCINFO line $((i + 1)) has another key than the AUR copy: $new"
+        return 1
+      fi
+    fi
+    case "$key" in
+      pkgver)
+        [[ "$new_val" == "$version" ]] || {
+          log_err "Prepared .SRCINFO has pkgver = ${new_val}, expected ${version}"
+          return 1
+        }
+        ;;
+      pkgrel)
+        [[ "$new_val" == "1" ]] || {
+          log_err "Prepared .SRCINFO has pkgrel = ${new_val}, expected 1"
+          return 1
+        }
+        ;;
+      *sums | *sums_*)
+        if [[ ! "$new_val" =~ ^([0-9a-fA-F]+|SKIP)$ ]] ||
+          [[ "$new_val" == "SKIP" && "$old_val" != "SKIP" ]] ||
+          [[ "$new_val" != "SKIP" && "$old_val" == "SKIP" ]]; then
+          log_err "Prepared .SRCINFO line $((i + 1)) is not a checksum matching the AUR copy: $new"
+          return 1
+        fi
+        ;;
+      *)
+        if [[ "$new" != "${old//"$old_ver"/"$version"}" ]]; then
+          log_err "Prepared .SRCINFO line $((i + 1)) changes more than the version: $new"
+          return 1
+        fi
+        ;;
+    esac
+  done
+  return 0
+}
+
+# =============================================================================
 # LOGGING
 # =============================================================================
 

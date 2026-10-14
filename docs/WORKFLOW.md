@@ -527,12 +527,14 @@ strategy: kde-tarball
 
 ## 4. Update Process
 
-`check-all.sh --update` calls `update-pkg.sh` for every package with a new version.
+`check-all.sh --update` calls `update-pkg.sh` for every package with a new version. `--prepare` and `--publish` split the same update into two runs, see [4.4](#44-prepare-and-publish).
 
 ### 4.1 Arguments
 
 ```text
-update-pkg.sh <package-name> <new-version> [--dry-run]
+update-pkg.sh <package-name> <new-version> [--dry-run] [--prepare <dir>]
+publish-pkg.sh <package-name> <version> <prepared-dir> [--dry-run]
+check-all.sh [--update | --prepare <dir> | --publish <dir>] [--dry-run]
 ```
 
 ### 4.2 Step-by-step
@@ -592,6 +594,27 @@ Every comparison that finds the current version newer than the latest one (`verc
 - `available_downgrade: 1.2.0` → `⬇️ 1.2.0 available (downgrade)`
 
 Both count toward `pkg_ok`, so the packages badge stays `brightgreen`. Only `check_failed` and `update_failed` turn it red.
+
+### 4.4 Prepare and publish
+
+A PKGBUILD is a bash script, and every step that reads it executes it: the audit, `updpkgsums`, `makepkg --verifysource` and `makepkg --printsrcinfo`. Whoever can push to the AUR repo of a tracked package, a co-maintainer for example, runs code in those steps. Prepare and publish split the update so that this code never runs where the SSH key, the GPG key or a write token is.
+
+**Prepare**, `update-pkg.sh --prepare <dir>`, needs no secrets:
+
+1. Clone `https://aur.archlinux.org/<package-name>.git` anonymously.
+2. Run steps 3 to 9 of [4.2](#42-step-by-step).
+3. Copy `PKGBUILD`, `.SRCINFO` and the commit id of the clone's `HEAD` to `<dir>/<package-name>/` as `PKGBUILD`, `.SRCINFO` and `base`. Nothing is committed and the package YAML does not change. Exit code 2 still means the AUR already has the version.
+
+**Publish**, `publish-pkg.sh <package-name> <version> <dir>/<package-name>`, never sources the PKGBUILD and never runs `makepkg`. It treats the prepared files as untrusted:
+
+1. `PKGBUILD`, `.SRCINFO` and `base` must be regular files, and `base` a commit id.
+2. When the prepared `pkgver` is not `<version>`, upstream moved after the update was prepared: exit code 3.
+3. Clone over SSH. When `HEAD` is not `base`, the AUR repo moved after the update was prepared: exit code 3.
+4. The prepared `PKGBUILD` may differ from the AUR copy only in `pkgver=`, which must be `<version>`, in `pkgrel=`, which must be `1`, and in the values of the checksum arrays. The arrays keep their names and lengths, hold only quoted hex checksums or `SKIP`, and have a `SKIP` exactly where the AUR copy has one.
+5. Each line of the prepared `.SRCINFO` must be the line of the AUR copy with the old version replaced by `<version>`. `pkgrel` and the checksums follow the rules of step 4.
+6. Any other difference stops the publish with exit code 1. Otherwise steps 10 to 13 of [4.2](#42-step-by-step) follow. When the prepared files equal the AUR copy, only `current` is written to the YAML and the exit code is 2.
+
+`check-all.sh --prepare <dir>` prepares every package with a new version. Its status becomes `new_version` or `available_downgrade`, and `update_failed` when preparing fails. `check-all.sh --publish <dir>` takes every package in `packages/` that has a directory in `<dir>`, runs its strategy once more and publishes with the version the strategy reports now. The statuses of the other packages stay as they are. Exit code 3 leaves the status at `new_version` or `available_downgrade` without an error, and the next run prepares the package again.
 
 ## 5. CI Workflow: check-updates.yml
 
