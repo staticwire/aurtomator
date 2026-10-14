@@ -166,6 +166,14 @@ setup_ssh() {
   fi
 }
 
+# Flush the agent cache, then sign without pinentry. Signing fails when the
+# key has a passphrase.
+# Args: $1=key id
+gpg_key_has_passphrase() {
+  gpgconf --kill gpg-agent 2>/dev/null || true
+  ! echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$1" >/dev/null 2>&1
+}
+
 setup_gpg() {
   header "gpg" "Sign AUR commits with GPG (optional)"
 
@@ -222,10 +230,7 @@ setup_gpg() {
     fi
   fi
 
-  # Check the passphrase: flush the agent cache, then sign without pinentry.
-  # Success means the key has no passphrase.
-  gpgconf --kill gpg-agent 2>/dev/null || true
-  if echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$GPG_KEY_ID" >/dev/null 2>&1; then
+  if ! gpg_key_has_passphrase "$GPG_KEY_ID"; then
     ok "GPG key: $GPG_KEY_ID (no passphrase, ready for CI)"
   else
     warn "This key has a passphrase. CI (GitHub Actions) requires a passphrase-free key."
@@ -324,6 +329,20 @@ setup_secrets() {
     warn "Set the secrets manually"
   fi
 
+  # GPG_SIGNING_KEY holds the passphrase-free copy made by the gpg step of
+  # this run, or the key itself when it has no passphrase
+  local gpg_source=""
+  if [[ -n "$GPG_KEY_ID" ]]; then
+    if [[ -n "$GPG_CLEAN_KEY" ]]; then
+      gpg_source="copy"
+    elif gpg_key_has_passphrase "$GPG_KEY_ID"; then
+      warn "GPG key $GPG_KEY_ID has a passphrase, GPG_SIGNING_KEY not set"
+      warn "Run ./scripts/setup.sh gpg secrets to make a passphrase-free copy"
+    else
+      gpg_source="key"
+    fi
+  fi
+
   if [[ "$has_gh" == "true" ]]; then
     # Detect repo from origin remote (not upstream)
     local gh_repo
@@ -358,15 +377,14 @@ setup_secrets() {
       fail "AUR_SSH_KEY"
     fi
 
-    if [[ -n "$GPG_KEY_ID" ]]; then
-      # Use passphrase-free copy if available, otherwise export directly
-      if [[ -n "${GPG_CLEAN_KEY:-}" ]]; then
-        if echo "$GPG_CLEAN_KEY" | gh secret set GPG_SIGNING_KEY -R "$gh_repo"; then
-          ok "GPG_SIGNING_KEY (passphrase-free copy)"
-        else
-          fail "GPG_SIGNING_KEY"
-        fi
-      elif gpg --export-secret-subkeys --armor "$GPG_KEY_ID" 2>/dev/null | gh secret set GPG_SIGNING_KEY -R "$gh_repo"; then
+    if [[ "$gpg_source" == "copy" ]]; then
+      if echo "$GPG_CLEAN_KEY" | gh secret set GPG_SIGNING_KEY -R "$gh_repo"; then
+        ok "GPG_SIGNING_KEY (passphrase-free copy)"
+      else
+        fail "GPG_SIGNING_KEY"
+      fi
+    elif [[ "$gpg_source" == "key" ]]; then
+      if gpg --export-secret-subkeys --armor "$GPG_KEY_ID" 2>/dev/null | gh secret set GPG_SIGNING_KEY -R "$gh_repo"; then
         ok "GPG_SIGNING_KEY"
       else
         fail "GPG_SIGNING_KEY"
@@ -384,7 +402,11 @@ setup_secrets() {
     printf "  %sAUR_SSH_KEY%s\n" "$BOLD" "$RESET"
     printf "    Contents of: %s\n\n" "$AUR_SSH_KEY"
 
-    if [[ -n "$GPG_KEY_ID" ]]; then
+    if [[ "$gpg_source" == "copy" ]]; then
+      printf "  %sGPG_SIGNING_KEY%s\n" "$BOLD" "$RESET"
+      printf "    Value, the passphrase-free copy, BEGIN and END lines included:\n\n"
+      printf "%s\n\n" "$GPG_CLEAN_KEY"
+    elif [[ "$gpg_source" == "key" ]]; then
       printf "  %sGPG_SIGNING_KEY%s\n" "$BOLD" "$RESET"
       printf "    Run: gpg --export-secret-subkeys --armor %s\n\n" "$GPG_KEY_ID"
     fi

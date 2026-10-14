@@ -168,6 +168,15 @@ AUR_SSH_KEY="$TEST_TMPDIR/ssh/aur.pem"
 EOF
 }
 
+# Helper: gh that fails auth, so the secrets step prints manual instructions
+mock_gh_unavailable() {
+  cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/gh"
+}
+
 # === Argument parsing ===
 
 @test "setup: --help exits 0" {
@@ -384,13 +393,7 @@ EOF
 }
 
 @test "setup secrets: shows manual instructions without gh" {
-  # Replace mock gh with one that fails auth
-  cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
-#!/usr/bin/env bash
-exit 1
-EOF
-  chmod +x "$TEST_TMPDIR/mock-bin/gh"
-
+  mock_gh_unavailable
   write_full_config ""
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
@@ -399,6 +402,84 @@ EOF
   [[ "$output" == *"AUR_GIT_NAME"* ]]
   [[ "$output" == *"AUR_GIT_EMAIL"* ]]
   [[ "$output" == *"AUR_SSH_KEY"* ]]
+}
+
+@test "setup secrets: skips GPG_SIGNING_KEY for a passphrase key without a copy" {
+  write_full_config "PASSKEY003"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"has a passphrase"* ]]
+  [[ "$output" == *"./scripts/setup.sh gpg secrets"* ]]
+  [[ "$output" != *"Set Actions secret GPG_SIGNING_KEY"* ]]
+}
+
+@test "setup secrets: manual path omits a passphrase key without a copy" {
+  mock_gh_unavailable
+  write_full_config "PASSKEY003"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"has a passphrase"* ]]
+  [[ "$output" != *"gpg --export-secret-subkeys"* ]]
+}
+
+@test "setup secrets: manual path prints the export command for a key without passphrase" {
+  mock_gh_unavailable
+  write_full_config "VALIDKEY123"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gpg --export-secret-subkeys --armor VALIDKEY123"* ]]
+  [[ "$output" != *"has a passphrase"* ]]
+}
+
+@test "setup gpg secrets: manual path prints the passphrase-free copy" {
+  mock_gh_unavailable
+  write_full_config "PASSKEY003"
+
+  # gpg for the passphrase strip flow: the main keyring exports the key with
+  # its passphrase, the temporary keyring (--homedir) exports the copy
+  cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *--with-keygrip*)
+    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
+    echo "      Keygrip = 0123456789ABCDEF0123456789ABCDEF01234567"
+    ;;
+  *--homedir*--export-secret-subkeys*)
+    echo "-----BEGIN PGP PRIVATE KEY BLOCK-----"
+    echo "mocked-passphrase-free"
+    echo "-----END PGP PRIVATE KEY BLOCK-----"
+    ;;
+  *--export-secret-subkeys*)
+    echo "-----BEGIN PGP PRIVATE KEY BLOCK-----"
+    echo "mocked-encrypted"
+    echo "-----END PGP PRIVATE KEY BLOCK-----"
+    ;;
+  *--import*) cat >/dev/null ;;
+  *--list-secret-keys*)
+    echo "sec   ed25519/MASTERXXX 2026-01-01 [SC]"
+    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
+    ;;
+  *--sign*) exit 2 ;;
+esac
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/gpg"
+  cat >"$TEST_TMPDIR/mock-bin/gpg-connect-agent" <<'EOF'
+#!/usr/bin/env bash
+echo "OK"
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/gpg-connect-agent"
+
+  # Answer "y" to "Proceed? (Y/n)"
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<"y"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"passphrase-free copy created for CI"* ]]
+  [[ "$output" == *"mocked-passphrase-free"* ]]
+  [[ "$output" != *"mocked-encrypted"* ]]
+  [[ "$output" != *"gpg --export-secret-subkeys"* ]]
 }
 
 # === ANSI colors ===
