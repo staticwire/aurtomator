@@ -516,6 +516,25 @@ teardown() {
   [[ "$output" == *"Failed to clone"* ]]
 }
 
+@test "git-latest: clone failure keeps the git error message" {
+  create_test_package "test-throttled" "git-latest" "upstream:
+  type: gitlab
+  host: gitlab.example.com
+  project: group/project"
+
+  cat >"$MOCK_DIR/git" <<'EOF'
+#!/usr/bin/env bash
+echo "fatal: unable to access 'https://gitlab.example.com/group/project.git/': The requested URL returned error: 429" >&2
+exit 128
+EOF
+  chmod +x "$MOCK_DIR/git"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-throttled"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Failed to clone"* ]]
+  [[ "$output" == *"The requested URL returned error: 429"* ]]
+}
+
 # === Error handling: curl network failure ===
 
 @test "github-release: fails on curl network error" {

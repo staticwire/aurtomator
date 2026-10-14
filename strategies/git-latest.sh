@@ -40,7 +40,7 @@ esac
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
-git clone --bare --quiet "$repo_url" "$tmp_dir/repo" 2>/dev/null || {
+git clone --bare --quiet "$repo_url" "$tmp_dir/repo" || {
   echo "Failed to clone $repo_url" >&2
   exit 1
 }
