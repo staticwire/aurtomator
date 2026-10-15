@@ -15,12 +15,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Reads the pinned Arch image from .github/ci-image/Dockerfile, where
+  # Dependabot updates its digest
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.read.outputs.ref }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/ci-image
+
+      - name: Read image
+        id: read
+        run: |
+          ref=$(sed -n 's/^FROM //p' .github/ci-image/Dockerfile)
+          if [[ ! "$ref" =~ ^archlinux:base-devel@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::.github/ci-image/Dockerfile must pin archlinux:base-devel by digest"
+            exit 1
+          fi
+          echo "ref=$ref" >>"$GITHUB_OUTPUT"
+
   # Every step that executes a PKGBUILD from the AUR runs here, without
   # secrets. Only the check step, which runs no PKGBUILD, gets the
   # read-only token.
   prepare:
+    needs: image
     runs-on: ubuntu-latest
-    container: archlinux:base-devel
+    container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
     outputs:
       work: ${{ steps.handoff.outputs.work }}
@@ -29,7 +55,8 @@ jobs:
       - name: Install dependencies
         run: |
           pacman-key --init
-          pacman -Syu --noconfirm --needed sudo git openssh namcap jq go-yq pacman-contrib
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm --needed sudo git openssh namcap jq go-yq pacman-contrib
           useradd -m builder
 
       - name: Checkout
@@ -103,17 +130,18 @@ jobs:
   # PKGBUILD and holds no secrets: the downloads from URLs that the AUR sets
   # stay out of the job with the keys.
   verify:
-    needs: prepare
+    needs: [image, prepare]
     if: needs.prepare.outputs.work == 'true'
     runs-on: ubuntu-latest
-    container: archlinux:base-devel
+    container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
 
     steps:
       - name: Install dependencies
         run: |
           pacman-key --init
-          pacman -Syu --noconfirm --needed git jq go-yq
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm --needed git jq go-yq
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -141,10 +169,10 @@ jobs:
   # Pushes what verify passed on. Nothing here executes a PKGBUILD:
   # publish-pkg.sh checks the prepared files against the AUR copy.
   publish:
-    needs: [prepare, verify]
+    needs: [image, prepare, verify]
     if: needs.prepare.outputs.work == 'true'
     runs-on: ubuntu-latest
-    container: archlinux:base-devel
+    container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
     permissions:
       contents: write
@@ -154,7 +182,8 @@ jobs:
       - name: Install dependencies
         run: |
           pacman-key --init
-          pacman -Syu --noconfirm --needed sudo git github-cli openssh gnupg jq go-yq
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm --needed sudo git github-cli openssh gnupg jq go-yq
           useradd -m builder
 
       - name: Checkout

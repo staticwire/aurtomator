@@ -649,10 +649,11 @@ The workflow runs every hour (`cron: "0 * * * *"`) and by hand through `workflow
 
 ### 5.2 Permissions and container
 
-The workflow has three jobs. All run in `archlinux:base-devel` on `ubuntu-latest` with a 30-minute timeout, and `vercmp` from pacman, which `check-all.sh` requires, is the reason `verify` and `publish` need Arch too. `makepkg` refuses to run as root, so the steps that touch packages in `prepare` and `publish` run as a `builder` user. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`. `verify` executes no PKGBUILD and runs as root.
+The workflow has three jobs after a short `image` job. `image` reads the image from `.github/ci-image/Dockerfile`: `archlinux:base-devel`, pinned by digest, so a new image on Docker Hub reaches the jobs with the secrets only through a reviewed commit. Dependabot updates the digest once a month with a pull request, and `ci.yml` runs the tests in the new image before the merge. The three jobs run in that image on `ubuntu-latest` with a 30-minute timeout, and `vercmp` from pacman, which `check-all.sh` requires, is the reason `verify` and `publish` need Arch too. Every install step upgrades `archlinux-keyring` before the system, because a pinned image ages and an old keyring rejects packages signed with a newer packager key. `makepkg` refuses to run as root, so the steps that touch packages in `prepare` and `publish` run as a `builder` user. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`. `verify` executes no PKGBUILD and runs as root.
 
 | Job | Permissions | Secrets |
 |-----|-------------|---------|
+| `image` | `contents: read` | none |
 | `prepare` | `contents: read` | none |
 | `verify` | `contents: read` | none |
 | `publish` | `contents: write` for the status commit, `issues: write` for failure issues | `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` |
@@ -662,6 +663,11 @@ The workflow has three jobs. All run in `archlinux:base-devel` on `ubuntu-latest
 ### 5.3 Steps
 
 Every job starts with **Checkout:** `actions/checkout`, pinned by commit SHA like every action in this repository, with `persist-credentials: false`, so the workflow token is not written to `.git/config`. The workflow never pushes to GitHub with git: the status commit goes through the API.
+
+`image`:
+
+1. **Checkout:** `.github/ci-image` only.
+2. **Read image:** takes the `FROM` line of `.github/ci-image/Dockerfile` and fails unless it is `archlinux:base-devel@sha256:` with a 64-character digest.
 
 `prepare`:
 
@@ -758,7 +764,7 @@ The step belongs to `publish`, which runs when the status table changes. A packa
 
 ### 6.1 Lint job
 
-`ubuntu-latest`, 5-minute timeout. It installs `shellcheck` from apt and `shfmt` with `go install`, then runs:
+`ubuntu-latest`, 5-minute timeout. It installs `shellcheck` from apt and `shfmt` v3.14.1 with `go install`, then runs:
 
 ```bash
 shellcheck -x -S warning scripts/*.sh strategies/*.sh
@@ -769,7 +775,7 @@ shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
 
 ### 6.2 Test job
 
-`archlinux:base-devel` container, 15-minute timeout. It installs `bash bats git go-yq curl openssh ruby ruby-erb` and the `bashcov` and `simplecov-cobertura` gems, then runs:
+15-minute timeout. It runs in the image that the `image` job of `ci.yml` reads, the same job as in [5.2](#52-permissions-and-container). It upgrades `archlinux-keyring`, installs `bash bats git go-yq curl openssh ruby ruby-erb` and the gems `bashcov` 4.0.0 and `simplecov-cobertura` 4.0.0, then runs:
 
 ```bash
 ./scripts/validate-pkg.sh --all

@@ -34,6 +34,7 @@ sudo pacman -S --needed git openssh go-yq curl pacman-contrib namcap github-cli 
 
 ### Recommended
 
+- **Enable Dependabot version updates**: Settings > Advanced Security, then Enable next to "Dependabot version updates". GitHub leaves them off on forks. Dependabot then opens pull requests for new action versions and for the digest of the Arch image the workflows run in.
 - Set repository topics if your fork is public.
 
 ### Badges
