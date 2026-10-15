@@ -443,9 +443,58 @@ check_prepared_pkgbuild() {
   return 0
 }
 
+# Replace the old version in a line with the new one, and also the forms a
+# PKGBUILD derives from pkgver: dots turned into underscores, the part
+# before the first +, and the version without its last component, such as
+# ${pkgver%.*} in the frameworks/6.19/ directory of KDE Frameworks. That
+# last form counts only while it keeps a dot, as a lone major version is
+# too common in other text. One pass from left to right, longest form
+# first, so a replaced part is not matched again: with 5.1.0 -> 5.10.0 the
+# 5.1 at the start of 5.10.0 stays.
+# Args: $1=line, $2=old version, $3=new version
+_bump_version() {
+  local rest="$1" old="$2" new="$3" out="" i matched
+  if [[ -z "$old" ]]; then
+    printf '%s\n' "$rest"
+    return 0
+  fi
+  local -a olds=("$old") news=("$new")
+  if [[ "$old" == *.* ]]; then
+    olds+=("${old//./_}")
+    news+=("${new//./_}")
+  fi
+  if [[ "$old" == *+* ]]; then
+    olds+=("${old%%+*}")
+    news+=("${new%%+*}")
+  fi
+  old="${old%%+*}"
+  new="${new%%+*}"
+  if [[ "${old%.*}" == *.* ]]; then
+    olds+=("${old%.*}")
+    news+=("${new%.*}")
+  fi
+
+  while [[ -n "$rest" ]]; do
+    matched=false
+    for i in "${!olds[@]}"; do
+      if [[ "$rest" == "${olds[$i]}"* ]]; then
+        out+="${news[$i]}"
+        rest="${rest:${#olds[$i]}}"
+        matched=true
+        break
+      fi
+    done
+    if [[ "$matched" == false ]]; then
+      out+="${rest:0:1}"
+      rest="${rest:1}"
+    fi
+  done
+  printf '%s\n' "$out"
+}
+
 # A .SRCINFO is generated, so line N of the prepared file must be line N of
-# the AUR file with the old version replaced by the new one. pkgrel and the
-# checksum values are the exceptions.
+# the AUR file with the old version replaced by the new one, see
+# _bump_version. pkgrel and the checksum values are the exceptions.
 # Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
@@ -510,7 +559,7 @@ check_prepared_srcinfo() {
         fi
         ;;
       *)
-        if [[ "$new" != "${old//"$old_ver"/"$version"}" ]]; then
+        if [[ "$new" != "$(_bump_version "$old" "$old_ver" "$version")" ]]; then
           log_err "Prepared .SRCINFO line $((i + 1)) changes more than the version: $new"
           return 1
         fi
