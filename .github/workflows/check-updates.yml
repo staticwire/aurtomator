@@ -233,6 +233,8 @@ jobs:
       - name: Commit changes via API
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           # Only the files this job writes are committed: the package YAMLs
           # and README.md. A change to any other tracked file fails the step.
@@ -251,8 +253,6 @@ jobs:
             fi
           done
 
-          REPO="${{ github.repository }}"
-          BRANCH="${{ github.ref_name }}"
           MESSAGE="chore: update package versions [skip ci]"
 
           HEAD_SHA=$(gh api "repos/$REPO/git/ref/heads/$BRANCH" --jq '.object.sha')
