@@ -141,15 +141,27 @@ jobs:
           # A process started by a PKGBUILD can outlive its step. Stop all
           # of them before root reads anything builder wrote. A zombie runs
           # nothing, and pid 1 of a job container never reaps one, so only
-          # the other processes count.
-          live() { ps -u builder -o stat= | awk '!/^Z/ { n++ } END { exit !n }'; }
+          # the other processes count, by effective or real user. live exits
+          # with 0 for a running process, 1 for none and 2 when the list
+          # fails, and only 1 lets the step go on.
+          uid=$(id -u builder)
+          live() {
+            procs=$(ps -e -o uid=,ruid=,stat=) || return 2
+            printf '%s\n' "$procs" |
+              awk -v u="$uid" '($1 == u || $2 == u) && $3 !~ /^Z/ { n++ } END { exit !n }'
+          }
           for _ in $(seq 30); do
-            live || break
+            rc=0
+            live || rc=$?
+            [ "$rc" -eq 1 ] && break
             pkill -KILL -u builder || true
+            pkill -KILL -U builder || true
             sleep 1
           done
-          if live; then
-            echo "::error::A process of builder is still running"
+          rc=0
+          live || rc=$?
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::A process of builder is still running, or the process list failed"
             exit 1
           fi
 
