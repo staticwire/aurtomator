@@ -263,14 +263,59 @@ EOF
   [ "$status" -ne 0 ]
 }
 
-@test "check-updates: publish runs on the check job's decision, also without prepare" {
+@test "check-updates: publish runs on the check job's decision, also after a failed prepare or verify" {
   run yq '.jobs.publish.needs | join(" ")' "$CHECK_UPDATES"
   [[ " $output " == *" check "* ]]
   run yq '.jobs.publish.if' "$CHECK_UPDATES"
-  [[ "$output" == *"!cancelled()"* ]]
-  [[ "$output" == *"needs.check.outputs.work == 'true'"* ]]
-  [[ "$output" == *"needs.prepare.result"* ]]
-  [[ "$output" == *"needs.verify.result"* ]]
+  [ "$output" = "!cancelled() && needs.check.outputs.work == 'true'" ]
+}
+
+# Runs the Hand over step in an empty workspace with a ps that lists the
+# states in $PS_STATES until pkill ran and those in $PS_AFTER_KILL after it.
+# pgrep matches any of them, zombies included, as the real one does. pkill
+# and sleep only log their calls. A step still running after 20 s fails.
+run_hand_over_step() {
+  local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$ws" "$bin"
+  cat >"$bin/ps" <<'EOF'
+#!/usr/bin/env bash
+if [[ -e "$CALLS/pkill" ]]; then states="$PS_AFTER_KILL"; else states="$PS_STATES"; fi
+[[ -n "$states" ]] || exit 1
+printf '%s\n' $states
+EOF
+  printf '#!/bin/sh\nps >/dev/null\n' >"$bin/pgrep"
+  printf '#!/bin/sh\necho x >>"$CALLS/pkill"\n' >"$bin/pkill"
+  printf '#!/bin/sh\necho x >>"$CALLS/sleep"\n' >"$bin/sleep"
+  chmod +x "$bin/ps" "$bin/pgrep" "$bin/pkill" "$bin/sleep"
+  CALLS="$BATS_TEST_TMPDIR/calls"
+  mkdir -p "$CALLS"
+  step_run prepare "Hand over" >"$BATS_TEST_TMPDIR/step.sh"
+  run timeout 20 env -C "$ws" PATH="$bin:$PATH" CALLS="$CALLS" PS_STATES="${PS_STATES:-}" \
+    PS_AFTER_KILL="${PS_AFTER_KILL:-}" sh -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "check-updates: Hand over goes on when builder runs nothing" {
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  [ ! -e "$CALLS/pkill" ]
+}
+
+@test "check-updates: Hand over kills builder and goes on when its processes end" {
+  PS_STATES="S R" PS_AFTER_KILL="" run_hand_over_step
+  [ "$status" -eq 0 ]
+  [ -e "$CALLS/pkill" ]
+}
+
+@test "check-updates: Hand over does not wait for zombies" {
+  PS_STATES="S" PS_AFTER_KILL="Z Z+" run_hand_over_step
+  [ "$status" -eq 0 ]
+}
+
+@test "check-updates: Hand over fails when a process of builder survives" {
+  PS_STATES="S" PS_AFTER_KILL="Z D" run_hand_over_step
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"::error::"* ]]
+  [ "$(wc -l <"$CALLS/sleep")" -le 30 ]
 }
 
 @test "check-updates: publish takes the statuses from the check job" {

@@ -769,7 +769,7 @@ current: '1.0.0'"
   checked_status pkg "new_version: 2.0.0"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
-  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare handed over no update" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
   [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
 }
 
@@ -797,7 +797,7 @@ current: '2.0.0'"
   echo "up_to_date" >"$TEST_TMPDIR/out/status/pkg"
   echo "check_failed: forged" >"$TEST_TMPDIR/out/status/other"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
-  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare handed over no update" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
   [ "$(cat "$TEST_TMPDIR/.status/other")" = "up_to_date" ]
 }
 
@@ -847,7 +847,7 @@ current: '1.0.0'"
   stub_script publish-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ ! -f "$TEST_TMPDIR/publish-pkg.sh.args" ]
-  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare handed over no update" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
 }
 
 @test "check-all --publish: does not import statuses of names that are not packages" {
@@ -871,7 +871,7 @@ current: '1.0.0'"
   echo "update_failed: from elsewhere" >"$TEST_TMPDIR/elsewhere/pkg"
   ln -s "$TEST_TMPDIR/elsewhere" "$TEST_TMPDIR/out/status"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
-  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare handed over no update" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
 }
 
 @test "check-all --publish: does not follow symlinks among the handed over statuses" {
@@ -894,7 +894,7 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/target-status")" = "update_failed: from a link" ]
   [ "$(cat "$TEST_TMPDIR/target-count")" = "keep" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/other")" = "update_failed: prepare handed over no update" ]
+  [ "$(cat "$TEST_TMPDIR/.status/other")" = "update_failed: prepare and verify handed over no update" ]
 }
 
 @test "check-all --publish: does not read a checked status that is a symlink" {
@@ -941,6 +941,88 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ ! -f "$TEST_TMPDIR/pwned" ]
   [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+}
+
+# === check-all.sh time budgets ===
+
+# Helper: replace a script with a stub that starts a background sleep,
+# records its pid in $TEST_TMPDIR/<script>.child, and then hangs
+# Usage: hanging_script <script name>
+hanging_script() {
+  rm -f "$TEST_TMPDIR/scripts/$1"
+  cat >"$TEST_TMPDIR/scripts/$1" <<EOF
+#!/usr/bin/env bash
+sleep 60 &
+echo \$! >"$TEST_TMPDIR/$1.child"
+sleep 60
+EOF
+  chmod +x "$TEST_TMPDIR/scripts/$1"
+}
+
+# Succeeds when the child that hanging_script started has ended
+child_ended() {
+  ! kill -0 "$(cat "$TEST_TMPDIR/$1.child")" 2>/dev/null
+}
+
+@test "check-all: a strategy that hangs fails after its time budget and the others go on" {
+  create_test_package "slow" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  create_test_package "zzz" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/check-update.sh"
+  cat >"$TEST_TMPDIR/scripts/check-update.sh" <<EOF
+#!/usr/bin/env bash
+[[ "\$1" == "slow" ]] && exec "$TEST_TMPDIR/scripts/hang.sh"
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/scripts/check-update.sh"
+  hanging_script hang.sh
+  SECONDS=0
+  AURTOMATOR_CHECK_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$SECONDS" -lt 10 ]
+  [ "$(cat "$TEST_TMPDIR/.status/slow")" = "check_failed: timed out after 1 s" ]
+  [ "$(cat "$TEST_TMPDIR/.status/zzz")" = "up_to_date" ]
+  child_ended hang.sh
+}
+
+@test "check-all --prepare: an update that hangs fails after its time budget" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  hanging_script update-pkg.sh
+  SECONDS=0
+  AURTOMATOR_UPDATE_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$SECONDS" -lt 10 ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: timed out after 1 s" ]
+  child_ended update-pkg.sh
+}
+
+@test "check-all --verify: a verify that hangs fails after its time budget" {
+  setup_check_verify
+  hanging_script verify-pkg.sh
+  SECONDS=0
+  AURTOMATOR_UPDATE_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$SECONDS" -lt 10 ]
+  [ ! -e "$TEST_TMPDIR/out/prepared/pkg" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: timed out after 1 s" ]
+  child_ended verify-pkg.sh
+}
+
+@test "check-all --publish: a publish that hangs fails after its time budget" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  hanging_script publish-pkg.sh
+  SECONDS=0
+  AURTOMATOR_UPDATE_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$SECONDS" -lt 10 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: timed out after 1 s" ]
+  child_ended publish-pkg.sh
 }
 
 # === check-all.sh --verify ===

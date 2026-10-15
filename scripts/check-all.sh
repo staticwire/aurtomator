@@ -28,6 +28,35 @@ MODE=check
 WORK_DIR=""
 DRY_RUN=""
 
+# Time budget of one package, in seconds: for its version check, and for
+# its update, verify or publish
+CHECK_TIMEOUT="${AURTOMATOR_CHECK_TIMEOUT:-120}"
+UPDATE_TIMEOUT="${AURTOMATOR_UPDATE_TIMEOUT:-300}"
+
+# Runs a per-package script within a budget. timeout runs it in a process
+# group of its own and ends the whole group, makepkg, git and curl below it
+# included. Such a group cannot read the terminal, where git and ssh may ask
+# for a passphrase, so --update, which runs on a terminal, has no budget.
+# Args: $1=budget in seconds, the command after it
+bounded() {
+  local budget="$1"
+  shift
+  if [[ "$MODE" == "update" ]]; then
+    "$@"
+  else
+    timeout --kill-after=30 "$budget" "$@"
+  fi
+}
+
+# Prints the error of a per-package script: the budget it ran out of, or
+# its stderr. Args: $1=exit code, $2=stderr file, $3=budget in seconds
+script_error() {
+  case "$1" in
+    124 | 137) echo "timed out after $3 s" ;;
+    *) cat "$2" ;;
+  esac
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --update)
@@ -76,8 +105,8 @@ if [[ "$MODE" == "verify" ]]; then
 
     err_file=$(mktemp)
     verify_rc=0
-    "${AURTOMATOR_DIR}/scripts/verify-pkg.sh" "$pkg_name" "$prepared" 2>"$err_file" || verify_rc=$?
-    verify_err=$(<"$err_file")
+    bounded "$UPDATE_TIMEOUT" "${AURTOMATOR_DIR}/scripts/verify-pkg.sh" "$pkg_name" "$prepared" 2>"$err_file" || verify_rc=$?
+    verify_err=$(script_error "$verify_rc" "$err_file" "$UPDATE_TIMEOUT")
     rm -f "$err_file"
     [[ -z "$verify_err" ]] || printf '%s\n' "$verify_err" >&2
 
@@ -140,7 +169,7 @@ handed_failure() {
       return
     fi
   fi
-  echo "update_failed: prepare handed over no update"
+  echo "update_failed: prepare and verify handed over no update"
 }
 
 updated=0
@@ -206,19 +235,21 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
   if [[ "$MODE" == "prepare" ]]; then
     check_cmd=(checked_version "$pkg_name")
   else
-    check_cmd=("${AURTOMATOR_DIR}/scripts/check-update.sh" "$pkg_name")
+    check_cmd=(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-update.sh" "$pkg_name")
   fi
 
   # Capture stderr separately for error reporting
   err_file=$(mktemp)
-  latest=$("${check_cmd[@]}" 2>"$err_file") || {
-    check_err=$(cat "$err_file")
+  check_rc=0
+  latest=$("${check_cmd[@]}" 2>"$err_file") || check_rc=$?
+  if ((check_rc != 0)); then
+    check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT")
     rm -f "$err_file"
     log_err "Failed to check $pkg_name: $check_err"
     echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     ((errors++)) || true
     continue
-  }
+  fi
   rm -f "$err_file"
 
   if [[ -z "$latest" ]]; then
@@ -267,8 +298,8 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
 
   err_file=$(mktemp)
   update_rc=0
-  "${cmd[@]}" 2>"$err_file" || update_rc=$?
-  update_err=$(cat "$err_file")
+  bounded "$UPDATE_TIMEOUT" "${cmd[@]}" 2>"$err_file" || update_rc=$?
+  update_err=$(script_error "$update_rc" "$err_file" "$UPDATE_TIMEOUT")
   rm -f "$err_file"
 
   case "$MODE:$update_rc" in

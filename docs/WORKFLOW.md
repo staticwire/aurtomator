@@ -64,7 +64,7 @@ flowchart TD
 - **Strategy-based version detection.** Each type of upstream source has its own script. A new source is a new script plus its entry in `scripts/validate-pkg.sh`.
 - **Patch, do not generate.** aurtomator trusts your PKGBUILD and changes only `pkgver`, `pkgrel`, checksums and `.SRCINFO`. Build steps, dependencies and install files stay untouched.
 - **Four jobs, one with secrets.** A PKGBUILD is code that every step reading it executes. `check` runs the strategies with the read-only workflow token, executes no PKGBUILD and decides what the run does. The jobs after it take the status of every package from `check`. `prepare` runs the PKGBUILD steps without secrets and without a token, and hands over only prepared files and update failures, because code from one PKGBUILD can write the files of every package there. `verify` downloads the sources of each prepared update and checks its checksums, without secrets, so code from one PKGBUILD cannot forge the checksums of another package. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD and never downloads a source, and checks what `verify` passes on before it pushes. See [4.4](#44-prepare-and-publish).
-- **Failure isolation.** A broken package does not block the others. Each failure is logged for its package and opens a GitHub Issue.
+- **Failure isolation.** A broken package does not block the others. Each failure is logged for its package and opens a GitHub Issue. Each package has a time budget, so one that hangs does not hold up the run either.
 
 ## 2. Package YAML Format
 
@@ -542,6 +542,8 @@ strategy: kde-tarball
 
 `check-all.sh --update` calls `update-pkg.sh` for every package with a new version. `--prepare`, `--verify` and `--publish` split the same update into three runs, see [4.4](#44-prepare-and-publish).
 
+Outside `--update`, `check-all.sh` gives each package a time budget: 120 seconds for `check-update.sh`, and 300 seconds each for `update-pkg.sh`, `verify-pkg.sh` and `publish-pkg.sh`. `timeout` ends the script together with everything it started, makepkg, git and curl included, and the package gets `check_failed: timed out after 120 s` or `update_failed: timed out after 300 s`. `AURTOMATOR_CHECK_TIMEOUT` and `AURTOMATOR_UPDATE_TIMEOUT` change the budgets. `--update` has none, because it runs on a terminal, where git and ssh may ask for a passphrase, and a command under `timeout` cannot read the terminal.
+
 ### 4.1 Arguments
 
 ```text
@@ -641,7 +643,7 @@ A PKGBUILD is a bash script, and every step that reads it executes it: the audit
 
 `check-all.sh --verify <dir>` runs `verify-pkg.sh` for every package in `packages/` that has a directory in `<dir>/prepared/`, and runs no strategy. An update that fails is removed from `<dir>/prepared/`, its status in `<dir>/status/` becomes `update_failed`, and `<dir>/status/_error_count` grows by one. Exit code 3 counts as a failure as well: the prepare run writes `base` for every package, so a moved AUR repo looks the same as a wrong `base`. The next run prepares the package again.
 
-`check-all.sh --publish <dir>` takes the statuses of the check run from `.status/`, as `--prepare` does, and writes `.status/` anew. `up_to_date` and `check_failed` stay as they are. A missing status, and one the check run does not write, become `check_failed`. For a package with `new_version` or `available_downgrade` and a directory in `<dir>/prepared/`, it runs the strategy once more and publishes with the version the strategy reports now. Exit code 3 leaves the status at `new_version` or `available_downgrade` without an error, and the next run prepares the package again. A package with `new_version` or `available_downgrade` and no prepared directory gets the `update_failed` status that the prepare or the verify run wrote for it to `<dir>/status/`, or `update_failed: prepare handed over no update`. Nothing else is taken from `<dir>/status/`, and only a regular file without a NUL byte: the prepare run executes PKGBUILDs, and code from one of them can write the files of every package. `_error_count` is the number of `check_failed` and `update_failed` statuses.
+`check-all.sh --publish <dir>` takes the statuses of the check run from `.status/`, as `--prepare` does, and writes `.status/` anew. `up_to_date` and `check_failed` stay as they are. A missing status, and one the check run does not write, become `check_failed`. For a package with `new_version` or `available_downgrade` and a directory in `<dir>/prepared/`, it runs the strategy once more and publishes with the version the strategy reports now. Exit code 3 leaves the status at `new_version` or `available_downgrade` without an error, and the next run prepares the package again. A package with `new_version` or `available_downgrade` and no prepared directory gets the `update_failed` status that the prepare or the verify run wrote for it to `<dir>/status/`, or `update_failed: prepare and verify handed over no update`. Nothing else is taken from `<dir>/status/`, and only a regular file without a NUL byte: the prepare run executes PKGBUILDs, and code from one of them can write the files of every package. `_error_count` is the number of `check_failed` and `update_failed` statuses.
 
 ## 5. CI Workflow: check-updates.yml
 
@@ -661,7 +663,7 @@ The workflow has four jobs after a short `image` job. `image` reads the image fr
 | `verify` | `contents: read` | none |
 | `publish` | `contents: write` for the status commit, `issues: write` for failure issues | `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` |
 
-`check` decides the run. `prepare` and `verify` run only when a package has a new version. `publish` runs for a new version and also for a change in the status table of `README.md`, but not after `prepare` or `verify` failed. In most hours nothing changes, and all three are skipped.
+`check` decides the run. `prepare` and `verify` run only when a package has a new version. `publish` runs for a new version and also for a change in the status table of `README.md`. It runs after a failure of `prepare` or `verify` as well: then it publishes nothing, and every package with a new version gets `update_failed` and an issue. In most hours nothing changes, and all three are skipped.
 
 ### 5.3 Steps
 
@@ -684,7 +686,7 @@ Every job starts with **Checkout:** `actions/checkout`, pinned by commit SHA lik
 1. **Install dependencies:** `sudo git openssh namcap jq go-yq pacman-contrib`, and the `builder` user.
 2. **Download statuses:** the `checked` artifact to `.status/`.
 3. **Prepare updates:** gives the workspace to `builder` and runs `check-all.sh --prepare handoff` as `builder`, without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token stays in `check`. Root prefixes every line of the output with `|` and a space, so nothing a PKGBUILD prints reaches the runner as a workflow command such as `::add-mask::`. The step runs in bash with `pipefail`, so a failure of `check-all.sh` fails it.
-4. **Hand over:** code from a PKGBUILD has run in the workspace by now, so the step runs nothing from it. A process started by a PKGBUILD can outlive its step, so the step kills every process of `builder`. Only after that does root copy the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
+4. **Hand over:** code from a PKGBUILD has run in the workspace by now, so the step runs nothing from it. A process started by a PKGBUILD can outlive its step, so the step kills every process of `builder` and waits up to 30 seconds for them to end. A zombie does not count: it runs nothing, and pid 1 of a job container never reaps one. A process that is still running after that fails the step. Only after that does root copy the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
 5. **Upload handoff:** uploads `upload/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
 
 `verify`:

@@ -139,9 +139,19 @@ jobs:
       - name: Hand over
         run: |
           # A process started by a PKGBUILD can outlive its step. Stop all
-          # of them before root reads anything builder wrote.
-          pkill -KILL -u builder || true
-          while pgrep -u builder >/dev/null; do sleep 1; done
+          # of them before root reads anything builder wrote. A zombie runs
+          # nothing, and pid 1 of a job container never reaps one, so only
+          # the other processes count.
+          live() { ps -u builder -o stat= | awk '!/^Z/ { n++ } END { exit !n }'; }
+          for _ in $(seq 30); do
+            live || break
+            pkill -KILL -u builder || true
+            sleep 1
+          done
+          if live; then
+            echo "::error::A process of builder is still running"
+            exit 1
+          fi
 
           # Copy regular files from the expected paths only, and nothing
           # else gets uploaded. find does not follow symlinks; -print0,
@@ -211,16 +221,14 @@ jobs:
           retention-days: 1
 
   # Pushes what verify passed on and records the statuses of the check job.
-  # Runs also when prepare is skipped, for a change in the status table.
-  # Nothing here executes a PKGBUILD: publish-pkg.sh checks the prepared
-  # files against the AUR copy.
+  # Runs also when prepare is skipped, for a change in the status table, and
+  # when prepare or verify failed: then it publishes nothing, and every
+  # package with a new version gets update_failed and an issue. Nothing here
+  # executes a PKGBUILD: publish-pkg.sh checks the prepared files against
+  # the AUR copy.
   publish:
     needs: [image, check, prepare, verify]
-    if: >-
-      !cancelled() &&
-      needs.check.outputs.work == 'true' &&
-      contains(fromJSON('["success", "skipped"]'), needs.prepare.result) &&
-      contains(fromJSON('["success", "skipped"]'), needs.verify.result)
+    if: "!cancelled() && needs.check.outputs.work == 'true'"
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
