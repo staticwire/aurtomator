@@ -410,7 +410,31 @@ commit_aur_state() {
   commit_aur_state "bzr source"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Local source lp:demo is missing"* ]]
+  [[ "$output" == *"Cannot check the checksum of lp:demo"* ]]
+}
+
+@test "verify-pkg: takes a file next to the PKGBUILD over a download of the same name" {
+  setup_verify
+  echo "committed archive" >"$TEST_TMPDIR/aur-work-demo/demo-1.1.0.tar.gz"
+  commit_aur_state "archive in the repo"
+  local sum
+  sum=$(sha256sum <"$TEST_TMPDIR/aur-work-demo/demo-1.1.0.tar.gz" | cut -d' ' -f1)
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$sum' '$SUM_LOCAL')"
+  write_srcinfo "$PREPARED/.SRCINFO" 1.1.0 1 "$sum" "$SUM_LOCAL"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+@test "verify-pkg: refuses a source that is a symlink in the AUR repo" {
+  setup_verify
+  local work="$TEST_TMPDIR/aur-work-demo"
+  git -C "$work" rm -q local.patch
+  ln -s /etc/hostname "$work/local.patch"
+  commit_aur_state "symlink"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"symlink"* ]]
 }
 
 @test "verify-pkg: refuses a .SRCINFO checksum array the PKGBUILD does not have" {

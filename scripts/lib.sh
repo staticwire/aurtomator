@@ -615,17 +615,37 @@ check_prepared_files() {
 # SOURCE CHECKSUMS
 # =============================================================================
 
-# Print the path of a source as makepkg finds it. A remote source is
-# downloaded to $3, once per URL. A local one is read from the AUR repo by
-# its file name.
+# Print the path of the file makepkg hashes for a source, following
+# get_protocol, get_filename and download_file of makepkg. A source that
+# makepkg would handle another way is refused, never guessed at.
 # Args: $1=source entry of a .SRCINFO, $2=AUR repo, $3=download directory
 _source_file() {
   local entry="$1" url="${1#*::}" name file
-  if [[ "$entry" == *://* ]]; then
-    if [[ ! "${url%%://*}" =~ ^(http|https|ftp)$ ]]; then
-      log_err "Cannot check the checksum of $entry: only http, https and ftp sources are downloaded"
+  if [[ "$entry" == *::* ]]; then
+    name="${entry%%::*}"
+  else
+    name="${entry##*/}"
+  fi
+  # makepkg reads lp: without :// as a bzr source
+  if [[ -z "$name" || "$name" == */* || "$name" == . || "$name" == .. ]] ||
+    [[ "$entry" == *://* && ! "${url%%://*}" =~ ^(http|https|ftp)$ ]] ||
+    [[ "$entry" != *://* && "$entry" == *lp:* ]]; then
+    log_err "Cannot check the checksum of $entry: only http, https and ftp sources and local files are checked"
+    return 1
+  fi
+
+  # makepkg takes a file of that name next to the PKGBUILD before it
+  # downloads anything
+  file="${2}/${name}"
+  if [[ -e "$file" || -L "$file" ]]; then
+    if [[ -L "$file" || ! -f "$file" ]]; then
+      log_err "Source $entry is a symlink or not a regular file in the AUR repo"
       return 1
     fi
+  elif [[ "$entry" != *://* ]]; then
+    log_err "Local source $entry is missing from the AUR repo"
+    return 1
+  else
     file="${3}/$(printf '%s' "$url" | sha256sum | cut -d' ' -f1)"
     # Retried as makepkg does. Redirects may only lead to the protocols above.
     if [[ ! -f "$file" ]] &&
@@ -633,18 +653,6 @@ _source_file() {
         --proto-redir '=http,https,ftp' -o "$file" "$url"; then
       rm -f "$file"
       log_err "Could not download $url"
-      return 1
-    fi
-  else
-    if [[ "$entry" == *::* ]]; then
-      name="${entry%%::*}"
-    else
-      name="${entry##*/}"
-    fi
-    file="${2}/${name}"
-    if [[ -z "$name" || "$name" == */* || "$name" == . || "$name" == .. ||
-      -L "$file" || ! -f "$file" ]]; then
-      log_err "Local source $entry is missing from the AUR repo or not a regular file"
       return 1
     fi
   fi
@@ -661,10 +669,13 @@ _source_file() {
 verify_prepared_sums() {
   local aur_dir="$1" prepared="$2" downloads="$3"
   local -A srcinfo=() pkgbuild=()
-  local -a keys=() sums=() sources=()
+  local -a lines=() keys=() sums=() sources=()
   local line key value algo i file actual
 
-  while IFS= read -r line; do
+  # mapfile, as check_prepared_srcinfo reads it: a last line without a
+  # newline counts
+  mapfile -t lines <"${prepared}/.SRCINFO"
+  for line in "${lines[@]}"; do
     [[ "$line" == *" = "* ]] || continue
     key="${line%% = *}"
     key="${key#"${key%%[![:space:]]*}"}"
@@ -672,7 +683,7 @@ verify_prepared_sums() {
       "$key" =~ ^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$ ]]; then
       srcinfo[$key]+="${line#* = }"$'\n'
     fi
-  done <"${prepared}/.SRCINFO"
+  done
 
   while IFS=$'\t' read -r _ key value; do
     [[ -n "${pkgbuild[$key]+set}" ]] || keys+=("$key")
