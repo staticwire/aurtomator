@@ -472,6 +472,42 @@ EOF
   [[ "$output" != *"has a passphrase"* ]]
 }
 
+@test "setup gpg: removes the temporary keyring after the passphrase-free copy" {
+  mock_gh_unavailable
+  mock_gpg_strip_flow
+  write_full_config "PASSKEY003"
+  mkdir -p "$TEST_TMPDIR/tmp"
+
+  TMPDIR="$TEST_TMPDIR/tmp" run "$TEST_TMPDIR/scripts/setup.sh" gpg <<<"y"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"passphrase-free copy created for CI"* ]]
+  [ -z "$(ls -A "$TEST_TMPDIR/tmp")" ]
+}
+
+@test "setup gpg: removes the temporary keyring when the terminal closes after the passphrase is gone" {
+  mock_gh_unavailable
+  mock_gpg_strip_flow
+  write_full_config "PASSKEY003"
+  mkdir -p "$TEST_TMPDIR/tmp"
+  # gpg-connect-agent that removes the passphrase, then the terminal of
+  # setup.sh closes. The signal goes to the topmost setup.sh process, not
+  # to the subshell of the command substitution.
+  cat >"$TEST_TMPDIR/mock-bin/gpg-connect-agent" <<'EOF'
+#!/usr/bin/env bash
+echo "OK"
+pid=$PPID
+while [[ "$pid" -gt 1 ]] && ps -o args= -p "$pid" | grep -q 'scripts/setup.sh'; do
+  target=$pid
+  pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
+done
+kill -HUP "$target"
+EOF
+
+  TMPDIR="$TEST_TMPDIR/tmp" run "$TEST_TMPDIR/scripts/setup.sh" gpg <<<"y"
+  [ "$status" -eq 129 ]
+  [ -z "$(ls -A "$TEST_TMPDIR/tmp")" ]
+}
+
 @test "setup gpg secrets: manual path prints the passphrase-free copy" {
   mock_gh_unavailable
   mock_gpg_strip_flow

@@ -174,6 +174,17 @@ gpg_key_has_passphrase() {
   ! echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$1" >/dev/null 2>&1
 }
 
+# The temporary keyring of setup_gpg holds the signing subkey without a
+# passphrase once gpg-agent has removed it. setup_gpg sets this function as
+# the EXIT trap, so Ctrl-C or a closed terminal does not leave it on disk.
+TMP_GNUPG=""
+remove_tmp_gnupg() {
+  [[ -n "$TMP_GNUPG" ]] || return 0
+  gpgconf --homedir "$TMP_GNUPG" --kill gpg-agent 2>/dev/null || true
+  rm -rf "$TMP_GNUPG"
+  TMP_GNUPG=""
+}
+
 setup_gpg() {
   header "gpg" "Sign AUR commits with GPG (optional)"
 
@@ -253,10 +264,10 @@ setup_gpg() {
     fi
 
     # Strip passphrase via temp keyring (only the signing subkey, not all subkeys)
-    local tmp_gnupg
-    tmp_gnupg=$(mktemp -d)
-    chmod 700 "$tmp_gnupg"
-    echo "pinentry-program /usr/bin/pinentry" >"$tmp_gnupg/gpg-agent.conf"
+    TMP_GNUPG=$(mktemp -d)
+    trap remove_tmp_gnupg EXIT
+    chmod 700 "$TMP_GNUPG"
+    echo "pinentry-program /usr/bin/pinentry" >"$TMP_GNUPG/gpg-agent.conf"
 
     # Export ONLY the signing subkey (! suffix = exact key) from real keyring
     # Pinentry will ask for passphrase once
@@ -264,46 +275,44 @@ setup_gpg() {
     exported_key=$(gpg --export-secret-subkeys --armor "${GPG_KEY_ID}!" 2>/dev/null) || true
     if [[ -z "$exported_key" ]]; then
       fail "Failed to export key (wrong passphrase or cancelled)"
-      rm -rf "$tmp_gnupg"
+      remove_tmp_gnupg
       GPG_KEY_ID=""
       return 0
     fi
 
     # Import into temp keyring
-    if ! echo "$exported_key" | gpg --homedir "$tmp_gnupg" --batch --import 2>/dev/null; then
+    if ! echo "$exported_key" | gpg --homedir "$TMP_GNUPG" --batch --import 2>/dev/null; then
       fail "Failed to import key into temporary keyring"
-      rm -rf "$tmp_gnupg"
+      remove_tmp_gnupg
       GPG_KEY_ID=""
       return 0
     fi
 
     # Remove passphrase via gpg-agent in isolated temp keyring
     local keygrip
-    keygrip=$(gpg --homedir "$tmp_gnupg" --list-secret-keys --with-keygrip 2>/dev/null |
+    keygrip=$(gpg --homedir "$TMP_GNUPG" --list-secret-keys --with-keygrip 2>/dev/null |
       grep -A1 "\[S\]" | grep Keygrip | awk '{print $3}' || true)
 
     if [[ -z "$keygrip" ]]; then
       fail "Could not determine keygrip for signing subkey"
-      rm -rf "$tmp_gnupg"
+      remove_tmp_gnupg
       GPG_KEY_ID=""
       return 0
     fi
 
     local passwd_out passwd_rc=0
-    passwd_out=$(gpg-connect-agent --homedir "$tmp_gnupg" "PASSWD $keygrip" /bye 2>&1) || passwd_rc=$?
+    passwd_out=$(gpg-connect-agent --homedir "$TMP_GNUPG" "PASSWD $keygrip" /bye 2>&1) || passwd_rc=$?
     if [[ "$passwd_rc" -ne 0 ]] || [[ "$passwd_out" == *"ERR"* ]]; then
       fail "Failed to remove passphrase (cancelled or timed out)"
-      gpgconf --homedir "$tmp_gnupg" --kill gpg-agent 2>/dev/null || true
-      rm -rf "$tmp_gnupg"
+      remove_tmp_gnupg
       GPG_KEY_ID=""
       return 0
     fi
 
     # Export the clean key for the secrets step
-    GPG_CLEAN_KEY=$(gpg --homedir "$tmp_gnupg" --batch --pinentry-mode loopback \
+    GPG_CLEAN_KEY=$(gpg --homedir "$TMP_GNUPG" --batch --pinentry-mode loopback \
       --passphrase "" --export-secret-subkeys --armor "${GPG_KEY_ID}!" 2>/dev/null) || true
-    gpgconf --homedir "$tmp_gnupg" --kill gpg-agent 2>/dev/null || true
-    rm -rf "$tmp_gnupg"
+    remove_tmp_gnupg
 
     if [[ -z "$GPG_CLEAN_KEY" ]]; then
       fail "Failed to export passphrase-free key"
