@@ -2,13 +2,15 @@
 #
 # check-all.sh - Check all packages for updates, optionally update them
 #
-# Usage: ./scripts/check-all.sh [--update | --prepare <dir> | --publish <dir>] [--dry-run]
+# Usage: ./scripts/check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--dry-run]
 #
 # Without a mode: only checks and reports
 # With --update: runs update-pkg.sh for each outdated package
 # With --prepare <dir>: runs update-pkg.sh --prepare <dir>/prepared for each
 #   package the check run before it found outdated, without running the
 #   strategies, and copies the statuses to <dir>/status
+# With --verify <dir>: runs verify-pkg.sh for each package in <dir>/prepared
+#   and takes out the ones that fail, without running the strategies
 # With --publish <dir>: runs publish-pkg.sh for each package in <dir>/prepared
 #   and takes the other statuses from <dir>/status
 # With --dry-run: runs update-pkg.sh or publish-pkg.sh in dry-run mode
@@ -32,7 +34,7 @@ while [[ $# -gt 0 ]]; do
       MODE=update
       shift
       ;;
-    --prepare | --publish)
+    --prepare | --verify | --publish)
       if [[ -z "${2:-}" ]]; then
         echo "$1 needs a directory" >&2
         exit 1
@@ -46,7 +48,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '3,17p' "$0"
+      sed -n '3,19p' "$0"
       exit 0
       ;;
     *)
@@ -55,6 +57,56 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# --verify checks every update in <dir>/prepared with verify-pkg.sh. It takes
+# out an update that fails, with an update_failed status, and one the AUR
+# moved under, with its status kept, so --publish skips both. Only package
+# names from packages/ reach a path.
+if [[ "$MODE" == "verify" ]]; then
+  failed=0
+  for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
+    [[ -f "$pkg_file" ]] || continue
+    pkg_name=$(pkg_get "$pkg_file" .name)
+    prepared="${WORK_DIR}/prepared/${pkg_name}"
+    if [[ -L "${WORK_DIR}/prepared" || ! -d "$prepared" ]]; then
+      continue
+    fi
+
+    err_file=$(mktemp)
+    verify_rc=0
+    "${AURTOMATOR_DIR}/scripts/verify-pkg.sh" "$pkg_name" "$prepared" 2>"$err_file" || verify_rc=$?
+    verify_err=$(<"$err_file")
+    rm -f "$err_file"
+    [[ -z "$verify_err" ]] || printf '%s\n' "$verify_err" >&2
+
+    case "$verify_rc" in
+      0) ;;
+      3)
+        rm -rf "$prepared"
+        ;;
+      *)
+        log_err "Failed to verify $pkg_name"
+        rm -rf "$prepared"
+        mkdir -p "${WORK_DIR}/status"
+        rm -f "${WORK_DIR}/status/${pkg_name}"
+        echo "update_failed: ${verify_err}" >"${WORK_DIR}/status/${pkg_name}"
+        ((failed++)) || true
+        ;;
+    esac
+  done
+
+  if ((failed > 0)); then
+    count_file="${WORK_DIR}/status/_error_count"
+    count=0
+    if [[ -f "$count_file" && ! -L "$count_file" ]]; then
+      count=$(<"$count_file")
+    fi
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    rm -f "$count_file"
+    echo "$((count + failed))" >"$count_file"
+  fi
+  exit 0
+fi
 
 # Status directory for per-package results
 STATUS_DIR="${AURTOMATOR_DIR}/.status"

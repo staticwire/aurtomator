@@ -354,11 +354,12 @@ _has_nul() {
   [[ "$(tr -d '\000' <"$1" | wc -c)" -ne "$(wc -c <"$1")" ]]
 }
 
-# Split a PKGBUILD into lines of four kinds, without executing it:
+# Split a PKGBUILD into lines of five kinds, without executing it:
 #   SKEL<TAB>line          every line, with pkgver=, pkgrel= and each
 #                          top-level checksum array replaced by a placeholder
 #   PKGVER|PKGREL<TAB>val  the value of a pkgver= or pkgrel= line
 #   SUM<TAB>array<TAB>index<TAB>HASH|SKIP  one line per checksum
+#   SUMVAL<TAB>array<TAB>value  the same checksum with its value
 #   BAD<TAB>text           anything in a checksum array but a quoted checksum
 # Args: $1=pkgbuild path
 _pkgbuild_parts() {
@@ -373,6 +374,7 @@ _pkgbuild_parts() {
           continue
         }
         print "SUM\t" name "\t" idx++ "\t" (t ~ /SKIP/ ? "SKIP" : "HASH")
+        print "SUMVAL\t" name "\t" substr(t, 2, length(t) - 2)
       }
     }
     function body(text,   end) {
@@ -565,6 +567,153 @@ check_prepared_srcinfo() {
         fi
         ;;
     esac
+  done
+  return 0
+}
+
+# Check the layout of a prepared directory and print its base, the AUR
+# commit the update was prepared from
+# Args: $1=prepared dir
+# Returns: 0 when the layout holds, 1 otherwise (reason on stderr)
+prepared_base() {
+  local f base
+  if [[ -L "$1" || ! -d "$1" ]]; then
+    log_err "Prepared directory is missing or a symlink: $1"
+    return 1
+  fi
+  for f in PKGBUILD .SRCINFO base; do
+    if [[ ! -f "$1/$f" || -L "$1/$f" ]]; then
+      log_err "Prepared $f is missing or not a regular file"
+      return 1
+    fi
+  done
+  base=$(<"$1/base")
+  if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
+    log_err "Prepared base is not a commit id"
+    return 1
+  fi
+  echo "$base"
+}
+
+# Check a prepared PKGBUILD and .SRCINFO against the AUR repo at their base
+# Args: $1=AUR repo, $2=prepared dir, $3=expected version
+# Returns: 0 when both files pass, 1 otherwise (reason on stderr)
+check_prepared_files() {
+  local f
+  # git keeps symlinks, and cp writes through one
+  for f in PKGBUILD .SRCINFO; do
+    if [[ -L "$1/$f" || ! -f "$1/$f" ]]; then
+      log_err "$f in the AUR repo is missing, a symlink or not a regular file"
+      return 1
+    fi
+  done
+  check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" &&
+    check_prepared_srcinfo "$1/.SRCINFO" "$2/.SRCINFO" "$3"
+}
+
+# =============================================================================
+# SOURCE CHECKSUMS
+# =============================================================================
+
+# Print the path of a source as makepkg finds it. A remote source is
+# downloaded to $3, once per URL. A local one is read from the AUR repo by
+# its file name.
+# Args: $1=source entry of a .SRCINFO, $2=AUR repo, $3=download directory
+_source_file() {
+  local entry="$1" url="${1#*::}" name file
+  if [[ "$entry" == *://* ]]; then
+    case "${url%%://*}" in
+      http | https | ftp) ;;
+      *)
+        log_err "Cannot check the checksum of $entry: only http, https and ftp sources are downloaded"
+        return 1
+        ;;
+    esac
+    file="${3}/$(printf '%s' "$url" | sha256sum | cut -d' ' -f1)"
+    # Retried as makepkg does. Redirects may only lead to the protocols above.
+    if [[ ! -f "$file" ]] &&
+      ! curl -qgfsSL --retry 3 --retry-delay 3 --proto '=http,https,ftp' \
+        --proto-redir '=http,https,ftp' -o "$file" "$url"; then
+      rm -f "$file"
+      log_err "Could not download $url"
+      return 1
+    fi
+  elif [[ "$entry" == *lp:* ]]; then
+    log_err "Cannot check the checksum of $entry"
+    return 1
+  else
+    if [[ "$entry" == *::* ]]; then
+      name="${entry%%::*}"
+    else
+      name="${entry##*/}"
+    fi
+    file="${2}/${name}"
+    if [[ -z "$name" || "$name" == */* || "$name" == . || "$name" == .. ||
+      -L "$file" || ! -f "$file" ]]; then
+      log_err "Local source $entry is missing from the AUR repo or not a regular file"
+      return 1
+    fi
+  fi
+  printf '%s\n' "$file"
+}
+
+# check_prepared_pkgbuild lets checksum values change, and the code of one
+# PKGBUILD runs where the updates of all packages are prepared. So each
+# value must match its source, hashed the way makepkg does. The sources
+# come from the prepared .SRCINFO, which check_prepared_srcinfo ties to the
+# AUR copy. Run check_prepared_files first.
+# Args: $1=AUR repo, $2=prepared dir, $3=empty directory for the downloads
+# Returns: 0 when every checksum matches, 1 otherwise (reason on stderr)
+verify_prepared_sums() {
+  local aur_dir="$1" prepared="$2" downloads="$3"
+  local -A srcinfo=() pkgbuild=()
+  local -a keys=() sums=() sources=()
+  local line key value algo i file actual
+
+  while IFS= read -r line; do
+    [[ "$line" == *" = "* ]] || continue
+    key="${line%% = *}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    if [[ "$key" =~ ^source(_[A-Za-z0-9_]+)?$ ||
+      "$key" =~ ^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$ ]]; then
+      srcinfo[$key]+="${line#* = }"$'\n'
+    fi
+  done <"${prepared}/.SRCINFO"
+
+  while IFS=$'\t' read -r _ key value; do
+    [[ -n "${pkgbuild[$key]+set}" ]] || keys+=("$key")
+    pkgbuild[$key]+="${value}"$'\n'
+  done < <(_pkgbuild_parts "${prepared}/PKGBUILD" | grep $'^SUMVAL\t')
+
+  for key in "${!srcinfo[@]}"; do
+    if [[ "$key" == *sums* && -z "${pkgbuild[$key]+set}" ]]; then
+      log_err "Prepared .SRCINFO lists ${key}, the PKGBUILD does not"
+      return 1
+    fi
+  done
+
+  for key in "${keys[@]}"; do
+    if [[ "${srcinfo[$key]:-}" != "${pkgbuild[$key]}" ]]; then
+      log_err "Prepared PKGBUILD and .SRCINFO differ in ${key}"
+      return 1
+    fi
+    algo="${key%%sums*}"
+    mapfile -t sums < <(printf '%s' "${pkgbuild[$key]}")
+    mapfile -t sources < <(printf '%s' "${srcinfo[source${key#*sums}]:-}")
+    if [[ "${#sums[@]}" -ne "${#sources[@]}" ]]; then
+      log_err "Prepared .SRCINFO has ${#sums[@]} ${key} for ${#sources[@]} sources"
+      return 1
+    fi
+    for i in "${!sums[@]}"; do
+      [[ "${sums[$i]}" != "SKIP" ]] || continue
+      file=$(_source_file "${sources[$i]}" "$aur_dir" "$downloads") || return 1
+      actual=$("${algo}sum" "$file")
+      actual="${actual%% *}"
+      if [[ "${sums[$i],,}" != "$actual" ]]; then
+        log_err "${key} of ${sources[$i]} is ${sums[$i]}, the source has ${actual}"
+        return 1
+      fi
+    done
   done
   return 0
 }

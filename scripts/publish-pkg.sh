@@ -28,21 +28,7 @@ load_config
 
 strategy=$(pkg_get "$PKG_FILE" .strategy)
 
-if [[ -L "$PREPARED" || ! -d "$PREPARED" ]]; then
-  log_err "Prepared directory is missing or a symlink: $PREPARED"
-  exit 1
-fi
-for f in PKGBUILD .SRCINFO base; do
-  if [[ ! -f "${PREPARED}/${f}" || -L "${PREPARED}/${f}" ]]; then
-    log_err "Prepared $f is missing or not a regular file"
-    exit 1
-  fi
-done
-base=$(<"${PREPARED}/base")
-if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
-  log_err "Prepared base is not a commit id"
-  exit 1
-fi
+base=$(prepared_base "$PREPARED") || exit 1
 
 prepared_ver=$(sed -n 's/^pkgver=//p' "${PREPARED}/PKGBUILD" | head -1)
 if [[ "$prepared_ver" != "$VERSION" ]]; then
@@ -72,16 +58,7 @@ fi
 # CHECK AND PUSH
 # =============================================================================
 
-# git keeps symlinks, and cp writes through one
-for f in PKGBUILD .SRCINFO; do
-  if [[ -L "${aur_dir}/${f}" || ! -f "${aur_dir}/${f}" ]]; then
-    log_err "$f in the AUR repo of $PKG_NAME is missing, a symlink or not a regular file"
-    exit 1
-  fi
-done
-
-check_prepared_pkgbuild "${aur_dir}/PKGBUILD" "${PREPARED}/PKGBUILD" "$VERSION" || exit 1
-check_prepared_srcinfo "${aur_dir}/.SRCINFO" "${PREPARED}/.SRCINFO" "$VERSION" || exit 1
+check_prepared_files "$aur_dir" "$PREPARED" "$VERSION" || exit 1
 cp "${PREPARED}/PKGBUILD" "${PREPARED}/.SRCINFO" "$aur_dir/"
 
 if git -C "$aur_dir" diff --quiet; then
