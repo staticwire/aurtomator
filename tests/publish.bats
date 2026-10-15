@@ -59,8 +59,9 @@ write_srcinfo() {
 
 # Helper: bare repo standing in for the AUR repo of <pkg>, holding the given
 # PKGBUILD, .SRCINFO and other files. A git on PATH clones it for any AUR
-# URL and logs that URL to $TEST_TMPDIR/clone-urls. Sets AUR_REMOTE and
-# AUR_BASE.
+# URL and logs that URL to $TEST_TMPDIR/clone-urls. A mirror clone gets
+# $TEST_TMPDIR/upstream.git instead, logged to git-clone-urls. Sets
+# AUR_REMOTE and AUR_BASE.
 # Usage: make_aur_remote <pkg> <PKGBUILD path> <.SRCINFO path> [file]...
 make_aur_remote() {
   local work="$TEST_TMPDIR/aur-work-$1"
@@ -79,6 +80,10 @@ make_aur_remote() {
   AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
   cat >"$MOCK_DIR/git" <<EOF
 #!/usr/bin/env bash
+if [[ "\$1" == "clone" && " \$* " == *" --mirror "* ]]; then
+  echo "\${@: -2:1}" >>"$TEST_TMPDIR/git-clone-urls"
+  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git clone -q --mirror "$TEST_TMPDIR/upstream.git" "\${@: -1}"
+fi
 if [[ "\$1" == "clone" ]]; then
   echo "\$2" >>"$TEST_TMPDIR/clone-urls"
   exec /usr/bin/git clone -q "$AUR_REMOTE" "\$3"
@@ -366,7 +371,7 @@ commit_aur_state() {
   setup_verify "file:///etc"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"only http, https and ftp"* ]]
+  [[ "$output" == *"Cannot check the checksum of file:"* ]]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
@@ -435,6 +440,112 @@ commit_aur_state() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"symlink"* ]]
+}
+
+# Helper: commit everything in a repo at a fixed date and tag the commit
+# Usage: tag_upstream <repo> <tag> <date>
+tag_upstream() {
+  git -C "$1" add .
+  GIT_AUTHOR_DATE="$3" GIT_COMMITTER_DATE="$3" git -C "$1" \
+    -c user.name=up -c user.email=up@example.invalid -c commit.gpgsign=false \
+    commit -qm "$2"
+  git -C "$1" -c tag.gpgSign=false tag "$2"
+}
+
+# Helper: a repo standing in for the upstream git repo of demo, with tags
+# v1.0.0 and v1.1.0 at fixed dates, so that their archives are fixed too.
+# Its .gitattributes keeps ignored.txt out of git archive, unless the
+# attributes are turned off as makepkg does. GIT_SUM is what makepkg -g
+# prints for sha256sums of v1.1.0.
+make_upstream() {
+  local work="$TEST_TMPDIR/upstream-work"
+  git init -q -b main "$work"
+  printf 'demo\n' >"$work/README"
+  printf 'kept by makepkg\n' >"$work/ignored.txt"
+  printf 'ignored.txt export-ignore\n' >"$work/.gitattributes"
+  tag_upstream "$work" v1.0.0 2026-01-01T00:00:00Z
+  printf '1.1.0\n' >"$work/VERSION"
+  tag_upstream "$work" v1.1.0 2026-01-02T00:00:00Z
+  git clone -q --bare "$work" "$TEST_TMPDIR/upstream.git"
+  GIT_SUM=3c22f642ed922d2407075abedb6b06a9e1a4d0813d9bfaff6c0acfc30a419e32
+  GIT_COMMIT=25463c6b9d6d29b0aafce9086418e06b77292dff
+}
+
+# Helper: put a source in place of the remote archive of setup_verify, in
+# the AUR repo and in the prepared files. VER stands for the version.
+# Usage: use_source <source>
+use_source() {
+  local work="$TEST_TMPDIR/aur-work-demo" pkgver='${pkgver}'
+  sed -i "s|https://example.com/demo-[^\"]*\.tar\.gz|${1//VER/$pkgver}|" "$work/PKGBUILD" "$PREPARED/PKGBUILD"
+  sed -i "s|= https://example.com/demo-1.0.0.tar.gz\$|= ${1//VER/1.0.0}|" "$work/.SRCINFO"
+  sed -i "s|= https://example.com/demo-1.1.0.tar.gz\$|= ${1//VER/1.1.0}|" "$PREPARED/.SRCINFO"
+  commit_aur_state "source $1"
+}
+
+@test "verify-pkg: checks a git source at a tag as makepkg does" {
+  setup_verify
+  make_upstream
+  use_source "demo::git+https://example.com/demo.git#tag=vVER"
+  sed -i "s/$SUM_REMOTE/$GIT_SUM/" "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 0 ]
+  grep -qx 'https://example.com/demo.git' "$TEST_TMPDIR/git-clone-urls"
+}
+
+@test "verify-pkg: checks a git source at a commit as makepkg does" {
+  setup_verify
+  make_upstream
+  use_source "git+https://example.com/demo.git#commit=$GIT_COMMIT"
+  sed -i "s/$SUM_REMOTE/$GIT_SUM/" "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 0 ]
+}
+
+@test "verify-pkg: refuses a wrong checksum of a git source" {
+  setup_verify
+  make_upstream
+  use_source "demo::git+https://example.com/demo.git#tag=vVER"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo.git#tag=v1.1.0"* ]]
+}
+
+@test "verify-pkg: refuses a checksum of a git source at a branch" {
+  setup_verify
+  make_upstream
+  use_source "demo::git+https://example.com/demo.git#branch=main"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tag or commit"* ]]
+  [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
+}
+
+@test "verify-pkg: refuses a git source over a protocol other than https or http" {
+  setup_verify
+  make_upstream
+  use_source "demo::git+ssh://example.com/demo.git#tag=vVER"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
+}
+
+@test "verify-pkg: refuses a git tag that git would read as an option" {
+  setup_verify
+  make_upstream
+  use_source "demo::git+https://example.com/demo.git#tag=-vVER"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
+}
+
+@test "verify-pkg: refuses a git source whose name a file in the AUR repo takes" {
+  setup_verify
+  make_upstream
+  echo "not a repo" >"$TEST_TMPDIR/aur-work-demo/demo"
+  use_source "demo::git+https://example.com/demo.git#tag=vVER"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"takes the place of the clone"* ]]
 }
 
 @test "verify-pkg: refuses a .SRCINFO checksum array the PKGBUILD does not have" {
