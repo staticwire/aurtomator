@@ -109,7 +109,7 @@ With GPG signing, also create:
 
 | Secret name       | Value                                                      |
 |-------------------|------------------------------------------------------------|
-| `GPG_SIGNING_KEY` | Output of `gpg --export-secret-subkeys --armor <key-id>`   |
+| `GPG_SIGNING_KEY` | Output of `gpg --export-secret-subkeys --armor '<subkey-id>!'` |
 
 That output works in CI only for a key without a passphrase. For a key with one, `./scripts/setup.sh gpg secrets` prints a passphrase-free copy, see [Passphrase stripping](#passphrase-stripping-3-pinentry-dialogs).
 
@@ -123,7 +123,7 @@ It checks identity, SSH access, GPG signing when configured, and the secrets whe
 
 ## GPG signing (optional)
 
-aurtomator works without GPG. With it, every AUR commit is signed with your key, and AUR users can check the signature with `git log --show-signature`. The signing key is stored as a CI secret, so a leak of the CI secrets exposes it as well. A dedicated subkey limits the damage: you revoke the subkey and keep your master key.
+aurtomator works without GPG. With it, every AUR commit is signed with your key, and AUR users can check the signature with `git log --show-signature`. The signing key is stored as a CI secret, so a leak of the CI secrets exposes it as well. A dedicated subkey limits the damage: you revoke the subkey and keep your master key. The setup script accepts only a signing subkey and refuses a master key, which certifies the others and stays on your machine.
 
 ### Create a dedicated signing subkey
 
@@ -144,8 +144,10 @@ gpg --list-keys --keyid-format long your-email@example.com
 With `gh`, the setup script does this. By hand, for a key without a passphrase:
 
 ```bash
-gpg --export-secret-subkeys --armor <subkey-id>
+gpg --export-secret-subkeys --armor '<subkey-id>!'
 ```
+
+The `!` exports that subkey alone. Without it, gpg exports every secret subkey of the key, an encryption subkey included.
 
 Paste the full output, including the `-----BEGIN PGP PRIVATE KEY BLOCK-----` and `-----END PGP PRIVATE KEY BLOCK-----` lines, as the `GPG_SIGNING_KEY` secret.
 

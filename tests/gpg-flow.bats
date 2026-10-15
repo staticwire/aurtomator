@@ -280,21 +280,19 @@ teardown() {
   [[ "$output" == *"Cannot remove passphrase in non-interactive"* ]]
 }
 
-@test "gpg-real: setup.sh warns about master key" {
+@test "gpg-real: setup.sh refuses a master key" {
   run "$TEST_TMPDIR/scripts/setup.sh" gpg \
     --gpg-key "$NOPASS_MASTER_ID" --non-interactive
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"master key"* ]]
-  [[ "$output" == *"Continuing with master key"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$NOPASS_MASTER_ID is a primary key"* ]]
 }
 
-@test "gpg-real: setup.sh detects passphrase on master key" {
+@test "gpg-real: setup.sh refuses a master key with a passphrase" {
   run "$TEST_TMPDIR/scripts/setup.sh" gpg \
     --gpg-key "$WITHPASS_MASTER_ID" --non-interactive
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"master key"* ]]
-  [[ "$output" == *"passphrase"* ]]
-  [[ "$output" == *"Cannot remove passphrase in non-interactive"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is a primary key"* ]]
+  [[ "$output" != *"Cannot remove passphrase"* ]]
 }
 
 @test "gpg-real: setup.sh rejects nonexistent key" {
