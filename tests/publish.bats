@@ -959,9 +959,12 @@ EOF
   chmod +x "$TEST_TMPDIR/scripts/$1"
 }
 
-# Succeeds when the child that hanging_script started has ended
+# Succeeds when the child that hanging_script started has ended. In a job
+# container pid 1 never reaps an orphan, so an ended child can stay a zombie.
 child_ended() {
-  ! kill -0 "$(cat "$TEST_TMPDIR/$1.child")" 2>/dev/null
+  local state
+  state=$(ps -o stat= -p "$(cat "$TEST_TMPDIR/$1.child")") || return 0
+  [[ "$state" == Z* ]]
 }
 
 @test "check-all: a strategy that hangs fails after its time budget and the others go on" {
