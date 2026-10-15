@@ -456,6 +456,15 @@ EOF
   [[ "$output" == *"AUR_SSH_KEY"* ]]
 }
 
+@test "setup secrets: names the GitHub secrets page as GitHub does" {
+  mock_gh_unavailable
+  write_full_config ""
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Settings → Secrets and variables → Actions"* ]]
+}
+
 @test "setup secrets: skips GPG_SIGNING_KEY for a passphrase key without a copy" {
   write_full_config "PASSKEY003"
 
@@ -662,6 +671,14 @@ EOF
     --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"ensure it is added to"* ]]
+}
+
+@test "setup ssh: names the AUR key field as aurweb does" {
+  run "$TEST_TMPDIR/scripts/setup.sh" ssh \
+    --ssh-key "$TEST_TMPDIR/ssh/aur.pem" \
+    --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"My Account → SSH Public Key"* ]]
 }
 
 # === Unknown option help hint ===

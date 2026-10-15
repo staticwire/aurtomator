@@ -161,7 +161,7 @@ setup_ssh() {
 
   local pubkey="${AUR_SSH_KEY}.pub"
   if [[ -f "$pubkey" ]]; then
-    printf "\n  Public key (ensure it is added to https://aur.archlinux.org → My Account → SSH Keys):\n"
+    printf "\n  Public key (ensure it is added to https://aur.archlinux.org → My Account → SSH Public Key):\n"
     printf "    %s\n" "$(cat "$pubkey")"
   fi
 }
@@ -404,7 +404,7 @@ setup_secrets() {
       fi
     fi
   else
-    printf "\n  Set these secrets in GitHub → Settings → Secrets → Actions:\n\n"
+    printf "\n  Set these secrets in GitHub → Settings → Secrets and variables → Actions:\n\n"
 
     printf "  %sAUR_GIT_NAME%s\n" "$BOLD" "$RESET"
     printf "    Value: %s\n\n" "$GIT_AUTHOR_NAME"
