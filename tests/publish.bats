@@ -309,6 +309,17 @@ current: '1.0.0'"
   echo "$AUR_BASE" >"$PREPARED/base"
 }
 
+# Helper: commit the work tree of the AUR repo of demo as its new state and
+# prepare the update from that commit
+commit_aur_state() {
+  local work="$TEST_TMPDIR/aur-work-demo"
+  git -C "$work" add -A
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid \
+    -c commit.gpgsign=false commit -qm "$1"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  git -C "$AUR_REMOTE" rev-parse HEAD >"$PREPARED/base"
+}
+
 @test "verify-pkg: accepts checksums that match the sources" {
   setup_verify
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
@@ -364,15 +375,75 @@ current: '1.0.0'"
   local work="$TEST_TMPDIR/aur-work-demo"
   write_pkgbuild "$work/PKGBUILD" 1.0.0 2 "sha256sums=('SKIP' '$H2')"
   write_srcinfo "$work/.SRCINFO" 1.0.0 2 SKIP "$H2"
-  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid \
-    -c commit.gpgsign=false commit -qam "skip"
-  git -C "$work" push -q "$AUR_REMOTE" master
-  git -C "$AUR_REMOTE" rev-parse HEAD >"$PREPARED/base"
+  commit_aur_state "skip"
   write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('SKIP' '$SUM_LOCAL')"
   write_srcinfo "$PREPARED/.SRCINFO" 1.1.0 1 SKIP "$SUM_LOCAL"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+@test "verify-pkg: finds a local source by the name before ::" {
+  setup_verify
+  local work="$TEST_TMPDIR/aur-work-demo"
+  sed -i 's/"local.patch"/"local.patch::upstream.patch"/' "$work/PKGBUILD" "$PREPARED/PKGBUILD"
+  sed -i 's/= local.patch$/= local.patch::upstream.patch/' "$work/.SRCINFO" "$PREPARED/.SRCINFO"
+  commit_aur_state "renamed source"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 0 ]
+}
+
+@test "verify-pkg: refuses a local source missing from the AUR repo" {
+  setup_verify
+  git -C "$TEST_TMPDIR/aur-work-demo" rm -q local.patch
+  commit_aur_state "no patch"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Local source local.patch is missing"* ]]
+}
+
+@test "verify-pkg: refuses a checksum of a source from Launchpad" {
+  setup_verify
+  local work="$TEST_TMPDIR/aur-work-demo"
+  sed -i 's/"local.patch"/"lp:demo"/' "$work/PKGBUILD" "$PREPARED/PKGBUILD"
+  sed -i 's/= local.patch$/= lp:demo/' "$work/.SRCINFO" "$PREPARED/.SRCINFO"
+  commit_aur_state "bzr source"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Local source lp:demo is missing"* ]]
+}
+
+@test "verify-pkg: refuses a .SRCINFO checksum array the PKGBUILD does not have" {
+  setup_verify
+  local work="$TEST_TMPDIR/aur-work-demo"
+  sed -i "s/^\tlicense = MIT\$/&\n\tb2sums = $H1/" "$work/.SRCINFO"
+  sed -i "s/^\tlicense = MIT\$/&\n\tb2sums = $H3/" "$PREPARED/.SRCINFO"
+  commit_aur_state "b2sums"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lists b2sums, the PKGBUILD does not"* ]]
+}
+
+@test "verify-pkg: refuses more checksums than sources" {
+  setup_verify
+  local work="$TEST_TMPDIR/aur-work-demo"
+  write_pkgbuild "$work/PKGBUILD" 1.0.0 2 "sha256sums=('$H1' '$H2' '$H1')"
+  sed -i "s/^\tsha256sums = $H2\$/&\n\tsha256sums = $H1/" "$work/.SRCINFO"
+  commit_aur_state "three checksums"
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$SUM_REMOTE' '$SUM_LOCAL' '$H3')"
+  sed -i "s/^\tsha256sums = $SUM_LOCAL\$/&\n\tsha256sums = $H3/" "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"has 3 sha256sums for 2 sources"* ]]
+}
+
+@test "verify-pkg: refuses a base that is not a commit id" {
+  setup_verify
+  echo master >"$PREPARED/base"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not a commit id"* ]]
+  [ ! -e "$TEST_TMPDIR/clone-urls" ]
 }
 
 @test "verify-pkg: refuses a prepared PKGBUILD that changes other lines, before any download" {
@@ -683,13 +754,16 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "1" ]
 }
 
-@test "check-all --verify: verifies only packages from packages/" {
+@test "check-all --verify: verifies only prepared packages from packages/" {
   setup_check_verify
+  create_test_package "other" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
   mkdir -p "$TEST_TMPDIR/out/prepared/unknown"
   stub_script verify-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
-  ! grep -q unknown "$TEST_TMPDIR/verify-pkg.sh.args"
+  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg $TEST_TMPDIR/out/prepared/pkg" ]
 }
 
 # === check_prepared_pkgbuild ===

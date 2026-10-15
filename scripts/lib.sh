@@ -622,13 +622,10 @@ check_prepared_files() {
 _source_file() {
   local entry="$1" url="${1#*::}" name file
   if [[ "$entry" == *://* ]]; then
-    case "${url%%://*}" in
-      http | https | ftp) ;;
-      *)
-        log_err "Cannot check the checksum of $entry: only http, https and ftp sources are downloaded"
-        return 1
-        ;;
-    esac
+    if [[ ! "${url%%://*}" =~ ^(http|https|ftp)$ ]]; then
+      log_err "Cannot check the checksum of $entry: only http, https and ftp sources are downloaded"
+      return 1
+    fi
     file="${3}/$(printf '%s' "$url" | sha256sum | cut -d' ' -f1)"
     # Retried as makepkg does. Redirects may only lead to the protocols above.
     if [[ ! -f "$file" ]] &&
@@ -638,9 +635,6 @@ _source_file() {
       log_err "Could not download $url"
       return 1
     fi
-  elif [[ "$entry" == *lp:* ]]; then
-    log_err "Cannot check the checksum of $entry"
-    return 1
   else
     if [[ "$entry" == *::* ]]; then
       name="${entry%%::*}"
