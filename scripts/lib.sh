@@ -79,6 +79,22 @@ warn_maintainer_line() {
 }
 
 # =============================================================================
+# GITHUB API
+# =============================================================================
+
+# GET a GitHub API URL, with GITHUB_TOKEN when it is set. curl reads the
+# header from stdin: as an argument, the token is visible in ps to every
+# local user.
+# Usage: github_api https://api.github.com/repos/owner/repo/tags
+github_api() {
+  local auth=()
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    auth=(-H @-)
+  fi
+  curl -sfL --max-time 30 "${auth[@]}" "$1" <<<"Authorization: Bearer ${GITHUB_TOKEN:-}"
+}
+
+# =============================================================================
 # VERSION VALIDATION
 # =============================================================================
 

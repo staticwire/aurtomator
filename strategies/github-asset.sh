@@ -19,7 +19,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: github-asset.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 
 # shellcheck source=../scripts/lib.sh
 source "${SCRIPT_DIR}/../scripts/lib.sh"
@@ -39,14 +38,7 @@ if [[ ${#assets[@]} -eq 0 ]]; then
   exit 1
 fi
 
-auth_header=()
-if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-  auth_header=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-fi
-
-release=$(curl -sfL --max-time "$TIMEOUT" \
-  "${auth_header[@]}" \
-  "https://api.github.com/repos/${owner_repo}/releases/tags/${tag}") || {
+release=$(github_api "https://api.github.com/repos/${owner_repo}/releases/tags/${tag}") || {
   echo "Failed to fetch release tag '${tag}' for ${owner_repo}" >&2
   exit 1
 }

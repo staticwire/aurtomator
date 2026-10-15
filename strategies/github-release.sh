@@ -13,7 +13,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: github-release.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 
 # shellcheck source=../scripts/lib.sh
 source "${SCRIPT_DIR}/../scripts/lib.sh"
@@ -22,15 +21,7 @@ pkg_file=$(pkg_file "$NAME")
 owner_repo=$(pkg_get "$pkg_file" .upstream.project)
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 
-# Build auth header if token available
-auth_header=()
-if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-  auth_header=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-fi
-
-version=$(curl -sfL --max-time "$TIMEOUT" \
-  "${auth_header[@]}" \
-  "https://api.github.com/repos/${owner_repo}/releases/latest" |
+version=$(github_api "https://api.github.com/repos/${owner_repo}/releases/latest" |
   yq -r '.tag_name') || {
   echo "Failed to fetch latest release for ${owner_repo}" >&2
   exit 1

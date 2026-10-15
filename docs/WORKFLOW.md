@@ -19,14 +19,16 @@ aurtomator bumps the version of AUR packages you already maintain. It does **not
 
 ```mermaid
 flowchart TD
-    A[Schedule / manual trigger] --> P[prepare job: no secrets, read-only token]
-    P --> B[check-all.sh --prepare]
+    A[Schedule / manual trigger] --> P[prepare job: no secrets]
+    P --> B[check-all.sh with the read-only token]
     B --> C{for each package}
     C --> D[check-update.sh]
     D --> E[run strategy script]
     E --> F{version changed?}
     F -->|same| G[write up_to_date]
-    F -->|new version| H[update-pkg.sh --prepare]
+    F -->|new version| G2[write new_version]
+    C -->|all done| B2[check-all.sh --prepare without a token]
+    B2 --> H[update-pkg.sh --prepare for each new_version]
     H --> H1[clone AUR repo over HTTPS]
     H1 --> H2[audit PKGBUILD]
     H2 --> H3[sed pkgver, reset pkgrel=1]
@@ -35,7 +37,7 @@ flowchart TD
     H5 --> H6[hand over PKGBUILD, .SRCINFO, AUR commit]
     H -->|failure| J[write error to .status/]
     D -->|failure| J
-    C -->|all done| W{update prepared or status table changed?}
+    B2 -->|all done| W{update prepared or status table changed?}
     W -->|no| O[done]
     W -->|yes| Q[publish job: SSH key, GPG key, write token]
     Q --> R[check-all.sh --publish]
@@ -54,7 +56,7 @@ flowchart TD
 - **One YAML per package.** Adding or removing a package is one file.
 - **Strategy-based version detection.** Each type of upstream source has its own script. A new source is a new script plus its entry in `scripts/validate-pkg.sh`.
 - **Patch, do not generate.** aurtomator trusts your PKGBUILD and changes only `pkgver`, `pkgrel`, checksums and `.SRCINFO`. Build steps, dependencies and install files stay untouched.
-- **Two jobs, one with secrets.** A PKGBUILD is code that every step reading it executes. `prepare` checks all packages and runs those steps without secrets. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD, and checks what `prepare` hands over before it pushes. See [4.4](#44-prepare-and-publish).
+- **Two jobs, one with secrets.** A PKGBUILD is code that every step reading it executes. `prepare` checks all packages and runs those steps without secrets, and only its check step, which runs no PKGBUILD, gets the read-only workflow token. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD, and checks what `prepare` hands over before it pushes. See [4.4](#44-prepare-and-publish).
 - **Failure isolation.** A broken package does not block the others. Each failure is logged for its package and opens a GitHub Issue.
 
 ## 2. Package YAML Format
@@ -98,7 +100,7 @@ aurtomator ships 14 strategies. A strategy is a bash script in `strategies/`. It
 
 **How the version is extracted:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases.
 
-**Authentication:** when `GITHUB_TOKEN` is set in the environment, it is sent as a Bearer token. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without it, for example in a local run, the limit is 60 requests per hour.
+**Authentication:** when `GITHUB_TOKEN` is set in the environment, it is sent as a Bearer token. curl reads the header from stdin, so the token does not appear on a command line. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without it, for example in a local run, the limit is 60 requests per hour.
 
 **Example YAML:**
 
@@ -618,7 +620,7 @@ A PKGBUILD is a bash script, and every step that reads it executes it: the audit
 5. Each line of the prepared `.SRCINFO` must be the line of the AUR copy with the old version replaced by `<version>`. `pkgrel` and the checksums follow the rules of step 4.
 6. Any other difference, and a NUL byte in either file, stops the publish with exit code 1. Otherwise steps 10 to 13 of [4.2](#42-step-by-step) follow. When the prepared files equal the AUR copy, only `current` is written to the YAML and the exit code is 2.
 
-`check-all.sh --prepare <dir>` prepares every package with a new version into `<dir>/prepared/` and copies the statuses to `<dir>/status/`. A status becomes `new_version` or `available_downgrade`, and `update_failed` when preparing fails.
+`check-all.sh --prepare <dir>` runs no strategy and needs no `GITHUB_TOKEN`. It takes the versions from the statuses that a check run, `check-all.sh` without a mode, wrote to `.status/` before it, and reads them before the first PKGBUILD runs. It prepares every package with `new_version` or `available_downgrade` into `<dir>/prepared/` and copies the statuses to `<dir>/status/`. A failed preparation becomes `update_failed`, and a package without a status from the check run becomes `check_failed`. The other statuses stay as the check run wrote them.
 
 `check-all.sh --publish <dir>` builds `.status/` anew from `<dir>/status/`. The prepare run executes PKGBUILDs, so only regular files named after a package in `packages/` are taken, in the forms that run writes, and any other content becomes `check_failed`. When the script stops before that, `.status/` stays empty and the steps after it read nothing from the prepare run. Then it takes every package in `packages/` that has a directory in `<dir>/prepared/`, runs its strategy once more and publishes with the version the strategy reports now. Exit code 3 leaves the status at `new_version` or `available_downgrade` without an error, and the next run prepares the package again.
 
@@ -646,9 +648,10 @@ Both jobs start with **Checkout:** `actions/checkout`, pinned by commit SHA like
 `prepare`:
 
 1. **Install dependencies:** `sudo git openssh namcap jq go-yq pacman-contrib`, and the `builder` user.
-2. **Prepare updates:** gives the workspace to `builder` and runs `check-all.sh --prepare handoff` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token.
-3. **Hand over:** as `builder`, runs `update-readme.sh` to find out whether the status table changes. Code from a PKGBUILD has run in the workspace by now, `.git/config` included, so root does not run git there. A process started by a PKGBUILD can outlive its step, so the step then kills every process of `builder`. Only after that does root copy the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
-4. **Upload handoff:** uploads `upload/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
+2. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. No PKGBUILD runs in this step.
+3. **Prepare updates:** runs `check-all.sh --prepare handoff` as `builder`, without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token exists only in the step before.
+4. **Hand over:** as `builder`, runs `update-readme.sh` to find out whether the status table changes. Code from a PKGBUILD has run in the workspace by now, `.git/config` included, so root does not run git there. A process started by a PKGBUILD can outlive its step, so the step then kills every process of `builder`. Only after that does root copy the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
+5. **Upload handoff:** uploads `upload/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
 
 `publish`:
 

@@ -6,8 +6,9 @@
 #
 # Without a mode: only checks and reports
 # With --update: runs update-pkg.sh for each outdated package
-# With --prepare <dir>: runs update-pkg.sh --prepare <dir>/prepared instead
-#   and copies the statuses to <dir>/status
+# With --prepare <dir>: runs update-pkg.sh --prepare <dir>/prepared for each
+#   package the check run before it found outdated, without running the
+#   strategies, and copies the statuses to <dir>/status
 # With --publish <dir>: runs publish-pkg.sh for each package in <dir>/prepared
 #   and takes the other statuses from <dir>/status
 # With --dry-run: runs update-pkg.sh or publish-pkg.sh in dry-run mode
@@ -45,7 +46,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '3,16p' "$0"
+      sed -n '3,17p' "$0"
       exit 0
       ;;
     *)
@@ -57,6 +58,18 @@ done
 
 # Status directory for per-package results
 STATUS_DIR="${AURTOMATOR_DIR}/.status"
+
+# --prepare runs code from PKGBUILDs, so the workflow gives it no
+# GITHUB_TOKEN and it runs no strategy. It takes the versions from the
+# statuses of the check run before it, read here before any PKGBUILD runs.
+declare -A CHECKED=()
+if [[ "$MODE" == "prepare" ]]; then
+  for status_file in "$STATUS_DIR"/*; do
+    [[ -f "$status_file" ]] || continue
+    CHECKED["${status_file##*/}"]=$(<"$status_file")
+  done
+fi
+
 rm -rf "$STATUS_DIR"
 mkdir -p "$STATUS_DIR"
 
@@ -97,6 +110,26 @@ updated=0
 checked=0
 errors=0
 
+# The version the check run found for a package, printed the way
+# check-update.sh prints it: nothing when up to date, an error on failure
+checked_version() {
+  local status="${CHECKED[$1]:-}"
+  case "$status" in
+    "new_version: "* | "available_downgrade: "*)
+      echo "${status#*: }"
+      ;;
+    up_to_date) ;;
+    check_failed:*)
+      echo "${status#check_failed: }" >&2
+      return 1
+      ;;
+    *)
+      echo "not checked before --prepare" >&2
+      return 1
+      ;;
+  esac
+}
+
 for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
   [[ -f "$pkg_file" ]] || continue
 
@@ -108,9 +141,15 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
   fi
   ((checked++)) || true
 
+  if [[ "$MODE" == "prepare" ]]; then
+    check_cmd=(checked_version "$pkg_name")
+  else
+    check_cmd=("${AURTOMATOR_DIR}/scripts/check-update.sh" "$pkg_name")
+  fi
+
   # Capture stderr separately for error reporting
   err_file=$(mktemp)
-  latest=$("${AURTOMATOR_DIR}/scripts/check-update.sh" "$pkg_name" 2>"$err_file") || {
+  latest=$("${check_cmd[@]}" 2>"$err_file") || {
     check_err=$(cat "$err_file")
     rm -f "$err_file"
     log_err "Failed to check $pkg_name: $check_err"

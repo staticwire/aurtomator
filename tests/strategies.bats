@@ -362,6 +362,63 @@ teardown() {
   [[ "$output" == *"voice-d.tar.bz2"* ]]
 }
 
+# === GITHUB_TOKEN ===
+
+# Helper: one package for each GitHub strategy, and a curl that appends its
+# arguments to curl.args and its stdin to curl.stdin before it answers
+setup_github_strategies() {
+  create_test_package "gh-release" "github-release" "upstream:
+  project: owner/repo"
+  create_test_package "gh-tag" "github-tag" "upstream:
+  project: owner/repo"
+  create_test_package "gh-asset" "github-asset" "upstream:
+  project: owner/models-repo
+  tag: models
+  assets:
+    - voice-a.tar.bz2"
+  create_test_package "gh-nightly" "github-nightly" "upstream:
+  project: owner/nightly-repo
+  nightly_tag: nightly
+  version_source: release_body
+  version_pattern: 'NVIM v\\K\\S+'"
+
+  mv "$MOCK_DIR/curl" "$MOCK_DIR/curl-answer"
+  cat >"$MOCK_DIR/curl" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$TEST_TMPDIR/curl.args"
+cat >>"$TEST_TMPDIR/curl.stdin"
+exec "$MOCK_DIR/curl-answer" "\$@"
+EOF
+  chmod +x "$MOCK_DIR/curl"
+}
+
+# Helper: run every GitHub strategy. Stdin is /dev/null, so the recording
+# curl does not wait when a strategy gives it nothing to read.
+run_github_strategies() {
+  local strategy
+  for strategy in release tag asset nightly; do
+    run "$TEST_TMPDIR/strategies/github-${strategy}.sh" "gh-${strategy}" </dev/null
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "github strategies: send GITHUB_TOKEN on stdin, never as an argument" {
+  setup_github_strategies
+  export GITHUB_TOKEN=standin-token
+  run_github_strategies
+  calls=$(wc -l <"$TEST_TMPDIR/curl.args")
+  [ "$(grep -c -- '-H @-' "$TEST_TMPDIR/curl.args")" -eq "$calls" ]
+  [ "$(grep -cx 'Authorization: Bearer standin-token' "$TEST_TMPDIR/curl.stdin")" -eq "$calls" ]
+  ! grep -q standin-token "$TEST_TMPDIR/curl.args"
+}
+
+@test "github strategies: send no Authorization header without GITHUB_TOKEN" {
+  setup_github_strategies
+  unset GITHUB_TOKEN
+  run_github_strategies
+  ! grep -q -- '-H' "$TEST_TMPDIR/curl.args"
+}
+
 # === Error handling: unknown package ===
 
 @test "strategy fails gracefully on unknown package" {

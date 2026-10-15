@@ -23,7 +23,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: github-nightly.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 
 # shellcheck source=../scripts/lib.sh
 source "${SCRIPT_DIR}/../scripts/lib.sh"
@@ -36,45 +35,32 @@ channel=$(pkg_get "$pkg_file" '.upstream.channel // ""')
 version_pattern=$(pkg_get "$pkg_file" '.upstream.version_pattern // ""')
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 
-auth_header=()
-if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-  auth_header=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-fi
-
 api="https://api.github.com/repos/${owner_repo}"
 
 # Fetch release based on pattern
 if [[ "$nightly_tag" == "latest" ]]; then
   # Pattern C: separate nightly repo, use /releases/latest
-  release=$(curl -sfL --max-time "$TIMEOUT" \
-    "${auth_header[@]}" \
-    "${api}/releases/latest") || {
+  release=$(github_api "${api}/releases/latest") || {
     echo "Failed to fetch latest release for ${owner_repo}" >&2
     exit 1
   }
 elif [[ -n "$channel" ]]; then
   # Pattern D: filter by channel name in release name
-  releases_json=$(curl -sfL --max-time "$TIMEOUT" \
-    "${auth_header[@]}" \
-    "${api}/releases?per_page=20") || {
+  releases_json=$(github_api "${api}/releases?per_page=20") || {
     echo "Failed to fetch releases for ${owner_repo}" >&2
     exit 1
   }
   release=$(echo "$releases_json" | yq -r "[.[] | select(.name | contains(\"${channel}\"))][0]")
 elif [[ "$nightly_tag" == *"-"* && "$nightly_tag" != "nightly" ]]; then
   # Pattern B: dated tags with prefix (e.g. "nightly-")
-  releases_json=$(curl -sfL --max-time "$TIMEOUT" \
-    "${auth_header[@]}" \
-    "${api}/releases?per_page=20") || {
+  releases_json=$(github_api "${api}/releases?per_page=20") || {
     echo "Failed to fetch releases for ${owner_repo}" >&2
     exit 1
   }
   release=$(echo "$releases_json" | yq -r "[.[] | select(.tag_name | contains(\"${nightly_tag}\"))][0]")
 else
   # Pattern A: fixed tag (default)
-  release=$(curl -sfL --max-time "$TIMEOUT" \
-    "${auth_header[@]}" \
-    "${api}/releases/tags/${nightly_tag}") || {
+  release=$(github_api "${api}/releases/tags/${nightly_tag}") || {
     echo "Failed to fetch release tag '${nightly_tag}' for ${owner_repo}" >&2
     exit 1
   }

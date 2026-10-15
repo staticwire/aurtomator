@@ -276,23 +276,55 @@ EOF
   chmod +x "$TEST_TMPDIR/scripts/$1"
 }
 
-@test "check-all --prepare: prepares the new version and hands over the statuses" {
+@test "check-all --prepare: prepares the versions the check run found and hands over the statuses" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
+  create_test_package "older" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  echo "new_version: 2.1.0" >"$TEST_TMPDIR/.status/pkg"
+  echo "available_downgrade: 0.9.0" >"$TEST_TMPDIR/.status/older"
+  stub_script check-update.sh 1 "strategy ran"
   stub_script update-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
-  grep -qx "pkg 2.0.0 --prepare $TEST_TMPDIR/out/prepared" "$TEST_TMPDIR/update-pkg.sh.args"
-  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
+  [ ! -e "$TEST_TMPDIR/check-update.sh.args" ]
+  grep -qx "pkg 2.1.0 --prepare $TEST_TMPDIR/out/prepared" "$TEST_TMPDIR/update-pkg.sh.args"
+  grep -qx "older 0.9.0 --prepare $TEST_TMPDIR/out/prepared" "$TEST_TMPDIR/update-pkg.sh.args"
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.1.0" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.1.0" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/older")" = "available_downgrade: 0.9.0" ]
   [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
+}
+
+@test "check-all --prepare: keeps the other statuses of the check run" {
+  create_test_package "fine" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  create_test_package "broken" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  create_test_package "unchecked" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  echo "up_to_date" >"$TEST_TMPDIR/.status/fine"
+  echo "check_failed: API down" >"$TEST_TMPDIR/.status/broken"
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/fine")" = "up_to_date" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/broken")" = "check_failed: API down" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/unchecked")" = "check_failed: not checked before --prepare" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "2" ]
 }
 
 @test "check-all --prepare: records a failed preparation" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
+  echo "new_version: 2.0.0" >"$TEST_TMPDIR/.status/pkg"
   stub_script update-pkg.sh 1 "audit failed"
   run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: audit failed" ]
