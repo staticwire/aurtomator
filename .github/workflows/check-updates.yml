@@ -230,14 +230,26 @@ jobs:
       - name: Update README status table
         run: sudo -u builder ./scripts/update-readme.sh
 
-      - name: Commit changes via API (verified)
+      - name: Commit changes via API
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet; then
+          # Only the files this job writes are committed: the package YAMLs
+          # and README.md. A change to any other tracked file fails the step.
+          # Through a file, so that a failing git diff stops the step
+          list=$(mktemp)
+          git diff --name-only -z >"$list"
+          mapfile -d '' changed <"$list"
+          if [[ ${#changed[@]} -eq 0 ]]; then
             echo "No changes to commit"
             exit 0
           fi
+          for file in "${changed[@]}"; do
+            if [[ ! "$file" =~ ^(README\.md|packages/[A-Za-z0-9@._+-]+\.yml)$ ]]; then
+              echo "::error::Refusing to commit a change to ${file@Q}"
+              exit 1
+            fi
+          done
 
           REPO="${{ github.repository }}"
           BRANCH="${{ github.ref_name }}"
@@ -247,7 +259,7 @@ jobs:
           BASE_TREE=$(gh api "repos/$REPO/git/commits/$HEAD_SHA" --jq '.tree.sha')
 
           TREE_ENTRIES="[]"
-          for file in $(git diff --name-only); do
+          for file in "${changed[@]}"; do
             CONTENT=$(base64 -w0 "$file")
             BLOB_SHA=$(gh api "repos/$REPO/git/blobs" \
               -f content="$CONTENT" \

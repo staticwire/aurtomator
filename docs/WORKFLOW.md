@@ -687,7 +687,7 @@ Every job starts with **Checkout:** `actions/checkout`, pinned by commit SHA lik
 5. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
 6. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GITHUB_TOKEN` set to the workflow token. It builds `.status/` from the checked statuses and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish).
 7. **Update README status table:** runs `update-readme.sh` as `builder`.
-8. **Commit changes via API (verified):** see [5.5](#55-verified-commit).
+8. **Commit changes via API:** see [5.5](#55-verified-commit).
 9. **Create issues for failed packages:** see [5.6](#56-failure-issues).
 
 Steps 8 and 9 run as root with `GH_TOKEN` set to the workflow token, `github.token`.
@@ -735,7 +735,7 @@ The color is `brightgreen` with no failures and `red` otherwise.
 
 A `git push` from the workflow would show as unverified, so the step commits through the GitHub Git Data API:
 
-1. Stop when `git diff --quiet` finds no change.
+1. List the changed tracked files with `git diff --name-only -z`, and stop when there is none. The job writes only `README.md` and `packages/<package-name>.yml`, so a change to any other tracked file fails the step and nothing is committed.
 2. Read the branch head and its tree.
 3. Create a blob for every changed file, a tree on the base tree, and a commit.
 4. Move the branch ref with `force=false`.
