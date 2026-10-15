@@ -92,3 +92,35 @@ jobs:
         with:
           files: coverage/coverage.xml
           fail_ci_if_error: false
+
+  # Merges a Dependabot pull request that changes only the CI image, after
+  # lint and test passed. Off unless the repository variable
+  # CI_IMAGE_AUTO_MERGE is true.
+  merge-image:
+    needs: [lint, test]
+    if: >-
+      vars.CI_IMAGE_AUTO_MERGE == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Merge image update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
+          if [[ "$files" != ".github/ci-image/Dockerfile" ]]; then
+            echo "::notice::#$PR changes more than .github/ci-image/Dockerfile and stays open"
+            exit 0
+          fi
+          # Merges nothing when the branch moved after lint and test
+          gh pr merge "$PR" -R "$REPO" --squash --match-head-commit "$HEAD_SHA"

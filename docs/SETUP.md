@@ -35,6 +35,7 @@ sudo pacman -S --needed git openssh go-yq curl pacman-contrib namcap github-cli 
 ### Recommended
 
 - **Enable Dependabot version updates**: Settings > Advanced Security, then Enable next to "Dependabot version updates". GitHub leaves them off on forks. Dependabot then opens pull requests for new action versions and for the digest of the Arch image the workflows run in.
+- **Merge Arch image updates automatically** (optional): Settings > Secrets and variables > Actions > Variables > New repository variable, with the name `CI_IMAGE_AUTO_MERGE` and the value `true`. A new image then reaches the jobs with the secrets after the tests and without a review, see [WORKFLOW.md](WORKFLOW.md#63-ci-image-updates).
 - Set repository topics if your fork is public.
 
 ### Badges

@@ -94,3 +94,63 @@ run_blocks() {
     [ "$status" -eq 0 ]
   done
 }
+
+@test "merge-image: runs only after lint and test" {
+  run yq '.jobs["merge-image"].needs | sort | join(" ")' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "lint test" ]
+}
+
+@test "merge-image: off unless the variable is true and Dependabot opened the pull request" {
+  run yq '.jobs["merge-image"].if' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"vars.CI_IMAGE_AUTO_MERGE == 'true'"* ]]
+  [[ "$output" == *"github.event_name == 'pull_request'"* ]]
+  [[ "$output" == *"github.actor == 'dependabot[bot]'"* ]]
+  [[ "$output" == *"github.event.pull_request.user.login == 'dependabot[bot]'"* ]]
+  [[ "$output" != *"||"* ]]
+}
+
+# Runs the merge step of ci.yml with a gh that prints the files in
+# $GH_FILES and logs every call to $GH_LOG
+run_merge_step() {
+  local bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$bin"
+  cat >"$bin/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$GH_LOG"
+if [[ "$1" == "api" ]]; then
+  [[ -z "${GH_FAIL:-}" ]] || exit 1
+  printf '%s\n' "$GH_FILES"
+fi
+EOF
+  chmod +x "$bin/gh"
+  yq '.jobs["merge-image"].steps[] | select(.name == "Merge image update") | .run' \
+    "$GITHUB_DIR/workflows/ci.yml" >"$BATS_TEST_TMPDIR/step.sh"
+  GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  : >"$GH_LOG"
+  run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" REPO=owner/repo PR=12 HEAD_SHA=abc123 \
+    bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "merge-image: merges the tested head when only the Dockerfile changed" {
+  GH_FILES=".github/ci-image/Dockerfile" run_merge_step
+  [ "$status" -eq 0 ]
+  grep -qx 'api repos/owner/repo/pulls/12/files --paginate --jq .\[\].filename' "$GH_LOG"
+  grep -qx 'pr merge 12 -R owner/repo --squash --match-head-commit abc123' "$GH_LOG"
+}
+
+@test "merge-image: leaves a pull request that changes other files" {
+  GH_FILES=$'.github/ci-image/Dockerfile\n.github/workflows/ci.yml' run_merge_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::"* ]]
+  run grep -c '^pr merge' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "merge-image: fails when the file list cannot be read" {
+  GH_FAIL=1 GH_FILES=".github/ci-image/Dockerfile" run_merge_step
+  [ "$status" -ne 0 ]
+  run grep -c '^pr merge' "$GH_LOG"
+  [ "$output" = "0" ]
+}

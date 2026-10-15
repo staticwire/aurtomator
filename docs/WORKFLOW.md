@@ -649,7 +649,7 @@ The workflow runs every hour (`cron: "0 * * * *"`) and by hand through `workflow
 
 ### 5.2 Permissions and container
 
-The workflow has three jobs after a short `image` job. `image` reads the image from `.github/ci-image/Dockerfile`: `archlinux:base-devel`, pinned by digest, so a new image on Docker Hub reaches the jobs with the secrets only through a reviewed commit. Dependabot updates the digest once a month with a pull request, and `ci.yml` runs the tests in the new image before the merge. The three jobs run in that image on `ubuntu-latest` with a 30-minute timeout, and `vercmp` from pacman, which `check-all.sh` requires, is the reason `verify` and `publish` need Arch too. Every install step upgrades `archlinux-keyring` before the system, because a pinned image ages and an old keyring rejects packages signed with a newer packager key. `makepkg` refuses to run as root, so the steps that touch packages in `prepare` and `publish` run as a `builder` user. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`. `verify` executes no PKGBUILD and runs as root.
+The workflow has three jobs after a short `image` job. `image` reads the image from `.github/ci-image/Dockerfile`: `archlinux:base-devel`, pinned by digest, so a new image on Docker Hub reaches the jobs with the secrets only through a reviewed commit. Dependabot updates the digest once a month with a pull request, and `ci.yml` runs the tests in the new image before the merge, see [6.3](#63-ci-image-updates). The three jobs run in that image on `ubuntu-latest` with a 30-minute timeout, and `vercmp` from pacman, which `check-all.sh` requires, is the reason `verify` and `publish` need Arch too. Every install step upgrades `archlinux-keyring` before the system, because a pinned image ages and an old keyring rejects packages signed with a newer packager key. `makepkg` refuses to run as root, so the steps that touch packages in `prepare` and `publish` run as a `builder` user. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`. `verify` executes no PKGBUILD and runs as root.
 
 | Job | Permissions | Secrets |
 |-----|-------------|---------|
@@ -784,6 +784,14 @@ bashcov -- bats tests/ --recursive
 ```
 
 The coverage run uploads `coverage/coverage.xml` to Codecov and never fails the job.
+
+### 6.3 CI image updates
+
+Once a month, when Docker Hub has a new `archlinux:base-devel`, Dependabot opens a pull request that changes the digest in `.github/ci-image/Dockerfile`. The `image` job reads the digest from the pull request, so `test` runs in the new image before the merge.
+
+The `merge-image` job merges such a pull request without a review. It is off until the repository variable `CI_IMAGE_AUTO_MERGE` is `true`, see [SETUP.md](SETUP.md#recommended). It runs after `lint` and `test` passed, only for a pull request that `dependabot[bot]` opened, on an event Dependabot caused, and gets `contents: write` and `pull-requests: write`. A pull request that changes any other file, a Dependabot update of an action for example, stays open with a notice. Otherwise the job squash-merges it with `--match-head-commit`, so a commit pushed after the tests stops the merge.
+
+With the variable set, a new image reaches the jobs with the secrets after the tests and without a review. A branch rule that requires an approval, or an up-to-date branch after `main` has moved, makes the merge fail, and the pull request waits for a manual merge.
 
 ## 7. Local Testing
 
