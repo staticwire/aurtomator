@@ -23,14 +23,16 @@ Automated AUR package updates from a single GitHub repo.
 
 ```mermaid
 graph LR
-    A[GitHub Actions<br/>on schedule] -->|for each package| B[prepare job, no secrets<br/>run strategy<br/>clone AUR repo<br/>sed pkgver<br/>updpkgsums<br/>makepkg --printsrcinfo]
-    B -->|update or status change| V[verify job, no secrets<br/>download the sources<br/>check the checksums]
+    A[GitHub Actions<br/>on schedule] -->|for each package| K[check job, read-only token<br/>run strategy<br/>decide the run]
+    K -->|new version| B[prepare job, no secrets<br/>clone AUR repo<br/>sed pkgver<br/>updpkgsums<br/>makepkg --printsrcinfo]
+    B --> V[verify job, no secrets<br/>download the sources<br/>check the checksums]
     V --> C[publish job<br/>check the prepared files<br/>git push to AUR]
+    K -->|status change only| C
     C -->|check or update failed| D[create GitHub Issue<br/>with error details]
     C -->|done| E[update-readme.sh<br/>commit badges + status table]
 ```
 
-Each package has a YAML config pointing to an upstream source. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. If anything fails, a GitHub Issue is opened automatically.
+Each package has a YAML config pointing to an upstream source. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. If anything fails, a GitHub Issue is opened automatically.
 
 ## Quick start
 

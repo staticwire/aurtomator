@@ -154,3 +154,128 @@ EOF
   run grep -c '^pr merge' "$GH_LOG"
   [ "$output" = "0" ]
 }
+
+# === check-updates.yml: who decides what ===
+
+CHECK_UPDATES="$GITHUB_DIR/workflows/check-updates.yml"
+
+# Prints the run block of step $2 in job $1 of check-updates.yml
+step_run() {
+  yq ".jobs.$1.steps[] | select(.name == \"$2\") | .run" "$CHECK_UPDATES"
+}
+
+@test "check-updates: the check job decides the run and executes no PKGBUILD" {
+  run yq '.jobs.check.steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"./scripts/check-all.sh"* ]]
+  [[ "$output" != *"--prepare"* ]]
+  [[ "$output" != *"update-pkg.sh"* ]]
+  run yq '.jobs.check.outputs | keys | join(" ")' "$CHECK_UPDATES"
+  [ "$output" = "prepare work" ]
+}
+
+# Runs the Decide step in a workspace with the statuses given as name=status
+# pairs, a sudo that does nothing and a git whose diff reports a README
+# change when $README_CHANGED is set; prints the step outputs
+run_decide_step() {
+  local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
+  mkdir -p "$ws/.status" "$bin"
+  for pair in "$@"; do
+    printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
+  done
+  printf '#!/bin/sh\nexit 0\n' >"$bin/sudo"
+  printf '#!/bin/sh\n[ -z "$README_CHANGED" ]\n' >"$bin/git"
+  chmod +x "$bin/sudo" "$bin/git"
+  step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
+  : >"$BATS_TEST_TMPDIR/output"
+  (cd "$ws" && PATH="$bin:$PATH" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
+    sh -e "$BATS_TEST_TMPDIR/step.sh") >/dev/null
+  cat "$BATS_TEST_TMPDIR/output"
+}
+
+@test "check-updates: Decide prepares when a package is outdated" {
+  run run_decide_step pkg="new_version: 2.0.0" other=up_to_date _error_count=0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=true\nwork=true' ]
+  run run_decide_step pkg="available_downgrade: 1.0.0"
+  [ "$output" = $'prepare=true\nwork=true' ]
+}
+
+@test "check-updates: Decide publishes only a change of the status table" {
+  README_CHANGED=1 run run_decide_step pkg="check_failed: API down"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=true' ]
+}
+
+@test "check-updates: Decide does nothing when nothing changed" {
+  run run_decide_step pkg=up_to_date _error_count=0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false' ]
+}
+
+@test "check-updates: prepare runs only for outdated packages and decides nothing" {
+  run yq '.jobs.prepare.if' "$CHECK_UPDATES"
+  [ "$output" = "needs.check.outputs.prepare == 'true'" ]
+  run yq '.jobs.prepare.outputs' "$CHECK_UPDATES"
+  [ "$output" = "null" ]
+}
+
+@test "check-updates: Hand over runs nothing from the workspace" {
+  run step_run prepare "Hand over"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [[ "$output" != *"./scripts/"* ]]
+  [[ "$output" != *"sudo -u builder"* ]]
+  [[ "$output" != *"GITHUB_OUTPUT"* ]]
+}
+
+# Runs the Prepare updates step with a sudo that prints $SUDO_OUT and exits
+# with $SUDO_RC, in the shell the step names. chown does nothing.
+run_prepare_step() {
+  local bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$bin"
+  printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
+  chmod +x "$bin/chown"
+  cat >"$bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$SUDO_OUT"
+printf '%s\n' "$SUDO_OUT" >&2
+exit "${SUDO_RC:-0}"
+EOF
+  chmod +x "$bin/sudo"
+  step_run prepare "Prepare updates" >"$BATS_TEST_TMPDIR/step.sh"
+  run yq '.jobs.prepare.steps[] | select(.name == "Prepare updates") | .shell' "$CHECK_UPDATES"
+  [ "$output" = "bash" ]
+  run env PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "check-updates: no line of the prepare run reaches the runner as a command" {
+  SUDO_OUT=$'::error::from a PKGBUILD\n::add-mask::failed' run_prepare_step
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 4 ]
+  for line in "${lines[@]}"; do
+    [[ "$line" != "::"* ]]
+  done
+}
+
+@test "check-updates: a failing prepare run fails its step" {
+  SUDO_OUT="boom" SUDO_RC=1 run_prepare_step
+  [ "$status" -ne 0 ]
+}
+
+@test "check-updates: publish runs on the check job's decision, also without prepare" {
+  run yq '.jobs.publish.needs | join(" ")' "$CHECK_UPDATES"
+  [[ " $output " == *" check "* ]]
+  run yq '.jobs.publish.if' "$CHECK_UPDATES"
+  [[ "$output" == *"!cancelled()"* ]]
+  [[ "$output" == *"needs.check.outputs.work == 'true'"* ]]
+  [[ "$output" == *"needs.prepare.result"* ]]
+  [[ "$output" == *"needs.verify.result"* ]]
+}
+
+@test "check-updates: publish takes the statuses from the check job" {
+  run yq '.jobs.publish.steps[] | select(.with.name == "checked") | .with.path' "$CHECK_UPDATES"
+  [ "$output" = ".status" ]
+  run yq '.jobs.publish.steps[] | select(.with.name == "verified") | .if' "$CHECK_UPDATES"
+  [ "$output" = "needs.verify.result == 'success'" ]
+}

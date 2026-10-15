@@ -40,23 +40,24 @@ jobs:
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
 
-  # Every step that executes a PKGBUILD from the AUR runs here, without
-  # secrets. Only the check step, which runs no PKGBUILD, gets the
-  # read-only token.
-  prepare:
+  # Runs the strategies with the read-only token and decides what the run
+  # does. No PKGBUILD runs here, so the jobs after it trust the statuses
+  # this job hands over.
+  check:
     needs: image
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
     outputs:
-      work: ${{ steps.handoff.outputs.work }}
+      prepare: ${{ steps.decide.outputs.prepare }}
+      work: ${{ steps.decide.outputs.work }}
 
     steps:
       - name: Install dependencies
         run: |
           pacman-key --init
           pacman -Sy --noconfirm --needed archlinux-keyring
-          pacman -Su --noconfirm --needed sudo git openssh namcap jq go-yq pacman-contrib
+          pacman -Su --noconfirm --needed sudo git go-yq
           useradd -m builder
 
       - name: Checkout
@@ -72,22 +73,71 @@ jobs:
           chown -R builder:builder .
           sudo --preserve-env=GITHUB_TOKEN -u builder ./scripts/check-all.sh
 
+      - name: Decide
+        id: decide
+        run: |
+          # prepare runs for an outdated package, publish also for a change
+          # in the status table
+          prepare=false
+          if grep -qsE '^(new_version|available_downgrade): ' .status/*; then
+            prepare=true
+          fi
+          sudo -u builder ./scripts/update-readme.sh
+          work=$prepare
+          git diff --quiet README.md || work=true
+          echo "prepare=$prepare" >>"$GITHUB_OUTPUT"
+          echo "work=$work" >>"$GITHUB_OUTPUT"
+
+      - name: Upload statuses
+        if: steps.decide.outputs.work == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: checked
+          path: .status/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  # Every step that executes a PKGBUILD from the AUR runs here, without
+  # secrets and without a token. Code from one PKGBUILD can write the files
+  # of every package here, so this job only hands over prepared files and
+  # update failures, and decides nothing.
+  prepare:
+    needs: [image, check]
+    if: needs.check.outputs.prepare == 'true'
+    runs-on: ubuntu-latest
+    container: ${{ needs.image.outputs.ref }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman-key --init
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm --needed sudo git openssh namcap jq go-yq pacman-contrib
+          useradd -m builder
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download statuses
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: checked
+          path: .status
+
       - name: Prepare updates
-        run: sudo -u builder ./scripts/check-all.sh --prepare handoff
+        shell: bash
+        run: |
+          chown -R builder:builder .
+          # Root prefixes every line, so no output of a PKGBUILD reaches
+          # the runner as a workflow command
+          sudo -u builder ./scripts/check-all.sh --prepare handoff 2>&1 | sed 's/^/| /'
 
       - name: Hand over
-        id: handoff
         run: |
-          # The workspace now belongs to code from PKGBUILDs, .git/config
-          # included, so only builder touches it. publish runs only for an
-          # update or a change in the status table.
-          work=$(sudo -u builder bash -c '
-            ./scripts/update-readme.sh >&2
-            if [[ -n "$(ls -A handoff/prepared 2>/dev/null)" ]] || ! git diff --quiet README.md; then
-              echo true
-            fi
-          ')
-
           # A process started by a PKGBUILD can outlive its step. Stop all
           # of them before root reads anything builder wrote.
           pkill -KILL -u builder || true
@@ -110,12 +160,7 @@ jobs:
               done
           fi
 
-          if [[ "$work" == "true" ]]; then
-            echo "work=true" >>"$GITHUB_OUTPUT"
-          fi
-
       - name: Upload handoff
-        if: steps.handoff.outputs.work == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: handoff
@@ -131,7 +176,6 @@ jobs:
   # stay out of the job with the keys.
   verify:
     needs: [image, prepare]
-    if: needs.prepare.outputs.work == 'true'
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
@@ -166,11 +210,17 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Pushes what verify passed on. Nothing here executes a PKGBUILD:
-  # publish-pkg.sh checks the prepared files against the AUR copy.
+  # Pushes what verify passed on and records the statuses of the check job.
+  # Runs also when prepare is skipped, for a change in the status table.
+  # Nothing here executes a PKGBUILD: publish-pkg.sh checks the prepared
+  # files against the AUR copy.
   publish:
-    needs: [image, prepare, verify]
-    if: needs.prepare.outputs.work == 'true'
+    needs: [image, check, prepare, verify]
+    if: >-
+      !cancelled() &&
+      needs.check.outputs.work == 'true' &&
+      contains(fromJSON('["success", "skipped"]'), needs.prepare.result) &&
+      contains(fromJSON('["success", "skipped"]'), needs.verify.result)
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
@@ -191,7 +241,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Download statuses
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: checked
+          path: .status
+
       - name: Download verified handoff
+        if: needs.verify.result == 'success'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified

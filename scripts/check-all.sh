@@ -11,8 +11,8 @@
 #   strategies, and copies the statuses to <dir>/status
 # With --verify <dir>: runs verify-pkg.sh for each package in <dir>/prepared
 #   and takes out the ones that fail, without running the strategies
-# With --publish <dir>: runs publish-pkg.sh for each package in <dir>/prepared
-#   and takes the other statuses from <dir>/status
+# With --publish <dir>: keeps the statuses of the check run before it, and
+#   runs publish-pkg.sh for each package that run found outdated
 # With --dry-run: runs update-pkg.sh or publish-pkg.sh in dry-run mode
 #
 # Writes per-package status to .status/ directory for README generation
@@ -58,10 +58,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# --verify checks every update in <dir>/prepared with verify-pkg.sh. It takes
-# out an update that fails, with an update_failed status, and one the AUR
-# moved under, with its status kept, so --publish skips both. Only package
-# names from packages/ reach a path.
+# --verify checks every update in <dir>/prepared with verify-pkg.sh and takes
+# out an update that fails, with an update_failed status, so --publish skips
+# it. An AUR repo that moved counts as a failure: the prepare run writes the
+# base of every package, so a move looks the same as a wrong base. The next
+# run prepares the package again. Only package names from packages/ reach a
+# path.
 if [[ "$MODE" == "verify" ]]; then
   failed=0
   for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
@@ -81,9 +83,6 @@ if [[ "$MODE" == "verify" ]]; then
 
     case "$verify_rc" in
       0) ;;
-      3)
-        rm -rf "$prepared"
-        ;;
       *)
         log_err "Failed to verify $pkg_name"
         rm -rf "$prepared"
@@ -111,13 +110,13 @@ fi
 # Status directory for per-package results
 STATUS_DIR="${AURTOMATOR_DIR}/.status"
 
-# --prepare runs code from PKGBUILDs, so the workflow gives it no
-# GITHUB_TOKEN and it runs no strategy. It takes the versions from the
-# statuses of the check run before it, read here before any PKGBUILD runs.
+# --prepare and --publish take the statuses of the check run before them,
+# read here before anything else runs. --prepare runs code from PKGBUILDs,
+# so the workflow gives it no GITHUB_TOKEN and it runs no strategy.
 declare -A CHECKED=()
-if [[ "$MODE" == "prepare" ]]; then
+if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ ! -L "$STATUS_DIR" ]]; then
   for status_file in "$STATUS_DIR"/*; do
-    [[ -f "$status_file" ]] || continue
+    [[ -f "$status_file" && ! -L "$status_file" ]] || continue
     CHECKED["${status_file##*/}"]=$(<"$status_file")
   done
 fi
@@ -125,38 +124,24 @@ fi
 rm -rf "$STATUS_DIR"
 mkdir -p "$STATUS_DIR"
 
-# --publish takes the statuses from the prepare run, which executed
-# PKGBUILDs while it wrote them. Only statuses of known packages, in the
-# forms that run writes, are copied. When this script stops early, .status/
-# stays empty, so the steps after it read nothing from that run.
-if [[ "$MODE" == "publish" && -d "${WORK_DIR}/status" && ! -L "${WORK_DIR}/status" ]]; then
-  known_names=$(for f in "${AURTOMATOR_DIR}"/packages/*.yml; do
-    [[ -f "$f" ]] && pkg_get "$f" .name
-  done)
-  for status_file in "${WORK_DIR}/status"/*; do
-    [[ -f "$status_file" && ! -L "$status_file" ]] || continue
-    name="${status_file##*/}"
-    if [[ ! "$name" =~ ^[A-Za-z0-9@._+-]+$ ]] || ! grep -qxF -- "$name" <<<"$known_names"; then
-      continue
+# The update failure that the prepare or the verify run recorded for a
+# package the check run found outdated. Both runs share one user with code
+# from every PKGBUILD, so nothing else of theirs is taken, and a package
+# they handed over nothing for fails as well.
+handed_failure() {
+  local status_dir="${WORK_DIR}/status"
+  local file="${status_dir}/$1"
+  if [[ -d "$status_dir" && ! -L "$status_dir" && -f "$file" && ! -L "$file" ]] &&
+    ! _has_nul "$file"; then
+    local handed
+    handed=$(<"$file")
+    if [[ "$handed" == update_failed:* ]]; then
+      printf '%s\n' "$handed"
+      return
     fi
-    status="check_failed: invalid status from the prepare run"
-    if ! _has_nul "$status_file"; then
-      # The whole file, as update-readme.sh and the issue step read it
-      handed_over=$(<"$status_file")
-      case "$handed_over" in
-        up_to_date | check_failed:* | update_failed:*)
-          status="$handed_over"
-          ;;
-        "new_version: "* | "available_downgrade: "*)
-          if validate_pkgver "${handed_over#*: }" 2>/dev/null; then
-            status="$handed_over"
-          fi
-          ;;
-      esac
-    fi
-    printf '%s\n' "$status" >"${STATUS_DIR}/${name}"
-  done
-fi
+  fi
+  echo "update_failed: prepare handed over no update"
+}
 
 updated=0
 checked=0
@@ -186,10 +171,35 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
   [[ -f "$pkg_file" ]] || continue
 
   pkg_name=$(pkg_get "$pkg_file" .name)
-  # Only package names from packages/ reach a path, never a name from WORK_DIR
-  if [[ "$MODE" == "publish" ]] &&
-    [[ -L "${WORK_DIR}/prepared" || ! -d "${WORK_DIR}/prepared/${pkg_name}" ]]; then
-    continue
+  # --publish keeps the status of the check run and publishes only a package
+  # that run found outdated. Only package names from packages/ reach a path,
+  # never a name from WORK_DIR.
+  if [[ "$MODE" == "publish" ]]; then
+    found="${CHECKED[$pkg_name]:-}"
+    case "$found" in
+      "new_version: "* | "available_downgrade: "*)
+        if ! validate_pkgver "${found#*: }" 2>/dev/null; then
+          echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
+          continue
+        fi
+        if [[ -L "${WORK_DIR}/prepared" || ! -d "${WORK_DIR}/prepared/${pkg_name}" ]]; then
+          handed_failure "$pkg_name" >"${STATUS_DIR}/${pkg_name}"
+          continue
+        fi
+        ;;
+      up_to_date | check_failed:*)
+        printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
+        continue
+        ;;
+      "")
+        echo "check_failed: not checked before --publish" >"${STATUS_DIR}/${pkg_name}"
+        continue
+        ;;
+      *)
+        echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
+        continue
+        ;;
+    esac
   fi
   ((checked++)) || true
 
@@ -286,18 +296,19 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
   esac
 done
 
+# --publish counts the failures among the statuses it wrote
+if [[ "$MODE" == "publish" ]]; then
+  errors=0
+  for status_file in "$STATUS_DIR"/*; do
+    [[ -f "$status_file" ]] || continue
+    case "$(<"$status_file")" in
+      check_failed:* | update_failed:*) ((errors++)) || true ;;
+    esac
+  done
+fi
+
 echo ""
 log_info "Checked: $checked, Updated: $updated, Errors: $errors"
-
-# --publish adds its errors to those of the prepare run. The file comes from
-# that run, so it is read only when it holds a plain number.
-handed_count="${WORK_DIR}/status/_error_count"
-if [[ "$MODE" == "publish" && -f "$handed_count" && ! -L "$handed_count" && ! -L "${WORK_DIR}/status" ]]; then
-  prepare_errors=$(<"$handed_count")
-  if [[ "$prepare_errors" =~ ^[0-9]+$ ]]; then
-    errors=$((errors + prepare_errors))
-  fi
-fi
 
 # Write summary for downstream steps
 echo "${errors}" >"${STATUS_DIR}/_error_count"
