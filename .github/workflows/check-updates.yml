@@ -297,6 +297,7 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           STATUS_DIR=".status"
           [[ -d "$STATUS_DIR" ]] || exit 0
@@ -309,7 +310,7 @@ jobs:
             status=$(cat "$status_file")
             case "$status" in
               check_failed:*|update_failed:*)
-                error_msg="${status#*: }"
+                kind="${status%%:*}"
 
                 gh label create "auto-update" --color "d73a4a" --description "Automated update failure" 2>/dev/null || true
 
@@ -319,11 +320,13 @@ jobs:
                   continue
                 fi
 
-                ISSUE_BODY=$(printf "Package: %s\nError: %s\nRun: %s\n\nAuto-created by update workflow. Close after fixing." \
-                  "$pkg_name" "$status" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+                # builder writes the body, so root runs no code from the
+                # workspace while it holds the token
+                ISSUE_BODY=$(sudo -u builder bash -c 'source ./scripts/lib.sh && failure_issue_body "$@"' \
+                  _ "$status_file" "$RUN_URL")
 
                 gh issue create \
-                  --title "❌ $pkg_name: update failed" \
+                  --title "❌ $pkg_name: ${kind//_/ }" \
                   --label "auto-update" \
                   --body "$ISSUE_BODY" || echo "Warning: could not create issue (issues may be disabled)"
                 echo "Created issue for $pkg_name"

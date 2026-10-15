@@ -748,7 +748,7 @@ The step runs with `if: always()`. For every `.status/` entry with `check_failed
 
 1. Creates the `auto-update` label when it is missing.
 2. Skips the package when an open `auto-update` issue already matches `<package> failed`.
-3. Opens an issue titled `❌ <package>: update failed` with the package, the error and a link to the run.
+3. Opens an issue titled `❌ <package>: check failed` or `❌ <package>: update failed`, after the status, with the package, the status, a link to the run and the error. The error holds text from upstream, a rejected tag name for example, so it stands in a code block, where links, images and mentions do not render, and is cut to its last 4000 characters. `builder` writes the body with `failure_issue_body` from `lib.sh`, so the step runs no code from the workspace as root.
 
 The step belongs to `publish`, which runs when the status table changes. A package that keeps failing gets its issue in the run where it starts failing, and a closed issue comes back only after its status changes again.
 

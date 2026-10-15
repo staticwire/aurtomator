@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 
 load helpers/setup.sh
+bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test_env
@@ -899,6 +900,46 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg $TEST_TMPDIR/out/prepared/pkg" ]
+}
+
+# === failure_issue_body ===
+
+@test "failure_issue_body: puts the error in a code block" {
+  echo "check_failed: rejected '1.0.1 @octocat https://evil.example'" >"$TEST_TMPDIR/demo"
+  run failure_issue_body "$TEST_TMPDIR/demo" https://github.com/owner/repo/actions/runs/1
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+Package: `demo`
+Status: check failed
+Run: https://github.com/owner/repo/actions/runs/1
+
+```
+rejected '1.0.1 @octocat https://evil.example'
+```
+
+Auto-created by update workflow. Close after fixing.
+EOF
+  )
+  [ "$output" = "$expected" ]
+}
+
+@test "failure_issue_body: uses a fence longer than any run of backticks in the error" {
+  printf '%s\n' 'update_failed: a ``` b' '````' c >"$TEST_TMPDIR/demo"
+  run --keep-empty-lines failure_issue_body "$TEST_TMPDIR/demo" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  [ "${lines[4]}" = '`````' ]
+  [ "${lines[8]}" = '`````' ]
+}
+
+@test "failure_issue_body: keeps the last 4000 characters of a long error" {
+  local tail
+  tail=$(printf 'x%.0s' {1..4000})
+  echo "update_failed: HEAD${tail}" >"$TEST_TMPDIR/demo"
+  run --keep-empty-lines failure_issue_body "$TEST_TMPDIR/demo" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  [ "${lines[5]}" = "[first 4 characters cut]" ]
+  [ "${lines[6]}" = "$tail" ]
 }
 
 # === check_prepared_pkgbuild ===
