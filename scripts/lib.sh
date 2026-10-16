@@ -360,7 +360,8 @@ _has_nul() {
 #   PKGVER|PKGREL<TAB>val  the value of a pkgver= or pkgrel= line
 #   SUM<TAB>array<TAB>index<TAB>HASH|SKIP  one line per checksum
 #   SUMVAL<TAB>array<TAB>value  the same checksum with its value
-#   BAD<TAB>text           anything in a checksum array but a quoted checksum
+#   BAD<TAB>text           anything in a checksum array but a quoted
+#                          checksum, a comment or a line continuation
 # Args: $1=pkgbuild path
 _pkgbuild_parts() {
   awk '
@@ -377,14 +378,22 @@ _pkgbuild_parts() {
         print "SUMVAL\t" name "\t" substr(t, 2, length(t) - 2)
       }
     }
-    function body(text,   end) {
+    # As bash does: a # that starts a word comments out the rest of the
+    # line, and a backslash at the end of a line outside a comment joins
+    # the next line, which inside the parentheses is only a separator
+    function body(text,   raw, cont, end, rest) {
+      raw = text
+      sub(/(^|[ \t])#.*/, "", text)
+      cont = text == raw && text ~ /(^|[ \t])\\$/
+      if (cont) text = substr(text, 1, length(text) - 1)
       end = index(text, ")")
       if (!end) {
         tokens(text)
         return 1
       }
       tokens(substr(text, 1, end - 1))
-      if (substr(text, end + 1) !~ /^[ \t]*$/) print "BAD\t" NR ": " substr(text, end + 1)
+      rest = substr(text, end + 1) (cont ? "\\" : "")
+      if (rest !~ /^[ \t]*$/) print "BAD\t" NR ": " rest
       return 0
     }
     in_sums { in_sums = body($0); next }
@@ -418,7 +427,7 @@ check_prepared_pkgbuild() {
   fi
 
   if grep -q $'^BAD\t' <<<"$new_parts"; then
-    log_err "Prepared PKGBUILD has more than quoted checksums in a checksum array:"
+    log_err "Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array:"
     grep $'^BAD\t' <<<"$new_parts" | cut -f2- >&2
     return 1
   fi
@@ -495,8 +504,12 @@ _bump_version() {
 }
 
 # A .SRCINFO is generated, so line N of the prepared file must be line N of
-# the AUR file with the old version replaced by the new one, see
-# _bump_version. pkgrel and the checksum values are the exceptions.
+# the AUR file, with these changes: pkgver is the new version, pkgrel is 1,
+# a checksum keeps its key and stays a SKIP or a hash, a source has the old
+# version replaced by the new one (see _bump_version), and any other line
+# either stays or has the version replaced in the same way. A license, a
+# dependency or a pkgdesc can hold the old version without deriving it
+# from pkgver.
 # Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
@@ -532,6 +545,8 @@ check_prepared_srcinfo() {
       kind="$key"
     elif [[ "$key" =~ ^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$ ]]; then
       kind=sums
+    elif [[ "$key" =~ ^source(_[A-Za-z0-9_]+)?$ ]]; then
+      kind=source
     else
       kind=other
     fi
@@ -560,8 +575,14 @@ check_prepared_srcinfo() {
           return 1
         fi
         ;;
-      *)
+      source)
         if [[ "$new" != "$(_bump_version "$old" "$old_ver" "$version")" ]]; then
+          log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $new"
+          return 1
+        fi
+        ;;
+      *)
+        if [[ "$new" != "$old" && "$new" != "$(_bump_version "$old" "$old_ver" "$version")" ]]; then
           log_err "Prepared .SRCINFO line $((i + 1)) changes more than the version: $new"
           return 1
         fi

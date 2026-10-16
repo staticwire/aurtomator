@@ -1174,6 +1174,58 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "check_prepared_pkgbuild: accepts a checksum array continued with a backslash" {
+  local sums="sha256sums=('SKIP' \\
+            'SKIP')"
+  write_pkgbuild "$OLD" 1.0.0 2 "$sums"
+  write_pkgbuild "$NEW" 1.1.0 1 "$sums"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_pkgbuild: accepts a comment after a checksum array" {
+  local sums="sha256sums=('SKIP' 'SKIP')  # VCS sources"
+  write_pkgbuild "$OLD" 1.0.0 2 "$sums"
+  write_pkgbuild "$NEW" 1.1.0 1 "$sums"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_pkgbuild: accepts comments inside a checksum array" {
+  local sums="sha256sums=( # git
+            'SKIP' # patch (local)
+            'SKIP')"
+  write_pkgbuild "$OLD" 1.0.0 2 "$sums"
+  write_pkgbuild "$NEW" 1.1.0 1 "$sums"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+# bash joins the next line to the assignment, and runs it as a command
+@test "check_prepared_pkgbuild: rejects a backslash after a checksum array" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('SKIP' 'SKIP')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('SKIP' 'SKIP') \\"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
+# bash reads an escaped space there, so the # starts a word, not a comment
+@test "check_prepared_pkgbuild: rejects a backslash before a hash sign in a checksum array" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('SKIP' 'SKIP')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('SKIP' \\ # c
+            'SKIP')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
+# bash starts no comment right after the closing parenthesis
+@test "check_prepared_pkgbuild: rejects a hash sign right after a checksum array" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('SKIP' 'SKIP')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('SKIP' 'SKIP')# c"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
 @test "check_prepared_pkgbuild: rejects a changed number of checksums" {
   write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
   write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3')"
@@ -1276,6 +1328,55 @@ write_srcinfo_line() {
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 3.0 "license = GPL-3"
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 3.0
   [ "$status" -eq 1 ]
+}
+
+# Helper: .SRCINFO as makepkg --printsrcinfo prints it for a PKGBUILD with
+# pkgdesc, license and depends holding 2.0 apart from pkgver
+# Usage: write_srcinfo_lookalike <path> <pkgver>
+write_srcinfo_lookalike() {
+  printf '%s\n' \
+    "pkgbase = demo" \
+    $'\tpkgdesc = A GPL-2.0 licensed tool' \
+    $'\tpkgver = '"$2" \
+    $'\tpkgrel = 1' \
+    $'\turl = https://example.com' \
+    $'\tarch = x86_64' \
+    $'\tlicense = GPL-2.0-or-later' \
+    $'\tdepends = glibc>=2.0.1' \
+    $'\tprovides = tool='"$2" \
+    $'\tsource = https://example.com/releases/'"$2"'/demo-'"$2"'.tar.gz' \
+    $'\tsha256sums = SKIP' \
+    "" \
+    "pkgname = demo" >"$1"
+}
+
+@test "check_prepared_srcinfo: keeps text that only looks like the old version" {
+  write_srcinfo_lookalike "$TEST_TMPDIR/old.SRCINFO" 2.0
+  write_srcinfo_lookalike "$TEST_TMPDIR/new.SRCINFO" 2.1
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: rejects a source that keeps the old version" {
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.0 "source = https://example.com/demo-2.0.tar.gz"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1 "source = https://example.com/demo-2.0.tar.gz"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  [ "$status" -eq 1 ]
+}
+
+@test "check_prepared_srcinfo: rejects an arch source that keeps the old version" {
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.0 "source_x86_64 = https://example.com/demo-2.0-x86_64.tar.gz"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1 "source_x86_64 = https://example.com/demo-2.0-x86_64.tar.gz"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  [ "$status" -eq 1 ]
+}
+
+@test "check_prepared_srcinfo: rejects a line changed beyond the version" {
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.0 "depends = glibc>=2.0.1"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1 "depends = glibc>=2.9"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"changes more than the version"* ]]
 }
 
 @test "check_prepared_srcinfo: rejects an added dependency" {
