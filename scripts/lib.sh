@@ -503,13 +503,39 @@ _bump_version() {
   printf '%s\n' "$out"
 }
 
+# Print "<arch suffix>:<index>" for every source entry of a .SRCINFO that is
+# SKIP in each checksum array with the same arch suffix
+# Args: $1=.SRCINFO
+_skip_sources() {
+  awk -F' = ' '
+    { key = $1; sub(/^[ \t]+/, "", key) }
+    key ~ /^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$/ {
+      entry = substr(key, index(key, "sums") + 4) ":" count[key]++
+      listed[entry] = 1
+      if ($2 != "SKIP") hashed[entry] = 1
+    }
+    END { for (entry in listed) if (!(entry in hashed)) print entry }
+  ' "$1"
+}
+
+# Args: $1=expected source line, $2=prepared source line
+# Returns: 0 when both save their file under a name before ::, have the same
+#          URL after it, and their names differ in nothing but digits
+_name_differs_in_digits() {
+  [[ "$1" == *::* && "$2" == *::* && "${1#*::}" == "${2#*::}" ]] || return 1
+  [[ "$(sed -E 's/[0-9]+/0/g' <<<"${1%%::*}")" == "$(sed -E 's/[0-9]+/0/g' <<<"${2%%::*}")" ]]
+}
+
 # A .SRCINFO is generated, so line N of the prepared file must be line N of
 # the AUR file, with these changes: pkgver is the new version, pkgrel is 1,
 # a checksum keeps its key and stays a SKIP or a hash, a source has the old
 # version replaced by the new one (see _bump_version), and any other line
 # either stays or has the version replaced in the same way. A license, a
 # dependency or a pkgdesc can hold the old version without deriving it
-# from pkgver.
+# from pkgver. A source that is SKIP in every checksum array may also change
+# the digits in the name of its file, as a nightly package names its
+# download by the date: verify_prepared_sums never fetches it, and makepkg
+# takes the sources from the PKGBUILD.
 # Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
@@ -533,7 +559,13 @@ check_prepared_srcinfo() {
   local old_ver
   old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
 
-  local i old new key kind old_val new_val
+  local -A skip_sources=() source_counts=()
+  local entry
+  while read -r entry; do
+    skip_sources["$entry"]=1
+  done < <(_skip_sources "$1")
+
+  local i old new key kind old_val new_val n expected
   for i in "${!new_lines[@]}"; do
     old="${old_lines[$i]}"
     new="${new_lines[$i]}"
@@ -576,7 +608,12 @@ check_prepared_srcinfo() {
         fi
         ;;
       source)
-        if [[ "$new" != "$(_bump_version "$old" "$old_ver" "$version")" ]]; then
+        n="${source_counts[$key]:-0}"
+        source_counts[$key]=$((n + 1))
+        expected=$(_bump_version "$old" "$old_ver" "$version")
+        if [[ "$new" != "$expected" ]] &&
+          ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
+            _name_differs_in_digits "$expected" "$new"; }; then
           log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $new"
           return 1
         fi

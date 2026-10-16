@@ -1379,6 +1379,83 @@ write_srcinfo_lookalike() {
   [[ "$output" == *"changes more than the version"* ]]
 }
 
+# Helper: .SRCINFO of a nightly package with two sources, the first saved
+# under <name>. <sums> gives the checksum arrays as array=checksum pairs,
+# with the checksum of the first source; the second source has $H2.
+# Usage: write_srcinfo_nightly <path> <pkgver> <name> <sums> [url]
+write_srcinfo_nightly() {
+  local url="${5:-https://example.com/releases/download/nightly/demo-linux.tar.gz}"
+  local pair
+  {
+    printf '%s\n' "pkgbase = demo-nightly-bin" $'\tpkgver = '"$2" $'\tpkgrel = 1' \
+      $'\tsource = '"$3::$url" $'\tsource = demo.vim'
+    for pair in $4; do
+      printf '\t%s = %s\n' "${pair%%=*}" "${pair#*=}" "${pair%%=*}" "$H2"
+    done
+    printf '%s\n' "" "pkgname = demo-nightly-bin"
+  } >"$1"
+}
+
+@test "check_prepared_srcinfo: accepts new digits in the name of a SKIP source" {
+  write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz b2sums=SKIP
+  write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz b2sums=SKIP
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: rejects new letters in the name of a SKIP source" {
+  write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz b2sums=SKIP
+  write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-oct16.tar.gz b2sums=SKIP
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
+@test "check_prepared_srcinfo: rejects a new URL for a SKIP source" {
+  write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz b2sums=SKIP
+  write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz b2sums=SKIP \
+    https://evil.example/demo-linux.tar.gz
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
+@test "check_prepared_srcinfo: rejects new digits in the name of a hashed source" {
+  write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz "b2sums=$H1"
+  write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz "b2sums=$H3"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
+@test "check_prepared_srcinfo: rejects new digits when another checksum array has a hash" {
+  write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz "b2sums=SKIP sha256sums=$H1"
+  write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz "b2sums=SKIP sha256sums=$H3"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
+# Helper: .SRCINFO of a nightly package with a generic source and an
+# x86_64 source saved under <name>, and the checksums of each
+# Usage: write_srcinfo_arch <path> <pkgver> <name> <generic sum> <x86_64 sum>
+write_srcinfo_arch() {
+  printf '%s\n' "pkgbase = demo-nightly-bin" $'\tpkgver = '"$2" $'\tpkgrel = 1' \
+    $'\tsource = demo.vim' \
+    $'\tsource_x86_64 = '"$3"'::https://example.com/releases/download/nightly/demo-x86_64.tar.gz' \
+    $'\tb2sums = '"$4" $'\tb2sums_x86_64 = '"$5" "" "pkgname = demo-nightly-bin" >"$1"
+}
+
+@test "check_prepared_srcinfo: accepts new digits in the name of a SKIP arch source" {
+  write_srcinfo_arch "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz "$H1" SKIP
+  write_srcinfo_arch "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz "$H1" SKIP
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: pairs an arch source with the checksums of its arch" {
+  write_srcinfo_arch "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz SKIP "$H1"
+  write_srcinfo_arch "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz SKIP "$H3"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+}
+
 @test "check_prepared_srcinfo: rejects an added dependency" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"

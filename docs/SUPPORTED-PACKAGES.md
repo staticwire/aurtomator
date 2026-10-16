@@ -100,6 +100,8 @@ upstream:
 
 The version comes from the tag name, the release body, the tag date or the publish date. `strategies/github-nightly.sh` lists the fields.
 
+A fixed tag keeps its download URL, so a PKGBUILD can save the download under a name with the date, as `neovim-nightly-bin` does with `_date="$(date -u +%Y%m%d)"` and `"$_pkgname-$_date.tar.gz::<url>"`. This works when the checksum of that source is `SKIP`: only the digits of the name may change from one update to the next. See step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
+
 ## Not supported (blocked or detected)
 
 aurtomator detects these cases and blocks the update or warns.
