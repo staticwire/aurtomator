@@ -31,8 +31,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 aur_dir="${tmp_dir}/aur-${PKG_NAME}"
 log_info "Cloning AUR repo: $PKG_NAME"
-aur_clone "https://aur.archlinux.org/${PKG_NAME}.git" "$aur_dir" || exit 1
-aur_reanchor "$aur_dir"
+aur_clone "https://aur.archlinux.org/${PKG_NAME}.git" "$aur_dir" --no-checkout || exit 1
+aur_reanchor "$aur_dir" --no-checkout
 
 head=$(git -C "$aur_dir" rev-parse HEAD)
 if [[ "$head" != "$base" ]]; then
@@ -40,7 +40,9 @@ if [[ "$head" != "$base" ]]; then
   exit 3
 fi
 
-check_prepared_files "$aur_dir" "$PREPARED" "$version" || exit 1
+aur_files="${tmp_dir}/aur-files"
+aur_export "$aur_dir" "$aur_files" || exit 1
+check_prepared_files "$aur_files" "$PREPARED" "$version" || exit 1
 mkdir "${tmp_dir}/downloads"
-verify_prepared_sums "$aur_dir" "$PREPARED" "${tmp_dir}/downloads" || exit 1
+verify_prepared_sums "$aur_files" "$PREPARED" "${tmp_dir}/downloads" || exit 1
 log_ok "Checksums of $PKG_NAME $version match the sources"

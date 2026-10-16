@@ -265,13 +265,13 @@ validate_source_urls() {
 # =============================================================================
 
 # Clone an AUR repo, with 3 attempts
-# Args: $1=url, $2=destination
+# Args: $1=url, $2=destination, $3...=options for git clone
 aur_clone() {
   local attempt
   # Brief delay to reduce AUR SSH rate-limit pressure from GitHub Actions IP pool
   sleep 2
   for attempt in 1 2 3; do
-    if git clone "$1" "$2" 2>&1; then
+    if git clone "${@:3}" "$1" "$2" 2>&1; then
       return 0
     fi
     if [[ "$attempt" -eq 3 ]]; then
@@ -292,13 +292,40 @@ aur_clone() {
 # origin/master and not on the detached HEAD. Anything unique to the
 # detached commit is dropped. The workflow's concurrency group prevents
 # the race; this stays as a safety net.
-# Args: $1=clone directory
+# Args: $1=clone directory, $2=--no-checkout for a clone made without one
 aur_reanchor() {
   if ! git -C "$1" symbolic-ref -q HEAD >/dev/null; then
     log_warn "Detached HEAD after clone (remote HEAD != refs/heads/master)"
     log_info "Re-basing on origin/master to allow fast-forward push"
-    git -C "$1" checkout -B master origin/master
+    if [[ "${2:-}" == "--no-checkout" ]]; then
+      git -C "$1" branch -f master origin/master &&
+        git -C "$1" symbolic-ref HEAD refs/heads/master
+    else
+      git -C "$1" checkout -B master origin/master
+    fi
   fi
+}
+
+# Write the top-level entries of HEAD of a clone made with --no-checkout
+# into a directory, without a checkout, so git applies none of the links,
+# attributes or filters of the repo: a regular file with its content, a
+# symlink as a link to nowhere and anything else as an empty directory. The
+# checks of the prepared update refuse those two where a PKGBUILD, a
+# .SRCINFO or a source is expected, as they do in a checkout.
+# Args: $1=clone directory, $2=destination directory, created here
+aur_export() {
+  local entry name mode sha
+  mkdir "$2" || return 1
+  while IFS= read -r -d '' entry; do
+    name="${entry#*$'\t'}"
+    [[ -n "$name" && "$name" != */* && "$name" != . && "$name" != .. ]] || continue
+    read -r mode _ sha <<<"${entry%%$'\t'*}"
+    case "$mode" in
+      100*) git -C "$1" cat-file blob "$sha" >"$2/$name" || return 1 ;;
+      120000) ln -s /nonexistent "$2/$name" || return 1 ;;
+      *) mkdir "$2/$name" || return 1 ;;
+    esac
+  done < <(git -C "$1" ls-tree -z HEAD)
 }
 
 # Commit PKGBUILD and .SRCINFO, sign when GPG_KEY_ID is set, push with 3

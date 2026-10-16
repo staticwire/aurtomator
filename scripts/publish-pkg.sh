@@ -45,8 +45,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 aur_dir="${tmp_dir}/aur-${PKG_NAME}"
 log_info "Cloning AUR repo: $PKG_NAME"
-aur_clone "ssh://aur@aur.archlinux.org/${PKG_NAME}.git" "$aur_dir" || exit 1
-aur_reanchor "$aur_dir"
+aur_clone "ssh://aur@aur.archlinux.org/${PKG_NAME}.git" "$aur_dir" --no-checkout || exit 1
+aur_reanchor "$aur_dir" --no-checkout
 
 head=$(git -C "$aur_dir" rev-parse HEAD)
 if [[ "$head" != "$base" ]]; then
@@ -58,10 +58,17 @@ fi
 # CHECK AND PUSH
 # =============================================================================
 
-check_prepared_files "$aur_dir" "$PREPARED" "$VERSION" || exit 1
-cp "${PREPARED}/PKGBUILD" "${PREPARED}/.SRCINFO" "$aur_dir/"
+aur_files="${tmp_dir}/aur-files"
+aur_export "$aur_dir" "$aur_files" || exit 1
+check_prepared_files "$aur_files" "$PREPARED" "$VERSION" || exit 1
 
-if git -C "$aur_dir" diff --quiet; then
+# The clone has no checkout: the index takes the tree of HEAD, and only the
+# two prepared files enter the work tree
+git -C "$aur_dir" read-tree HEAD || exit 1
+cp "${PREPARED}/PKGBUILD" "${PREPARED}/.SRCINFO" "$aur_dir/"
+git -C "$aur_dir" add PKGBUILD .SRCINFO || exit 1
+
+if git -C "$aur_dir" diff --cached --quiet; then
   log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
   pkg_set "$PKG_FILE" .current "\"${VERSION}\""
   exit 2
@@ -70,7 +77,7 @@ fi
 if [[ "$DRY_RUN" == "--dry-run" ]]; then
   log_warn "[DRY RUN] Would push $PKG_NAME $VERSION to AUR"
   log_info "PKGBUILD diff:"
-  git -C "$aur_dir" diff PKGBUILD || true
+  git -C "$aur_dir" diff --cached PKGBUILD || true
   exit 0
 fi
 
