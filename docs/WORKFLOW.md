@@ -41,7 +41,7 @@ flowchart TD
     H5 --> H6[hand over PKGBUILD, .SRCINFO, AUR commit]
     H -->|failure| J[write error to .status/]
     D -->|failure| J
-    B2 -->|all done| V[verify job: no secrets]
+    B2 -->|all done| V[verify job: no secrets, as builder]
     V --> V1[check-all.sh --verify]
     V1 --> V2[verify-pkg.sh: download the sources, check the checksums]
     V2 -->|failure| V3[take the update out, write update_failed]
@@ -62,7 +62,7 @@ flowchart TD
 - **One YAML per package.** Adding or removing a package is one file.
 - **Strategy-based version detection.** Each type of upstream source has its own script. A new source is a new script plus its entry in `scripts/validate-pkg.sh`.
 - **Patch, do not generate.** aurtomator trusts your PKGBUILD and changes only `pkgver`, `pkgrel`, checksums and `.SRCINFO`. Build steps, dependencies and install files stay untouched.
-- **Four jobs, one with secrets.** A PKGBUILD is code that every step reading it executes. `check` runs the strategies with the read-only workflow token, executes no PKGBUILD and decides what the run does. The jobs after it take the status of every package from `check`. `prepare` runs the PKGBUILD steps without secrets and without a token, and hands over only prepared files and update failures, because code from one PKGBUILD can write the files of every package there. `verify` downloads the sources of each prepared update and checks its checksums, without secrets, so code from one PKGBUILD cannot forge the checksums of another package. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD, runs no strategy and never downloads a source, and checks what `verify` passes on before it pushes. See [4.4](#44-prepare-and-publish).
+- **Four jobs, one with secrets.** A PKGBUILD is code that every step reading it executes. `check` runs the strategies with the read-only workflow token, executes no PKGBUILD and decides what the run does. The jobs after it take the status of every package from `check`. `prepare` runs the PKGBUILD steps without secrets and without a token, and hands over only prepared files and update failures, because code from one PKGBUILD can write the files of every package there. `verify` downloads the sources of each prepared update and checks its checksums, without secrets and as an unprivileged user, so code from one PKGBUILD cannot forge the checksums of another package. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD, runs no strategy and never downloads a source, and checks what `verify` passes on before it pushes. See [4.4](#44-prepare-and-publish).
 - **Failure isolation.** A broken package does not block the others. Each failure is logged for its package and opens a GitHub Issue. Each package has a time budget, so one that hangs does not hold up the run either.
 
 ## 2. Package YAML Format
@@ -690,10 +690,11 @@ Every job starts with **Checkout:** `actions/checkout`, pinned by commit SHA lik
 
 `verify`:
 
-1. **Install dependencies:** `git jq go-yq`.
+1. **Install dependencies:** `sudo git jq go-yq`, and the `builder` user.
 2. **Download handoff:** the `handoff` artifact to `handoff/`.
-3. **Verify checksums:** runs `check-all.sh --verify handoff`, see [4.4](#44-prepare-and-publish).
-4. **Upload verified handoff:** uploads `handoff/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
+3. **Verify checksums:** gives the workspace to `builder` and runs `check-all.sh --verify handoff` as `builder`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot.
+4. **Hand over:** the same step as in `prepare`.
+5. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
 
 `publish`:
 

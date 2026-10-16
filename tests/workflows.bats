@@ -402,6 +402,16 @@ EOF
   [ "$output" = "0" ]
 }
 
+@test "check-updates: verify runs as builder and hands over as prepare does" {
+  run step_run verify "Verify checksums"
+  [[ "$output" == *"sudo -u builder ./scripts/check-all.sh --verify handoff"* ]]
+  [ "$(step_run verify "Hand over")" = "$(step_run prepare "Hand over")" ]
+  run yq '[.jobs.verify.steps[].name] | join(",")' "$CHECK_UPDATES"
+  [[ "$output" == *"Verify checksums,Hand over,Upload verified handoff"* ]]
+  run yq '.jobs.verify.steps[] | select(.name == "Upload verified handoff") | .with.path' "$CHECK_UPDATES"
+  [ "$output" = "upload/" ]
+}
+
 @test "check-updates: the publish step gets no GitHub token" {
   run step_run publish "Publish updates"
   [ "$status" -eq 0 ]
