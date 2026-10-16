@@ -335,6 +335,73 @@ EOF
   [[ "$output" == *"::error::"* ]]
 }
 
+# Runs the issue step of publish in a workspace with the statuses given as
+# name=status pairs. gh lists the titles in $GH_TITLES, one per line, as
+# every open issue whatever --search asks for, the first 30 unless --limit
+# says otherwise, and logs every call to $GH_LOG.
+run_issue_step() {
+  local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
+  mkdir -p "$ws/.status" "$bin"
+  for pair in "$@"; do
+    printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
+  done
+  cat >"$bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GH_LOG"
+[[ "$1 $2" == "issue list" ]] || exit 0
+[[ -z "${GH_FAIL:-}" ]] || exit 1
+limit=30 jq_expr=""
+while (($#)); do
+  case "$1" in
+    --limit) limit=$2 && shift ;;
+    --jq) jq_expr=$2 && shift ;;
+  esac
+  shift
+done
+titles=$(grep -v '^$' <<<"${GH_TITLES:-}" | head -n "$limit")
+case "$jq_expr" in
+  length) grep -c . <<<"$titles" ;;
+  ".[].title") [[ -z "$titles" ]] || printf '%s\n' "$titles" ;;
+  *) exit 2 ;;
+esac
+EOF
+  printf '#!/bin/sh\necho body\n' >"$bin/sudo"
+  chmod +x "$bin/gh" "$bin/sudo"
+  GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  : >"$GH_LOG"
+  step_run publish "Create issues for failed packages" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_TITLES="${GH_TITLES:-}" \
+    GH_FAIL="${GH_FAIL:-}" RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "check-updates: an open issue of another package holds back no issue" {
+  GH_TITLES="❌ foo-bar: update failed" run_issue_step foo="update_failed: boom"
+  [ "$status" -eq 0 ]
+  grep -q '^issue create --title ❌ foo: update failed ' "$GH_LOG"
+}
+
+@test "check-updates: an open issue of the package holds back another one" {
+  GH_TITLES="❌ foo: check failed" run_issue_step foo="update_failed: boom"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step finds an open issue behind 30 others" {
+  GH_TITLES="$(printf '❌ pkg%s: check failed\n' {1..30})"$'\n❌ foo: update failed' \
+    run_issue_step foo="update_failed: boom"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step fails when the open issues cannot be listed" {
+  GH_FAIL=1 run_issue_step foo="update_failed: boom"
+  [ "$status" -ne 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "check-updates: publish takes the statuses from the check job" {
   run yq '.jobs.publish.steps[] | select(.with.name == "checked") | .with.path' "$CHECK_UPDATES"
   [ "$output" = ".status" ]

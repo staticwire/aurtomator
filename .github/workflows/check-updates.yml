@@ -420,8 +420,10 @@ jobs:
 
                 gh label create "auto-update" --color "d73a4a" --description "Automated update failure" 2>/dev/null || true
 
-                existing=$(gh issue list --label "auto-update" --search "$pkg_name failed" --state open --json number --jq 'length')
-                if [[ "$existing" -gt 0 ]]; then
+                # Exact titles: search splits foo-bar into words, so a
+                # search for foo also finds the issue of foo-bar
+                titles=$(gh issue list --label "auto-update" --state open --limit 1000 --json title --jq '.[].title')
+                if grep -qxF -e "❌ $pkg_name: check failed" -e "❌ $pkg_name: update failed" <<<"$titles"; then
                   echo "Issue already open for $pkg_name, skipping"
                   continue
                 fi
