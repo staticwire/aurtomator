@@ -9,7 +9,7 @@
 # Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--dry-run]
 #
 # Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version,
-#             3 the AUR or upstream moved since the update was prepared
+#             3 the AUR moved since the update was prepared
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -32,8 +32,8 @@ base=$(prepared_base "$PREPARED") || exit 1
 
 prepared_ver=$(sed -n 's/^pkgver=//p' "${PREPARED}/PKGBUILD" | head -1)
 if [[ "$prepared_ver" != "$VERSION" ]]; then
-  log_warn "$PKG_NAME was prepared for $prepared_ver, upstream now has $VERSION. The next run prepares it again."
-  exit 3
+  log_err "Prepared PKGBUILD has pkgver=${prepared_ver}, expected ${VERSION}"
+  exit 1
 fi
 
 # =============================================================================

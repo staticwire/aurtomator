@@ -12,7 +12,8 @@
 # With --verify <dir>: runs verify-pkg.sh for each package in <dir>/prepared
 #   and takes out the ones that fail, without running the strategies
 # With --publish <dir>: keeps the statuses of the check run before it, and
-#   runs publish-pkg.sh for each package that run found outdated
+#   runs publish-pkg.sh for each package that run found outdated, with the
+#   version that run found and without running the strategies
 # With --dry-run: runs update-pkg.sh or publish-pkg.sh in dry-run mode
 #
 # Writes per-package status to .status/ directory for README generation
@@ -140,8 +141,9 @@ fi
 STATUS_DIR="${AURTOMATOR_DIR}/.status"
 
 # --prepare and --publish take the statuses of the check run before them,
-# read here before anything else runs. --prepare runs code from PKGBUILDs,
-# so the workflow gives it no GITHUB_TOKEN and it runs no strategy.
+# read here before anything else runs, and run no strategy: --prepare runs
+# code from PKGBUILDs without GITHUB_TOKEN, and --publish holds the AUR and
+# GPG keys.
 declare -A CHECKED=()
 if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ ! -L "$STATUS_DIR" ]]; then
   for status_file in "$STATUS_DIR"/*; do
@@ -232,7 +234,7 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
   fi
   ((checked++)) || true
 
-  if [[ "$MODE" == "prepare" ]]; then
+  if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
     check_cmd=(checked_version "$pkg_name")
   else
     check_cmd=(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-update.sh" "$pkg_name")
@@ -316,7 +318,7 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
       echo "up_to_date" >"${STATUS_DIR}/${pkg_name}"
       ;;
     publish:3)
-      # The AUR or upstream moved after prepare; the next run prepares again
+      # The AUR moved after prepare; the next run prepares again
       echo "$available" >"${STATUS_DIR}/${pkg_name}"
       ;;
     *)

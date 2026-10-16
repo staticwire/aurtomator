@@ -236,10 +236,11 @@ current: '1.0.0'"
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
-@test "publish-pkg: defers when upstream moved since the update was prepared" {
+@test "publish-pkg: refuses an update prepared for another version" {
   setup_publish
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.2.0 "$PREPARED"
-  [ "$status" -eq 3 ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pkgver=1.1.0, expected 1.2.0"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
@@ -683,7 +684,7 @@ checked_status() {
   printf '%s\n' "$2" >"$TEST_TMPDIR/.status/$1"
 }
 
-@test "check-all --publish: publishes with the version upstream reports now and keeps the checked statuses" {
+@test "check-all --publish: publishes the version the check run found, runs no strategy and keeps the checked statuses" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
@@ -693,9 +694,11 @@ current: '2.0.0'"
   checked_status pkg "new_version: 2.0.0"
   checked_status other "up_to_date"
   mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script check-update.sh 1 "strategy ran"
   stub_script publish-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/check-update.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
   [ "$(cat "$TEST_TMPDIR/.status/other")" = "up_to_date" ]

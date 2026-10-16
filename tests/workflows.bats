@@ -402,6 +402,14 @@ EOF
   [ "$output" = "0" ]
 }
 
+@test "check-updates: the publish step gets no GitHub token" {
+  run step_run publish "Publish updates"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *GITHUB_TOKEN* ]]
+  run yq '.jobs.publish.steps[] | select(.name == "Publish updates") | .env | has("GITHUB_TOKEN")' "$CHECK_UPDATES"
+  [ "$output" = "false" ]
+}
+
 @test "check-updates: publish takes the statuses from the check job" {
   run yq '.jobs.publish.steps[] | select(.with.name == "checked") | .with.path' "$CHECK_UPDATES"
   [ "$output" = ".status" ]
