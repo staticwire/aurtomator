@@ -76,7 +76,8 @@ case "$version_source" in
   tag)
     version=$(echo "$release" | yq -r '.tag_name')
     if [[ -n "$tag_version_regex" ]]; then
-      extracted=$(echo "$version" | sed -nE "s|${tag_version_regex}|\\1|p" | head -1)
+      # The regex can close the s command; --sandbox refuses e, r and w
+      extracted=$(echo "$version" | sed --sandbox -nE "s|${tag_version_regex}|\\1|p" | head -1)
       if [[ -z "$extracted" ]]; then
         echo "tag_version_regex '${tag_version_regex}' did not match tag '${version}'" >&2
         exit 1
@@ -96,7 +97,7 @@ case "$version_source" in
       exit 1
     fi
     body=$(echo "$release" | yq -r '.body')
-    version=$(echo "$body" | grep -oP "$version_pattern" | head -1)
+    version=$(echo "$body" | grep -oP -e "$version_pattern" | head -1)
     # Clean up: replace - with + for pacman compatibility
     version="${version//-/+}"
     ;;

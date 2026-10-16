@@ -42,7 +42,8 @@ fi
 
 # Extract version from tags
 if [[ -n "$tag_version_regex" ]]; then
-  version=$(echo "$tags" | sed -nE "s|${tag_version_regex}|\\1|p" | sort -V | tail -1)
+  # The regex can close the s command; --sandbox refuses e, r and w
+  version=$(echo "$tags" | sed --sandbox -nE "s|${tag_version_regex}|\\1|p" | sort -V | tail -1)
 else
   # Default: strip v prefix, sort semver, take latest
   version=$(echo "$tags" | sed 's/^v//' | sort -V | tail -1)

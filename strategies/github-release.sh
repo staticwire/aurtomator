@@ -34,7 +34,8 @@ fi
 
 # Extract version from tag
 if [[ -n "$tag_version_regex" ]]; then
-  extracted=$(echo "$version" | sed -nE "s|${tag_version_regex}|\\1|p" | head -1)
+  # The regex can close the s command; --sandbox refuses e, r and w
+  extracted=$(echo "$version" | sed --sandbox -nE "s|${tag_version_regex}|\\1|p" | head -1)
   if [[ -z "$extracted" ]]; then
     echo "tag_version_regex '${tag_version_regex}' did not match tag '${version}'" >&2
     exit 1

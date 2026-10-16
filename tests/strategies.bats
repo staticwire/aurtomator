@@ -273,6 +273,75 @@ teardown() {
   [ "$output" = "3.5.0" ]
 }
 
+# === YAML regex fields ===
+
+# A regex field closes the s command of sed and adds the e flag, which
+# runs the pattern space as a command
+@test "github-release: tag_version_regex runs no command" {
+  create_test_package "test-regex-exec" "github-release" "upstream:
+  project: custom-prefix/repo
+  tag_version_regex: '.*|touch $TEST_TMPDIR/pwned|e;s|(x)|y|;#'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-regex-exec"
+  [ "$status" -ne 0 ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
+@test "github-tag: tag_version_regex runs no command" {
+  create_test_package "test-regex-exec" "github-tag" "upstream:
+  project: custom-prefix/repo
+  tag_version_regex: '.*|touch $TEST_TMPDIR/pwned|e;s|(x)|y|;#'"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-regex-exec"
+  [ "$status" -ne 0 ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
+@test "github-nightly: tag_version_regex runs no command" {
+  create_test_package "test-regex-exec" "github-nightly" "upstream:
+  project: custom-nightly/repo
+  nightly_tag: nightly
+  version_source: tag
+  tag_version_regex: '.*|touch $TEST_TMPDIR/pwned|e;s|(x)|y|;#'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-regex-exec"
+  [ "$status" -ne 0 ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
+@test "webpage-scrape: pattern runs no command" {
+  create_test_package "test-scrape-exec" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'test-scrape-(7)|/touch pwned/e;s/(x)'"
+
+  cd "$TEST_TMPDIR"
+  run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-scrape-exec"
+  [ "$status" -ne 0 ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
+@test "webpage-scrape: a pattern may start with a dash" {
+  create_test_package "test-scrape-dash" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: '-([0-9]+\\.[0-9]+\\.[0-9]+)\\.tar\\.gz'"
+
+  run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-scrape-dash"
+  [ "$status" -eq 0 ]
+  [ "$output" = "7.0.0" ]
+}
+
+@test "github-nightly: a version_pattern may start with a dash" {
+  create_test_package "test-nightly-dash" "github-nightly" "upstream:
+  project: owner/nightly-repo
+  nightly_tag: nightly
+  version_source: release_body
+  version_pattern: '-\\K[a-z]+'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-dash"
+  [ "$status" -eq 0 ]
+  [ "$output" = "dev" ]
+}
+
 # === github-asset ===
 
 @test "github-asset: single asset, version is its updated_at as YYYYMMDD" {

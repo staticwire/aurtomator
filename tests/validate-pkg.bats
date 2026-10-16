@@ -381,6 +381,14 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "validate: webpage-scrape accepts a pattern that starts with a dash" {
+  create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: '-([0-9]+\\.[0-9]+)\\.tar\\.gz'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
 @test "validate: webpage-scrape rejects invalid regex pattern" {
   create_test_package "mypkg" "webpage-scrape" "upstream:
   url: https://example.com/releases
@@ -424,6 +432,17 @@ EOF
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -ne 0 ]
   [[ "$output" == *"not valid ERE regex"* ]]
+}
+
+# The field closes the s command of sed and adds the e flag, which runs the
+# pattern space as a command
+@test "validate: tag_version_regex runs no command" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: '.*|touch $TEST_TMPDIR/pwned|e;s|(x)|y|;#'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
 }
 
 @test "validate: tag_version_regex without capture group rejected" {

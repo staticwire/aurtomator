@@ -85,8 +85,9 @@ validate_pkg() {
     if ! echo "$tag_version_regex" | grep -qE '\([^)]*\)'; then
       log_err "$file: upstream.tag_version_regex must contain a capture group (): $tag_version_regex"
       ((errors++))
-    # Then check valid regex syntax
-    elif ! echo "test" | sed -nE "s|${tag_version_regex}|\\1|p" >/dev/null 2>&1; then
+    # Then check valid regex syntax. The regex can close the s command;
+    # --sandbox refuses e, r and w
+    elif ! echo "test" | sed --sandbox -nE "s|${tag_version_regex}|\\1|p" >/dev/null 2>&1; then
       log_err "$file: upstream.tag_version_regex is not valid ERE regex: $tag_version_regex"
       ((errors++))
     fi
@@ -201,7 +202,7 @@ validate_pkg() {
       else
         # Validate regex syntax: grep exits 2 on invalid regex
         local grep_rc=0
-        echo "" | grep -qE "$pattern" 2>/dev/null || grep_rc=$?
+        echo "" | grep -qE -e "$pattern" 2>/dev/null || grep_rc=$?
         if [[ "$grep_rc" -eq 2 ]]; then
           log_err "$file: upstream.pattern is not valid ERE regex: $pattern"
           ((errors++))
