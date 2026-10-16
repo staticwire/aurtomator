@@ -153,6 +153,22 @@ current: '0.9.0'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "0.9.0" ]
 }
 
+@test "update-pkg: commits the updated PKGBUILD and .SRCINFO" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx 'pkgver=1.1.0'
+  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "pkgbase = demo" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
+}
+
 @test "update-pkg: --prepare needs a directory" {
   create_test_package "demo" "github-nightly" "upstream:
   project: owner/repo"
@@ -198,6 +214,22 @@ current: '1.0.0'"
   git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx 'pkgver=1.1.0'
   [ "$(git -C "$AUR_REMOTE" show HEAD:demo.install)" = "post_install() { :; }" ]
   [ "$(git -C "$AUR_REMOTE" ls-tree --name-only HEAD | LC_ALL=C sort | tr '\n' ' ')" = ".SRCINFO PKGBUILD demo.install " ]
+}
+
+# git add would convert both files on their way into the index: UTF-7
+# turns +AAo- in a comment into a new line, ident collapses $Id: ...$
+@test "publish-pkg: commits the prepared bytes whatever the attributes of the AUR repo say" {
+  setup_publish
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$H3' # +AAo-)+AAo-echo PWNED+AAo-x=(
+            '$H4')"
+  sed -i 's/^\tpkgdesc = demo$/&, $Id: kept $/' "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  aur_add_file .SRCINFO "$(<"$TEST_TMPDIR/old.SRCINFO")"
+  aur_add_file .gitattributes $'PKGBUILD working-tree-encoding=UTF-7\n.SRCINFO ident'
+
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+  cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:PKGBUILD) "$PREPARED/PKGBUILD"
+  cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:.SRCINFO) "$PREPARED/.SRCINFO"
 }
 
 @test "publish-pkg: refuses a prepared PKGBUILD that changes other lines" {

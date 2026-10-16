@@ -328,8 +328,8 @@ aur_export() {
   done < <(git -C "$1" ls-tree -z HEAD)
 }
 
-# Commit PKGBUILD and .SRCINFO, sign when GPG_KEY_ID is set, push with 3
-# attempts.
+# Commit what the index holds, sign when GPG_KEY_ID is set, push with 3
+# attempts. The caller stages PKGBUILD and .SRCINFO.
 # Args: $1=clone directory, $2=version, $3=strategy (for the commit message)
 aur_commit_push() {
   local dir="$1" attempt
@@ -337,7 +337,6 @@ aur_commit_push() {
   git -C "$dir" config user.name "${GIT_AUTHOR_NAME:-aurtomator}"
   git -C "$dir" config user.email "${GIT_AUTHOR_EMAIL:-aurtomator@users.noreply.github.com}"
   git -C "$dir" config commit.gpgsign false
-  git -C "$dir" add PKGBUILD .SRCINFO
   git -C "$dir" commit -m "$2 release from $3" || {
     log_err "git commit failed in $dir"
     return 1

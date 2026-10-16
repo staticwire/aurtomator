@@ -197,6 +197,7 @@ fi
 # COMMIT & PUSH TO AUR
 # =============================================================================
 
+git -C "$aur_dir" add PKGBUILD .SRCINFO || exit 1
 aur_commit_push "$aur_dir" "$NEW_VERSION" "$strategy" || exit 1
 log_ok "Pushed $PKG_NAME $NEW_VERSION to AUR"
 

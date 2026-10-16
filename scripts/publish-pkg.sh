@@ -62,11 +62,15 @@ aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
 check_prepared_files "$aur_files" "$PREPARED" "$VERSION" || exit 1
 
-# The clone has no checkout: the index takes the tree of HEAD, and only the
-# two prepared files enter the work tree
+# The clone has no checkout: the index takes the tree of HEAD, and the two
+# prepared files enter it byte for byte. git add would pass them through
+# the attributes of the AUR repo, and an encoding such as UTF-7 turns text
+# in a comment into code.
 git -C "$aur_dir" read-tree HEAD || exit 1
-cp "${PREPARED}/PKGBUILD" "${PREPARED}/.SRCINFO" "$aur_dir/"
-git -C "$aur_dir" add PKGBUILD .SRCINFO || exit 1
+for file in PKGBUILD .SRCINFO; do
+  blob=$(git -C "$aur_dir" hash-object -w --stdin --no-filters <"${PREPARED}/${file}") || exit 1
+  git -C "$aur_dir" update-index --add --cacheinfo "100644,${blob},${file}" || exit 1
+done
 
 if git -C "$aur_dir" diff --cached --quiet; then
   log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
