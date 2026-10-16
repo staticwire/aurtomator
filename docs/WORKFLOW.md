@@ -668,6 +668,8 @@ The workflow has four jobs after a short `image` job. `image` reads the image fr
 
 Every job starts with **Checkout:** `actions/checkout`, pinned by commit SHA like every action in this repository, with `persist-credentials: false`, so the workflow token is not written to `.git/config`. The workflow never pushes to GitHub with git: the status commit goes through the API.
 
+The four steps that run `check-all.sh` as `builder` stop workflow commands while it runs. Its output carries text that a PKGBUILD, the AUR or an upstream chose: the error text a git server sends, a line of a prepared `.SRCINFO` that `verify` refuses. The runner takes a line as a workflow command when it starts with `::` after leading whitespace, or when it holds `##[` anywhere. A line `::add-mask::true` makes the runner skip the outputs `prepare` and `work` of `check`, so no job after `check` runs. Root prints `::stop-commands::` with a token of 32 hex digits from `/dev/urandom` before the run and `::<token>::` after it, and the runner takes no command in between. The token stays in a variable of root's shell, so `builder` cannot print it. The output goes through a pipe to `cat`, which ends only when no process of `builder` holds the pipe, so nothing `builder` prints comes after the token. The steps run in bash with `pipefail` and exit with the status of `check-all.sh`.
+
 `image`:
 
 1. **Checkout:** `.github/ci-image` only.
@@ -676,7 +678,7 @@ Every job starts with **Checkout:** `actions/checkout`, pinned by commit SHA lik
 `check`:
 
 1. **Install dependencies:** `sudo git go-yq`, and the `builder` user.
-2. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line.
+2. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
 3. **Decide:** sets the output `prepare` when a status is `new_version` or `available_downgrade`. It runs `update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in the status table.
 4. **Upload statuses:** with `work`, uploads `.status/` as the `checked` artifact with a retention of 1 day.
 
@@ -684,7 +686,7 @@ Every job starts with **Checkout:** `actions/checkout`, pinned by commit SHA lik
 
 1. **Install dependencies:** `sudo git openssh namcap jq go-yq pacman-contrib`, and the `builder` user.
 2. **Download statuses:** the `checked` artifact to `.status/`.
-3. **Prepare updates:** gives the workspace to `builder` and runs `check-all.sh --prepare handoff` as `builder`, without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token stays in `check`. Root prefixes every line of the output with `|` and a space, so nothing a PKGBUILD prints reaches the runner as a workflow command such as `::add-mask::`. The step runs in bash with `pipefail`, so a failure of `check-all.sh` fails it.
+3. **Prepare updates:** gives the workspace to `builder` and runs `check-all.sh --prepare handoff` as `builder`, without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token stays in `check`. Workflow commands are stopped while it runs.
 4. **Hand over:** code from a PKGBUILD has run in the workspace by now, so the step runs nothing from it. A process started by a PKGBUILD can outlive its step, so the step kills every process whose effective or real user is `builder` and waits up to 30 seconds for them to end. A zombie does not count: it runs nothing, and pid 1 of a job container never reaps one. A process that is still running after that fails the step, and so does a process list that `ps` cannot produce. Only after that does root copy the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
 5. **Upload handoff:** uploads `upload/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
 
@@ -692,7 +694,7 @@ Every job starts with **Checkout:** `actions/checkout`, pinned by commit SHA lik
 
 1. **Install dependencies:** `sudo git jq go-yq`, and the `builder` user.
 2. **Download handoff:** the `handoff` artifact to `handoff/`.
-3. **Verify checksums:** gives the workspace to `builder` and runs `check-all.sh --verify handoff` as `builder`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot.
+3. **Verify checksums:** gives the workspace to `builder` and runs `check-all.sh --verify handoff` as `builder`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
 4. **Hand over:** the same step as in `prepare`.
 5. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
 
@@ -704,7 +706,7 @@ Every job starts with **Checkout:** `actions/checkout`, pinned by commit SHA lik
 4. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
 5. **Setup AUR SSH:** writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. When the AUR changes its host key, update the key in `check-updates.yml`.
 6. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
-7. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish).
+7. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
 8. **Update README status table:** runs `update-readme.sh` as `builder`.
 9. **Commit changes via API:** see [5.5](#55-verified-commit).
 10. **Create issues for failed packages:** see [5.6](#56-failure-issues).

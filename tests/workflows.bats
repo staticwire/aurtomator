@@ -229,38 +229,75 @@ run_decide_step() {
   [[ "$output" != *"GITHUB_OUTPUT"* ]]
 }
 
-# Runs the Prepare updates step with a sudo that prints $SUDO_OUT and exits
-# with $SUDO_RC, in the shell the step names. chown does nothing.
-run_prepare_step() {
+# Prints job and step name, tab-separated, of every step that runs
+# check-all.sh, which runs as builder
+builder_steps() {
+  yq '.jobs | to_entries[] | .key as $job | .value.steps[] |
+    select((.run // "") | test("scripts/check-all.sh")) | $job + "\t" + .name' "$CHECK_UPDATES"
+}
+
+# Runs step $2 of job $1 in the shell the step names. sudo records its
+# arguments and environment in $SUDO_LOG, prints $SUDO_OUT on stdout and
+# stderr, leaves two processes behind that print $LATE_OUT after it exits,
+# one holding only stdout and one only stderr, and exits with $SUDO_RC.
+# chown and git do nothing.
+run_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
   printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
-  chmod +x "$bin/chown"
+  printf '#!/bin/sh\nexit 0\n' >"$bin/git"
   cat >"$bin/sudo" <<'EOF'
 #!/usr/bin/env bash
+{ printf '%s\n' "$@"; env; } >>"$SUDO_LOG"
 printf '%s\n' "$SUDO_OUT"
 printf '%s\n' "$SUDO_OUT" >&2
+if [[ -n "${LATE_OUT:-}" ]]; then
+  (exec 2>/dev/null && sleep 0.5 && printf '%s\n' "$LATE_OUT") &
+  (exec >/dev/null && sleep 1 && printf '%s\n' "$LATE_OUT" >&2) &
+fi
 exit "${SUDO_RC:-0}"
 EOF
-  chmod +x "$bin/sudo"
-  step_run prepare "Prepare updates" >"$BATS_TEST_TMPDIR/step.sh"
-  run yq '.jobs.prepare.steps[] | select(.name == "Prepare updates") | .shell' "$CHECK_UPDATES"
+  chmod +x "$bin/chown" "$bin/git" "$bin/sudo"
+  run yq ".jobs.$1.steps[] | select(.name == \"$2\") | .shell" "$CHECK_UPDATES"
   [ "$output" = "bash" ]
-  run env PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+  step_run "$1" "$2" >"$BATS_TEST_TMPDIR/step.sh"
+  rm -f "$SUDO_LOG"
+  run env PATH="$bin:$PATH" GITHUB_WORKSPACE="$BATS_TEST_TMPDIR" SUDO_LOG="$SUDO_LOG" \
+    bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
 }
 
-@test "check-updates: no line of the prepare run reaches the runner as a command" {
-  SUDO_OUT=$'::error::from a PKGBUILD\n::add-mask::failed' run_prepare_step
-  [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 4 ]
-  for line in "${lines[@]}"; do
-    [[ "$line" != "::"* ]]
+@test "check-updates: no line of builder reaches the runner as a command" {
+  local steps step token
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  mapfile -t steps < <(builder_steps)
+  [ "${#steps[@]}" -eq 4 ]
+  for step in "${steps[@]}"; do
+    echo "$step"
+    SUDO_OUT=$'::add-mask::true\nfatal: ##[add-mask]true' LATE_OUT="::error::late" \
+      run_builder_step "${step%%$'\t'*}" "${step#*$'\t'}"
+    [ "$status" -eq 0 ]
+    # stop, two lines on stdout and two on stderr, the late lines, resume
+    [ "${#lines[@]}" -eq 8 ]
+    [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
+    token="${BASH_REMATCH[1]}"
+    [ "${lines[5]}" = "::error::late" ]
+    [ "${lines[6]}" = "::error::late" ]
+    [ "${lines[7]}" = "::$token::" ]
+    run grep -c -F "$token" "$SUDO_LOG"
+    [ "$output" = "0" ]
   done
 }
 
-@test "check-updates: a failing prepare run fails its step" {
-  SUDO_OUT="boom" SUDO_RC=1 run_prepare_step
-  [ "$status" -ne 0 ]
+@test "check-updates: a failing builder run fails its step and resumes commands" {
+  local steps step
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  mapfile -t steps < <(builder_steps)
+  for step in "${steps[@]}"; do
+    echo "$step"
+    SUDO_OUT="boom" SUDO_RC=3 run_builder_step "${step%%$'\t'*}" "${step#*$'\t'}"
+    [ "$status" -eq 3 ]
+    [[ "${lines[-1]}" =~ ^::[0-9a-f]{32}::$ ]]
+  done
 }
 
 @test "check-updates: publish runs on the check job's decision, also after a failed prepare or verify" {
