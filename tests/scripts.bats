@@ -369,7 +369,7 @@ EOF
   cat >"$MOCK_DIR/curl" <<MOCKCURL
 #!/usr/bin/env bash
 echo "\${@: -1}" >>"$TEST_TMPDIR/curl-urls.log"
-printf "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\n"
+printf '200 text/html; charset=utf-8'
 MOCKCURL
   chmod +x "$MOCK_DIR/curl"
 
@@ -379,6 +379,60 @@ MOCKCURL
   [[ "$output" == *"test-1.0.0-riscv64.tar.gz"* ]]
   grep -q "test-1.0.0-armv7h.tar.gz" "$TEST_TMPDIR/curl-urls.log"
   grep -q "test-1.0.0-riscv64.tar.gz" "$TEST_TMPDIR/curl-urls.log"
+}
+
+# The server of a source chooses the headers. bash evaluates an operand of
+# -ge as arithmetic, and an array subscript there runs a command.
+@test "lib.sh: validate_source_urls runs nothing a source server sends" {
+  cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
+pkgname=test-status
+pkgver=1.0.0
+pkgrel=1
+arch=('x86_64')
+source=("https://example.com/test-1.0.0.tar.gz")
+sha256sums=('abc123')
+EOF
+  # The payload in both places a status was read from: the first word of
+  # curl -w, and the status line of curl -I
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+printf 'BASH_VERSINFO[\$(id>%s)] text/plain\n' "$TEST_TMPDIR/pwned"
+printf 'HTTP/1.1 BASH_VERSINFO[\$(id>%s)] OK\n' "$TEST_TMPDIR/pwned"
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+
+  # Called as update-pkg.sh calls it, where set -e does not apply
+  run bash -c 'source "$0/scripts/lib.sh"; validate_source_urls "$1" || exit $?' "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+  [ "$status" -eq 1 ]
+}
+
+@test "lib.sh: validate_source_urls takes the status and type of the last response" {
+  cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
+pkgname=test-status
+pkgver=1.0.0
+pkgrel=1
+arch=('x86_64')
+source=("https://example.com/test-1.0.0.tar.gz")
+sha256sums=('abc123')
+EOF
+  # curl -w prints what curl read from the last response
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
+#!/usr/bin/env bash
+[[ " $* " == *" -w %{http_code} %{content_type} "* ]] || exit 99
+printf '%s\n' "$CURL_W"
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+  local lib='source "$0/scripts/lib.sh"; validate_source_urls "$1" || exit $?'
+
+  CURL_W="200 application/octet-stream" run bash -c "$lib" "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 0 ]
+  CURL_W="404 application/octet-stream" run bash -c "$lib" "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"HTTP 404"* ]]
+  CURL_W="200 Text/HTML; charset=utf-8" run bash -c "$lib" "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"HTML instead of"* ]]
 }
 
 # === validate_pkgver ===
@@ -1223,7 +1277,7 @@ MOCKGIT
   cat > "$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
 if [[ "$1" == "-sIL" ]]; then
-  printf "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\n"
+  printf '200 text/html; charset=utf-8'
   exit 0
 fi
 # Default mock for other curl calls
@@ -1277,7 +1331,7 @@ MOCKGIT
   cat > "$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
 if [[ "$1" == "-sIL" ]]; then
-  printf "HTTP/1.1 200 OK\r\ncontent-type: application/octet-stream\r\n"
+  printf '200 application/octet-stream'
   exit 0
 fi
 echo '{}'
@@ -1346,7 +1400,7 @@ MOCKGIT
   cat > "$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
 if [[ "$1" == "-sIL" ]]; then
-  printf "HTTP/1.1 200 OK\r\ncontent-type: application/octet-stream\r\n"
+  printf '200 application/octet-stream'
   exit 0
 fi
 echo '{}'
@@ -1423,7 +1477,7 @@ MOCKGIT
   cat > "$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
 if [[ "$1" == "-sIL" ]]; then
-  printf "HTTP/1.1 200 OK\r\ncontent-type: application/octet-stream\r\n"
+  printf '200 application/octet-stream'
   exit 0
 fi
 echo '{}'

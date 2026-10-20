@@ -232,17 +232,28 @@ validate_source_urls() {
   while IFS= read -r url; do
     [[ -z "$url" ]] && continue
 
-    local headers http_code content_type
-    headers=$(curl -sIL --max-time 10 --max-redirs 5 "$url" 2>/dev/null) || {
+    # curl reports the status and type of the last response. The headers
+    # are text the server chose, and bash evaluates an operand of -ge as
+    # arithmetic, where an array subscript runs a command.
+    local response http_code content_type
+    response=$(curl -sIL -o /dev/null -w '%{http_code} %{content_type}' \
+      --max-time 10 --max-redirs 5 "$url" 2>/dev/null) || {
       log_warn "Source URL unreachable: $url"
       errors=$((errors + 1))
       continue
     }
+    read -r http_code content_type <<<"$response"
+    content_type="${content_type%%;*}"
+    content_type="${content_type//[[:space:]]/}"
+    content_type="${content_type,,}"
 
-    http_code=$(grep -i "^HTTP/" <<<"$headers" | tail -1 | awk '{print $2}')
-    content_type=$(grep -i "^content-type:" <<<"$headers" | tail -1 | sed 's/^[^:]*: *//' | cut -d';' -f1 | tr -d '[:space:]')
+    if [[ ! "$http_code" =~ ^[0-9]{3}$ ]]; then
+      log_err "Source URL returned no HTTP status: $url"
+      errors=$((errors + 1))
+      continue
+    fi
 
-    if [[ "${http_code:-0}" -ge 400 ]]; then
+    if ((10#$http_code >= 400)); then
       log_err "Source URL returned HTTP $http_code: $url"
       errors=$((errors + 1))
       continue

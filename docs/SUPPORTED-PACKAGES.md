@@ -140,7 +140,7 @@ sha256sums=('SKIP'
 
 Upstream moves or renames a release, and the old URL now redirects to an HTML error or download page.
 
-**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array. HTTP status 400 or above, or `Content-Type: text/html`, blocks the update.
+**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text.
 
 **Why:** without this check, `updpkgsums` would hash the HTML page. The checksums would match and the package would fail to install.
 
