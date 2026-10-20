@@ -79,7 +79,6 @@ EOF
 
   # Git repo for setup.sh (needs origin remote)
   git -C "$TEST_TMPDIR" init -q
-  git config --global --add safe.directory "$TEST_TMPDIR"
   git -C "$TEST_TMPDIR" remote add origin "git@github.com:test/repo.git"
 
   # SSH key for setup.sh

@@ -157,7 +157,6 @@ MOCKEOF
 
   # Init git repo with origin (for secrets step)
   git -C "$TEST_TMPDIR" init -q
-  git config --global --add safe.directory "$TEST_TMPDIR"
   git -C "$TEST_TMPDIR" remote add origin "git@github.com:test/repo.git"
 }
 

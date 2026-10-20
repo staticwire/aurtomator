@@ -32,6 +32,9 @@ setup_test_env() {
 
   # No pause before an AUR clone or between attempts
   export AURTOMATOR_CLONE_DELAY=0 AURTOMATOR_RETRY_DELAY=0
+
+  # git reads and writes no global config of the user running the tests
+  export GIT_CONFIG_GLOBAL="$TEST_TMPDIR/gitconfig"
 }
 
 teardown_test_env() {

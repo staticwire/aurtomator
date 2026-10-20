@@ -10,6 +10,13 @@ teardown() {
   teardown_test_env
 }
 
+# === test environment ===
+
+@test "setup_test_env: git keeps its global config in the test directory" {
+  git config --global --add aurtomator.probe 1
+  [ "$(git config -f "$TEST_TMPDIR/gitconfig" aurtomator.probe)" = 1 ]
+}
+
 # === lib.sh ===
 
 @test "lib.sh: pkg_file resolves existing package" {
