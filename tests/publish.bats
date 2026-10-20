@@ -1238,6 +1238,51 @@ make_export_clone() {
   [ ! -e "$clone/PKGBUILD" ]
 }
 
+# === aur_clone and aur_commit_push ===
+
+# Helper: a sleep on PATH that logs its argument to $TEST_TMPDIR/sleeps, and
+# a git whose clone always fails
+mock_sleep_and_clone() {
+  printf '#!/usr/bin/env bash\necho "$1" >>"%s/sleeps"\n' "$TEST_TMPDIR" >"$MOCK_DIR/sleep"
+  printf '#!/usr/bin/env bash\n[[ "$1" == clone ]] && exit 128\nexec /usr/bin/git "$@"\n' >"$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/sleep" "$MOCK_DIR/git"
+}
+
+# Helper: a repo without a remote, with a staged PKGBUILD, at $TEST_TMPDIR/clone
+make_unpushable_repo() {
+  git init -q -b master "$TEST_TMPDIR/clone"
+  echo "pkgver=1.0.0" >"$TEST_TMPDIR/clone/PKGBUILD"
+  git -C "$TEST_TMPDIR/clone" add PKGBUILD
+}
+
+@test "aur_clone: waits the pauses the environment sets" {
+  mock_sleep_and_clone
+  AURTOMATOR_CLONE_DELAY=3 AURTOMATOR_RETRY_DELAY=7 run aur_clone https://example.invalid/demo.git "$TEST_TMPDIR/clone"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$TEST_TMPDIR/sleeps")" = $'3\n7\n7' ]
+  [[ "$output" == *"Clone attempt 2 failed, retrying in 7s"* ]]
+}
+
+@test "aur_commit_push: waits the pause the environment sets" {
+  mock_sleep_and_clone
+  make_unpushable_repo
+  AURTOMATOR_RETRY_DELAY=7 run aur_commit_push "$TEST_TMPDIR/clone" 1.0.0 test
+  [ "$status" -eq 1 ]
+  [ "$(cat "$TEST_TMPDIR/sleeps")" = $'7\n7' ]
+  [[ "$output" == *"Push attempt 2 failed, retrying in 7s"* ]]
+}
+
+@test "aur_clone and aur_commit_push: wait 2 s before a clone and 5 s between attempts by default" {
+  mock_sleep_and_clone
+  make_unpushable_repo
+  unset AURTOMATOR_CLONE_DELAY AURTOMATOR_RETRY_DELAY
+  run aur_clone https://example.invalid/demo.git "$TEST_TMPDIR/other"
+  [ "$status" -eq 1 ]
+  run aur_commit_push "$TEST_TMPDIR/clone" 1.0.0 test
+  [ "$status" -eq 1 ]
+  [ "$(cat "$TEST_TMPDIR/sleeps")" = $'2\n5\n5\n5\n5' ]
+}
+
 # === check_prepared_pkgbuild ===
 
 @test "check_prepared_pkgbuild: accepts new pkgver, pkgrel and checksums" {

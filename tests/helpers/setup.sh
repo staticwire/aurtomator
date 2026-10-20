@@ -29,6 +29,9 @@ setup_test_env() {
 
   # Override AURTOMATOR_DIR so all scripts use our temp workspace
   export AURTOMATOR_DIR="$TEST_TMPDIR"
+
+  # No pause before an AUR clone or between attempts
+  export AURTOMATOR_CLONE_DELAY=0 AURTOMATOR_RETRY_DELAY=0
 }
 
 teardown_test_env() {

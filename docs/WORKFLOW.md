@@ -555,7 +555,7 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--
 ### 4.2 Step-by-step
 
 1. Load `.aurtomator.conf` when it exists. In CI, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GPG_KEY_ID` come from the workflow environment.
-2. Clone `ssh://aur@aur.archlinux.org/<package-name>.git` into a temporary directory, with up to 3 attempts. A clone without a PKGBUILD stops the update.
+2. Wait 2 seconds, then clone `ssh://aur@aur.archlinux.org/<package-name>.git` into a temporary directory, with up to 3 attempts 5 seconds apart. A clone without a PKGBUILD stops the update.
 3. When the clone lands on a detached `HEAD`, reset `master` to `origin/master`, so the push is a fast-forward.
 4. Warn when the PKGBUILD has no `# Maintainer:` line.
 5. Audit the PKGBUILD. Split packages, `pkgver()` with the wrong strategy and mixed checksums block the update. Patches only warn. See [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md).
@@ -565,8 +565,10 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--
 9. Regenerate `.SRCINFO` with `makepkg --printsrcinfo`.
 10. With `--dry-run`, print the PKGBUILD diff and stop.
 11. Commit `PKGBUILD` and `.SRCINFO` as `<new-version> release from <strategy>`, authored by `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL` (default `aurtomator`). With `GPG_KEY_ID` set, the commit is amended with a signature. When signing fails, the commit is pushed unsigned.
-12. Push, with up to 3 attempts.
+12. Push, with up to 3 attempts 5 seconds apart.
 13. Write `current` and `last_updated` to the package YAML.
+
+`AURTOMATOR_CLONE_DELAY` and `AURTOMATOR_RETRY_DELAY` change the 2 and the 5 seconds. The tests set both to 0.
 
 ### 4.3 Downgrade behavior
 

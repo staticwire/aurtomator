@@ -6,11 +6,10 @@
 
 load helpers/setup.sh
 
-setup() {
-  setup_test_env
-
-  # Isolated GPG keyring for all tests
-  export GNUPGHOME="$TEST_TMPDIR/gnupg"
+# The keys are generated once per file, and every test gets a copy of the
+# keyring
+setup_file() {
+  export GNUPGHOME="$BATS_FILE_TMPDIR/gnupg"
   mkdir -m 0700 "$GNUPGHOME"
   echo "allow-loopback-pinentry" >"$GNUPGHOME/gpg-agent.conf"
 
@@ -49,6 +48,17 @@ GPGEOF
   withpass_fpr=$(gpg --list-secret-keys --keyid-format long 2>/dev/null | grep -B2 "Test Withpass" | grep "^sec" | head -1 | awk '{print $2}' | cut -d'/' -f2)
   WITHPASS_MASTER_ID="$withpass_fpr"
   WITHPASS_SUBKEY_ID=$(gpg --list-secret-keys --keyid-format long 2>/dev/null | grep -A8 "Test Withpass" | grep "^ssb" | head -1 | awk '{print $2}' | cut -d'/' -f2)
+  export NOPASS_SUBKEY_ID NOPASS_MASTER_ID WITHPASS_MASTER_ID WITHPASS_SUBKEY_ID
+
+  gpgconf --kill gpg-agent
+}
+
+setup() {
+  setup_test_env
+
+  # Isolated GPG keyring for each test
+  export GNUPGHOME="$TEST_TMPDIR/gnupg"
+  cp -a "$BATS_FILE_TMPDIR/gnupg" "$GNUPGHOME"
 
   # Git repo for commit signing tests
   AUR_DIR="$TEST_TMPDIR/aur-test-pkg"
