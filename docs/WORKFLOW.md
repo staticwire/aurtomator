@@ -309,7 +309,7 @@ upstream:
 
 ### 3.7 git-latest
 
-**What it checks:** any git repository, through a bare clone.
+**What it checks:** any git repository with an HTTPS URL, through a bare clone.
 
 **When to use:** `-git` AUR packages that track the latest commit.
 
@@ -320,9 +320,11 @@ upstream:
 | `upstream.type`    | yes      | One of: `github`, `gitlab`, `git`            |
 | `upstream.host`    | depends  | Required for the `gitlab` type               |
 | `upstream.project` | depends  | Required for the `github` and `gitlab` types |
-| `upstream.url`     | depends  | Required for the `git` type: full clone URL  |
+| `upstream.url`     | depends  | Required for the `git` type: full clone URL, `https://` only |
 
 **How the version is extracted:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the short hash (`git rev-parse --short=7 HEAD`) and prints the usual `-git` format `r<count>.<shorthash>`, for example `r431.66db9ce`.
+
+The clone runs with `GIT_ALLOW_PROTOCOL=http:https`. A URL in a package YAML that comes with a pull request therefore cannot read a local repository or connect to an ssh host with the SSH key of the machine that runs the check.
 
 **Example YAML (GitHub):**
 
@@ -345,7 +347,7 @@ upstream:
   project: network/my-kde-app
 ```
 
-**Example YAML (any git URL):**
+**Example YAML (any HTTPS git URL):**
 
 ```yaml
 name: my-package-git

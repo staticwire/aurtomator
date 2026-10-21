@@ -57,7 +57,7 @@ The setup script configures your identity (git author for AUR commits), SSH acce
 | `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag    |
 | `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                  |
 | `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea          |
-| `git-latest`       | `git clone --bare`  | `-git` packages, any git repo        |
+| `git-latest`       | `git clone --bare`  | `-git` packages, any HTTPS git repo  |
 | `pypi`             | PyPI JSON API       | Python packages                      |
 | `npm`              | npm registry        | Node.js packages                     |
 | `crates`           | crates.io API       | Rust crates                          |

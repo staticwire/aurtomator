@@ -129,7 +129,7 @@ upstream:
 #   type: github                           # required: github|gitlab|git
 #   project: owner/repo                    # required for github|gitlab
 #   host: gitlab.example.com               # required for gitlab
-#   url: https://example.com/repo.git      # required for type=git
+#   url: https://example.com/repo.git      # required for type=git, https only
 
 # --- pypi / npm / crates ----------------------------------------------------
 # Language registries. PyPI and crates return stable releases only.

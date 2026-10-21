@@ -273,12 +273,55 @@ teardown() {
 
   create_test_package "test-git" "git-latest" "upstream:
   type: git
-  url: ${fake_repo}"
+  url: https://git.example.com/repo.git"
+
+  # git that clones the fake repo in place of the URL, and logs the
+  # protocols the strategy allows
+  cat >"$MOCK_DIR/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "clone" ]]; then
+  echo "\${GIT_ALLOW_PROTOCOL:-unset} \${@: -2:1}" >>"$TEST_TMPDIR/git-clone"
+  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git clone "\${@:2:\$#-3}" "$fake_repo" "\${@: -1}"
+fi
+exec /usr/bin/git "\$@"
+EOF
+  chmod +x "$MOCK_DIR/git"
 
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
   [ "$status" -eq 0 ]
   # Should match r3.<7-char-hash>
   [[ "$output" =~ ^r3\.[0-9a-f]{7}$ ]]
+  [ "$(cat "$TEST_TMPDIR/git-clone")" = "http:https https://git.example.com/repo.git" ]
+}
+
+@test "git-latest: refuses a local repository" {
+  git init -q "$TEST_TMPDIR/local-repo"
+  git -C "$TEST_TMPDIR/local-repo" -c user.name=test -c user.email=test@test \
+    commit -q --allow-empty -m "commit 1"
+  create_test_package "test-git-file" "git-latest" "upstream:
+  type: git
+  url: file://$TEST_TMPDIR/local-repo"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git-file"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"transport 'file' not allowed"* ]]
+}
+
+@test "git-latest: refuses an ssh URL without connecting" {
+  cat >"$MOCK_DIR/ssh" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$TEST_TMPDIR/ssh.args"
+exit 255
+EOF
+  chmod +x "$MOCK_DIR/ssh"
+  create_test_package "test-git-ssh" "git-latest" "upstream:
+  type: git
+  url: ssh://git.example.com/repo.git"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git-ssh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"transport 'ssh' not allowed"* ]]
+  [ ! -e "$TEST_TMPDIR/ssh.args" ]
 }
 
 # === github-nightly ===

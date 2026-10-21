@@ -68,6 +68,24 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "validate: git-latest git type fails on a URL without HTTPS" {
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: git
+  url: file:///srv/repo"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.url must use HTTPS: file:///srv/repo"* ]]
+}
+
+@test "validate: git-latest git type fails on an HTTP URL" {
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: git
+  url: http://git.example.com/repo.git"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.url must use HTTPS: http://git.example.com/repo.git"* ]]
+}
+
 @test "validate: pypi passes" {
   create_test_package "mypkg" "pypi" "upstream:
   registry: requests"

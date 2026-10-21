@@ -177,6 +177,9 @@ validate_pkg() {
             if [[ -z "$url" || "$url" == "null" ]]; then
               log_err "$file: git-latest type 'git' requires 'upstream.url'"
               ((errors++))
+            elif [[ "$url" != https://* ]]; then
+              log_err "$file: upstream.url must use HTTPS: $url"
+              ((errors++))
             fi
             ;;
           *)
