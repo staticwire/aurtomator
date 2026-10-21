@@ -183,6 +183,16 @@ EOF
   chmod +x "$TEST_TMPDIR/mock-bin/gh"
 }
 
+# Helper: ssh that the AUR refuses, as for a key missing from the account
+mock_ssh_denied() {
+  cat >"$TEST_TMPDIR/mock-bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+echo "aur@aur.archlinux.org: Permission denied (publickey)." >&2
+exit 255
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/ssh"
+}
+
 # Helper: gpg for the passphrase strip flow on PASSKEY003. The main keyring
 # exports the key with its passphrase, the temporary keyring (--homedir)
 # exports the copy
@@ -428,6 +438,43 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"GPG: skipped"* ]]
   [[ "$output" == *"Ready."* ]]
+}
+
+@test "setup verify: runs every check after a failed one" {
+  write_full_config "VALIDKEY123"
+  mock_ssh_denied
+
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ SSH: cannot connect to aur.archlinux.org"* ]]
+  [[ "$output" == *"✓ GPG: signing works with VALIDKEY123"* ]]
+  [[ "$output" == *"✓ Secrets: 4/4 configured"* ]]
+  [[ "$output" == *"1 issue(s) found."* ]]
+}
+
+@test "setup verify: counts every failed check" {
+  cat >"$TEST_TMPDIR/.aurtomator.conf" <<EOF
+AUR_SSH_KEY="$TEST_TMPDIR/ssh/aur.pem"
+EOF
+  mock_ssh_denied
+
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ Identity: git author name/email not configured"* ]]
+  [[ "$output" == *"✗ SSH: cannot connect to aur.archlinux.org"* ]]
+  [[ "$output" == *"2 issue(s) found."* ]]
+}
+
+@test "setup: full setup saves the config when verify finds an issue" {
+  mock_ssh_denied
+
+  run "$TEST_TMPDIR/scripts/setup.sh" \
+    --git-name "Jane Doe" --git-email "jane@example.com" \
+    --ssh-key "$TEST_TMPDIR/ssh/aur.pem" --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 issue(s) found."* ]]
+  grep -q 'GIT_AUTHOR_NAME="Jane Doe"' "$TEST_TMPDIR/.aurtomator.conf"
+  grep -q "AUR_SSH_KEY=\"$TEST_TMPDIR/ssh/aur.pem\"" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
 # === Secrets step ===
@@ -718,13 +765,16 @@ EOF
 
 # === Passphrase-protected SSH key ===
 
-@test "setup ssh: accepts passphrase-protected key" {
+@test "setup ssh: refuses a passphrase-protected key" {
   mkdir -p "$TEST_TMPDIR/ssh-pass"
   ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
 
   run "$TEST_TMPDIR/scripts/setup.sh" ssh \
     --ssh-key "$TEST_TMPDIR/ssh-pass/key" \
     --non-interactive
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"passphrase-protected"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ SSH key has a passphrase: $TEST_TMPDIR/ssh-pass/key"* ]]
+  [[ "$output" == *"cp $TEST_TMPDIR/ssh-pass/key $TEST_TMPDIR/ssh-pass/key-ci"* ]]
+  [[ "$output" == *"ssh-keygen -p -N '' -f $TEST_TMPDIR/ssh-pass/key-ci"* ]]
+  [ ! -e "$TEST_TMPDIR/.aurtomator.conf" ]
 }

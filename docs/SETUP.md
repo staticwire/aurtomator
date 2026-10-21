@@ -56,12 +56,12 @@ With `gh` installed and authenticated (`gh auth login`), setup is one command:
 It runs five steps in order:
 
 1. **identity**: your name and email for AUR git commits
-2. **ssh**: an existing SSH key for the AUR
+2. **ssh**: an existing SSH key for the AUR. CI uses the key without a prompt, so the step refuses a key with a passphrase and prints the commands that make a copy without one.
 3. **gpg**: optional GPG commit signing
 4. **secrets**: pushes `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY` to your GitHub repo
 5. **verify**: checks identity, SSH access to the AUR, GPG signing and the secrets
 
-The script reads the GitHub repo from the `origin` remote and asks for `owner/repo` when that fails. It saves your answers to `.aurtomator.conf`.
+The script reads the GitHub repo from the `origin` remote and asks for `owner/repo` when that fails. It saves your answers to `.aurtomator.conf`, also when `verify` finds a problem.
 
 ## Identity
 
@@ -121,7 +121,7 @@ That output works in CI only for a key without a passphrase. For a key with one,
 ./scripts/setup.sh verify
 ```
 
-It checks identity, SSH access, GPG signing when configured, and the secrets when `gh` is available.
+It checks identity, SSH access, GPG signing when configured, and the secrets when `gh` is available. When a check fails, the others still run, and `verify` then prints how many failed and exits with status 1.
 
 ## GPG signing (optional)
 
