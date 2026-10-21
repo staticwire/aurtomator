@@ -350,7 +350,7 @@ run_package() {
 }
 
 RECHECK=()
-for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
+for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
   [[ -f "$pkg_file" ]] || continue
   run_package "$pkg_file" 1
 done

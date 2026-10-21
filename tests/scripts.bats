@@ -584,6 +584,36 @@ EOF
   [[ "$output" == *"Checked: 0"* ]]
 }
 
+# === project path with a space ===
+
+# Helper: a project at "$TEST_TMPDIR/my project" with the scripts and
+# strategies of the test project and one package, pkg, that is up to date
+make_spaced_project() {
+  SPACED="$TEST_TMPDIR/my project"
+  mkdir -p "$SPACED/packages"
+  ln -s "$TEST_TMPDIR/scripts" "$SPACED/scripts"
+  ln -s "$TEST_TMPDIR/strategies" "$SPACED/strategies"
+  printf '%s\n' "name: pkg" "strategy: github-release" "upstream:" "  project: owner/repo" \
+    "current: '2.0.0'" >"$SPACED/packages/pkg.yml"
+}
+
+@test "check-all: finds the packages of a project whose path has a space" {
+  make_spaced_project
+  run "$SPACED/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Checked: 1, Updated: 0, Errors: 0"* ]]
+  [ "$(cat "$SPACED/.status/pkg")" = "up_to_date" ]
+}
+
+@test "update-readme: lists the packages of a project whose path has a space" {
+  make_spaced_project
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$SPACED/README.md"
+  git -C "$SPACED" init -q
+  run "$SPACED/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -q '\[pkg\]' "$SPACED/README.md"
+}
+
 # === update-readme.sh ===
 
 @test "update-readme: generates status table" {

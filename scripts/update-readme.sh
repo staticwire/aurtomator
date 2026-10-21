@@ -93,7 +93,7 @@ table_header="| Package | Version | Strategy | Updated | Status |
 pkg_count=0
 pkg_ok=0
 pkg_fail=0
-for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
+for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
   [[ -f "$pkg_file" ]] || continue
 
   name=$(pkg_get "$pkg_file" .name)
