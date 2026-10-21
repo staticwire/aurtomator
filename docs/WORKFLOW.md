@@ -786,6 +786,12 @@ For every `.status/` entry with `check_failed:` or `update_failed:`, the step:
 
 The step belongs to `publish`, which runs when the status table changes. A package that keeps failing gets its issue in the run where it starts failing, and a closed issue comes back only after its status changes again.
 
+### 5.7 Failed runs
+
+The issue step of `publish` reports failed packages, and a run that fails in `image` or `check` never reaches it. `notify-failure.yml` runs on `workflow_run` when a run of `Check AUR Package Updates` completes, and its job runs only when the conclusion of that run is `failure` or `timed_out`. It opens one issue titled `❌ Check AUR Package Updates failed`, with a link to the run, its branch and the names of the failed jobs, and opens no second one while that issue is open. A repository with Issues turned off gets a notice instead, as in [5.6](#56-failure-issues). The workflow has `actions: read` to list the jobs and `issues: write`, and checks out nothing.
+
+GitHub starts a `workflow_run` workflow only from its file on the default branch.
+
 ## 6. CI Quality Gate: ci.yml
 
 `ci.yml` runs on every push and pull request to `main`.

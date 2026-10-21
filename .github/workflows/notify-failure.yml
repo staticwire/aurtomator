@@ -1,0 +1,58 @@
+name: Notify Failed Runs
+
+# The issues of the packages come from the publish job. A run that fails
+# before it, or in it, opens this one issue instead.
+on:
+  workflow_run:
+    workflows: [Check AUR Package Updates]
+    types: [completed]
+
+permissions:
+  actions: read
+  issues: write
+
+# Two failed runs that end together open one issue
+concurrency:
+  group: notify-failure
+
+jobs:
+  notify:
+    if: github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Open an issue for the failed run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          title="❌ Check AUR Package Updates failed"
+
+          # gh issue list fails in a repository with Issues turned off
+          has_issues=$(gh api "repos/$GH_REPO" --jq .has_issues)
+          if [[ "$has_issues" == "false" ]]; then
+            echo "::notice::Issues are disabled in $GH_REPO, so the failed run gets no issue"
+            exit 0
+          fi
+
+          # Exact titles, as in the issue step of publish
+          titles=$(gh issue list --label auto-update --state open --limit 1000 --json title --jq '.[].title')
+          if grep -qxF -e "$title" <<<"$titles"; then
+            echo "Issue already open, skipping"
+            exit 0
+          fi
+
+          # The names of the failed jobs only fill the text, so the issue
+          # opens without them as well
+          failed=$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID/jobs" \
+            --jq '[.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name] | join(", ")') || failed=""
+
+          gh label create auto-update --color d73a4a --description "Automated update failure" 2>/dev/null || true
+          gh issue create --title "$title" --label auto-update --body "$(printf '%s\n' \
+            "Run $RUN_URL on \`$RUN_BRANCH\` failed in ${failed:-jobs that could not be listed}." \
+            "" \
+            "Packages may be left unchecked or unpublished until a run succeeds.")"
