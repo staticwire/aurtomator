@@ -1311,6 +1311,10 @@ pkgver() {
 }
 EOF
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
+  # A bare remote, so the push of the copied clone succeeds
+  git init --bare -q "$TEST_TMPDIR/aur-bare-test-vcs-ok.git"
+  git -C "$aur_dir" remote add origin "$TEST_TMPDIR/aur-bare-test-vcs-ok.git"
+  git -C "$aur_dir" push -q -u origin HEAD
 
   cat > "$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
@@ -1329,10 +1333,10 @@ echo "pkgname = test-vcs-ok"
 EOF
   chmod +x "$MOCK_DIR/makepkg"
 
-  # Should pass audit (pkgver() + git-latest = OK)
-  # Will fail at git push (no remote) but should get past audit
+  # pkgver() with the git-latest strategy passes the audit
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-vcs-ok" "r200.def5678"
-  [[ "$output" == *"VCS package, skipping checksums"* ]] || [[ "$output" == *"Generating .SRCINFO"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Pushed test-vcs-ok r200.def5678 to AUR"* ]]
 }
 
 @test "update-pkg: validate_source_urls blocks HTML responses" {
@@ -1605,15 +1609,17 @@ echo "pkgname = test-detached"
 EOF
   chmod +x "$MOCK_DIR/makepkg"
 
-  # Remove namcap mock so the namcap block is skipped gracefully
-  rm -f "$MOCK_DIR/namcap"
+  # namcap that finds nothing
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$MOCK_DIR/namcap"
+  chmod +x "$MOCK_DIR/namcap"
 
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-detached" "2.0.0"
-  # Detected + logged
+  [ "$status" -eq 0 ]
   [[ "$output" == *"Detached HEAD after clone"* ]]
   [[ "$output" == *"Re-basing on origin/master"* ]]
-  # Proceeded past the self-heal block (reached later stages)
-  [[ "$output" == *"Updating pkgver"* ]] || [[ "$output" == *"Generating .SRCINFO"* ]]
+  [[ "$output" == *"Pushed test-detached 2.0.0 to AUR"* ]]
+  run git -C "$bare_dir" log -1 --format=%s master
+  [[ "$output" == "2.0.0 release from "* ]]
 }
 
 @test "update-pkg: fails loudly on detached HEAD when origin/master is absent" {
@@ -1762,6 +1768,10 @@ source=("git+https://example.com/repo.git")
 sha256sums=('SKIP')
 EOF
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
+  # A bare remote, so the push of the copied clone succeeds
+  git init --bare -q "$TEST_TMPDIR/aur-bare-test-vcs.git"
+  git -C "$aur_dir" remote add origin "$TEST_TMPDIR/aur-bare-test-vcs.git"
+  git -C "$aur_dir" push -q -u origin HEAD
 
   # Mock git clone
   cat > "$MOCK_DIR/git" <<MOCKGIT
@@ -1784,8 +1794,9 @@ EOF
 
   # Should skip updpkgsums and not fail
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-vcs" "r200.def5678"
-  # Will fail at git push (no remote) but should get past checksums
-  [[ "$output" == *"VCS package, skipping checksums"* ]] || [[ "$output" == *"Generating .SRCINFO"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"VCS package, skipping checksums"* ]]
+  [[ "$output" == *"Pushed test-vcs r200.def5678 to AUR"* ]]
 }
 
 @test "update-pkg: skips checksums for arch-specific SKIP arrays" {

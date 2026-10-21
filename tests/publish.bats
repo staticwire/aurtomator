@@ -436,6 +436,26 @@ commit_aur_state() {
   [[ "$output" == *"Could not download"* ]]
 }
 
+@test "verify-pkg: refuses a local source that is a symlink in the AUR repo" {
+  setup_verify
+  ln -sf /etc/hostname "$TEST_TMPDIR/aur-work-demo/local.patch"
+  commit_aur_state "local.patch as a symlink"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Source local.patch is a symlink or not a regular file in the AUR repo"* ]]
+}
+
+# aur_export writes a symlink as one to /nonexistent; this one leads to a
+# regular file
+@test "_source_file: refuses a local source that links to a regular file" {
+  mkdir "$TEST_TMPDIR/aur" "$TEST_TMPDIR/downloads"
+  echo "patch" >"$TEST_TMPDIR/real.patch"
+  ln -s "$TEST_TMPDIR/real.patch" "$TEST_TMPDIR/aur/local.patch"
+  run _source_file local.patch "$TEST_TMPDIR/aur" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Source local.patch is a symlink or not a regular file in the AUR repo"* ]]
+}
+
 @test "verify-pkg: refuses a checksum of a source it does not download" {
   setup_verify "file:///etc"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
@@ -577,6 +597,24 @@ use_source() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"demo.git#tag=v1.1.0"* ]]
+}
+
+@test "verify-pkg: refuses a git source it cannot clone" {
+  setup_verify
+  # No make_upstream, so the mirror clone finds no repository
+  use_source "demo::git+https://example.com/demo.git#tag=vVER"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not clone https://example.com/demo.git"* ]]
+}
+
+@test "verify-pkg: refuses a git tag the repository does not have" {
+  setup_verify
+  make_upstream
+  use_source "demo::git+https://example.com/demo.git#tag=releaseVER"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not archive release1.1.0 of https://example.com/demo.git"* ]]
 }
 
 @test "verify-pkg: refuses a checksum of a git source at a branch" {
@@ -1828,4 +1866,24 @@ write_srcinfo_arch() {
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO has pkgver = 1.2.0, expected 1.1.0"* ]]
+}
+
+@test "check_prepared_srcinfo: rejects a pkgrel other than 1" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 2 "$H3" "$H4"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO has pkgrel = 2, expected 1"* ]]
+}
+
+@test "check_prepared_files: refuses a PKGBUILD of the AUR repo that is a symlink" {
+  mkdir "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared"
+  write_pkgbuild "$TEST_TMPDIR/aur-PKGBUILD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  ln -s "$TEST_TMPDIR/aur-PKGBUILD" "$TEST_TMPDIR/aur/PKGBUILD"
+  write_srcinfo "$TEST_TMPDIR/aur/.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  write_pkgbuild "$TEST_TMPDIR/prepared/PKGBUILD" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  write_srcinfo "$TEST_TMPDIR/prepared/.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PKGBUILD in the AUR repo is missing, a symlink or not a regular file"* ]]
 }
