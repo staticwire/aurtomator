@@ -81,7 +81,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '3,19p' "$0"
+      sed -n '3,20p' "$0"
       exit 0
       ;;
     *)

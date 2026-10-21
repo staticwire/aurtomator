@@ -165,7 +165,8 @@ upstream:
 
 # --- kde-tarball ------------------------------------------------------------
 # Reads https://download.kde.org/stable/<name>/ for *.tar.xz releases.
-# Needs no upstream settings: the package name is the directory.
+# Takes no upstream settings: the package name is the directory, and
+# validate-pkg.sh refuses an upstream block.
 #
 # strategy: kde-tarball
 

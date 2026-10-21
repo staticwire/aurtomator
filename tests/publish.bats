@@ -1446,12 +1446,19 @@ make_unpushable_repo() {
   git -C "$TEST_TMPDIR/clone" add PKGBUILD
 }
 
-@test "aur_clone: waits the pauses the environment sets" {
+@test "aur_clone: waits the pauses the environment sets before an SSH clone" {
   mock_sleep_and_clone
-  AURTOMATOR_CLONE_DELAY=3 AURTOMATOR_RETRY_DELAY=7 run aur_clone https://example.invalid/demo.git "$TEST_TMPDIR/clone"
+  AURTOMATOR_CLONE_DELAY=3 AURTOMATOR_RETRY_DELAY=7 run aur_clone ssh://aur@example.invalid/demo.git "$TEST_TMPDIR/clone"
   [ "$status" -eq 1 ]
   [ "$(cat "$TEST_TMPDIR/sleeps")" = $'3\n7\n7' ]
   [[ "$output" == *"Clone attempt 2 failed, retrying in 7s"* ]]
+}
+
+@test "aur_clone: an HTTPS clone does not wait before the first attempt" {
+  mock_sleep_and_clone
+  AURTOMATOR_CLONE_DELAY=3 AURTOMATOR_RETRY_DELAY=7 run aur_clone https://example.invalid/demo.git "$TEST_TMPDIR/clone"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$TEST_TMPDIR/sleeps")" = $'7\n7' ]
 }
 
 @test "aur_commit_push: waits the pause the environment sets" {
@@ -1463,11 +1470,11 @@ make_unpushable_repo() {
   [[ "$output" == *"Push attempt 2 failed, retrying in 7s"* ]]
 }
 
-@test "aur_clone and aur_commit_push: wait 2 s before a clone and 5 s between attempts by default" {
+@test "aur_clone and aur_commit_push: wait 2 s before an SSH clone and 5 s between attempts by default" {
   mock_sleep_and_clone
   make_unpushable_repo
   unset AURTOMATOR_CLONE_DELAY AURTOMATOR_RETRY_DELAY
-  run aur_clone https://example.invalid/demo.git "$TEST_TMPDIR/other"
+  run aur_clone ssh://aur@example.invalid/demo.git "$TEST_TMPDIR/other"
   [ "$status" -eq 1 ]
   run aur_commit_push "$TEST_TMPDIR/clone" 1.0.0 test
   [ "$status" -eq 1 ]

@@ -226,9 +226,7 @@ teardown() {
 # === kde-tarball ===
 
 @test "kde-tarball: returns latest version from download.kde.org" {
-  create_test_package "test-kde" "kde-tarball" "upstream:
-  type: kde
-  project: test-kde"
+  create_test_package "test-kde" "kde-tarball" ""
 
   run "$TEST_TMPDIR/strategies/kde-tarball.sh" "test-kde"
   [ "$status" -eq 0 ]

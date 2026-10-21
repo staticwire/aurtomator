@@ -13,10 +13,14 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 
-readonly VALID_STRATEGIES=(
-  github-release github-tag github-nightly github-asset gitlab-tag gitea-tag
-  git-latest pypi npm crates repology archpkg kde-tarball webpage-scrape
-)
+# Every script in strategies/ is a strategy
+VALID_STRATEGIES=()
+for strategy_file in "${AURTOMATOR_DIR}"/strategies/*.sh; do
+  [[ -f "$strategy_file" ]] || continue
+  strategy_file="${strategy_file##*/}"
+  VALID_STRATEGIES+=("${strategy_file%.sh}")
+done
+readonly VALID_STRATEGIES
 
 # Validate a single package YAML file
 # Returns 0 if valid, 1 if invalid (errors printed to stderr)
@@ -219,8 +223,15 @@ validate_pkg() {
         fi
       fi
       ;;
-    archpkg | repology | kde-tarball)
+    archpkg | repology)
       # No required strategy-specific fields
+      ;;
+    kde-tarball)
+      # The strategy reads no YAML: the package name is the directory
+      if [[ "$(pkg_get "$file" '.upstream | tag')" != "!!null" ]]; then
+        log_err "$file: strategy 'kde-tarball' takes no upstream settings, the package name is the directory on download.kde.org"
+        ((errors++))
+      fi
       ;;
   esac
 

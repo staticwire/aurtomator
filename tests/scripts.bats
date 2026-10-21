@@ -912,6 +912,12 @@ EOF
   [[ "$output" == *"check-all.sh"* ]]
 }
 
+@test "check-all: --help prints the whole header" {
+  run "$TEST_TMPDIR/scripts/check-all.sh" --help
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(awk 'NR > 2 && !/^#/ { exit } NR > 2' "$PROJECT_DIR/scripts/check-all.sh")" ]
+}
+
 @test "check-all: rejects unknown flag" {
   run "$TEST_TMPDIR/scripts/check-all.sh" --bogus
   [ "$status" -ne 0 ]

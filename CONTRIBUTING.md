@@ -51,7 +51,7 @@ Keep PRs focused: one logical change per PR. Unrelated refactors go in a separat
 ## Adding a new strategy
 
 1. Create `strategies/<name>.sh`. It takes the package name as its only argument, reads the package config with `pkg_get`, prints one version string to stdout and exits non-zero on failure. Start from the closest existing strategy.
-2. Add the name to `VALID_STRATEGIES` in `scripts/validate-pkg.sh`, together with any required fields.
+2. Add the checks of its required fields to `scripts/validate-pkg.sh`. The name needs no entry: every script in `strategies/` is a valid strategy.
 3. Add tests to `tests/strategies.bats`, grouped by strategy, and the API fixtures they need to `tests/helpers/mock-curl.sh`.
 4. Document the strategy in the strategies table in `README.md` and in `docs/WORKFLOW.md`.
 5. Add a usage example to `packages/example.yml.sample`.

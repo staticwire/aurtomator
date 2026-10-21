@@ -125,6 +125,14 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "validate: kde-tarball fails with an upstream block" {
+  create_test_package "mypkg" "kde-tarball" "upstream:
+  project: other-name"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"strategy 'kde-tarball' takes no upstream settings"* ]]
+}
+
 @test "validate: webpage-scrape passes" {
   create_test_package "mypkg" "webpage-scrape" "upstream:
   url: https://example.com/releases
@@ -173,6 +181,21 @@ EOF
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -ne 0 ]
   [[ "$output" == *"unknown strategy"* ]]
+}
+
+@test "validate: accepts a strategy that has a script in strategies/" {
+  printf '#!/usr/bin/env bash\necho 1.0.0\n' >"$TEST_TMPDIR/strategies/forgejo-release.sh"
+  chmod +x "$TEST_TMPDIR/strategies/forgejo-release.sh"
+  create_test_package "mypkg" "forgejo-release" ""
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: fails on a strategy path outside strategies/" {
+  create_test_package "mypkg" "../scripts/check-all" ""
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown strategy '../scripts/check-all'"* ]]
 }
 
 # === Strategy-specific field errors ===

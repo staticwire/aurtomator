@@ -60,7 +60,7 @@ flowchart TD
 ### Key design decisions
 
 - **One YAML per package.** Adding or removing a package is one file.
-- **Strategy-based version detection.** Each type of upstream source has its own script. A new source is a new script plus its entry in `scripts/validate-pkg.sh`.
+- **Strategy-based version detection.** Each type of upstream source has its own script. A new source is a new script plus the checks of its fields in `scripts/validate-pkg.sh`.
 - **Patch, do not generate.** aurtomator trusts your PKGBUILD and changes only `pkgver`, `pkgrel`, checksums and `.SRCINFO`. Build steps, dependencies and install files stay untouched.
 - **Four jobs, one with secrets.** A PKGBUILD is code that every step reading it executes. `check` runs the strategies with the read-only workflow token, executes no PKGBUILD and decides what the run does. The jobs after it take the status of every package from `check`. `prepare` runs the PKGBUILD steps without secrets and without a token, and hands over only prepared files and update failures, because code from one PKGBUILD can write the files of every package there. `verify` downloads the sources of each prepared update and checks its checksums, without secrets and as an unprivileged user, so code from one PKGBUILD cannot forge the checksums of another package. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD, runs no strategy and never downloads a source, and checks what `verify` passes on before it pushes. See [4.4](#44-prepare-and-publish).
 - **Failure isolation.** A broken package does not block the others. Each failure is logged for its package, and a package that starts failing gets a GitHub Issue, see [5.6](#56-failure-issues). Each package has a time budget, so one that hangs does not hold up the run either.
@@ -73,7 +73,7 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 |----------------|----------|-----------------------------------------------------------------------------|
 | `name`         | yes      | AUR package name, equal to the file name without `.yml`                     |
 | `strategy`     | yes      | Version detection strategy: a script name in `strategies/` without `.sh`    |
-| `upstream`     | depends  | Strategy-specific settings. `archpkg`, `repology` and `kde-tarball` need none. |
+| `upstream`     | depends  | Strategy-specific settings. `archpkg` and `repology` need none, and `kde-tarball` takes none. |
 | `current`      | no       | Currently tracked version. Written after every push.                        |
 | `last_updated` | no       | Date of the last push, `YYYY-MM-DD`. Written after every push.              |
 | `allow_downgrade` | no    | `true` publishes an upstream version lower than `current`. Default `false`, see [4.3](#43-downgrade-behavior). |
@@ -530,7 +530,7 @@ upstream:
 
 **When to use:** KDE and Plasma packages that publish release tarballs on download.kde.org.
 
-**YAML fields:** none. The package `name` is the directory on the server.
+**YAML fields:** none. The package `name` is the directory on the server, and `validate-pkg.sh` refuses an `upstream` block.
 
 **How the version is extracted:** matches `{name}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`), and returns the highest by `sort -Vu`.
 
@@ -574,7 +574,7 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--
 12. Push, with up to 3 attempts 5 seconds apart.
 13. Write `current` and `last_updated` to the package YAML.
 
-`AURTOMATOR_CLONE_DELAY` and `AURTOMATOR_RETRY_DELAY` change the 2 and the 5 seconds. The tests set both to 0.
+`AURTOMATOR_CLONE_DELAY` and `AURTOMATOR_RETRY_DELAY` change the 2 and the 5 seconds. The tests set both to 0. The anonymous HTTPS clones of prepare and verify, see [4.4](#44-prepare-and-publish), start without the 2 seconds.
 
 ### 4.3 Downgrade behavior
 
@@ -992,7 +992,7 @@ echo "$version"
 3. **HTTP:** `http_get <url> [curl option]...` from `lib.sh`. It runs `curl -sfL --max-time 30` and tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. `-f` fails on HTTP errors and `-L` follows redirects. A test in `tests/strategies.bats` fails when a strategy calls `curl` itself.
 4. **Result:** check for an empty string and for `null` from `yq`.
 5. **Prefix:** strip a leading `v` with `${version#v}` when upstream tags look like `v1.0.0`.
-6. **Validation:** add the name and its required fields to `scripts/validate-pkg.sh`.
+6. **Validation:** add the checks of its required fields to `scripts/validate-pkg.sh`. The name needs no entry: every script in `strategies/` is a valid strategy.
 7. **Tests:** add the API fixture to `tests/helpers/mock-curl.sh` and tests to `tests/strategies.bats`.
 8. **Linters:**
 

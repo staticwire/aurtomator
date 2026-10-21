@@ -319,8 +319,11 @@ validate_source_urls() {
 # Args: $1=url, $2=destination, $3...=options for git clone
 aur_clone() {
   local attempt delay="${AURTOMATOR_RETRY_DELAY:-5}"
-  # Brief delay to reduce AUR SSH rate-limit pressure from GitHub Actions IP pool
-  sleep "${AURTOMATOR_CLONE_DELAY:-2}"
+  # Brief delay to reduce AUR SSH rate-limit pressure from GitHub Actions IP
+  # pool. The anonymous HTTPS clones of prepare and verify do not use SSH.
+  if [[ "$1" == ssh://* ]]; then
+    sleep "${AURTOMATOR_CLONE_DELAY:-2}"
+  fi
   for attempt in 1 2 3; do
     if git clone "${@:3}" "$1" "$2" 2>&1; then
       return 0
