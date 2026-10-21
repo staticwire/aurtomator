@@ -71,6 +71,10 @@ case "$url" in
   *api.github.com/repos/*/releases/tags/nightly)
     printf '{"tag_name": "nightly", "body": "NVIM v0.12.0-dev+2713+g925e9e8722\\nSome other text", "published_at": "2026-03-27T05:43:19Z"}'
     ;;
+  # Pattern B+D: release names and tags that hold a double quote
+  *api.github.com/repos/owner/quoted-repo/releases\?per_page=20)
+    echo '[{"tag_name": "v1.0.0", "name": "Stable"}, {"tag_name": "v2.0.0", "name": "Beta \"b\""}, {"tag_name": "nightly-\"q\"-2026-04-01", "name": "Nightly"}]'
+    ;;
   # Pattern B+D: releases list (for dated tags and channel filter)
   *api.github.com/repos/*/releases\?per_page=20)
     echo '[{"tag_name": "nightly-2026-03-26", "name": "Nightly v9.0.1", "published_at": "2026-03-26T00:00:00Z"}, {"tag_name": "nightly-2026-03-25", "name": "Stable v8.0.0", "published_at": "2026-03-25T00:00:00Z"}]'

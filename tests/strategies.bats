@@ -371,6 +371,28 @@ EOF
   [[ "$output" == "nightly-2026-03-26" ]]
 }
 
+@test "github-nightly: a channel with a double quote matches the release name" {
+  create_test_package "test-nightly-quote-d" "github-nightly" "upstream:
+  project: owner/quoted-repo
+  channel: 'Beta \"b\"'
+  version_source: tag"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-quote-d"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.0.0" ]
+}
+
+@test "github-nightly: a nightly_tag with a double quote matches the tag" {
+  create_test_package "test-nightly-quote-b" "github-nightly" "upstream:
+  project: owner/quoted-repo
+  nightly_tag: 'nightly-\"q\"'
+  version_source: tag_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-quote-b"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.04.01" ]
+}
+
 @test "github-nightly: published_date version source" {
   create_test_package "test-nightly-date" "github-nightly" "upstream:
   project: owner/nightly-repo
