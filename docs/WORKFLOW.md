@@ -650,7 +650,7 @@ A PKGBUILD is a bash script, and every step that reads it executes it: the audit
 
 ### 5.1 Trigger
 
-The workflow runs every hour (`cron: "0 * * * *"`) and by hand through `workflow_dispatch`. The `check-updates` concurrency group serializes runs: a new run waits for the running one.
+The workflow runs every hour at minute 17 (`cron: "17 * * * *"`) and by hand through `workflow_dispatch`. GitHub delays scheduled runs at the start of every hour and drops some of them when the load is high, so the schedule avoids minute 0. The `check-updates` concurrency group serializes runs: a new run waits for the running one.
 
 ### 5.2 Permissions and container
 

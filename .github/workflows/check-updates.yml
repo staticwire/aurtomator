@@ -2,7 +2,9 @@ name: Check AUR Package Updates
 
 on:
   schedule:
-    - cron: "0 * * * *" # every hour
+    # Every hour at minute 17. GitHub delays scheduled runs at the start of
+    # every hour and drops some of them.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:

@@ -164,6 +164,13 @@ step_run() {
   yq ".jobs.$1.steps[] | select(.name == \"$2\") | .run" "$CHECK_UPDATES"
 }
 
+# GitHub delays scheduled runs at the start of every hour and drops some
+@test "check-updates: runs every hour, off the start of the hour" {
+  run yq '.on.schedule[].cron' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^([1-9]|[1-5][0-9])\ \*\ \*\ \*\ \*$ ]]
+}
+
 @test "check-updates: the check job decides the run and executes no PKGBUILD" {
   run yq '.jobs.check.steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
