@@ -694,7 +694,8 @@ EOF
 current: '1.0.0'"
   create_test_package "older" "github-release" "upstream:
   project: owner/repo
-current: '1.0.0'"
+current: '1.0.0'
+allow_downgrade: true"
   echo "new_version: 2.1.0" >"$TEST_TMPDIR/.status/pkg"
   echo "available_downgrade: 0.9.0" >"$TEST_TMPDIR/.status/older"
   stub_script check-update.sh 1 "strategy ran"
@@ -730,6 +731,19 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/out/status/broken")" = "check_failed: API down" ]
   [ "$(cat "$TEST_TMPDIR/out/status/unchecked")" = "check_failed: not checked before --prepare" ]
   [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "2" ]
+}
+
+@test "check-all --prepare: prepares no downgrade the check run skipped" {
+  create_test_package "older" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  echo "downgrade_skipped: 0.9.0" >"$TEST_TMPDIR/.status/older"
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/older")" = "downgrade_skipped: 0.9.0" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
 }
 
 @test "check-all --prepare: records a failed preparation" {
@@ -777,6 +791,32 @@ current: '2.0.0'"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: API down" ]
   [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+}
+
+@test "check-all --publish: keeps a skipped downgrade and publishes nothing" {
+  create_test_package "older" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status older "downgrade_skipped: 0.9.0"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/older")" = "downgrade_skipped: 0.9.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all --publish: publishes no downgrade of a package that does not allow it" {
+  create_test_package "older" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status older "available_downgrade: 0.9.0"
+  mkdir -p "$TEST_TMPDIR/out/prepared/older"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/older")" = "downgrade_skipped: 0.9.0" ]
 }
 
 @test "check-all --publish: marks a package the check run left out" {

@@ -126,6 +126,10 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
         status="⬇️ ${run_status#available_downgrade: } available (downgrade)"
         ((pkg_ok++)) || true
         ;;
+      downgrade_skipped:*)
+        status="⬇️ ${run_status#downgrade_skipped: } skipped (downgrade)"
+        ((pkg_ok++)) || true
+        ;;
       check_failed:* | update_failed:*)
         status="❌ failed"
         ((pkg_fail++)) || true

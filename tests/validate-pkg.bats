@@ -398,6 +398,26 @@ EOF
   [[ "$output" == *"not valid ERE regex"* ]]
 }
 
+@test "validate: allow_downgrade true passes" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+allow_downgrade: true"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: allow_downgrade that is not a boolean rejected" {
+  local value
+  for value in yes '"true"' 1; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+allow_downgrade: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"allow_downgrade must be true or false"* ]]
+  done
+}
+
 @test "validate: tag_pattern valid glob accepted" {
   create_test_package "mypkg" "github-tag" "upstream:
   project: owner/repo

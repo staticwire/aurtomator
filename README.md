@@ -83,7 +83,7 @@ Patches in `source=()` trigger a warning and are not blocked.
 
 ## Downgrades
 
-aurtomator follows upstream when it publishes a version older than the tracked one, for example after a tag is deleted and recreated. Upstream is the source of truth. A downgrade is logged with the literal keyword `DOWNGRADE` and shown in the package table with a `⬇️` icon. It counts as a successful run, so the badge stays green. Details are in [docs/WORKFLOW.md section 4.3](docs/WORKFLOW.md#43-downgrade-behavior).
+aurtomator publishes a version older than the tracked one only when the package YAML sets `allow_downgrade: true`. Without it, the downgrade is skipped: the latest release of a GitHub project can be a maintenance release of an older line. A downgrade is logged with the literal keyword `DOWNGRADE` and shown in the package table with a `⬇️` icon. It counts as a successful run, so the badge stays green. Details are in [docs/WORKFLOW.md section 4.3](docs/WORKFLOW.md#43-downgrade-behavior).
 
 ## Resource usage
 

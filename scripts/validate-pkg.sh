@@ -61,6 +61,15 @@ validate_pkg() {
     return 1
   fi
 
+  # --- Optional fields ---
+
+  local allow_downgrade
+  allow_downgrade=$(pkg_get "$file" '.allow_downgrade | tag')
+  if [[ "$allow_downgrade" != "!!null" && "$allow_downgrade" != "!!bool" ]]; then
+    log_err "$file: allow_downgrade must be true or false"
+    ((errors++))
+  fi
+
   # --- Strategy-specific fields ---
 
   # Validate optional tag_pattern as regex (used by *-tag strategies)

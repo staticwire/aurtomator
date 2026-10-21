@@ -212,6 +212,8 @@ run_decide_step() {
   README_CHANGED=1 run run_decide_step pkg="check_failed: API down"
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=false\nwork=true' ]
+  README_CHANGED=1 run run_decide_step pkg="downgrade_skipped: 1.0.0"
+  [ "$output" = $'prepare=false\nwork=true' ]
 }
 
 @test "check-updates: Decide does nothing when nothing changed" {

@@ -179,11 +179,12 @@ checked=0
 errors=0
 
 # The version the check run found for a package, printed the way
-# check-update.sh prints it: nothing when up to date, an error on failure
+# check-update.sh prints it: nothing when up to date, an error on failure.
+# A skipped downgrade prints its version, and the check below skips it again.
 checked_version() {
   local status="${CHECKED[$1]:-}"
   case "$status" in
-    "new_version: "* | "available_downgrade: "*)
+    "new_version: "* | "available_downgrade: "* | "downgrade_skipped: "*)
       echo "${status#*: }"
       ;;
     up_to_date) ;;
@@ -218,7 +219,7 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
           continue
         fi
         ;;
-      up_to_date | check_failed:*)
+      up_to_date | check_failed:* | "downgrade_skipped: "*)
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         continue
         ;;
@@ -267,11 +268,21 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
     cmp=$(vercmp "$current" "$latest")
     if [[ "$cmp" -gt 0 ]]; then
       is_downgrade=true
-      log_warn "$pkg_name: DOWNGRADE detected $current → $latest (mirroring upstream)"
     fi
   fi
 
+  # A lower version reaches the AUR only for a package that allows it. The
+  # latest release of a GitHub project can be a maintenance release of an
+  # older line.
+  if [[ "$is_downgrade" == "true" ]] &&
+    [[ "$(pkg_get "$pkg_file" '.allow_downgrade // false')" != "true" ]]; then
+    log_warn "$pkg_name: DOWNGRADE detected $current → $latest, skipped: allow_downgrade is not set"
+    echo "downgrade_skipped: ${latest}" >"${STATUS_DIR}/${pkg_name}"
+    continue
+  fi
+
   if [[ "$is_downgrade" == "true" ]]; then
+    log_warn "$pkg_name: DOWNGRADE detected $current → $latest (mirroring upstream)"
     available="available_downgrade: ${latest}"
     pushed="downgrade: ${latest}"
   else

@@ -1729,7 +1729,7 @@ EOF
   [[ "$output" != *"Updating checksums"* ]]
 }
 
-# === downgrade detection (observability only) ===
+# === downgrades ===
 
 @test "check-update: detects downgrade when current is newer than latest" {
   # Mock github-release returns v2.0.0. Current 3.0.0 > 2.0.0 = downgrade.
@@ -1742,7 +1742,7 @@ current: '3.0.0'"
   [ "$status" -eq 0 ]
   # stderr (captured into $output by `run`) carries the DOWNGRADE log line.
   [[ "$output" == *"DOWNGRADE 3.0.0"*"2.0.0"* ]]
-  # The version is still printed to stdout (mirror upstream blindly).
+  # The version is still printed to stdout; check-all.sh decides on it.
   [[ "$output" == *"2.0.0"* ]]
 }
 
@@ -1760,16 +1760,45 @@ current: '1.0.0'"
   [[ "$output" == *"2.0.0"* ]]
 }
 
-@test "check-all: writes 'available_downgrade:' status in check-only mode" {
+@test "check-all: writes 'available_downgrade:' for a package that allows downgrades" {
   # Mock returns v2.0.0. Current 3.0.0 > 2.0.0 = downgrade.
+  create_test_package "pkg-down" "github-release" "upstream:
+  type: github
+  project: owner/repo
+current: '3.0.0'
+allow_downgrade: true"
+
+  "$TEST_TMPDIR/scripts/check-all.sh" 2>/dev/null || true
+  [ -f "$TEST_TMPDIR/.status/pkg-down" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "available_downgrade: 2.0.0" ]
+}
+
+@test "check-all: skips a downgrade without allow_downgrade" {
   create_test_package "pkg-down" "github-release" "upstream:
   type: github
   project: owner/repo
 current: '3.0.0'"
 
-  "$TEST_TMPDIR/scripts/check-all.sh" 2>/dev/null || true
-  [ -f "$TEST_TMPDIR/.status/pkg-down" ]
-  [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "available_downgrade: 2.0.0" ]
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DOWNGRADE detected 3.0.0 → 2.0.0, skipped: allow_downgrade is not set"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all --update: runs no update to a lower version without allow_downgrade" {
+  create_test_package "pkg-down" "github-release" "upstream:
+  type: github
+  project: owner/repo
+current: '3.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/update-pkg.args"\n' "$TEST_TMPDIR" >"$TEST_TMPDIR/scripts/update-pkg.sh"
+  chmod +x "$TEST_TMPDIR/scripts/update-pkg.sh"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 2.0.0" ]
 }
 
 @test "check-all: writes 'downgrade:' status after successful --update causing downgrade" {
@@ -1778,7 +1807,8 @@ current: '3.0.0'"
   create_test_package "pkg-down-upd" "github-release" "upstream:
   type: github
   project: owner/repo
-current: '3.0.0'"
+current: '3.0.0'
+allow_downgrade: true"
 
   # Replace the symlinked update-pkg.sh with a stub that exits 0.
   rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
@@ -1829,6 +1859,24 @@ EOF
 
   grep -q "⬇️ 1.0.0 available (downgrade)" "$TEST_TMPDIR/README.md"
   # Available downgrades count toward pkg_ok too, so the badge stays green.
+  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: renders a skipped downgrade and keeps the badge green" {
+  create_test_package "pkg-down" "github-release" "upstream:
+  project: owner/repo
+current: '3.0.0'"
+
+  echo "downgrade_skipped: 1.0.0" >"$TEST_TMPDIR/.status/pkg-down"
+
+  cat >"$TEST_TMPDIR/README.md" <<'EOF'
+<!-- PACKAGES:START -->
+<!-- PACKAGES:END -->
+EOF
+  git -C "$TEST_TMPDIR" init -q
+  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
+
+  grep -q "⬇️ 1.0.0 skipped (downgrade)" "$TEST_TMPDIR/README.md"
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
