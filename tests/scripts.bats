@@ -34,6 +34,7 @@ teardown() {
   source "$TEST_TMPDIR/scripts/lib.sh"
   run pkg_file "nonexistent"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"Package not found: "*"/packages/nonexistent.yml"* ]]
 }
 
 @test "lib.sh: pkg_get reads YAML field" {
@@ -356,6 +357,7 @@ current: '2.0.0'"
 @test "check-update: fails on nonexistent package" {
   run "$TEST_TMPDIR/scripts/check-update.sh" "nonexistent"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"Package not found: "*"/packages/nonexistent.yml"* ]]
 }
 
 # === validate_source_urls ===
@@ -512,15 +514,20 @@ MOCKCURL
 }
 
 @test "lib.sh: validate_pkgver rejects what makepkg forbids in pkgver" {
-  for v in '1.0-1' '1:2.0' '1.0/2' ''; do
+  for v in '1.0-1' '1:2.0' '1.0/2'; do
     run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" "$v"
     [ "$status" -eq 1 ]
+    [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed"* ]]
   done
+  run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" ''
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Version string is empty"* ]]
 }
 
 @test "lib.sh: validate_pkgver rejects non-ASCII" {
   run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" '1.0в'
   [ "$status" -eq 1 ]
+  [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed"* ]]
 }
 
 @test "check-update: rejects an injected version from the strategy" {
@@ -1167,6 +1174,7 @@ EOF
 @test "update-pkg: fails on nonexistent package" {
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "nonexistent" "1.0.0"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"Package not found: "*"/packages/nonexistent.yml"* ]]
 }
 
 @test "update-pkg: fails when AUR clone fails" {
@@ -1672,6 +1680,7 @@ MOCKGIT
 
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "bad-pkg"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown strategy 'nonexistent'"* ]]
 }
 
 # === updpkgsums dependency ===
@@ -1702,9 +1711,14 @@ b2sums=('abc123')
 EOF
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
 
-  # Remove updpkgsums from PATH to simulate CI without pacman-contrib
-  CLEAN_PATH=$(echo "$PATH" | tr ':' '\n' | grep -v mock | tr '\n' ':')
-  
+  # The source URL answers as a download, so the run reaches the checksums
+  printf '#!/usr/bin/env bash\nprintf "200 application/octet-stream"\n' >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
+  # /usr/bin without updpkgsums, as on a system without pacman-contrib
+  mkdir "$TEST_TMPDIR/usr-bin"
+  ln -s /usr/bin/* "$TEST_TMPDIR/usr-bin/"
+  rm -f "$TEST_TMPDIR/usr-bin/updpkgsums"
+
   # Mock git clone to return our fake AUR dir
   mkdir -p "$MOCK_DIR"
   cat > "$MOCK_DIR/git" <<MOCKGIT
@@ -1718,8 +1732,9 @@ MOCKGIT
   chmod +x "$MOCK_DIR/git"
 
   # update-pkg fails without updpkgsums
-  run env PATH="$MOCK_DIR:/usr/bin" "$TEST_TMPDIR/scripts/update-pkg.sh" "test-checksums" "2.0.0"
-  [ "$status" -ne 0 ]
+  run env PATH="$MOCK_DIR:$TEST_TMPDIR/usr-bin" "$TEST_TMPDIR/scripts/update-pkg.sh" "test-checksums" "2.0.0"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Required command not found: updpkgsums"* ]]
 }
 
 @test "update-pkg: skips checksums for VCS packages (SKIP pattern)" {

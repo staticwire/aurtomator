@@ -49,6 +49,7 @@ teardown() {
 
   run "$TEST_TMPDIR/strategies/github-release.sh" "test-nomatch"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"tag_version_regex 'docker-v(.*)' did not match tag '0.1.8-stable'"* ]]
 }
 
 # === github-tag ===
@@ -393,6 +394,27 @@ EOF
   [ "$output" = "2026.04.01" ]
 }
 
+@test "github-nightly: fails when the tag holds no date" {
+  create_test_package "test-nightly-nodate" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: tag_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-nodate"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not extract version from nightly release"* ]]
+}
+
+@test "github-nightly: fails when version_pattern matches nothing in the body" {
+  create_test_package "test-nightly-nomatch" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: release_body
+  version_pattern: 'NOMATCH v\\K\\S+'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-nomatch"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not extract version from nightly release"* ]]
+}
+
 @test "github-nightly: published_date version source" {
   create_test_package "test-nightly-date" "github-nightly" "upstream:
   project: owner/nightly-repo
@@ -652,6 +674,7 @@ run_github_strategies() {
 @test "strategy fails gracefully on unknown package" {
   run "$TEST_TMPDIR/strategies/github-release.sh" "nonexistent-package"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"Package not found: "*"/packages/nonexistent-package.yml"* ]]
 }
 
 # === Error handling: null/empty API responses ===
@@ -744,6 +767,7 @@ run_github_strategies() {
 
   run "$TEST_TMPDIR/strategies/kde-tarball.sh" "no-versions-here"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"No versions found at "* ]]
 }
 
 @test "webpage-scrape: fails on missing url" {
@@ -752,6 +776,7 @@ run_github_strategies() {
 
   run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-nourl"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"Only HTTPS URLs supported: null"* ]]
 }
 
 @test "webpage-scrape: fails on missing pattern" {
@@ -760,6 +785,7 @@ run_github_strategies() {
 
   run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-nopat"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"No versions matched pattern 'null'"* ]]
 }
 
 @test "webpage-scrape: fails on non-HTTPS url" {
@@ -779,6 +805,7 @@ run_github_strategies() {
 
   run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-nomatch"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"No versions matched pattern "*" at https://example.com/empty-page"* ]]
 }
 
 @test "git-latest: fails on unknown upstream type" {

@@ -387,6 +387,7 @@ EOF
 @test "validate: fails on nonexistent package" {
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "nonexistent"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"Package not found: "*"/packages/nonexistent.yml"* ]]
 }
 
 # === Regex validation ===

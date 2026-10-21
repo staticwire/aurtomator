@@ -263,6 +263,7 @@ EOF
     --git-email "jane@example.com" \
     --non-interactive
   [ "$status" -ne 0 ]
+  [[ "$output" == *"Git author name is required"* ]]
 }
 
 @test "setup identity: fails without git email in non-interactive" {
@@ -270,6 +271,7 @@ EOF
     --git-name "Jane Doe" \
     --non-interactive
   [ "$status" -ne 0 ]
+  [[ "$output" == *"Valid email is required (must contain @)"* ]]
 }
 
 @test "setup identity: fails on invalid email" {

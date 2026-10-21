@@ -25,7 +25,7 @@ page=$(http_get "$URL") || {
 version=$(echo "$page" |
   grep -oP "${NAME}-\K[0-9]+\.[0-9]+(\.[0-9]+)*(?=\.tar\.xz\")" |
   sort -Vu |
-  tail -1)
+  tail -1 || true)
 
 if [[ -z "$version" ]]; then
   echo "No versions found at $URL" >&2

@@ -90,7 +90,7 @@ case "$version_source" in
     ;;
   tag_date)
     tag=$(echo "$release" | yq -r '.tag_name')
-    version=$(echo "$tag" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | tr '-' '.')
+    version=$(echo "$tag" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | tr '-' '.' || true)
     ;;
   release_body)
     if [[ -z "$version_pattern" ]]; then
@@ -98,7 +98,7 @@ case "$version_source" in
       exit 1
     fi
     body=$(echo "$release" | yq -r '.body')
-    version=$(echo "$body" | grep -oP -e "$version_pattern" | head -1)
+    version=$(echo "$body" | grep -oP -e "$version_pattern" | head -1 || true)
     # Clean up: replace - with + for pacman compatibility
     version="${version//-/+}"
     ;;
