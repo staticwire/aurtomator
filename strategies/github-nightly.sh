@@ -51,16 +51,14 @@ elif [[ -n "$channel" ]]; then
     echo "Failed to fetch releases for ${owner_repo}" >&2
     exit 1
   }
-  release=$(echo "$releases_json" |
-    CHANNEL="$channel" yq -r '[.[] | select(.name | contains(strenv(CHANNEL)))][0]')
+  release=$(echo "$releases_json" | CHANNEL="$channel" yq -r '[.[] | select(.name | contains(strenv(CHANNEL)))][0]')
 elif [[ "$nightly_tag" == *"-"* && "$nightly_tag" != "nightly" ]]; then
   # Pattern B: dated tags with prefix (e.g. "nightly-")
   releases_json=$(github_api "${api}/releases?per_page=20") || {
     echo "Failed to fetch releases for ${owner_repo}" >&2
     exit 1
   }
-  release=$(echo "$releases_json" |
-    NIGHTLY_TAG="$nightly_tag" yq -r '[.[] | select(.tag_name | contains(strenv(NIGHTLY_TAG)))][0]')
+  release=$(echo "$releases_json" | NIGHTLY_TAG="$nightly_tag" yq -r '[.[] | select(.tag_name | contains(strenv(NIGHTLY_TAG)))][0]')
 else
   # Pattern A: fixed tag (default)
   release=$(github_api "${api}/releases/tags/${nightly_tag}") || {
