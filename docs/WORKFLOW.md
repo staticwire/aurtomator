@@ -721,9 +721,10 @@ The four steps that run `check-all.sh` as `builder` stop workflow commands while
 7. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
 8. **Update README status table:** runs `update-readme.sh` as `builder`.
 9. **Commit changes via API:** see [5.5](#55-verified-commit).
-10. **Create issues for failed packages:** see [5.6](#56-failure-issues).
+10. **Close issues of recovered packages:** see [5.6](#56-failure-issues).
+11. **Create issues for failed packages:** see [5.6](#56-failure-issues).
 
-Steps 9 and 10 run as root with `GH_TOKEN` set to the workflow token, `github.token`.
+Steps 9 to 11 run as root with `GH_TOKEN` set to the workflow token, `github.token`.
 
 ### 5.4 README update
 
@@ -787,6 +788,8 @@ For every `.status/` entry with `check_failed:` or `update_failed:`, the step:
 3. Opens an issue titled `❌ <package>: check failed` or `❌ <package>: update failed`, after the status, with the package, the status, a link to the run and the error. The error holds text from upstream, a rejected tag name for example, so it stands in a code block, where links, images and mentions do not render, and is cut to its last 4000 characters. `builder` writes the body with `failure_issue_body` from `lib.sh`, so the step runs no code from the workspace as root.
 
 The step belongs to `publish`, which runs when the status table changes. A package that keeps failing gets its issue in the run where it starts failing, and a closed issue comes back only after its status changes again.
+
+The step before it, `Close issues of recovered packages`, closes the issue of a package that recovered, with a comment that names the new status and the run. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated` or `downgrade`, so the version is in the AUR. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It does not run after a failed step, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
 
 ### 5.7 Failed runs
 

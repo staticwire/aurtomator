@@ -931,7 +931,7 @@ failure_issue_body() {
   done
   # The backticks are Markdown code around the package name
   # shellcheck disable=SC2016
-  printf 'Package: `%s`\nStatus: %s\nRun: %s\n\n%s\n%s\n%s\n\nAuto-created by update workflow. Close after fixing.\n' \
+  printf 'Package: `%s`\nStatus: %s\nRun: %s\n\n%s\n%s\n%s\n\nAuto-created by update workflow. A run closes it when the package recovers.\n' \
     "${1##*/}" "${kind//_/ }" "$2" "$fence" "$error" "$fence"
 }
 

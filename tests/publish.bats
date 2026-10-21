@@ -1300,7 +1300,7 @@ Run: https://github.com/owner/repo/actions/runs/1
 rejected '1.0.1 @octocat https://evil.example'
 ```
 
-Auto-created by update workflow. Close after fixing.
+Auto-created by update workflow. A run closes it when the package recovers.
 EOF
   )
   [ "$output" = "$expected" ]

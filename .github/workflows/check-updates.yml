@@ -493,6 +493,42 @@ jobs:
 
           echo "Committed: $COMMIT_SHA (verified)"
 
+      # Before the issue step: an open issue of a package holds back a new
+      # one, so the check issue of a package whose update now fails has to
+      # be closed first. The step does not run after a failed step, so a
+      # status that publish did not write closes nothing.
+      - name: Close issues of recovered packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          STATUS_DIR=".status"
+          [[ -d "$STATUS_DIR" ]] || exit 0
+
+          has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
+          [[ "$has_issues" != "false" ]] || exit 0
+          open=$(gh issue list --label "auto-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+
+          while read -r number title; do
+            [[ -n "$number" ]] || continue
+            for status_file in "$STATUS_DIR"/*; do
+              [[ -f "$status_file" ]] || continue
+              pkg_name=$(basename "$status_file")
+              [[ "$pkg_name" == _* ]] && continue
+              status=$(cat "$status_file")
+              # A check issue closes once the check passes, an update issue
+              # once the version is in the AUR
+              case "$title:$status" in
+                "❌ $pkg_name: check failed:check_failed:"*) continue ;;
+                "❌ $pkg_name: check failed:"*) ;;
+                "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
+                  "❌ $pkg_name: update failed:downgrade: "*) ;;
+                *) continue ;;
+              esac
+              gh issue close "$number" --comment "The status of $pkg_name is \`$status\` in $RUN_URL."
+            done
+          done <<<"$open"
+
       - name: Create issues for failed packages
         if: always()
         env:
