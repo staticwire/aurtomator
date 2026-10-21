@@ -940,10 +940,13 @@ verify_prepared_sums() {
 # where links, images and mentions do not render. The fence is longer than
 # any run of backticks in the error, so the error cannot close it. The
 # error is cut to its last 4000 characters, where the cause usually is.
+# The job containers run in the C locale, where bash counts bytes, so the
+# cut could split a character.
 # Args: $1=status file in .status/, named after the package, holding
 #       check_failed: ... or update_failed: ...; $2=URL of the run
 failure_issue_body() {
   local status kind error fence='```' limit=4000
+  local LC_ALL=C.UTF-8
   status=$(<"$1")
   kind="${status%%:*}"
   error="${status#*: }"

@@ -1324,6 +1324,22 @@ EOF
   [ "${lines[6]}" = "$tail" ]
 }
 
+@test "failure_issue_body: cuts a long error by characters in the C locale" {
+  local tail
+  tail=$(printf '中%.0s' {1..4000})
+  echo "update_failed: ab${tail}" >"$TEST_TMPDIR/demo"
+  # The job containers run without a locale
+  LC_ALL=C
+  run --keep-empty-lines failure_issue_body "$TEST_TMPDIR/demo" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  [ "${lines[5]}" = "[first 2 characters cut]" ]
+  [ "${lines[6]}" = "$tail" ]
+  printf '%s' "$output" | iconv -f UTF-8 -t UTF-8 >/dev/null
+  # The caller keeps its locale
+  failure_issue_body "$TEST_TMPDIR/demo" https://example.invalid/run >/dev/null
+  [ "$LC_ALL" = C ]
+}
+
 # === aur_export and aur_reanchor ===
 
 # Helper: a repo with a file, an executable, a symlink out of the repo and a
