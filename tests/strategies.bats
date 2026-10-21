@@ -73,6 +73,34 @@ teardown() {
   [ "$output" = "1.3.11" ]
 }
 
+@test "github-tag: takes only tags of the form v1.2.3 by default" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: mixed-owner/mixed-repo"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.0.0" ]
+}
+
+@test "github-tag: names both fields when no tag is a release" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: named-owner/named-repo"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern or upstream.tag_version_regex"* ]]
+}
+
+@test "github-tag: tag_pattern replaces the default filter" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: mixed-owner/mixed-repo
+  tag_pattern: 'latest'"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "latest" ]
+}
+
 # === gitlab-tag ===
 
 @test "gitlab-tag: returns latest tag from GitLab" {
@@ -86,6 +114,26 @@ teardown() {
   [ "$output" = "3.1.0" ]
 }
 
+@test "gitlab-tag: takes only tags of the form v1.2.3 by default" {
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: mixed-group/mixed-project"
+
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.0.0" ]
+}
+
+@test "gitlab-tag: names tag_pattern when no tag is a release" {
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: named-group/named-project"
+
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern"* ]]
+}
+
 # === gitea-tag ===
 
 @test "gitea-tag: returns latest tag from Gitea/Codeberg" {
@@ -97,6 +145,26 @@ teardown() {
   run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-gitea"
   [ "$status" -eq 0 ]
   [ "$output" = "1.5.0" ]
+}
+
+@test "gitea-tag: takes only tags of the form v1.2.3 by default" {
+  create_test_package "test-gitea" "gitea-tag" "upstream:
+  host: codeberg.org
+  project: mixed-owner/mixed-repo"
+
+  run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-gitea"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.0.0" ]
+}
+
+@test "gitea-tag: names tag_pattern when no tag is a release" {
+  create_test_package "test-gitea" "gitea-tag" "upstream:
+  host: codeberg.org
+  project: named-owner/named-repo"
+
+  run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-gitea"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern"* ]]
 }
 
 # === pypi ===

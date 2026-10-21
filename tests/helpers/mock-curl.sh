@@ -97,6 +97,17 @@ case "$url" in
   *api.github.com/repos/custom-prefix/repo/tags*)
     echo '[{"name": "bun-v1.3.11"}, {"name": "bun-v1.2.0"}, {"name": "bun-v1.0.0"}]'
     ;;
+  # Tags of which some are not releases, and tags of which none is
+  *api.github.com/repos/mixed-owner/mixed-repo/tags* | \
+    *gitlab.com/api/v4/projects/mixed-group%2Fmixed-project/repository/tags* | \
+    *codeberg.org/api/v1/repos/mixed-owner/mixed-repo/tags*)
+    echo '[{"name": "latest"}, {"name": "v2.1.0-rc1"}, {"name": "v2.1.0rc2"}, {"name": "v2.0.0"}, {"name": "v1.9.0"}]'
+    ;;
+  *api.github.com/repos/named-owner/named-repo/tags* | \
+    *gitlab.com/api/v4/projects/named-group%2Fnamed-project/repository/tags* | \
+    *codeberg.org/api/v1/repos/named-owner/named-repo/tags*)
+    echo '[{"name": "latest"}, {"name": "nightly"}]'
+    ;;
 
   # --- Normal success patterns (wildcards) ---
 

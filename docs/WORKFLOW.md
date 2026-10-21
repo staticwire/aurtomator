@@ -139,10 +139,10 @@ upstream:
 | Field                        | Required | Description                              |
 |------------------------------|----------|------------------------------------------|
 | `upstream.project`           | yes      | `owner/repo` format                      |
-| `upstream.tag_pattern`       | no       | Glob to filter tags (e.g. `v*`)          |
-| `upstream.tag_version_regex` | no       | ERE with one capture group               |
+| `upstream.tag_pattern`       | no       | Glob to filter tags (e.g. `release-*`), replaces the default filter |
+| `upstream.tag_version_regex` | no       | ERE with one capture group, replaces the default filter |
 
-**How the version is extracted:** fetches the first 100 tags and filters them by `tag_pattern`, where `*` matches anything and the match is anchored at the start. It strips a leading `v`, or applies `tag_version_regex`, and returns the highest tag by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so filter pre-release tags with `tag_pattern`.
+**How the version is extracted:** fetches the first 100 tags. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead, where `*` matches anything and the match is anchored at the start. The strategy strips a leading `v`, or applies `tag_version_regex`, and returns the highest tag by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so a `tag_pattern` that lets pre-release tags through picks them.
 
 **Authentication:** same as `github-release`.
 
@@ -153,7 +153,6 @@ name: my-package
 strategy: github-tag
 upstream:
   project: owner/repo
-  tag_pattern: "v*"
 ```
 
 ### 3.3 github-nightly
@@ -268,9 +267,9 @@ upstream:
 |------------------------|----------|-------------------------------------------------------|
 | `upstream.host`        | yes      | GitLab hostname (e.g. `invent.kde.org`, `gitlab.com`) |
 | `upstream.project`     | yes      | Project path (e.g. `network/my-kde-app`)              |
-| `upstream.tag_pattern` | no       | Glob to filter tags                                   |
+| `upstream.tag_pattern` | no       | Glob to filter tags, replaces the default filter      |
 
-**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`), fetches the first 100 tags, filters them by `tag_pattern`, strips a leading `v` and returns the highest by `sort -V`. There is no authentication, so private projects cannot be queried.
+**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags. Without `tag_pattern`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names `tag_pattern`. With it, it filters the tags by the pattern. It strips a leading `v` and returns the highest by `sort -V`. There is no authentication, so private projects cannot be queried.
 
 **Example YAML:**
 
@@ -294,9 +293,9 @@ upstream:
 |------------------------|----------|------------------------------------------|
 | `upstream.host`        | yes      | Instance hostname (e.g. `codeberg.org`)  |
 | `upstream.project`     | yes      | `owner/repo` format                      |
-| `upstream.tag_pattern` | no       | Glob to filter tags                      |
+| `upstream.tag_pattern` | no       | Glob to filter tags, replaces the default filter |
 
-**How the version is extracted:** fetches up to 50 tags without pagination, filters them by `tag_pattern`, strips a leading `v` and returns the highest by `sort -V`.
+**How the version is extracted:** fetches up to 50 tags without pagination. Without `tag_pattern`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names `tag_pattern`. With it, it filters the tags by the pattern. It strips a leading `v` and returns the highest by `sort -V`.
 
 **Example YAML:**
 

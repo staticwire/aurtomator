@@ -118,6 +118,14 @@ validate_pkgver() {
   fi
 }
 
+# The tags of the form v1.2.3 or 1.2.3, for a tag strategy without a filter
+# of its own. sort -V puts latest, 2.1.0-rc1 and 2.1.0rc1 above 2.1.0, so
+# they are left out.
+# Args: $1=tags, one per line
+release_tags() {
+  grep -E '^v?[0-9]+(\.[0-9]+)*$' <<<"$1" || true
+}
+
 # =============================================================================
 # CHECKSUMS
 # =============================================================================

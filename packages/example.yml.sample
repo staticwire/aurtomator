@@ -50,13 +50,13 @@ upstream:
 #   tag_version_regex: '(.+)-stable'       # optional, ERE with a capture group
 
 # --- github-tag -------------------------------------------------------------
-# Reads up to 100 tags from /repos/{project}/tags, pre-release tags included.
-# Filter them with tag_pattern or tag_version_regex.
+# Reads up to 100 tags from /repos/{project}/tags and keeps v1.2.3 and 1.2.3.
+# tag_pattern or tag_version_regex replaces that filter.
 #
 # strategy: github-tag
 # upstream:
 #   project: owner/repo                    # required
-#   tag_pattern: 'v*'                      # optional, glob filter
+#   tag_pattern: 'release-*'               # optional, glob filter
 #   tag_version_regex: 'release-(.+)'      # optional, ERE with a capture group
 
 # --- github-nightly ---------------------------------------------------------
@@ -102,22 +102,24 @@ upstream:
 #     - voice-b.tar.bz2
 
 # --- gitlab-tag -------------------------------------------------------------
-# Any GitLab instance, public API only (no authentication).
+# Any GitLab instance, public API only (no authentication). Keeps the tags
+# v1.2.3 and 1.2.3; tag_pattern replaces that filter.
 #
 # strategy: gitlab-tag
 # upstream:
 #   host: gitlab.com                       # required, hostname without protocol
 #   project: group/subgroup/project        # required, full path
-#   tag_pattern: 'v*'                      # optional
+#   tag_pattern: 'release-*'               # optional
 
 # --- gitea-tag --------------------------------------------------------------
-# Codeberg, self-hosted Gitea/Forgejo. Reads at most 50 tags.
+# Codeberg, self-hosted Gitea/Forgejo. Reads at most 50 tags and keeps
+# v1.2.3 and 1.2.3; tag_pattern replaces that filter.
 #
 # strategy: gitea-tag
 # upstream:
 #   host: codeberg.org                     # required
 #   project: owner/repo                    # required
-#   tag_pattern: 'v*'                      # optional
+#   tag_pattern: 'release-*'               # optional
 
 # --- git-latest -------------------------------------------------------------
 # For -git packages. Produces rCOUNT.HASH (e.g. r435.abc1234).

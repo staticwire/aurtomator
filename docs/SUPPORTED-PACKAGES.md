@@ -188,11 +188,11 @@ aurtomator includes 14 version detection strategies. Choose by where your upstre
 | Strategy | Source | Best for | Pre-release filter |
 |---|---|---|---|
 | `github-release` | GitHub Releases API | Most GitHub projects | Auto (excludes pre-releases) |
-| `github-tag` | GitHub Tags API | Projects without formal releases | Manual (`tag_pattern`) |
+| `github-tag` | GitHub Tags API | Projects without formal releases | Auto (`v1.2.3` tags only) |
 | `github-nightly` | GitHub Releases API | Nightly/dev builds (4 patterns) | Nightly-specific |
 | `github-asset` | GitHub Releases API | Assets re-uploaded on a fixed tag (model zoos) | N/A (fixed tag) |
-| `gitlab-tag` | GitLab Tags API | GitLab.com, invent.kde.org, self-hosted | Manual (`tag_pattern`) |
-| `gitea-tag` | Gitea/Forgejo Tags API | Codeberg, self-hosted Gitea | Manual (`tag_pattern`) |
+| `gitlab-tag` | GitLab Tags API | GitLab.com, invent.kde.org, self-hosted | Auto (`v1.2.3` tags only) |
+| `gitea-tag` | Gitea/Forgejo Tags API | Codeberg, self-hosted Gitea | Auto (`v1.2.3` tags only) |
 | `git-latest` | Bare git clone | `-git` packages (commit tracking) | N/A |
 | `pypi` | PyPI JSON API | Python packages | Auto (stable only) |
 | `npm` | npm registry | Node.js packages | Auto (`latest` tag) |
@@ -206,7 +206,7 @@ aurtomator includes 14 version detection strategies. Choose by where your upstre
 
 - **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without a token, the limit is 60 requests per hour.
 - **No retry on API failure:** strategies make one attempt. A transient failure fails the package for that run.
-- **Tag strategies include pre-releases:** `github-tag`, `gitlab-tag` and `gitea-tag` pick the highest tag with `sort -V`, which places `1.0.0-rc1` above `1.0.0`. Filter with `tag_pattern`.
+- **Tag strategies take only `v1.2.3` and `1.2.3` by default:** without `tag_pattern`, and without `tag_version_regex` for `github-tag`, `github-tag`, `gitlab-tag` and `gitea-tag` leave out every other tag, `latest`, `1.0.0-rc1` and `1.0.0rc1` included. A `tag_pattern` replaces that filter. They pick the highest tag with `sort -V`, which places `1.0.0-rc1` above `1.0.0`, so a pattern that lets pre-release tags through picks them.
 - **`gitea-tag` fetches at most 50 tags:** there is no pagination.
 - **`gitlab-tag` has no authentication:** private GitLab projects cannot be queried.
 

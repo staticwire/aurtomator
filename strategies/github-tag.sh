@@ -34,10 +34,16 @@ if [[ -z "$tags" ]]; then
   exit 1
 fi
 
-# Filter by pattern if set
+# Filter by pattern if set, by the form of a release if neither field is
 if [[ -n "$tag_pattern" ]]; then
   regex="^${tag_pattern//\*/.*}"
   tags=$(echo "$tags" | grep -E "$regex" || true)
+elif [[ -z "$tag_version_regex" ]]; then
+  tags=$(release_tags "$tags")
+  if [[ -z "$tags" ]]; then
+    echo "No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern or upstream.tag_version_regex" >&2
+    exit 1
+  fi
 fi
 
 # Extract version from tags
