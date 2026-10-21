@@ -442,6 +442,17 @@ MOCKCURL
   [[ "$output" == *"HTML instead of"* ]]
 }
 
+# === http_get ===
+
+@test "lib.sh: http_get tries a transient failure again" {
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*"\n' >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get https://example.invalid/a --max-redirs 5
+  [ "$status" -eq 0 ]
+  [ "$output" = "-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --max-redirs 5 https://example.invalid/a" ]
+}
+
 # === validate_pkgver ===
 
 @test "lib.sh: validate_pkgver accepts versions the strategies produce" {

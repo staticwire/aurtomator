@@ -79,8 +79,15 @@ warn_maintainer_line() {
 }
 
 # =============================================================================
-# GITHUB API
+# HTTP
 # =============================================================================
+
+# GET a URL for a strategy. curl tries a timeout, a refused connection and
+# an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more.
+# Usage: http_get <url> [curl option]...
+http_get() {
+  curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused "${@:2}" "$1"
+}
 
 # GET a GitHub API URL, with GITHUB_TOKEN when it is set. curl reads the
 # header from stdin: as an argument, the token is visible in ps to every
@@ -91,7 +98,7 @@ github_api() {
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     auth=(-H @-)
   fi
-  curl -sfL --max-time 30 "${auth[@]}" "$1" <<<"Authorization: Bearer ${GITHUB_TOKEN:-}"
+  http_get "$1" "${auth[@]}" <<<"Authorization: Bearer ${GITHUB_TOKEN:-}"
 }
 
 # =============================================================================

@@ -543,6 +543,8 @@ strategy: kde-tarball
 
 Outside `--update`, `check-all.sh` gives each package a time budget: 120 seconds for `check-update.sh`, and 300 seconds each for `update-pkg.sh`, `verify-pkg.sh` and `publish-pkg.sh`. `timeout` ends the script together with everything it started, makepkg, git and curl included, and the package gets `check_failed: timed out after 120 s` or `update_failed: timed out after 300 s`. `AURTOMATOR_CHECK_TIMEOUT` and `AURTOMATOR_UPDATE_TIMEOUT` change the budgets. `--update` has none, because it runs on a terminal, where git and ssh may ask for a passphrase, and a command under `timeout` cannot read the terminal.
 
+Without a mode and with `--update`, a package whose check failed within its budget is checked once more after all the others, following a pause of 60 seconds, and the second result counts. A check that ran out of its budget is not repeated, so a run without network does not take twice as long. `AURTOMATOR_RECHECK_DELAY` changes the pause, and the tests set it to 0.
+
 ### 4.1 Arguments
 
 ```text
@@ -931,7 +933,7 @@ A strategy is a bash script in `strategies/` that finds the latest upstream vers
 - **Failure:** an error on stderr, a non-zero exit code.
 - **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`.
 
-The script can rely on `yq` and `curl`. `scripts/lib.sh` provides YAML helpers and logging and sets `AURTOMATOR_DIR` to the project root.
+The script can rely on `yq` and `curl`. `scripts/lib.sh` provides YAML helpers, `http_get` for requests and logging, and sets `AURTOMATOR_DIR` to the project root.
 
 ### 8.2 Template
 
@@ -948,7 +950,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: my-strategy.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 
 # shellcheck source=../scripts/lib.sh
 source "${SCRIPT_DIR}/../scripts/lib.sh"
@@ -956,8 +957,7 @@ source "${SCRIPT_DIR}/../scripts/lib.sh"
 pkg_file=$(pkg_file "$NAME")
 my_field=$(pkg_get "$pkg_file" .upstream.my_field)
 
-version=$(curl -sfL --max-time "$TIMEOUT" \
-  "https://example.com/api/${my_field}" |
+version=$(http_get "https://example.com/api/${my_field}" |
   yq -r '.version') || {
   echo "Failed to fetch version for ${my_field}" >&2
   exit 1
@@ -975,7 +975,7 @@ echo "$version"
 
 1. **Location:** `strategies/<name>.sh`, executable (`chmod +x`). `<name>` is the value of the YAML `strategy` field.
 2. **Header:** `set -euo pipefail`, then source `lib.sh` for `pkg_file`, `pkg_get` and logging.
-3. **HTTP:** `curl -sfL --max-time "$TIMEOUT"`. `-f` fails on HTTP errors, `-L` follows redirects, and `--max-time` prevents hangs.
+3. **HTTP:** `http_get <url> [curl option]...` from `lib.sh`. It runs `curl -sfL --max-time 30` and tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. `-f` fails on HTTP errors and `-L` follows redirects. A test in `tests/strategies.bats` fails when a strategy calls `curl` itself.
 4. **Result:** check for an empty string and for `null` from `yq`.
 5. **Prefix:** strip a leading `v` with `${version#v}` when upstream tags look like `v1.0.0`.
 6. **Validation:** add the name and its required fields to `scripts/validate-pkg.sh`.

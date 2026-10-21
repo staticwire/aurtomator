@@ -556,6 +556,21 @@ run_github_strategies() {
   ! grep -q -- '-H' "$TEST_TMPDIR/curl.args"
 }
 
+@test "github strategies: try a failed request again" {
+  setup_github_strategies
+  run_github_strategies
+  calls=$(wc -l <"$TEST_TMPDIR/curl.args")
+  [ "$calls" -gt 0 ]
+  [ "$(grep -c -- '--retry 2 --retry-delay 5 --retry-connrefused' "$TEST_TMPDIR/curl.args")" -eq "$calls" ]
+}
+
+# A request that goes around http_get makes one attempt
+@test "strategies: send every request through http_get" {
+  run grep -nE '^[^#]*\bcurl -' "$PROJECT_DIR"/strategies/*.sh
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
 # === Error handling: unknown package ===
 
 @test "strategy fails gracefully on unknown package" {

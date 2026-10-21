@@ -11,9 +11,13 @@ set -euo pipefail
 
 readonly NAME="${1:?Usage: kde-tarball.sh <package-name>}"
 readonly URL="https://download.kde.org/stable/${NAME}/"
-readonly TIMEOUT=30
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 
-page=$(curl -sfL --max-time "$TIMEOUT" "$URL") || {
+# shellcheck source=../scripts/lib.sh
+source "${SCRIPT_DIR}/../scripts/lib.sh"
+
+page=$(http_get "$URL") || {
   echo "Failed to fetch $URL" >&2
   exit 1
 }

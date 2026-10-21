@@ -12,7 +12,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: gitea-tag.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 
 # shellcheck source=../scripts/lib.sh
 source "${SCRIPT_DIR}/../scripts/lib.sh"
@@ -22,8 +21,7 @@ host=$(pkg_get "$pkg_file" .upstream.host)
 owner_repo=$(pkg_get "$pkg_file" .upstream.project)
 tag_pattern=$(pkg_get "$pkg_file" '.upstream.tag_pattern // ""')
 
-tags=$(curl -sfL --max-time "$TIMEOUT" \
-  "https://${host}/api/v1/repos/${owner_repo}/tags?limit=50" |
+tags=$(http_get "https://${host}/api/v1/repos/${owner_repo}/tags?limit=50" |
   yq -r '.[].name') || {
   echo "Failed to fetch tags from ${host}/${owner_repo}" >&2
   exit 1

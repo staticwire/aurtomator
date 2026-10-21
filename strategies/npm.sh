@@ -12,7 +12,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: npm.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 
 # shellcheck source=../scripts/lib.sh
 source "${SCRIPT_DIR}/../scripts/lib.sh"
@@ -20,8 +19,7 @@ source "${SCRIPT_DIR}/../scripts/lib.sh"
 pkg_file=$(pkg_file "$NAME")
 registry=$(pkg_get "$pkg_file" .upstream.registry)
 
-version=$(curl -sfL --max-time "$TIMEOUT" \
-  "https://registry.npmjs.org/${registry}/latest" |
+version=$(http_get "https://registry.npmjs.org/${registry}/latest" |
   yq -r '.version') || {
   echo "Failed to fetch npm info for ${registry}" >&2
   exit 1

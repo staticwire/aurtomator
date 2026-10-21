@@ -12,7 +12,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: repology.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 
 # shellcheck source=../scripts/lib.sh
 source "${SCRIPT_DIR}/../scripts/lib.sh"
@@ -22,9 +21,8 @@ repology_name=$(pkg_get "$pkg_file" '.upstream.repology // .name')
 
 # Repology returns an array of package entries from various repos.
 # Filter for "newest" status to get the latest upstream version.
-version=$(curl -sfL --max-time "$TIMEOUT" \
-  -H "User-Agent: aurtomator/1.0" \
-  "https://repology.org/api/v1/project/${repology_name}" |
+version=$(http_get "https://repology.org/api/v1/project/${repology_name}" \
+  -H "User-Agent: aurtomator/1.0" |
   yq -r '[.[] | select(.status == "newest")] | .[0].version') || {
   echo "Failed to fetch Repology info for ${repology_name}" >&2
   exit 1

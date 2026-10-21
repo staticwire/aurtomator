@@ -12,7 +12,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: gitlab-tag.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 
 # shellcheck source=../scripts/lib.sh
 source "${SCRIPT_DIR}/../scripts/lib.sh"
@@ -25,8 +24,7 @@ tag_pattern=$(pkg_get "$pkg_file" '.upstream.tag_pattern // ""')
 # URL-encode the project path (e.g., group/project → group%2Fproject)
 project_encoded="${project//\//%2F}"
 
-tags=$(curl -sfL --max-time "$TIMEOUT" \
-  "https://${host}/api/v4/projects/${project_encoded}/repository/tags?per_page=100" |
+tags=$(http_get "https://${host}/api/v4/projects/${project_encoded}/repository/tags?per_page=100" |
   yq -r '.[].name') || {
   echo "Failed to fetch tags from ${host}/${project}" >&2
   exit 1

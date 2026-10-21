@@ -14,7 +14,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: archpkg.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 
 # shellcheck source=../scripts/lib.sh
 source "${SCRIPT_DIR}/../scripts/lib.sh"
@@ -22,8 +21,7 @@ source "${SCRIPT_DIR}/../scripts/lib.sh"
 pkg_file=$(pkg_file "$NAME")
 archpkg_name=$(pkg_get "$pkg_file" '.upstream.archpkg // .name')
 
-result=$(curl -sfL --max-time "$TIMEOUT" \
-  "https://archlinux.org/packages/search/json/?name=${archpkg_name}" |
+result=$(http_get "https://archlinux.org/packages/search/json/?name=${archpkg_name}" |
   yq -r '.results[0]') || {
   echo "Failed to fetch Arch package info for ${archpkg_name}" >&2
   exit 1

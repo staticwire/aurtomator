@@ -34,6 +34,9 @@ DRY_RUN=""
 CHECK_TIMEOUT="${AURTOMATOR_CHECK_TIMEOUT:-120}"
 UPDATE_TIMEOUT="${AURTOMATOR_UPDATE_TIMEOUT:-300}"
 
+# Pause, in seconds, before a package whose check failed is checked again
+RECHECK_DELAY="${AURTOMATOR_RECHECK_DELAY:-60}"
+
 # Runs a per-package script within a budget. timeout runs it in a process
 # group of its own and ends the whole group, makepkg, git and curl below it
 # included. Such a group cannot read the terminal, where git and ssh may ask
@@ -176,7 +179,6 @@ handed_failure() {
 
 updated=0
 checked=0
-errors=0
 
 # The version the check run found for a package, printed the way
 # check-update.sh prints it: nothing when up to date, an error on failure.
@@ -199,9 +201,14 @@ checked_version() {
   esac
 }
 
-for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
-  [[ -f "$pkg_file" ]] || continue
-
+# Checks one package, then updates, prepares or publishes it as the mode
+# says, and writes its status. A check that fails fast in a mode that runs
+# the strategies goes on the list for the second pass.
+# Args: $1=package file, $2=pass, 1 or 2
+run_package() {
+  local pkg_file="$1" pass="$2"
+  local pkg_name found check_cmd err_file check_rc latest check_err current
+  local is_downgrade cmp available pushed cmd update_rc update_err
   pkg_name=$(pkg_get "$pkg_file" .name)
   # --publish keeps the status of the check run and publishes only a package
   # that run found outdated. Only package names from packages/ reach a path,
@@ -212,28 +219,28 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
       "new_version: "* | "available_downgrade: "*)
         if ! validate_pkgver "${found#*: }" 2>/dev/null; then
           echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
-          continue
+          return
         fi
         if [[ -L "${WORK_DIR}/prepared" || ! -d "${WORK_DIR}/prepared/${pkg_name}" ]]; then
           handed_failure "$pkg_name" >"${STATUS_DIR}/${pkg_name}"
-          continue
+          return
         fi
         ;;
       up_to_date | check_failed:* | "downgrade_skipped: "*)
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
-        continue
+        return
         ;;
       "")
         echo "check_failed: not checked before --publish" >"${STATUS_DIR}/${pkg_name}"
-        continue
+        return
         ;;
       *)
         echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
-        continue
+        return
         ;;
     esac
   fi
-  ((checked++)) || true
+  ((pass == 2)) || ((checked++)) || true
 
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
     check_cmd=(checked_version "$pkg_name")
@@ -250,14 +257,17 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
     rm -f "$err_file"
     log_err "Failed to check $pkg_name: $check_err"
     echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
-    ((errors++)) || true
-    continue
+    if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded ]] &&
+      ((check_rc != 124 && check_rc != 137)); then
+      RECHECK+=("$pkg_file")
+    fi
+    return
   fi
   rm -f "$err_file"
 
   if [[ -z "$latest" ]]; then
     echo "up_to_date" >"${STATUS_DIR}/${pkg_name}"
-    continue
+    return
   fi
 
   # Detect downgrade: current from YAML is newer than latest from upstream.
@@ -278,7 +288,7 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
     [[ "$(pkg_get "$pkg_file" '.allow_downgrade // false')" != "true" ]]; then
     log_warn "$pkg_name: DOWNGRADE detected $current → $latest, skipped: allow_downgrade is not set"
     echo "downgrade_skipped: ${latest}" >"${STATUS_DIR}/${pkg_name}"
-    continue
+    return
   fi
 
   if [[ "$is_downgrade" == "true" ]]; then
@@ -293,7 +303,7 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
   case "$MODE" in
     check)
       echo "$available" >"${STATUS_DIR}/${pkg_name}"
-      continue
+      return
       ;;
     update)
       log_info "Updating $pkg_name to $latest"
@@ -335,21 +345,36 @@ for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
     *)
       log_err "Failed to update $pkg_name to $latest"
       echo "update_failed: ${update_err}" >"${STATUS_DIR}/${pkg_name}"
-      ((errors++)) || true
       ;;
   esac
+}
+
+RECHECK=()
+for pkg_file in $(printf '%s\n' "${AURTOMATOR_DIR}"/packages/*.yml | sort); do
+  [[ -f "$pkg_file" ]] || continue
+  run_package "$pkg_file" 1
 done
 
-# --publish counts the failures among the statuses it wrote
-if [[ "$MODE" == "publish" ]]; then
-  errors=0
-  for status_file in "$STATUS_DIR"/*; do
-    [[ -f "$status_file" ]] || continue
-    case "$(<"$status_file")" in
-      check_failed:* | update_failed:*) ((errors++)) || true ;;
-    esac
+# A check that failed fast gets a second try after a pause, by when a
+# failure of the upstream host can be over. A check that ran out of its
+# budget gets none, so a run without network stays within the time limit
+# of its job.
+if ((${#RECHECK[@]} > 0)); then
+  log_info "Checking ${#RECHECK[@]} failed package(s) again in ${RECHECK_DELAY} s"
+  sleep "$RECHECK_DELAY"
+  for pkg_file in "${RECHECK[@]}"; do
+    run_package "$pkg_file" 2
   done
 fi
+
+# Count the failures among the statuses written
+errors=0
+for status_file in "$STATUS_DIR"/*; do
+  [[ -f "$status_file" ]] || continue
+  case "$(<"$status_file")" in
+    check_failed:* | update_failed:*) ((errors++)) || true ;;
+  esac
+done
 
 echo ""
 log_info "Checked: $checked, Updated: $updated, Errors: $errors"

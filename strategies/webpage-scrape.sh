@@ -14,7 +14,6 @@ set -euo pipefail
 readonly NAME="${1:?Usage: webpage-scrape.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly TIMEOUT=30
 readonly MAX_SIZE=5242880 # 5MB
 
 # shellcheck source=../scripts/lib.sh
@@ -37,8 +36,7 @@ if [[ "$url" != https://* ]]; then
 fi
 
 # Fetch page
-page=$(curl -sfL --max-time "$TIMEOUT" --max-redirs 5 --max-filesize "$MAX_SIZE" \
-  -A "Mozilla/5.0" "$url") || {
+page=$(http_get "$url" --max-redirs 5 --max-filesize "$MAX_SIZE" -A "Mozilla/5.0") || {
   echo "Failed to fetch $url" >&2
   exit 1
 }

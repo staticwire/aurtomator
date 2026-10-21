@@ -1135,6 +1135,97 @@ current: '1.0.0'"
   child_ended publish-pkg.sh
 }
 
+# === check-all.sh second pass ===
+
+# Helper: a check-update.sh that logs every package it checks to
+# $TEST_TMPDIR/checks, exits for <package> with the given codes, one per
+# call, and finds every package up to date otherwise; a sleep that logs its
+# argument to $TEST_TMPDIR/sleeps; the packages flaky and steady
+# Usage: flaky_check <package> [exit code]...
+flaky_check() {
+  local pkg="$1"
+  shift
+  create_test_package "flaky" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  create_test_package "steady" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  printf '%s\n' "$@" >"$TEST_TMPDIR/codes"
+  rm -f "$TEST_TMPDIR/scripts/check-update.sh"
+  cat >"$TEST_TMPDIR/scripts/check-update.sh" <<EOF
+#!/usr/bin/env bash
+echo "\$1" >>"$TEST_TMPDIR/checks"
+[[ "\$1" == "$pkg" ]] || exit 0
+rc=\$(head -1 "$TEST_TMPDIR/codes")
+sed -i 1d "$TEST_TMPDIR/codes"
+[[ -n "\$rc" ]] || exit 0
+echo "API down" >&2
+exit "\$rc"
+EOF
+  chmod +x "$TEST_TMPDIR/scripts/check-update.sh"
+  printf '#!/usr/bin/env bash\necho "$1" >>"%s/sleeps"\n' "$TEST_TMPDIR" >"$MOCK_DIR/sleep"
+  chmod +x "$MOCK_DIR/sleep"
+}
+
+@test "check-all: checks a package that failed again after a pause" {
+  flaky_check flaky 1
+  AURTOMATOR_RECHECK_DELAY=9 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady\nflaky' ]
+  [ "$(cat "$TEST_TMPDIR/sleeps")" = "9" ]
+  [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "up_to_date" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [[ "$output" == *"Checking 1 failed package(s) again in 9 s"* ]]
+  [[ "$output" == *"Checked: 2, Updated: 0, Errors: 0"* ]]
+}
+
+@test "check-all: keeps a package that fails twice as failed" {
+  flaky_check flaky 1 1
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady\nflaky' ]
+  [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "check_failed: API down" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+}
+
+# Without network every check runs out of its budget, and a second pass
+# would double the time of the job
+@test "check-all: checks a package that ran out of its budget once" {
+  flaky_check flaky 124
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady' ]
+  [ ! -e "$TEST_TMPDIR/sleeps" ]
+  [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "check_failed: timed out after 120 s" ]
+}
+
+@test "check-all: makes no pause when every check passed" {
+  flaky_check flaky
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady' ]
+  [ ! -e "$TEST_TMPDIR/sleeps" ]
+}
+
+@test "check-all --update: checks a package that failed again" {
+  flaky_check flaky 1
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady\nflaky' ]
+  [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "up_to_date" ]
+}
+
+@test "check-all --prepare: checks no failed package again" {
+  flaky_check flaky
+  echo "check_failed: API down" >"$TEST_TMPDIR/.status/flaky"
+  echo "up_to_date" >"$TEST_TMPDIR/.status/steady"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/sleeps" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/flaky")" = "check_failed: API down" ]
+}
+
 # === check-all.sh --verify ===
 
 # Helper: one package with a prepared update and its handed over status
