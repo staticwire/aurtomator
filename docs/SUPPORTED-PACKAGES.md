@@ -11,11 +11,13 @@ For every update, aurtomator does exactly this:
 3. `sed` replaces `pkgver=` with the new version
 4. Reset `pkgrel=1`
 5. **Validate source URLs** (HEAD request, HTTP status and `Content-Type` check)
-6. Run `updpkgsums`, or skip it for VCS checksums
+6. Run `updpkgsums`
 7. Run `makepkg --verifysource` to verify checksums
 8. **Lint with `namcap`** when it is installed (errors are fatal, warnings are not)
 9. Run `makepkg --printsrcinfo` to regenerate `.SRCINFO`
 10. Commit and push to the AUR
+
+Steps 5 to 7 are skipped when any checksum array holds `SKIP`, see [Packages with VCS checksums](#packages-with-vcs-checksums-skip).
 
 aurtomator does not build packages and does not check runtime dependencies. That needs `ldd` or `readelf` on built binaries and is out of scope. Dependency correctness is the maintainer's responsibility.
 
@@ -140,7 +142,7 @@ sha256sums=('SKIP'
 
 Upstream moves or renames a release, and the old URL now redirects to an HTML error or download page.
 
-**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text.
+**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text. The check runs only when no checksum array holds `SKIP`: one `SKIP` turns it off for every URL of the package.
 
 **Why:** without this check, `updpkgsums` would hash the HTML page. The checksums would match and the package would fail to install.
 
@@ -167,7 +169,7 @@ When upstream changes the download URL format:
 - Binary renamed: `app-linux-x86_64` to `app-linux-amd64`
 - Major version path change: `v1/app.tar.gz` to `v2/app.tar.gz`
 
-aurtomator does not modify `source=()`. After such a change, source URL validation or `updpkgsums` fails and aurtomator refuses to push. That failure is safe.
+aurtomator does not modify `source=()`. After such a change, source URL validation or `updpkgsums` fails and aurtomator refuses to push. That failure is safe. In a package with a `SKIP` checksum every remote source is `SKIP`, and no step downloads one, so a changed URL there is pushed unnoticed.
 
 ### Packages with changing dependencies
 
@@ -236,7 +238,7 @@ aurtomator combines detection, update and push in one tool that runs in your own
 
 1. **Only automate packages you actively maintain.** When something breaks, you fix it by hand.
 2. **Only automate packages where pkgver is the only thing that changes.** Do not automate a package whose upstream often changes dependencies, source URLs or the build system.
-3. **Watch your issues.** aurtomator opens a GitHub Issue for every failure.
+3. **Watch your issues.** aurtomator opens a GitHub Issue when a package starts failing and when a run of the workflow fails.
 4. **Test a new package by hand first.** Build and install it once before adding it to aurtomator.
 5. **Do not automate packages with patches** unless the patches are known to apply across versions.
 6. **Check your packages after automated pushes.** Build them now and then with `makepkg -si` to confirm they build and work.

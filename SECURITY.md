@@ -36,6 +36,10 @@ Out of scope:
 - The fork model itself, for example that a malicious fork can push a bad package.
 - Issues in third-party GitHub Actions. Report them to the action's maintainer. aurtomator pins every action by commit SHA.
 
+## Known limitations
+
+Publish compares a line of the prepared `.SRCINFO` other than `pkgver`, `pkgrel`, `source` and the checksums with the AUR copy, and accepts it with the old version or with the new one. Telling which of the two the PKGBUILD yields needs the PKGBUILD to run. Code in the PKGBUILD of a tracked package can therefore keep the old version in such a line of any package updated in the same run, and the AUR then shows a stale description, dependency or relation. Details are in [docs/WORKFLOW.md section 4.4](docs/WORKFLOW.md#44-prepare-and-publish).
+
 ## Disclosure
 
 Once a reported issue is fixed, the advisory is published on the repository's Security tab. A CVE assigned through GitHub's CNA is referenced in the published advisory. A fork gets the fix with its next merge from upstream. Watching this repository's releases gives a notification when a fix ships.

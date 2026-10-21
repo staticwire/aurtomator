@@ -32,7 +32,7 @@ graph LR
     C -->|done| E[update-readme.sh<br/>commit badges + status table]
 ```
 
-Each package has a YAML config pointing to an upstream source. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. If anything fails, a GitHub Issue is opened automatically.
+Each package has a YAML config pointing to an upstream source. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow.
 
 ## Quick start
 
@@ -70,12 +70,12 @@ See [docs/WORKFLOW.md](docs/WORKFLOW.md) for strategy details, YAML examples, an
 
 ## Limitations
 
-aurtomator only updates `pkgver`, checksums, and `.SRCINFO`. It does not build packages or check dependencies. These cases are detected and blocked:
+aurtomator only sets `pkgver`, resets `pkgrel` to 1, and updates checksums and `.SRCINFO`. It does not build packages or check dependencies. These cases are detected and blocked:
 
 - **Split packages**: `pkgname=(...)` arrays
 - **`pkgver()` with the wrong strategy**: use `git-latest` for VCS packages
-- **Mixed SKIP and real checksums**: `updpkgsums` is all-or-nothing
-- **Source URLs returning HTML**: detected by the `Content-Type` check
+- **A `SKIP` next to a real checksum of a remote source**: `updpkgsums` is all-or-nothing
+- **Source URLs returning HTML**: detected by the `Content-Type` check, which runs only when no checksum is `SKIP`
 
 Patches in `source=()` trigger a warning and are not blocked.
 
@@ -87,7 +87,7 @@ aurtomator publishes a version older than the tracked one only when the package 
 
 ## Resource usage
 
-All packages run in one workflow: one Arch container and one SSH and GPG setup per run. A version check is a few API requests per package, or a bare clone for `git-latest`.
+All packages run in one workflow run. `check` runs every time, `prepare` and `verify` only for a new version, and `publish` for a new version or a change in the status table. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`. A version check is a few API requests per package, or a bare clone for `git-latest`.
 
 ## Documentation
 

@@ -351,7 +351,7 @@ Without `gh`, set the secrets in the web UI: see [Manual setup](#manual-setup-wi
 
 ### check-update.sh fails: "Strategy not found"
 
-**Symptom:** `Strategy not found or not executable: strategies/xxx.sh`
+**Symptom:** `Strategy not found or not executable:` followed by the absolute path of `strategies/xxx.sh` in your checkout
 
 **Fixes:**
 
