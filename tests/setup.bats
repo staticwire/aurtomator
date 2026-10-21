@@ -253,8 +253,8 @@ EOF
     --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"Git author: Jane Doe"* ]]
-  grep -q 'GIT_AUTHOR_NAME="Jane Doe"' "$TEST_TMPDIR/.aurtomator.conf"
-  grep -q 'GIT_AUTHOR_EMAIL="jane@example.com"' "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "GIT_AUTHOR_NAME='Jane Doe'" "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "GIT_AUTHOR_EMAIL='jane@example.com'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
 @test "setup identity: fails without git name in non-interactive" {
@@ -384,6 +384,31 @@ EOF
   grep -q "GIT_AUTHOR_EMAIL" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
+@test "setup: saved values with shell characters come back unchanged" {
+  local name="x\"; touch $TEST_TMPDIR/injected; :\""
+  local email="j\`touch $TEST_TMPDIR/injected\`@example.com"
+  local gpg_key="\$(touch $TEST_TMPDIR/injected)"
+  local ssh_key="/keys/it's a \$key\\path"
+  "$TEST_TMPDIR/scripts/setup.sh" identity \
+    --git-name "$name" --git-email "$email" \
+    --gpg-key "$gpg_key" --ssh-key "$ssh_key" \
+    --non-interactive
+
+  run "$TEST_TMPDIR/scripts/setup.sh" identity --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Git author: $name <$email>"* ]]
+
+  # lib.sh sources the file the same way
+  run bash -c 'source "$1"; printf "%s\n" "$GIT_AUTHOR_NAME" "$GIT_AUTHOR_EMAIL" "$GPG_KEY_ID" "$AUR_SSH_KEY"' \
+    _ "$TEST_TMPDIR/.aurtomator.conf"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$name" ]
+  [ "${lines[1]}" = "$email" ]
+  [ "${lines[2]}" = "$gpg_key" ]
+  [ "${lines[3]}" = "$ssh_key" ]
+  [ ! -e "$TEST_TMPDIR/injected" ]
+}
+
 @test "setup identity: CLI flags override saved config" {
   write_full_config
 
@@ -392,8 +417,8 @@ EOF
     --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"Git author: Jane Doe <jane@example.com>"* ]]
-  grep -q 'GIT_AUTHOR_NAME="Jane Doe"' "$TEST_TMPDIR/.aurtomator.conf"
-  grep -q 'GIT_AUTHOR_EMAIL="jane@example.com"' "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "GIT_AUTHOR_NAME='Jane Doe'" "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "GIT_AUTHOR_EMAIL='jane@example.com'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
 @test "setup gpg: --gpg-key overrides saved key" {
@@ -402,7 +427,7 @@ EOF
   run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key VALIDKEY123 --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"GPG key: VALIDKEY123"* ]]
-  grep -q 'GPG_KEY_ID="VALIDKEY123"' "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "GPG_KEY_ID='VALIDKEY123'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
 @test "setup ssh: --ssh-key overrides saved path" {
@@ -415,7 +440,7 @@ EOF
     --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"SSH key: $TEST_TMPDIR/ssh/aur.pem"* ]]
-  grep -q "AUR_SSH_KEY=\"$TEST_TMPDIR/ssh/aur.pem\"" "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "AUR_SSH_KEY='$TEST_TMPDIR/ssh/aur.pem'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
 # === Verify step ===
@@ -473,8 +498,8 @@ EOF
     --ssh-key "$TEST_TMPDIR/ssh/aur.pem" --non-interactive
   [ "$status" -eq 1 ]
   [[ "$output" == *"1 issue(s) found."* ]]
-  grep -q 'GIT_AUTHOR_NAME="Jane Doe"' "$TEST_TMPDIR/.aurtomator.conf"
-  grep -q "AUR_SSH_KEY=\"$TEST_TMPDIR/ssh/aur.pem\"" "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "GIT_AUTHOR_NAME='Jane Doe'" "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "AUR_SSH_KEY='$TEST_TMPDIR/ssh/aur.pem'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
 # === Secrets step ===

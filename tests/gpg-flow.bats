@@ -338,7 +338,7 @@ EOF
     --gpg-key "$NOPASS_SUBKEY_ID" --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"no passphrase, ready for CI"* ]]
-  grep -q "GPG_KEY_ID=\"$NOPASS_SUBKEY_ID\"" "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "GPG_KEY_ID='$NOPASS_SUBKEY_ID'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
 @test "gpg-real: config clears GPG_KEY_ID when passphrase key skipped" {
@@ -352,5 +352,5 @@ EOF
   run "$TEST_TMPDIR/scripts/setup.sh" gpg \
     --gpg-key "$WITHPASS_SUBKEY_ID" --non-interactive
   [ "$status" -eq 0 ]
-  grep -q 'GPG_KEY_ID=""' "$TEST_TMPDIR/.aurtomator.conf"
+  grep -qx "GPG_KEY_ID=''" "$TEST_TMPDIR/.aurtomator.conf"
 }

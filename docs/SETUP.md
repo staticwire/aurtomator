@@ -240,13 +240,13 @@ Steps can be combined:
 
 ## Configuration file
 
-Setup saves its state to `.aurtomator.conf` in the project root. The scripts source it as a shell file.
+Setup saves its state to `.aurtomator.conf` in the project root. The scripts source it as a shell file, so `setup.sh` writes every value shell-quoted, and a `"`, `$` or backtick in a name stays part of the name. A file from an older version, with double quotes, still loads.
 
 ```bash
-GIT_AUTHOR_NAME="Jane Doe"
-GIT_AUTHOR_EMAIL="jane@example.com"
-GPG_KEY_ID="ABCDEF1234567890"
-AUR_SSH_KEY="/home/jane/.ssh/aur_ed25519"
+GIT_AUTHOR_NAME='Jane Doe'
+GIT_AUTHOR_EMAIL='jane@example.com'
+GPG_KEY_ID='ABCDEF1234567890'
+AUR_SSH_KEY='/home/<user>/.ssh/aur_ed25519'
 ```
 
 | Variable           | Description                                                |

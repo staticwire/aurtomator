@@ -85,13 +85,14 @@ load_config() {
   fi
 }
 
+# load_config sources the file, so each value is written shell-quoted
 save_config() {
-  cat >"$CONFIG_FILE" <<EOF
-GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME}"
-GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL}"
-GPG_KEY_ID="${GPG_KEY_ID}"
-AUR_SSH_KEY="${AUR_SSH_KEY}"
-EOF
+  {
+    printf 'GIT_AUTHOR_NAME=%s\n' "${GIT_AUTHOR_NAME@Q}"
+    printf 'GIT_AUTHOR_EMAIL=%s\n' "${GIT_AUTHOR_EMAIL@Q}"
+    printf 'GPG_KEY_ID=%s\n' "${GPG_KEY_ID@Q}"
+    printf 'AUR_SSH_KEY=%s\n' "${AUR_SSH_KEY@Q}"
+  } >"$CONFIG_FILE"
   ok "Config saved to .aurtomator.conf"
 }
 
