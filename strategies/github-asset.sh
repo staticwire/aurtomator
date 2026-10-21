@@ -52,8 +52,7 @@ fi
 # name cannot break the expression.
 newest=0
 for asset in "${assets[@]}"; do
-  updated=$(echo "$release" |
-    ASSET="$asset" yq -r '.assets[] | select(.name == strenv(ASSET)) | .updated_at')
+  updated=$(echo "$release" | ASSET="$asset" yq -r '.assets[] | select(.name == strenv(ASSET)) | .updated_at')
   if [[ -z "$updated" || "$updated" == "null" ]]; then
     echo "Asset '${asset}' not found in release '${tag}' of ${owner_repo}" >&2
     exit 1

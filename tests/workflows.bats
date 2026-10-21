@@ -101,6 +101,16 @@ run_blocks() {
   [ "$output" = "1" ]
 }
 
+@test "ci: the test job runs the suite once, under bashcov, and fails with it" {
+  run yq '[.jobs.test.steps[] | select(has("run")) | .run | select(test("bats tests/"))] | length' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+  run yq '.jobs.test.steps[] | select(has("run")) | .run | select(test("bats tests/"))' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "bashcov -- bats tests/ --recursive"* ]]
+  [[ "$output" != *"|| true"* ]]
+}
+
 @test "merge-image: runs only after lint and test" {
   run yq '.jobs["merge-image"].needs | sort | join(" ")' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
@@ -197,7 +207,7 @@ run_decide_step() {
     printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
   done
   printf '#!/bin/sh\nexit 0\n' >"$bin/sudo"
-  printf '#!/bin/sh\n[ -z "$README_CHANGED" ]\n' >"$bin/git"
+  printf '#!/bin/sh\n[ -z "${README_CHANGED:-}" ]\n' >"$bin/git"
   chmod +x "$bin/sudo" "$bin/git"
   step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
@@ -416,7 +426,7 @@ while (($#)); do
   esac
   shift
 done
-titles=$(grep -v '^$' <<<"${GH_TITLES:-}" | head -n "$limit")
+titles=$(grep -v '^$' <<<"${GH_TITLES:-}" | head -n "$limit") || true
 case "$jq_expr" in
   length) grep -c . <<<"$titles" ;;
   ".[].title") [[ -z "$titles" ]] || printf '%s\n' "$titles" ;;

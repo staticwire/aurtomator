@@ -823,11 +823,10 @@ actionlint
 
 ```bash
 ./scripts/validate-pkg.sh --all
-bats tests/ --recursive
 bashcov -- bats tests/ --recursive
 ```
 
-The coverage run uploads `coverage/coverage.xml` to Codecov and never fails the job.
+The suite runs once, under bashcov, and a failing test fails the job. bashcov exports `SHELLOPTS` to trace every script the tests start, so those scripts, mocks included, run with the options of the test: `errexit`, `nounset` and `pipefail`. The upload of `coverage/coverage.xml` to Codecov never fails the job.
 
 The two tests of the `namcap` check in `update-pkg.sh` run the real `namcap`. Without it they skip, except when `CI` is set: there a missing `namcap` fails them.
 

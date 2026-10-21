@@ -31,7 +31,7 @@ bats tests/ --recursive
 
 ## Running the full check locally
 
-CI runs exactly these commands:
+CI runs these commands:
 
 ```sh
 shellcheck -x -S warning scripts/*.sh strategies/*.sh
@@ -39,6 +39,8 @@ shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
 actionlint
 bats tests/ --recursive
 ```
+
+CI runs the suite under bashcov, as `bashcov -- bats tests/ --recursive`. bashcov passes `errexit`, `nounset` and `pipefail` to every script a test starts, so a mock has to work under `set -euo pipefail`.
 
 ## PR workflow
 

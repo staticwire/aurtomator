@@ -81,12 +81,9 @@ jobs:
       - name: Validate package configs
         run: ./scripts/validate-pkg.sh --all
 
-      - name: Run BATS tests
-        run: bats tests/ --recursive
-
-      - name: Generate coverage
+      - name: Run BATS tests with coverage
         run: |
-          bashcov -- bats tests/ --recursive 2>&1 || true
+          bashcov -- bats tests/ --recursive
           # Fix absolute paths in Cobertura XML so Codecov can match files
           if [ -f coverage/coverage.xml ]; then
             sed -i "s|<source>.*</source>|<source>.</source>|g" coverage/coverage.xml
