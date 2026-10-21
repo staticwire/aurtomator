@@ -494,8 +494,10 @@ upstream:
 
 1. Fetches the page: HTTPS only, at most 5 redirects and 5 MB.
 2. Finds every match with `grep -oE`.
-3. Extracts the first capture group with `sed -E`.
+3. Takes the first capture group of each match with bash `[[ =~ ]]`, so the pattern may hold any character, `/` included.
 4. Sorts with `sort -Vu` and returns the highest version.
+
+`validate-pkg.sh` compiles the pattern with bash, which refuses some patterns that `grep -E` takes, `(?:...)` among them.
 
 **Example YAML:**
 

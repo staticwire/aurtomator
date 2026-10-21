@@ -389,6 +389,27 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+# grep -E takes these and bash refuses them
+@test "validate: webpage-scrape rejects a pattern that bash cannot compile" {
+  local pattern
+  for pattern in '(?:v)?pkg-([0-9.]+)' '*pkg-([0-9.]+)' 'pkg-([0-9]{1)'; do
+    create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: '$pattern'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"not valid ERE regex"* ]]
+  done
+}
+
+@test "validate: webpage-scrape accepts a pattern with a slash" {
+  create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'download/pkg-([0-9.]+)\\.tar\\.gz'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
 @test "validate: webpage-scrape rejects invalid regex pattern" {
   create_test_package "mypkg" "webpage-scrape" "upstream:
   url: https://example.com/releases

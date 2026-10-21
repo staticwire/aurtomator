@@ -209,10 +209,8 @@ validate_pkg() {
         log_err "$file: strategy 'webpage-scrape' requires 'upstream.pattern'"
         ((errors++))
       else
-        # Validate regex syntax: grep exits 2 on invalid regex
-        local grep_rc=0
-        echo "" | grep -qE -e "$pattern" 2>/dev/null || grep_rc=$?
-        if [[ "$grep_rc" -eq 2 ]]; then
+        # The strategy runs the pattern through grep and bash
+        if ! ere_valid "$pattern"; then
           log_err "$file: upstream.pattern is not valid ERE regex: $pattern"
           ((errors++))
         fi

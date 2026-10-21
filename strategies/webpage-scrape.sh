@@ -41,9 +41,8 @@ page=$(http_get "$url" --max-redirs 5 --max-filesize "$MAX_SIZE" -A "Mozilla/5.0
   exit 1
 }
 
-# Extract versions using ERE, capture group via sed. The pattern can close
-# the s command; --sandbox refuses e, r and w
-versions=$(echo "$page" | grep -oE -e "$pattern" | sed --sandbox -E "s/$pattern/\\1/" | sort -Vu)
+# The first capture group of every match
+versions=$(echo "$page" | capture_matches "$pattern" | sort -Vu)
 
 if [[ -z "$versions" ]]; then
   echo "No versions matched pattern '$pattern' at $url" >&2

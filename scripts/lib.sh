@@ -133,6 +133,30 @@ release_tags() {
   grep -E '^v?[0-9]+(\.[0-9]+)*$' <<<"$1" || true
 }
 
+# The first capture group of every match of an ERE in stdin, one per line.
+# grep finds the matches and bash takes the group, so no delimiter of a sed
+# command limits the pattern.
+# Args: $1=ERE with a capture group
+capture_matches() {
+  local pattern="$1" match
+  while IFS= read -r match; do
+    if [[ "$match" =~ $pattern ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+    fi
+  done < <(grep -oE -e "$pattern")
+}
+
+# Succeeds when bash accepts an ERE, as capture_matches needs. bash refuses
+# some patterns that grep -E takes, (?:x) and *x among them.
+# Args: $1=ERE
+ere_valid() {
+  local rc=0
+  # [[ =~ ]] returns 2 for a pattern bash cannot compile
+  # shellcheck disable=SC2319
+  [[ "" =~ $1 ]] 2>/dev/null || rc=$?
+  ((rc != 2))
+}
+
 # =============================================================================
 # CHECKSUMS
 # =============================================================================

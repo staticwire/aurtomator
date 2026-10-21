@@ -246,6 +246,16 @@ teardown() {
   [ "$output" = "7.0.0" ]
 }
 
+@test "webpage-scrape: a pattern may hold a slash" {
+  create_test_package "test-scrape-path" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'download/test-scrape-([0-9.]+)\\.tar\\.gz'"
+
+  run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-scrape-path"
+  [ "$status" -eq 0 ]
+  [ "$output" = "7.0.0" ]
+}
+
 # === git-latest ===
 
 @test "git-latest: returns rCOUNT.HASH format from git repo" {
@@ -384,8 +394,9 @@ teardown() {
 
   cd "$TEST_TMPDIR"
   run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-scrape-exec"
-  [ "$status" -ne 0 ]
   [ ! -e "$TEST_TMPDIR/pwned" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "7" ]
 }
 
 @test "webpage-scrape: a pattern may start with a dash" {
