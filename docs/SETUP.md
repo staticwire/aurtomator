@@ -28,14 +28,14 @@ sudo pacman -S --needed git openssh go-yq curl pacman-contrib namcap github-cli 
 ### Required
 
 1. **Enable GitHub Actions**: open the Actions tab of your fork and enable workflows. GitHub disables Actions on forks by default.
-2. **Enable the "Check AUR Package Updates" workflow**: open it in the Actions tab and click "Enable workflow". A fork needs this for every scheduled workflow.
-3. **Enable Issues**: Settings > General > Features > Issues. Failures are reported as issues.
+2. **Enable the "Check AUR Package Updates" workflow**: open it in the Actions tab and click "Enable workflow". A fork needs this for every scheduled workflow. GitHub also disables a scheduled workflow of a public repository after 60 days without activity in it. The workflow commits only when a status or a version changes, so a fork whose packages stay the same that long loses its schedule and has to enable the workflow again.
+3. **Enable Issues**: Settings > General > Features > Issues. Failures are reported as issues. With Issues off, a run prints a notice instead and opens none.
 4. **Run setup**: `./scripts/setup.sh` configures identity, SSH, GPG and GitHub Secrets, as described below.
 
 ### Recommended
 
 - **Enable Dependabot version updates**: Settings > Advanced Security, then Enable next to "Dependabot version updates". GitHub leaves them off on forks. Dependabot then opens pull requests for new action versions and for the digest of the Arch image the workflows run in.
-- **Merge Arch image updates automatically** (optional): Settings > Secrets and variables > Actions > Variables > New repository variable, with the name `CI_IMAGE_AUTO_MERGE` and the value `true`. A new image then reaches the jobs with the secrets after the tests and without a review, see [WORKFLOW.md](WORKFLOW.md#63-ci-image-updates).
+- **Merge Arch image updates automatically** (optional): Settings > Secrets and variables > Actions > Variables > New repository variable, with the name `CI_IMAGE_AUTO_MERGE` and the value `true`. A new image then reaches the jobs with the secrets after the tests and without a review, see [WORKFLOW.md](WORKFLOW.md#63-ci-image-updates). The merge is a squash merge, so Settings > General > Pull Requests has to allow squash merging.
 - Set repository topics if your fork is public.
 
 ### Badges

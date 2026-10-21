@@ -502,6 +502,17 @@ jobs:
           STATUS_DIR=".status"
           [[ -d "$STATUS_DIR" ]] || exit 0
 
+          # gh issue list fails in a repository with Issues turned off. A
+          # fork like that gets a notice, and any other failure of the
+          # list still fails the step.
+          if grep -qsE '^(check|update)_failed:' "$STATUS_DIR"/*; then
+            has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
+            if [[ "$has_issues" == "false" ]]; then
+              echo "::notice::Issues are disabled in $GITHUB_REPOSITORY, so failed packages get no issue"
+              exit 0
+            fi
+          fi
+
           for status_file in "$STATUS_DIR"/*; do
             [[ -f "$status_file" ]] || continue
             pkg_name=$(basename "$status_file")

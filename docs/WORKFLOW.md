@@ -776,7 +776,9 @@ The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the
 
 ### 5.6 Failure issues
 
-The step runs with `if: always()`. For every `.status/` entry with `check_failed:` or `update_failed:`, it:
+The step runs with `if: always()`. When a package failed, it first reads `has_issues` of the repository. `gh issue list` fails in a repository with Issues turned off, so when GitHub answers `false`, the step prints a notice and opens no issue. Any other answer goes on, and a failure to read the answer or to list the issues fails the step.
+
+For every `.status/` entry with `check_failed:` or `update_failed:`, the step:
 
 1. Creates the `auto-update` label when it is missing.
 2. Skips the package when an open `auto-update` issue already has the title `❌ <package>: check failed` or `❌ <package>: update failed`, so a package never gets a second issue while one is open. The step compares the titles of up to 1000 open issues and uses no search, because a search splits `foo-bar` into words and finds the issue of `foo-bar` for `foo`.

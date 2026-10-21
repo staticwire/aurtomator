@@ -384,7 +384,8 @@ EOF
 # Runs the issue step of publish in a workspace with the statuses given as
 # name=status pairs. gh lists the titles in $GH_TITLES, one per line, as
 # every open issue whatever --search asks for, the first 30 unless --limit
-# says otherwise, and logs every call to $GH_LOG.
+# says otherwise, answers has_issues with $GH_HAS_ISSUES (true by default)
+# or fails it when $GH_API_FAIL is set, and logs every call to $GH_LOG.
 run_issue_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   mkdir -p "$ws/.status" "$bin"
@@ -394,6 +395,11 @@ run_issue_step() {
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
+if [[ "$*" == "api repos/$GITHUB_REPOSITORY --jq .has_issues" ]]; then
+  [[ -z "${GH_API_FAIL:-}" ]] || exit 1
+  echo "${GH_HAS_ISSUES:-true}"
+  exit 0
+fi
 [[ "$1 $2" == "issue list" ]] || exit 0
 [[ -z "${GH_FAIL:-}" ]] || exit 1
 limit=30 jq_expr=""
@@ -417,7 +423,9 @@ EOF
   : >"$GH_LOG"
   step_run publish "Create issues for failed packages" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_TITLES="${GH_TITLES:-}" \
-    GH_FAIL="${GH_FAIL:-}" RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
+    GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
+    GITHUB_REPOSITORY=owner/fork \
+    RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: an open issue of another package holds back no issue" {
@@ -446,6 +454,34 @@ EOF
   [ "$status" -ne 0 ]
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# gh issue list exits 1 in a repository with Issues turned off
+@test "check-updates: the issue step gives a notice when Issues are disabled" {
+  GH_HAS_ISSUES=false GH_FAIL=1 run_issue_step foo="update_failed: boom"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
+  run grep -c '^issue ' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step skips issues only when GitHub says Issues are off" {
+  GH_HAS_ISSUES=null run_issue_step foo="update_failed: boom"
+  [ "$status" -eq 0 ]
+  grep -q '^issue create --title ❌ foo: update failed ' "$GH_LOG"
+}
+
+@test "check-updates: the issue step fails when it cannot read whether Issues are on" {
+  GH_API_FAIL=1 run_issue_step foo="update_failed: boom"
+  [ "$status" -ne 0 ]
+  run grep -c '^issue ' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step asks GitHub nothing when no package failed" {
+  run_issue_step foo=up_to_date bar="new_version: 2.0.0"
+  [ "$status" -eq 0 ]
+  [ ! -s "$GH_LOG" ]
 }
 
 @test "check-updates: verify runs as builder and hands over as prepare does" {
