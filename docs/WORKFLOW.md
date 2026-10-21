@@ -819,7 +819,7 @@ actionlint
 
 ### 6.2 Test job
 
-15-minute timeout. It runs in the image that the `image` job of `ci.yml` reads, the same job as in [5.2](#52-permissions-and-container). It upgrades `archlinux-keyring`, installs `bash bats git go-yq curl openssh ruby ruby-erb` and the gems `bashcov` 4.0.0 and `simplecov-cobertura` 4.0.0, then runs:
+15-minute timeout. It runs in the image that the `image` job of `ci.yml` reads, the same job as in [5.2](#52-permissions-and-container). It upgrades `archlinux-keyring`, installs `bash bats git go-yq curl openssh namcap ruby ruby-erb` and the gems `bashcov` 4.0.0 and `simplecov-cobertura` 4.0.0, then runs:
 
 ```bash
 ./scripts/validate-pkg.sh --all
@@ -828,6 +828,8 @@ bashcov -- bats tests/ --recursive
 ```
 
 The coverage run uploads `coverage/coverage.xml` to Codecov and never fails the job.
+
+The two tests of the `namcap` check in `update-pkg.sh` run the real `namcap`. Without it they skip, except when `CI` is set: there a missing `namcap` fails them.
 
 ### 6.3 CI image updates
 

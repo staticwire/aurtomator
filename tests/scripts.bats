@@ -442,6 +442,47 @@ MOCKCURL
   [[ "$output" == *"HTML instead of"* ]]
 }
 
+# Helper: a PKGBUILD with one source, and a curl that prints $CURL_W and
+# exits $CURL_RC. Real curl -s prints the -w text and nothing on stderr
+# when it fails.
+mock_source_head() {
+  cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
+pkgname=test-status
+pkgver=1.0.0
+pkgrel=1
+arch=('x86_64')
+source=("https://example.com/test-1.0.0.tar.gz")
+sha256sums=('abc123')
+EOF
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
+#!/usr/bin/env bash
+printf '%s' "$CURL_W"
+exit "$CURL_RC"
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+}
+
+@test "lib.sh: validate_source_urls reports a refused connection (curl exit 7)" {
+  mock_source_head
+  CURL_RC=7 CURL_W='000 ' run bash -c 'source "$0/scripts/lib.sh"; validate_source_urls "$1" || exit $?' "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Source URL unreachable: https://example.com/test-1.0.0.tar.gz"* ]]
+}
+
+@test "lib.sh: validate_source_urls reports a timeout (curl exit 28)" {
+  mock_source_head
+  CURL_RC=28 CURL_W='000 ' run bash -c 'source "$0/scripts/lib.sh"; validate_source_urls "$1" || exit $?' "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Source URL unreachable: https://example.com/test-1.0.0.tar.gz"* ]]
+}
+
+@test "lib.sh: validate_source_urls reports a redirect loop (curl exit 47)" {
+  mock_source_head
+  CURL_RC=47 CURL_W='302 text/plain' run bash -c 'source "$0/scripts/lib.sh"; validate_source_urls "$1" || exit $?' "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Source URL unreachable: https://example.com/test-1.0.0.tar.gz"* ]]
+}
+
 # === http_get ===
 
 @test "lib.sh: http_get tries a transient failure again" {
@@ -1338,8 +1379,18 @@ MOCKCURL
   [[ "$output" == *"Source URL returns HTML"* ]] || [[ "$output" == *"Source URL validation failed"* ]]
 }
 
+# Helper: skip without namcap, except in CI, which installs it
+require_namcap() {
+  command -v namcap &>/dev/null && return 0
+  if [[ -n "${CI:-}" ]]; then
+    echo "namcap is not installed, and CI installs it" >&2
+    return 1
+  fi
+  skip "namcap not installed"
+}
+
 @test "update-pkg: namcap blocks on real errors (missing pkgdesc)" {
-  command -v namcap &>/dev/null || skip "namcap not installed"
+  require_namcap
 
   create_test_package "test-namcap" "github-release" "upstream:
   project: owner/repo
@@ -1409,7 +1460,7 @@ EOF
 }
 
 @test "update-pkg: namcap passes with real warnings only (missing Maintainer)" {
-  command -v namcap &>/dev/null || skip "namcap not installed"
+  require_namcap
 
   create_test_package "test-namcap-warn" "github-release" "upstream:
   project: owner/repo

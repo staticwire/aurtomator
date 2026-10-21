@@ -17,7 +17,7 @@ cd aurtomator
 bats tests/ --recursive
 ```
 
-`namcap` is optional. Two tests skip without it.
+`namcap` is optional. Two tests skip without it, unless `CI` is set: CI installs `namcap`, so there they fail.
 
 ## Conventions
 

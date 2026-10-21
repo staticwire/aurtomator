@@ -528,7 +528,7 @@ EOF
   [[ "$output" == *"not found"* ]]
 }
 
-@test "github-asset: fails when the release tag does not exist" {
+@test "github-asset: fails on a body without assets" {
   create_test_package "test-asset-404" "github-asset" "upstream:
   project: null-owner/null-repo
   tag: models
@@ -656,7 +656,7 @@ run_github_strategies() {
 
 # === Error handling: null/empty API responses ===
 
-@test "github-release: fails on null tag_name (404 response)" {
+@test "github-release: fails on a body without tag_name" {
   create_test_package "test-null" "github-release" "upstream:
   project: null-owner/null-repo"
 
@@ -837,6 +837,22 @@ EOF
   run "$TEST_TMPDIR/strategies/github-release.sh" "test-neterr"
   [ "$status" -ne 0 ]
   [[ "$output" == *"Failed to fetch"* ]]
+}
+
+@test "github-release: fails on a 404 (curl exit 22)" {
+  create_test_package "test-404" "github-release" "upstream:
+  project: owner/repo"
+
+  # curl -sf prints nothing on a 404 and exits 22
+  cat >"$TEST_TMPDIR/mock-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+exit 22
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/curl"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-404"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch latest release for owner/repo"* ]]
 }
 
 @test "github-asset: fails on curl network error" {

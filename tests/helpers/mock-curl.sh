@@ -12,7 +12,8 @@ done
 case "$url" in
   # --- Specific error/null patterns (must be before wildcards) ---
 
-  # GitHub Release: null tag_name (404 response)
+  # GitHub Release: a body without tag_name. A real 404 is exit 22 with
+  # no body, see the tests of curl exit codes.
   *api.github.com/repos/null-owner/null-repo/releases/latest)
     echo '{"message": "Not Found"}'
     ;;
@@ -56,7 +57,7 @@ case "$url" in
   *example.com/empty-page*)
     echo '<html><body>No downloads here</body></html>'
     ;;
-  # GitHub Asset - release tag missing (404 body)
+  # GitHub Asset: a body without assets
   *api.github.com/repos/null-owner/null-repo/releases/tags/*)
     echo '{"message": "Not Found"}'
     ;;

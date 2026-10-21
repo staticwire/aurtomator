@@ -70,7 +70,7 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Sy --noconfirm --needed archlinux-keyring
-          pacman -Su --noconfirm --needed bash bats git go-yq curl openssh ruby ruby-erb
+          pacman -Su --noconfirm --needed bash bats git go-yq curl openssh namcap ruby ruby-erb
           gem install bashcov:4.0.0 simplecov-cobertura:4.0.0 --no-document
           echo "$(ruby -e 'puts Gem.user_dir')/bin" >> "$GITHUB_PATH"
 
