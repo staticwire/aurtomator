@@ -20,6 +20,7 @@ Fixes #<!-- issue number --> <!-- or "N/A" if this PR does not track an issue --
 - [ ] Commit messages follow Conventional Commits format
 - [ ] `shellcheck -x -S warning scripts/*.sh strategies/*.sh` passes locally
 - [ ] `shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh` produces no diff
+- [ ] `actionlint` passes locally
 - [ ] `bats tests/ --recursive` passes
 - [ ] New scripts or strategies have BATS tests
 - [ ] New strategies are documented in `README.md` and `docs/WORKFLOW.md`

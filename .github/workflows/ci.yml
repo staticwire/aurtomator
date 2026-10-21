@@ -43,11 +43,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install shellcheck and shfmt
+      - name: Install shellcheck, shfmt and actionlint
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
           go install mvdan.cc/sh/v3/cmd/shfmt@v3.14.1
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: shellcheck
@@ -55,6 +56,10 @@ jobs:
 
       - name: shfmt
         run: shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
+
+      # Checks the workflows, and the run blocks with shellcheck
+      - name: actionlint
+        run: actionlint
 
   test:
     needs: image

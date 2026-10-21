@@ -36,6 +36,7 @@ CI runs exactly these commands:
 ```sh
 shellcheck -x -S warning scripts/*.sh strategies/*.sh
 shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
+actionlint
 bats tests/ --recursive
 ```
 

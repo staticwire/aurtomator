@@ -95,6 +95,12 @@ run_blocks() {
   done
 }
 
+@test "ci: the lint job runs actionlint on the workflows" {
+  run yq '[.jobs.lint.steps[] | select(.run == "actionlint")] | length' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
 @test "merge-image: runs only after lint and test" {
   run yq '.jobs["merge-image"].needs | sort | join(" ")' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]

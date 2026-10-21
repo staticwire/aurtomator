@@ -807,14 +807,15 @@ GitHub starts a `workflow_run` workflow only from its file on the default branch
 
 ### 6.1 Lint job
 
-`ubuntu-latest`, 5-minute timeout. It installs `shellcheck` from apt and `shfmt` v3.14.1 with `go install`, then runs:
+`ubuntu-latest`, 5-minute timeout. It installs `shellcheck` from apt, and `shfmt` v3.14.1 and `actionlint` v1.7.12 with `go install`, then runs:
 
 ```bash
 shellcheck -x -S warning scripts/*.sh strategies/*.sh
 shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
+actionlint
 ```
 
-`-x` follows `source` directives and `-S warning` sets the minimum severity. `-d` fails on any formatting diff, `-i 2` sets two-space indentation, and `-ci` indents `case` branches.
+`-x` follows `source` directives and `-S warning` sets the minimum severity. `-d` fails on any formatting diff, `-i 2` sets two-space indentation, and `-ci` indents `case` branches. `actionlint` checks every file in `.github/workflows/`: the syntax, the expressions, the `needs` of each job, and the `run:` blocks with `shellcheck`.
 
 ### 6.2 Test job
 
@@ -927,6 +928,9 @@ shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
 
 # shfmt (auto-fix)
 shfmt -w -i 2 -ci scripts/*.sh strategies/*.sh
+
+# actionlint (the workflows, with shellcheck on their run: blocks)
+actionlint
 ```
 
 ## 8. Writing Custom Strategies
