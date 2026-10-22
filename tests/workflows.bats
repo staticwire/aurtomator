@@ -221,8 +221,9 @@ step_run() {
 }
 
 # Runs the Decide step in a workspace with the statuses given as name=status
-# pairs, a sudo that does nothing and a git whose diff reports a README
-# change when $README_CHANGED is set; prints the step outputs
+# pairs, a sudo that does nothing and a git whose status reports a new
+# STATUS.md, when asked about it, if $STATUS_CHANGED is set; prints the step
+# outputs
 run_decide_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   mkdir -p "$ws/.status" "$bin"
@@ -230,7 +231,14 @@ run_decide_step() {
     printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
   done
   printf '#!/bin/sh\nexit 0\n' >"$bin/sudo"
-  printf '#!/bin/sh\n[ -z "${README_CHANGED:-}" ]\n' >"$bin/git"
+  cat >"$bin/git" <<'EOF'
+#!/bin/sh
+case "$*" in
+  "status --porcelain -- README.md STATUS.md")
+    [ -z "${STATUS_CHANGED:-}" ] || echo "?? STATUS.md"
+    ;;
+esac
+EOF
   chmod +x "$bin/sudo" "$bin/git"
   step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
@@ -248,10 +256,10 @@ run_decide_step() {
 }
 
 @test "check-updates: Decide publishes only a change of the status table" {
-  README_CHANGED=1 run run_decide_step pkg="check_failed: API down"
+  STATUS_CHANGED=1 run run_decide_step pkg="check_failed: API down"
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=false\nwork=true' ]
-  README_CHANGED=1 run run_decide_step pkg="downgrade_skipped: 1.0.0"
+  STATUS_CHANGED=1 run run_decide_step pkg="downgrade_skipped: 1.0.0"
   [ "$output" = $'prepare=false\nwork=true' ]
 }
 
@@ -655,7 +663,8 @@ moved_tree() {
 # answers the head of main with $GH_HEAD (HEAD of the repository by
 # default), lists the tree of that head from $GH_TREE as "path sha" lines
 # (the tree of HEAD by default) or fails the listing when $GH_TREE_FAIL is
-# set, and logs every call to $GH_LOG.
+# set, logs every call to $GH_LOG and keeps the entries of the new tree in
+# $GH_LOG.tree.
 run_commit_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
@@ -670,7 +679,7 @@ case "$2" in
     printf '%s\n' "$GH_TREE"
     ;;
   repos/owner/fork/git/blobs) echo "blob" ;;
-  repos/owner/fork/git/trees) cat >/dev/null && echo "tree" ;;
+  repos/owner/fork/git/trees) cat >"$GH_LOG.tree" && echo "tree" ;;
   repos/owner/fork/git/commits) echo "commit" ;;
   repos/owner/fork/git/refs/heads/main) echo "{}" ;;
   *) exit 1 ;;
@@ -738,6 +747,43 @@ no_commit() {
   make_commit_repo README.md="new table"
   GH_HEAD=$MOVED GH_TREE_FAIL=1 run_commit_step
   [ "$status" -ne 0 ]
+  no_commit
+}
+
+@test "check-updates: the commit step commits a new STATUS.md" {
+  make_commit_repo STATUS.md="# Package status"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  grep -q '"STATUS.md"' "$GH_LOG.tree"
+  grep -q "^api repos/owner/fork/git/refs/heads/main " "$GH_LOG"
+}
+
+@test "check-updates: the commit step commits a new STATUS.md on a moved head that has none" {
+  make_commit_repo STATUS.md="# Package status"
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/bar.yml)" run_commit_step
+  [ "$status" -eq 0 ]
+  grep -q '"STATUS.md"' "$GH_LOG.tree"
+  grep -q "^api repos/owner/fork/git/refs/heads/main " "$GH_LOG"
+}
+
+@test "check-updates: the commit step stops with a notice when the moved head has a STATUS.md of its own" {
+  make_commit_repo STATUS.md="# Package status"
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/bar.yml)
+STATUS.md 2222222222222222222222222222222222222222" run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::"*"STATUS.md"* ]]
+  no_commit
+}
+
+@test "check-updates: the commit step refuses a change to another tracked file" {
+  make_commit_repo README.md="new table"
+  echo "a" >"$BATS_TEST_TMPDIR/ws/other.txt"
+  git -C "$BATS_TEST_TMPDIR/ws" add other.txt
+  git -C "$BATS_TEST_TMPDIR/ws" -c user.name=t -c user.email=t@example.invalid commit -q -m other
+  echo "b" >"$BATS_TEST_TMPDIR/ws/other.txt"
+  run_commit_step
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"::error::Refusing to commit a change to 'other.txt'"* ]]
   no_commit
 }
 

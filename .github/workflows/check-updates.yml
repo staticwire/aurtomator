@@ -88,7 +88,10 @@ jobs:
           fi
           sudo -u builder ./scripts/update-readme.sh
           work=$prepare
-          git diff --quiet README.md || work=true
+          # STATUS.md is new until the first commit, which git diff misses
+          if [ -n "$(git status --porcelain -- README.md STATUS.md)" ]; then
+            work=true
+          fi
           echo "prepare=$prepare" >>"$GITHUB_OUTPUT"
           echo "work=$work" >>"$GITHUB_OUTPUT"
 
@@ -345,7 +348,7 @@ jobs:
           args: --publish handoff
           keep-env: GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL
 
-      - name: Update README status table
+      - name: Update README badges and STATUS.md
         run: sudo -u builder ./scripts/update-readme.sh
 
       - name: Commit changes via API
@@ -354,8 +357,13 @@ jobs:
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
         run: |
-          # Only the files this job writes are committed: the package YAMLs
-          # and README.md. A change to any other tracked file fails the step.
+          # Only the files this job writes are committed: the package YAMLs,
+          # README.md and STATUS.md. A change to any other tracked file fails
+          # the step. A new STATUS.md is untracked, and git diff lists it
+          # only once it is marked with intent to add.
+          if [[ -f STATUS.md ]]; then
+            git add -N STATUS.md
+          fi
           # Through a file, so that a failing git diff stops the step
           list=$(mktemp)
           git diff --name-only -z >"$list"
@@ -365,7 +373,7 @@ jobs:
             exit 0
           fi
           for file in "${changed[@]}"; do
-            if [[ ! "$file" =~ ^(README\.md|packages/[A-Za-z0-9@._+-]+\.yml)$ ]]; then
+            if [[ ! "$file" =~ ^(README\.md|STATUS\.md|packages/[A-Za-z0-9@._+-]+\.yml)$ ]]; then
               echo "::error::Refusing to commit a change to ${file@Q}"
               exit 1
             fi
@@ -379,12 +387,15 @@ jobs:
           # The tree below replaces each changed file as a whole, so a
           # commit pushed during the run that changed one of them would be
           # lost. Then this run commits nothing, and the next run starts
-          # from the new head.
+          # from the new head. A new file has no blob in HEAD, and the new
+          # head must not have one either.
           if [[ "$HEAD_SHA" != "$(git rev-parse HEAD)" ]]; then
             remote=$(gh api "repos/$REPO/git/trees/$BASE_TREE?recursive=1" \
               --jq '.tree[] | select(.type == "blob") | .path + " " + .sha')
             for file in "${changed[@]}"; do
-              if ! grep -qxF -- "$file $(git rev-parse "HEAD:$file")" <<<"$remote"; then
+              ours=$(git rev-parse -q --verify "HEAD:$file" || true)
+              theirs=$(awk -v f="$file" '$1 == f { print $2 }' <<<"$remote")
+              if [[ "$ours" != "$theirs" ]]; then
                 echo "::notice::$file changed on $BRANCH during the run, so the statuses of this run are not committed"
                 exit 0
               fi

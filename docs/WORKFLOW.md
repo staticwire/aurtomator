@@ -680,7 +680,7 @@ The workflow has four jobs after a short `image` job. `image` reads the image fr
 | `verify` | `contents: read` | none |
 | `publish` | `contents: write` for the status commit, `issues: write` for failure issues | `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` |
 
-`check` decides the run. `prepare` and `verify` run only when a package has a new version. `publish` runs for a new version and also for a change in the status table of `README.md`. It runs after a failure of `prepare` or `verify` as well: then it publishes nothing, and every package with a new version gets `update_failed` and an issue. In most hours nothing changes, and all three are skipped.
+`check` decides the run. `prepare` and `verify` run only when a package has a new version. `publish` runs for a new version and also for a change in `STATUS.md` or in the badges of `README.md`. It runs after a failure of `prepare` or `verify` as well: then it publishes nothing, and every package with a new version gets `update_failed` and an issue. In most hours nothing changes, and all three are skipped.
 
 ### 5.3 Steps
 
@@ -699,7 +699,7 @@ The four steps use the composite action `.github/actions/run-as-builder`. It add
 
 1. **Install dependencies:** `sudo git go-yq`, and the `builder` user.
 2. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
-3. **Decide:** sets the output `prepare` when a status is `new_version` or `available_downgrade`. It runs `update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in the status table.
+3. **Decide:** sets the output `prepare` when a status is `new_version` or `available_downgrade`. It runs `update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in `README.md` or `STATUS.md`, which `git status --porcelain` reports also for a new `STATUS.md`.
 4. **Upload statuses:** with `work`, uploads `.status/` as the `checked` artifact with a retention of 1 day.
 
 `prepare`:
@@ -727,19 +727,21 @@ The four steps use the composite action `.github/actions/run-as-builder`. It add
 5. **Setup AUR SSH:** writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. When the AUR changes its host key, update the key in `check-updates.yml`.
 6. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
 7. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
-8. **Update README status table:** runs `update-readme.sh` as `builder`.
+8. **Update README badges and STATUS.md:** runs `update-readme.sh` as `builder`.
 9. **Commit changes via API:** see [5.5](#55-verified-commit).
 10. **Close issues of recovered packages:** see [5.6](#56-failure-issues).
 11. **Create issues for failed packages:** see [5.6](#56-failure-issues).
 
 Steps 9 to 11 run as root with `GH_TOKEN` set to the workflow token, `github.token`.
 
-### 5.4 README update
+### 5.4 README badges and STATUS.md
 
-`update-readme.sh` rewrites two blocks of `README.md`:
+`update-readme.sh` writes two things:
 
-1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: CI, Codecov and static badges for the repository in `origin`. A public repository gets its own tokenless Codecov badge. A private one, or a failed API call, links the upstream aurtomator badge.
-2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`.
+1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->` in `README.md`: CI, Codecov and static badges for the repository in `origin`. A public repository gets its own tokenless Codecov badge. A private one, or a failed API call, links the upstream aurtomator badge. The line depends only on the repository and its visibility, so a fork's `README.md` changes in its first run and when the fork turns public or private.
+2. **`STATUS.md`**, as a whole: a title, the badge of `check-updates.yml` and the packages badge, the package table built from `.status/`, and a footer. With no package configured the script writes no `STATUS.md`. The template has no package and therefore no `STATUS.md`, so a merge from the template never touches the file that changes with every status.
+
+A fork from before this layout has the table between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->` in `README.md`. The script no longer writes there. The first merge of the new template conflicts in that part of `README.md` once; taking the template's version removes the old table, and the next run writes `STATUS.md`.
 
 #### .status/ directory format
 
@@ -778,8 +780,8 @@ The color is `brightgreen` with no failures and `red` otherwise.
 
 A `git push` from the workflow would show as unverified, so the step commits through the GitHub Git Data API:
 
-1. List the changed tracked files with `git diff --name-only -z`, and stop when there is none. The job writes only `README.md` and `packages/<package-name>.yml`, so a change to any other tracked file fails the step and nothing is committed.
-2. Read the branch head and its tree. A head other than the commit the job checked out means a commit was pushed during the run. The step then lists the tree of the new head, and when a changed file differs there from the checked-out commit, or is gone, it prints a notice and commits nothing, because the tree of step 3 replaces each file as a whole and would drop that change. The next run starts from the new head and writes the statuses again. A package that this run pushed to the AUR keeps its old `last_updated`: the next run finds the version in the AUR and writes only `current`. When the pushed commits changed none of these files, the step commits on the new head.
+1. List the changed files with `git diff --name-only -z`, and stop when there is none. A new `STATUS.md` is untracked, so the step first marks it with `git add -N`, and `git diff` lists it as well. The job writes only `README.md`, `STATUS.md` and `packages/<package-name>.yml`, so a change to any other tracked file fails the step and nothing is committed.
+2. Read the branch head and its tree. A head other than the commit the job checked out means a commit was pushed during the run. The step then lists the tree of the new head, and when a changed file differs there from the checked-out commit, or is gone, or a `STATUS.md` new in this run is already there, it prints a notice and commits nothing, because the tree of step 3 replaces each file as a whole and would drop that change. The next run starts from the new head and writes the statuses again. A package that this run pushed to the AUR keeps its old `last_updated`: the next run finds the version in the AUR and writes only `current`. When the pushed commits changed none of these files, the step commits on the new head.
 3. Create a blob for every changed file, a tree on the base tree, and a commit.
 4. Move the branch ref with `force=false`.
 
