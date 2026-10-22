@@ -589,7 +589,7 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = "-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --max-redirs 5 https://example.invalid/a" ]
+  [ "$output" = "-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused -A aurtomator/1.0 --max-redirs 5 https://example.invalid/a" ]
 }
 
 # === validate_pkgver ===

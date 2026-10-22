@@ -231,6 +231,13 @@ validate_pkg() {
           ((errors++))
         fi
       fi
+      # curl would send the text after a line break as a header of its own
+      local user_agent
+      user_agent=$(pkg_get "$file" '.upstream.user_agent // ""')
+      if [[ -n "$user_agent" ]] && ! (LC_ALL=C && [[ "$user_agent" =~ ^[[:print:]]+$ ]]); then
+        log_err "$file: upstream.user_agent must hold printable ASCII only: ${user_agent@Q}"
+        ((errors++))
+      fi
       ;;
     archpkg | repology)
       # No required strategy-specific fields

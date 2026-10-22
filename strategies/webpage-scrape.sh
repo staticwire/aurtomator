@@ -8,6 +8,7 @@
 # YAML fields:
 #   upstream.url      - page URL to scrape
 #   upstream.pattern  - ERE whose first capture group is the version: 'package-([0-9.]+)\.tar\.gz'
+#   upstream.user_agent - User-Agent in place of aurtomator/1.0 (optional)
 
 set -euo pipefail
 
@@ -23,6 +24,7 @@ require_cmd curl
 pkg_file=$(pkg_file "$NAME")
 url=$(pkg_get "$pkg_file" .upstream.url)
 pattern=$(pkg_get "$pkg_file" .upstream.pattern)
+user_agent=$(pkg_get "$pkg_file" '.upstream.user_agent // ""')
 
 if [[ -z "$url" || -z "$pattern" ]]; then
   echo "Missing upstream.url or upstream.pattern in package YAML" >&2
@@ -35,8 +37,11 @@ if [[ "$url" != https://* ]]; then
   exit 1
 fi
 
-# Fetch page
-page=$(http_get "$url" --max-redirs 5 --max-filesize "$MAX_SIZE" -A "Mozilla/5.0") || {
+# Fetch page, with the agent of the YAML for a site with rules of its own
+if [[ -n "$user_agent" ]]; then
+  USER_AGENT=$user_agent
+fi
+page=$(http_get "$url" --max-redirs 5 --max-filesize "$MAX_SIZE") || {
   echo "Failed to fetch $url" >&2
   exit 1
 }

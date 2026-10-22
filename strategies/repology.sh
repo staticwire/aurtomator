@@ -21,8 +21,7 @@ repology_name=$(pkg_get "$pkg_file" '.upstream.repology // .name')
 
 # Repology returns an array of package entries from various repos.
 # Filter for "newest" status to get the latest upstream version.
-version=$(http_get "https://repology.org/api/v1/project/${repology_name}" \
-  -H "User-Agent: aurtomator/1.0" |
+version=$(http_get "https://repology.org/api/v1/project/${repology_name}" |
   yq -r '[.[] | select(.status == "newest")] | .[0].version') || {
   echo "Failed to fetch Repology info for ${repology_name}" >&2
   exit 1

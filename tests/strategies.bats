@@ -745,6 +745,63 @@ run_github_strategies() {
   [ -z "$output" ]
 }
 
+# === User-Agent ===
+
+# Helper: a curl that appends its arguments to curl.args, one per line,
+# before it answers
+record_curl() {
+  mv "$MOCK_DIR/curl" "$MOCK_DIR/curl-answer"
+  cat >"$MOCK_DIR/curl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >>"$TEST_TMPDIR/curl.args"
+exec "$MOCK_DIR/curl-answer" "\$@"
+EOF
+  chmod +x "$MOCK_DIR/curl"
+}
+
+# Helper: the value of every -A that curl got
+curl_agents() {
+  grep -x -A1 -- '-A' "$TEST_TMPDIR/curl.args" | grep -vx -e '-A' -e '--'
+}
+
+# SourceForge answers a bare Mozilla/5.0 with HTTP 403
+@test "strategies: send aurtomator/1.0 as the User-Agent" {
+  record_curl
+  create_test_package "scrape" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'test-scrape-([0-9.]+)\\.tar\\.gz'"
+  create_test_package "release" "github-release" "upstream:
+  project: owner/repo"
+  create_test_package "rust" "crates" "upstream:
+  registry: serde"
+  create_test_package "repo" "repology" "upstream:
+  repology: firefox"
+
+  run "$TEST_TMPDIR/strategies/webpage-scrape.sh" scrape
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/strategies/github-release.sh" release
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/strategies/crates.sh" rust
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/strategies/repology.sh" repo
+  [ "$status" -eq 0 ]
+  [ "$(curl_agents | wc -l)" -eq 4 ]
+  [ "$(curl_agents | sort -u)" = "aurtomator/1.0" ]
+  ! grep -qi 'user-agent' "$TEST_TMPDIR/curl.args"
+}
+
+@test "webpage-scrape: sends upstream.user_agent in place of aurtomator/1.0" {
+  record_curl
+  create_test_package "scrape" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'test-scrape-([0-9.]+)\\.tar\\.gz'
+  user_agent: 'Example/2.0 (+https://example.com/bot)'"
+
+  run "$TEST_TMPDIR/strategies/webpage-scrape.sh" scrape
+  [ "$status" -eq 0 ]
+  [ "$(curl_agents)" = "Example/2.0 (+https://example.com/bot)" ]
+}
+
 # === Error handling: unknown package ===
 
 @test "strategy fails gracefully on unknown package" {

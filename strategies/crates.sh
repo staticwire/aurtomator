@@ -19,8 +19,7 @@ source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 pkg_file=$(pkg_file "$NAME")
 registry=$(pkg_get "$pkg_file" .upstream.registry)
 
-version=$(http_get "https://crates.io/api/v1/crates/${registry}" \
-  -H "User-Agent: aurtomator/1.0" |
+version=$(http_get "https://crates.io/api/v1/crates/${registry}" |
   yq -r '.crate.max_stable_version') || {
   echo "Failed to fetch crates.io info for ${registry}" >&2
   exit 1

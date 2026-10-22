@@ -380,6 +380,36 @@ EOF
   [[ "$output" == *"requires 'upstream.registry'"* ]]
 }
 
+@test "validate: webpage-scrape passes with upstream.user_agent" {
+  create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'pkg-([0-9.]+)\\.tar\\.gz'
+  user_agent: 'Example/2.0 (+https://example.com/bot)'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+# curl would send the text after a line break as a header of its own
+@test "validate: webpage-scrape fails on a user_agent with a control character" {
+  create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'pkg-([0-9.]+)\\.tar\\.gz'
+  user_agent: \"Example/2.0\\r\\nX-Extra: 1\""
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.user_agent must hold printable ASCII only: \$'Example/2.0\\r\\nX-Extra: 1'"* ]]
+}
+
+@test "validate: webpage-scrape fails on a user_agent outside ASCII" {
+  create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'pkg-([0-9.]+)\\.tar\\.gz'
+  user_agent: 'Exämple/2.0'"
+  run env LC_ALL=C.UTF-8 "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.user_agent must hold printable ASCII only"* ]]
+}
+
 @test "validate: webpage-scrape fails without upstream.url" {
   create_test_package "mypkg" "webpage-scrape" "upstream:
   pattern: 'pkg-([0-9.]+)'"

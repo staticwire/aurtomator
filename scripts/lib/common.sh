@@ -74,11 +74,16 @@ pkg_file() {
 # HTTP
 # =============================================================================
 
+# The User-Agent of every strategy request. SourceForge answers a bare
+# Mozilla/5.0 with HTTP 403. webpage-scrape.sh sets upstream.user_agent here.
+USER_AGENT="aurtomator/1.0"
+
 # GET a URL for a strategy. curl tries a timeout, a refused connection and
 # an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more.
 # Usage: http_get <url> [curl option]...
 http_get() {
-  curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused "${@:2}" "$1"
+  curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
+    -A "$USER_AGENT" "${@:2}" "$1"
 }
 
 # GET a GitHub API URL, with GITHUB_TOKEN when it is set. curl reads the
