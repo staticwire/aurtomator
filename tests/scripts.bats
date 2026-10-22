@@ -592,6 +592,20 @@ MOCKCURL
   [ "$output" = "-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused -A aurtomator/1.0 --max-redirs 5 https://example.invalid/a" ]
 }
 
+# script from util-linux runs the command on a terminal of its own
+@test "lib.sh: colors the log on a terminal" {
+  printf 'source "$1/scripts/lib.sh"\nlog_ok done\n' >"$TEST_TMPDIR/color.sh"
+  run script -qec "bash $TEST_TMPDIR/color.sh $TEST_TMPDIR" /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\e[0;32m✓\e[0m done'* ]]
+}
+
+@test "lib.sh: writes the log without colors elsewhere" {
+  run bash -c 'source "$0/scripts/lib.sh"; log_ok done' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "✓ done" ]
+}
+
 # === validate_pkgver ===
 
 @test "lib.sh: validate_pkgver accepts versions the strategies produce" {

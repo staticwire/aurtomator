@@ -774,6 +774,17 @@ use_source() {
   [[ "$output" == *"takes the place of the clone"* ]]
 }
 
+# makepkg clones a git source into a directory of that name
+@test "_git_source_sum: refuses a git source without a usable name" {
+  local entry
+  for entry in "::git+https://example.com/demo.git#tag=v1" ".::git+https://example.com/demo.git#tag=v1" \
+    "..::git+https://example.com/demo.git#tag=v1" "a/b::git+https://example.com/demo.git#tag=v1"; do
+    run _git_source_sum "$entry" sha256 "$TEST_TMPDIR" "$TEST_TMPDIR"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Cannot check the checksum of $entry" ]]
+  done
+}
+
 @test "verify-pkg: refuses a .SRCINFO checksum array the PKGBUILD does not have" {
   setup_verify
   local work="$TEST_TMPDIR/aur-work-demo"
@@ -1587,6 +1598,16 @@ make_unpushable_repo() {
   [[ "$output" == *"Push attempt 2 failed, retrying in 7s"* ]]
 }
 
+@test "aur_commit_push: stops when git has nothing to commit" {
+  mock_sleep_and_clone
+  git init -q -b master "$TEST_TMPDIR/clone"
+  run aur_commit_push "$TEST_TMPDIR/clone" 1.0.0 test
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"git commit failed in $TEST_TMPDIR/clone"* ]]
+  [[ "$output" != *"Push attempt"* ]]
+  [ ! -e "$TEST_TMPDIR/sleeps" ]
+}
+
 @test "aur_clone and aur_commit_push: wait 2 s before an SSH clone and 5 s between attempts by default" {
   mock_sleep_and_clone
   make_unpushable_repo
@@ -2027,6 +2048,23 @@ write_srcinfo_arch() {
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO adds or removes lines"* ]]
+}
+
+@test "check_prepared_srcinfo: rejects a line with another key than the AUR copy" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  sed -i $'s/^\tsha256sums = '"$H4"'$/\tb2sums = '"$H4"'/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 11 has another key than the AUR copy: "$'\t'"b2sums = $H4"* ]]
+}
+
+# A .SRCINFO without pkgver gives no old version, and the empty string
+# matches at every position
+@test "_bump_version: keeps the line without an old version" {
+  run _bump_version "source = https://example.com/demo-1.0.0.tar.gz" "" 1.1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = "source = https://example.com/demo-1.0.0.tar.gz" ]
 }
 
 @test "check_prepared_srcinfo: rejects a line turned into an unknown checksum key" {

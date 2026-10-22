@@ -271,6 +271,39 @@ teardown() {
 }
 
 # =============================================================================
+# aur_commit_push WITH GPG_KEY_ID
+# =============================================================================
+
+# Helper: a bare remote for $AUR_DIR at $TEST_TMPDIR/aur-remote.git, and a
+# staged PKGBUILD at 2.0.0
+stage_aur_update() {
+  git init -q --bare "$TEST_TMPDIR/aur-remote.git"
+  git -C "$AUR_DIR" remote add origin "$TEST_TMPDIR/aur-remote.git"
+  git -C "$AUR_DIR" push -q -u origin HEAD
+  sed -i 's/pkgver=1.0.0/pkgver=2.0.0/' "$AUR_DIR/PKGBUILD"
+  git -C "$AUR_DIR" add PKGBUILD
+}
+
+@test "aur_commit_push: signs the commit with GPG_KEY_ID" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  stage_aur_update
+  GPG_KEY_ID="$NOPASS_SUBKEY_ID" run aur_commit_push "$AUR_DIR" 2.0.0 test
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$TEST_TMPDIR/aur-remote.git" log -1 --format=%s)" = "2.0.0 release from test" ]
+  git -C "$TEST_TMPDIR/aur-remote.git" verify-commit HEAD
+}
+
+@test "aur_commit_push: pushes the commit unsigned when signing fails" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  stage_aur_update
+  GPG_KEY_ID=0000000000000000 run aur_commit_push "$AUR_DIR" 2.0.0 test
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"GPG signing failed, pushing unsigned commit"* ]]
+  [ "$(git -C "$TEST_TMPDIR/aur-remote.git" log -1 --format=%s)" = "2.0.0 release from test" ]
+  ! git -C "$TEST_TMPDIR/aur-remote.git" cat-file commit HEAD | grep -q '^gpgsig'
+}
+
+# =============================================================================
 # SETUP.SH GPG STEP (with real keys, non-interactive)
 # =============================================================================
 
