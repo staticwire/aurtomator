@@ -620,6 +620,14 @@ MOCKCURL
   [[ "$output" == *"Version string is empty"* ]]
 }
 
+@test "lib.sh: validate_pkgver rejects a version without a digit" {
+  for v in nightly latest stable . _+.; do
+    run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" "$v"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Version string rejected, it holds no digit: '$v'"* ]]
+  done
+}
+
 @test "lib.sh: validate_pkgver rejects non-ASCII" {
   run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" '1.0в'
   [ "$status" -eq 1 ]
@@ -638,6 +646,20 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"rejected"* ]]
   [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
+# A tag_pattern, a scraped page or a registry can return a word
+@test "check-update: rejects a word from the strategy" {
+  cat >"$TEST_TMPDIR/strategies/word.sh" <<'EOF'
+#!/usr/bin/env bash
+echo latest
+EOF
+  chmod +x "$TEST_TMPDIR/strategies/word.sh"
+  create_test_package "mypkg" "word" "current: '1.0'"
+
+  run "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Version string rejected, it holds no digit: 'latest'"* ]]
 }
 
 @test "update-pkg: refuses an injected version before any git call" {

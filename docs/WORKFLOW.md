@@ -971,7 +971,7 @@ A strategy is a bash script in `strategies/` that finds the latest upstream vers
 - **Input:** one positional argument, the package name.
 - **Success:** the version on stdout as one line, exit code 0.
 - **Failure:** an error on stderr, a non-zero exit code.
-- **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`.
+- **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`, and a version without a digit, such as `latest`.
 
 The script can rely on `yq` and `curl`. `scripts/lib/common.sh` provides YAML helpers, `http_get` for requests and logging, and sets `AURTOMATOR_DIR` to the project root.
 
@@ -1040,7 +1040,7 @@ echo "$version"
 | `load_config`                   | Sources `.aurtomator.conf` if present               |
 | `http_get <url> [curl option]...` | Fetches a URL with `curl`, see 8.3                |
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
-| `validate_pkgver <version>`     | Returns 1 for an empty version or one with a character outside `A-Za-z0-9._+` |
+| `validate_pkgver <version>`     | Returns 1 for an empty version, one with a character outside `A-Za-z0-9._+` or one without a digit |
 | `release_tags <tags>`           | Prints the tags of the form `v1.2.3` or `1.2.3`, one per line |
 | `tag_versions <ere>`            | Prints the version in each tag of stdin: the first capture group of the ERE, or the tag without a leading `v` when the ERE is empty |
 | `latest_tag_version <tags> <tag_pattern> <ere>` | Prints the highest version among the tags, filtered as the tag strategies filter them |
