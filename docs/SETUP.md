@@ -275,6 +275,8 @@ upstream:
   project: owner/repo
 ```
 
+`name` is the `pkgbase` on the AUR, the name of its git repository. It is the package name, except for a split package: liblinear with `pkgname=(liblinear python-liblinear)` has the `name` `liblinear`, and `python-liblinear` has no YAML of its own.
+
 [docs/WORKFLOW.md](WORKFLOW.md) has YAML examples for all 14 strategies.
 
 ### 3. Validate the config

@@ -1,7 +1,9 @@
 # Example package config. Copy to packages/<name>.yml and edit.
 #
 # Top-level fields:
-#   name       - AUR package name, equal to the packages/<name>.yml file name (required)
+#   name       - pkgbase on the AUR, the name of its git repository, equal to
+#                the packages/<name>.yml file name (required). It is the
+#                package name, except for a split package.
 #   strategy   - version detection strategy, see the list below (required)
 #   upstream   - strategy-specific settings, see the examples below
 #
