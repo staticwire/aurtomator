@@ -376,6 +376,21 @@ jobs:
           HEAD_SHA=$(gh api "repos/$REPO/git/ref/heads/$BRANCH" --jq '.object.sha')
           BASE_TREE=$(gh api "repos/$REPO/git/commits/$HEAD_SHA" --jq '.tree.sha')
 
+          # The tree below replaces each changed file as a whole, so a
+          # commit pushed during the run that changed one of them would be
+          # lost. Then this run commits nothing, and the next run starts
+          # from the new head.
+          if [[ "$HEAD_SHA" != "$(git rev-parse HEAD)" ]]; then
+            remote=$(gh api "repos/$REPO/git/trees/$BASE_TREE?recursive=1" \
+              --jq '.tree[] | select(.type == "blob") | .path + " " + .sha')
+            for file in "${changed[@]}"; do
+              if ! grep -qxF -- "$file $(git rev-parse "HEAD:$file")" <<<"$remote"; then
+                echo "::notice::$file changed on $BRANCH during the run, so the statuses of this run are not committed"
+                exit 0
+              fi
+            done
+          fi
+
           TREE_ENTRIES="[]"
           for file in "${changed[@]}"; do
             CONTENT=$(base64 -w0 "$file")

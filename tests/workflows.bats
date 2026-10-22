@@ -626,6 +626,121 @@ EOF
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
+# A git repository at $BATS_TEST_TMPDIR/ws whose HEAD holds README.md,
+# packages/foo.yml and packages/bar.yml, with the edits given as file=text
+# pairs in the work tree
+make_commit_repo() {
+  local ws="$BATS_TEST_TMPDIR/ws" pair
+  mkdir -p "$ws/packages"
+  git -C "$ws" init -q -b main
+  echo "readme" >"$ws/README.md"
+  echo "current: 1.0" >"$ws/packages/foo.yml"
+  echo "current: 1.0" >"$ws/packages/bar.yml"
+  git -C "$ws" add .
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m init
+  for pair in "$@"; do
+    printf '%s\n' "${pair#*=}" >"$ws/${pair%%=*}"
+  done
+}
+
+# The tree of HEAD in the repository of make_commit_repo, as gh lists it,
+# with the sha of file $1 replaced, or $1 left out when $2 is "gone"
+moved_tree() {
+  git -C "$BATS_TEST_TMPDIR/ws" ls-tree -r HEAD | awk -v f="$1" -v how="${2:-}" '
+    $4 == f { if (how == "gone") next; $3 = "0123456789012345678901234567890123456789" }
+    { print $4 " " $3 }'
+}
+
+# Runs the commit step of publish in the repository of make_commit_repo. gh
+# answers the head of main with $GH_HEAD (HEAD of the repository by
+# default), lists the tree of that head from $GH_TREE as "path sha" lines
+# (the tree of HEAD by default) or fails the listing when $GH_TREE_FAIL is
+# set, and logs every call to $GH_LOG.
+run_commit_step() {
+  local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$bin"
+  cat >"$bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GH_LOG"
+case "$2" in
+  repos/owner/fork/git/ref/heads/main) echo "$GH_HEAD" ;;
+  repos/owner/fork/git/commits/*) echo "tree-of-head" ;;
+  "repos/owner/fork/git/trees/tree-of-head?recursive=1")
+    [[ -z "${GH_TREE_FAIL:-}" ]] || exit 1
+    printf '%s\n' "$GH_TREE"
+    ;;
+  repos/owner/fork/git/blobs) echo "blob" ;;
+  repos/owner/fork/git/trees) cat >/dev/null && echo "tree" ;;
+  repos/owner/fork/git/commits) echo "commit" ;;
+  repos/owner/fork/git/refs/heads/main) echo "{}" ;;
+  *) exit 1 ;;
+esac
+EOF
+  chmod +x "$bin/gh"
+  GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  : >"$GH_LOG"
+  step_run publish "Commit changes via API" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" REPO=owner/fork BRANCH=main \
+    GH_HEAD="${GH_HEAD:-$(git -C "$ws" rev-parse HEAD)}" GH_TREE_FAIL="${GH_TREE_FAIL:-}" \
+    GH_TREE="${GH_TREE:-$(git -C "$ws" ls-tree -r HEAD | awk '{ print $4 " " $3 }')}" \
+    bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+MOVED=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+# Fails when gh got a call that matches $1. A function, because bats does
+# not fail a test on a negated command that is not the last one.
+no_call() {
+  ! grep -q -e "$1" "$GH_LOG"
+}
+
+# Fails when the commit step wrote a blob or moved the branch
+no_commit() {
+  no_call "git/blobs" && no_call "git/refs/heads/main "
+}
+
+@test "check-updates: the commit step commits on the head it checked out" {
+  make_commit_repo README.md="new table"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  grep -q "^api repos/owner/fork/git/refs/heads/main " "$GH_LOG"
+  no_call "recursive"
+}
+
+@test "check-updates: the commit step commits on a moved head that left its files alone" {
+  make_commit_repo README.md="new table" packages/foo.yml="current: 2.0"
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/bar.yml)" run_commit_step
+  [ "$status" -eq 0 ]
+  grep -q "^api repos/owner/fork/git/refs/heads/main " "$GH_LOG"
+}
+
+@test "check-updates: the commit step stops with a notice when the moved head changed README.md" {
+  make_commit_repo README.md="new table"
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree README.md)" run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::"*"README.md"* ]]
+  no_commit
+}
+
+@test "check-updates: the commit step stops with a notice when the moved head changed or removed a YAML" {
+  make_commit_repo README.md="new table" packages/foo.yml="current: 2.0"
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/foo.yml)" run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::"*"packages/foo.yml"* ]]
+  no_commit
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/foo.yml gone)" run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::"*"packages/foo.yml"* ]]
+  no_commit
+}
+
+@test "check-updates: the commit step fails when it cannot list the tree of a moved head" {
+  make_commit_repo README.md="new table"
+  GH_HEAD=$MOVED GH_TREE_FAIL=1 run_commit_step
+  [ "$status" -ne 0 ]
+  no_commit
+}
+
 @test "check-updates: the close step runs before the issue step, and not after a failed step" {
   run yq '[.jobs.publish.steps[].name] | join(",")' "$CHECK_UPDATES"
   [[ "$output" == *"Close issues of recovered packages,Create issues for failed packages" ]]
