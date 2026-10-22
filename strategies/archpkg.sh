@@ -3,10 +3,11 @@
 # archpkg - Detect latest version from Arch official repositories
 #
 # Input: package name (reads upstream config from package YAML)
-# Output: latest version string (without pkgrel)
+# Output: pkgver of the official package, without epoch and pkgrel
 #
-# Useful for AUR packages that track official repo versions
-# or need rebuilds when dependencies change.
+# For AUR packages that follow the pkgver of an official package. A
+# rebuild in the official repos raises only pkgrel, so it gives no new
+# version here.
 # upstream.archpkg: package name in official repos (e.g. "qt6-base")
 
 set -euo pipefail
@@ -32,7 +33,7 @@ if [[ -z "$result" || "$result" == "null" ]]; then
   exit 1
 fi
 
-# Return pkgver (without pkgrel)
+# Return pkgver, without epoch and pkgrel
 version=$(echo "$result" | yq -r '.pkgver')
 
 if [[ -z "$version" || "$version" == "null" ]]; then

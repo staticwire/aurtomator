@@ -525,7 +525,7 @@ strategy: repology
 
 **What it checks:** Arch Linux package search API (`https://archlinux.org/packages/search/json/?name={name}`).
 
-**When to use:** AUR packages that follow an official Arch package, for example a package that needs a rebuild when a dependency in the official repos is updated.
+**When to use:** AUR packages that follow the `pkgver` of an official Arch package, for example an addon released together with it.
 
 **YAML fields:**
 
@@ -533,7 +533,7 @@ strategy: repology
 |--------------------|----------|----------------------------------------------------------------|
 | `upstream.archpkg` | no       | Package name in the official repos. Defaults to the package `name`. |
 
-**How the version is extracted:** reads `.results[0].pkgver`, the version without `pkgrel`.
+**How the version is extracted:** reads `.results[0].pkgver`, the version without `epoch` and `pkgrel`: ffmpeg `2:9.0.2-2` gives `9.0.2`. A rebuild in the official repos raises only `pkgrel`, so it gives no new version, and aurtomator has no update that raises `pkgrel` alone, see [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md#packages-needing-a-pkgrel-bump).
 
 **Example YAML:**
 

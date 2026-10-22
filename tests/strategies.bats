@@ -436,6 +436,15 @@ teardown() {
   [ "$output" = "6.10.2" ]
 }
 
+@test "archpkg: prints pkgver without epoch and pkgrel" {
+  create_test_package "test-archpkg" "archpkg" "upstream:
+  archpkg: ffmpeg"
+
+  run "$TEST_TMPDIR/strategies/archpkg.sh" "test-archpkg"
+  [ "$status" -eq 0 ]
+  [ "$output" = "9.0.2" ]
+}
+
 # === kde-tarball ===
 
 @test "kde-tarball: returns latest version from download.kde.org" {

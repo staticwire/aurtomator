@@ -59,6 +59,10 @@ case "$url" in
   *archlinux.org/packages/search/json*name=no-such-pkg*)
     echo '{"results": []}'
     ;;
+  # Arch repos: an entry with an epoch, as ffmpeg 2:9.0.2-2
+  *archlinux.org/packages/search/json*name=ffmpeg*)
+    echo '{"results": [{"repo": "extra", "epoch": 2, "pkgver": "9.0.2", "pkgrel": "2"}]}'
+    ;;
   # KDE tarball: no versions in listing
   *download.kde.org/stable/no-versions-here/*)
     echo '<html><body>Parent Directory</body></html>'

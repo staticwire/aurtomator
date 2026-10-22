@@ -62,7 +62,7 @@ The setup script configures your identity (git author for AUR commits), SSH acce
 | `npm`              | npm registry        | Node.js packages                     |
 | `crates`           | crates.io API       | Rust crates                          |
 | `repology`         | Repology API        | Universal fallback (120+ repos)      |
-| `archpkg`          | Arch repos API      | Rebuild triggers, dependency tracking |
+| `archpkg`          | Arch repos API      | The pkgver of an official package    |
 | `webpage-scrape`   | URL + regex         | Anything not covered above           |
 | `kde-tarball`      | download.kde.org    | KDE/Plasma packages                  |
 

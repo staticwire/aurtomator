@@ -29,7 +29,7 @@
 #   npm              npm registry
 #   crates           crates.io API
 #   repology         Repology API (fallback)
-#   archpkg          Arch official repos (for rebuild triggers)
+#   archpkg          Arch official repos, pkgver only
 #   kde-tarball      download.kde.org directory listing
 #   webpage-scrape   any HTTPS page + regex
 #
@@ -180,8 +180,9 @@ upstream:
 #   repology: project-name                 # optional, defaults to `name` above
 
 # --- archpkg ----------------------------------------------------------------
-# Follows a package in the Arch official repos. Useful for an AUR package
-# that needs a rebuild when a dependency updates.
+# Follows the pkgver of a package in the Arch official repos, without
+# epoch and pkgrel. A rebuild there raises only pkgrel and gives no new
+# version.
 #
 # strategy: archpkg
 # upstream:
