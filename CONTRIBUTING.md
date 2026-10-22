@@ -41,7 +41,7 @@ for action in .github/actions/*/action.yml; do yq '.runs.steps[] | select(has("r
 bats tests/ --recursive
 ```
 
-CI runs the suite under bashcov, as `bashcov -- bats tests/ --recursive`. bashcov passes `errexit`, `nounset` and `pipefail` to every script a test starts, so a mock has to work under `set -euo pipefail`.
+CI runs the suite under bashcov, as `bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive`. bashcov passes `errexit`, `nounset` and `pipefail` to every script a test starts, so a mock has to work under `set -euo pipefail`.
 
 ## PR workflow
 

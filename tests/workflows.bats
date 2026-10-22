@@ -154,12 +154,12 @@ run_blocks() {
 }
 
 @test "ci: the test job runs the suite once, under bashcov, and fails with it" {
-  run yq '[.jobs.test.steps[] | select(has("run")) | .run | select(test("bats tests/"))] | length' "$GITHUB_DIR/workflows/ci.yml"
+  run yq '[.jobs.test.steps[] | select(has("run")) | .run | select(test("tests/"))] | length' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
-  run yq '.jobs.test.steps[] | select(has("run")) | .run | select(test("bats tests/"))' "$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs.test.steps[] | select(has("run")) | .run | select(test("tests/"))' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [[ "$output" == "bashcov -- bats tests/ --recursive"* ]]
+  [[ "$output" == "bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive"* ]]
   [[ "$output" != *"|| true"* ]]
 }
 

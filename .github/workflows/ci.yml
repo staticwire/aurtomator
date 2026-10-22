@@ -92,7 +92,7 @@ jobs:
 
       - name: Run BATS tests with coverage
         run: |
-          bashcov -- bats tests/ --recursive
+          bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
           # Fix absolute paths in Cobertura XML so Codecov can match files
           if [ -f coverage/coverage.xml ]; then
             sed -i "s|<source>.*</source>|<source>.</source>|g" coverage/coverage.xml

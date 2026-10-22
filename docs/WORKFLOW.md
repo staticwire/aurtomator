@@ -829,12 +829,14 @@ actionlint
 
 ```bash
 ./scripts/validate-pkg.sh --all
-bashcov -- bats tests/ --recursive
+bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 ```
 
 The suite runs once, under bashcov, and a failing test fails the job. bashcov exports `SHELLOPTS` to trace every script the tests start, so those scripts, mocks included, run with the options of the test: `errexit`, `nounset` and `pipefail`. The upload of `coverage/coverage.xml` to Codecov never fails the job.
 
-The two tests of the `namcap` check in `update-pkg.sh` run the real `namcap`. Without it they skip, except when `CI` is set: there a missing `namcap` fails them.
+bashcov 4.0.0 on its own loses trace lines, and with them coverage the suite has. Ruby opens the pipe that bashcov reads in non-blocking mode, so bash drops a line whenever the pipe is full. And bashcov resolves the path of a traced script when it reads the line, after the test may have removed the link it ran the script from. `tests/helpers/bashcov-bats.sh` makes the pipe blocking and keeps the test directories until bashcov exits. bats itself writes most of the trace, so the script passes bashcov only the lines of `.sh` files. `tests/coverage.bats` runs bashcov on a small project and checks the exact count of a line.
+
+The two tests of the `namcap` check in `update-pkg.sh` run the real `namcap`, and the tests in `tests/coverage.bats` run the real `bashcov`. Without them they skip, except when `CI` is set: there a missing `namcap` or `bashcov` fails them.
 
 ### 6.3 CI image updates
 
@@ -920,9 +922,12 @@ bats tests/ --recursive --timing
 bats tests/scripts.bats
 bats tests/strategies.bats
 bats tests/setup.bats
+
+# Coverage report in coverage/, as CI makes it
+bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 ```
 
-`tests/helpers/setup.sh` gives every test a temporary project directory with symlinked scripts and strategies. It copies `tests/helpers/mock-curl.sh` there as `curl`, puts it first in `PATH`, and removes the directory afterwards. Tests that need `git`, `ssh` or `gh` put their own mocks in the same place. The suite makes no network requests and never touches real AUR repos.
+`tests/helpers/setup.sh` gives every test a temporary project directory with symlinked scripts and strategies. It copies `tests/helpers/mock-curl.sh` there as `curl`, puts it first in `PATH`, and removes the directory afterwards, unless `AURTOMATOR_KEEP_TEST_DIRS` is set, as `bashcov-bats.sh` sets it (see [6.2](#62-test-job)). Tests that need `git`, `ssh` or `gh` put their own mocks in the same place. The suite makes no network requests and never touches real AUR repos.
 
 ### 7.7 Linting locally
 

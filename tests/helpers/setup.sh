@@ -38,8 +38,12 @@ setup_test_env() {
   export GIT_CONFIG_GLOBAL="$TEST_TMPDIR/gitconfig"
 }
 
+# bashcov-bats.sh sets AURTOMATOR_KEEP_TEST_DIRS: bashcov reads the trace
+# of a test after the test, and needs the links in $TEST_TMPDIR then
 teardown_test_env() {
-  rm -rf "$TEST_TMPDIR"
+  if [[ -z "${AURTOMATOR_KEEP_TEST_DIRS:-}" ]]; then
+    rm -rf "$TEST_TMPDIR"
+  fi
 }
 
 # Create a test package YAML
