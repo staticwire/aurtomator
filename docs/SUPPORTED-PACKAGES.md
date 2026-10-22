@@ -126,8 +126,8 @@ pkgver_dash: _
 `github-nightly` tracks nightly builds in 4 patterns:
 
 - **Fixed tag**, for example the neovim `nightly` tag, moved daily
-- **Dated tags**, for example `nightly-2026-03-26`
-- **Separate nightly repo**, for example yt-dlp-nightly-builds
+- **Dated tags**, for example `nightly-2026-03-26`, or any tag form with `nightly_tag_regex`
+- **Separate nightly repo**, for example yt-dlp-nightly-builds. It reads `/releases/latest`, which skips pre-releases, so a repository that files its nightlies as pre-releases, such as ruffle, needs dated tags.
 - **Channel filter**, for example the brave-browser Nightly channel
 
 The version comes from the tag name, the release body, the tag date or the publish date. `strategies/github-nightly.sh` lists the fields. `date_format` sets the form of the two dates, `YYYY.MM.DD` by default, and `'%Y%m%d'` fits a `pkgver` such as `20251213`. See [WORKFLOW.md section 3.3](WORKFLOW.md#33-github-nightly).

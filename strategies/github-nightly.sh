@@ -4,8 +4,10 @@
 #
 # Supports 4 patterns:
 #   A) Fixed tag (default): nightly tag force-pushed daily (neovim, ghostty, yazi)
-#   B) Dated tags: nightly-YYYY-MM-DD (ruffle, servo)
-#   C) Separate nightly repo: standard /releases/latest on a different repo (yt-dlp)
+#   B) Dated tags: nightly-YYYY-MM-DD (ruffle), or a tag that matches
+#      nightly_tag_regex (servo)
+#   C) Separate nightly repo: standard /releases/latest on a different repo
+#      (yt-dlp); /releases/latest skips pre-releases
 #   D) Channel filter: filter releases by name containing channel string (brave)
 #
 # YAML fields:
@@ -13,6 +15,8 @@
 #   upstream.nightly_tag    - tag name or pattern (default: "nightly")
 #                             use "latest" for pattern C
 #                             use prefix like "nightly-" for pattern B
+#   upstream.nightly_tag_regex - ERE for the tag in pattern B, in place of
+#                             nightly_tag; reads up to 3 pages of 100 releases
 #   upstream.version_source - where to extract version from:
 #                             "tag" (default), "release_body", "tag_date", "published_date"
 #   upstream.version_pattern - regex for extracting version from release body (pattern A)
@@ -38,8 +42,22 @@ version_pattern=$(pkg_get "$pkg_file" '.upstream.version_pattern // ""')
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 date_format=$(pkg_get "$pkg_file" '.upstream.date_format // "%Y.%m.%d"')
+nightly_tag_regex=$(pkg_get "$pkg_file" '.upstream.nightly_tag_regex // ""')
 
 api="https://api.github.com/repos/${owner_repo}"
+
+# The tag of the release published last among those whose tag matches
+# nightly_tag_regex, or nothing. A draft holds no published_at.
+# Args: $1=releases JSON
+latest_match() {
+  local published tag
+  yq -r '.[] | select(.published_at != null) | [.published_at, .tag_name] | @tsv' <<<"$1" |
+    while IFS=$'\t' read -r published tag; do
+      if [[ "$tag" =~ $nightly_tag_regex ]]; then
+        printf '%s\t%s\n' "$published" "$tag"
+      fi
+    done | sort | tail -1 | cut -f2
+}
 
 # A date in date_format. -u keeps the day of a UTC timestamp whatever the
 # time zone of the machine. Prints nothing when there is no date.
@@ -52,7 +70,26 @@ format_date() {
 
 # Fetch release based on pattern. channel and nightly_tag reach yq through
 # the environment so that quotes in them cannot break the expression.
-if [[ "$nightly_tag" == "latest" ]]; then
+if [[ -n "$nightly_tag_regex" ]]; then
+  # Pattern B with a regex. The API lists releases by created_at, the date
+  # of the tagged commit, so the match published last wins. A page with
+  # fewer than 100 releases is the last one.
+  release=""
+  for page in 1 2 3; do
+    releases_json=$(github_api "${api}/releases?per_page=100&page=${page}") || {
+      echo "Failed to fetch releases for ${owner_repo}" >&2
+      exit 1
+    }
+    tag=$(latest_match "$releases_json")
+    if [[ -n "$tag" ]]; then
+      release=$(echo "$releases_json" | TAG="$tag" yq -r '[.[] | select(.tag_name == strenv(TAG))][0]')
+      break
+    fi
+    if (($(yq 'length' <<<"$releases_json") < 100)); then
+      break
+    fi
+  done
+elif [[ "$nightly_tag" == "latest" ]]; then
   # Pattern C: separate nightly repo, use /releases/latest
   release=$(github_api "${api}/releases/latest") || {
     echo "Failed to fetch latest release for ${owner_repo}" >&2

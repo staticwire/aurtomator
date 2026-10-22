@@ -86,6 +86,42 @@ case "$url" in
   *api.github.com/repos/*/releases/tags/nightly)
     printf '{"tag_name": "nightly", "body": "NVIM v0.12.0-dev+2713+g925e9e8722\\nSome other text", "published_at": "2026-03-27T05:43:19Z"}'
     ;;
+  # Pattern B with a regex, as servo/servo-nightly-builds: the rc releases
+  # come first, the API order is not the publish order, and a draft holds
+  # no published_at
+  *"api.github.com/repos/dated-nightly/repo/releases?per_page=100&page=1")
+    echo '[{"tag_name": "v0.7.0-rc1", "published_at": "2026-10-01T20:28:19Z"}, {"tag_name": "2026-10-20", "published_at": "2026-10-21T00:00:29Z"}, {"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z"}, {"tag_name": "2026-10-22", "published_at": null}, {"tag_name": "2026-10-19", "published_at": "2026-10-19T23:28:58Z"}]'
+    ;;
+  # A last page of 2 releases without a match
+  *"api.github.com/repos/short-nightly/repo/releases?per_page=100&page=1")
+    echo '[{"tag_name": "v0.7.0-rc1", "published_at": "2026-10-01T20:28:19Z"}, {"tag_name": "v0.6.0-rc2", "published_at": "2026-09-24T16:52:22Z"}]'
+    ;;
+  # A full page of 100 releases with the match among them
+  *"api.github.com/repos/full-nightly/repo/releases?per_page=100&page=1")
+    printf '[{"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z"}'
+    for i in $(seq 1 99); do
+      printf ', {"tag_name": "v0.%d-rc1", "published_at": "2026-01-01T00:00:00Z"}' "$i"
+    done
+    printf ']\n'
+    ;;
+  # A page of 100 releases without a match, and the match on page 2
+  *"api.github.com/repos/later-nightly/repo/releases?per_page=100&page=2")
+    echo '[{"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z"}]'
+    ;;
+  *"api.github.com/repos/later-nightly/repo/releases?per_page=100&page="* | \
+    *"api.github.com/repos/no-nightly/repo/releases?per_page=100&page="*)
+    sep=""
+    printf '['
+    for i in $(seq 1 100); do
+      printf '%s{"tag_name": "v0.%d-rc1", "published_at": "2026-01-01T00:00:00Z"}' "$sep" "$i"
+      sep=", "
+    done
+    printf ']\n'
+    ;;
+  # GitHub answered [] for a page of ruffle-rs/ruffle that a retry filled
+  *"api.github.com/repos/empty-nightly/repo/releases?per_page=100&page="*)
+    echo '[]'
+    ;;
   # Pattern B+D: release names and tags that hold a double quote
   *api.github.com/repos/owner/quoted-repo/releases\?per_page=20)
     echo '[{"tag_name": "v1.0.0", "name": "Stable"}, {"tag_name": "v2.0.0", "name": "Beta \"b\""}, {"tag_name": "nightly-\"q\"-2026-04-01", "name": "Nightly"}]'

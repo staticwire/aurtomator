@@ -96,6 +96,21 @@ validate_pkg() {
     fi
   fi
 
+  local nightly_tag_regex
+  nightly_tag_regex=$(pkg_get "$file" '.upstream.nightly_tag_regex // ""')
+  if [[ -n "$nightly_tag_regex" ]]; then
+    if [[ "$strategy" != "github-nightly" ]]; then
+      log_err "$file: upstream.nightly_tag_regex applies to the github-nightly strategy only"
+      ((errors++))
+    elif [[ $(pkg_get "$file" '.upstream | (has("nightly_tag") or has("channel"))') == true ]]; then
+      log_err "$file: upstream.nightly_tag_regex takes the place of nightly_tag and channel"
+      ((errors++))
+    elif ! ere_valid "$nightly_tag_regex"; then
+      log_err "$file: upstream.nightly_tag_regex is not valid ERE regex: $nightly_tag_regex"
+      ((errors++))
+    fi
+  fi
+
   local prerelease
   prerelease=$(pkg_get "$file" '.upstream.prerelease | tag')
   if [[ "$prerelease" != "!!null" ]]; then

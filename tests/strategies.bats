@@ -622,6 +622,92 @@ EOF
   [ "$output" = "2026.03.26" ]
 }
 
+# Helper: the pages of the releases list that curl fetched
+nightly_pages() {
+  grep -o 'releases?per_page=100&page=[0-9]*' "$TEST_TMPDIR/curl.args" | cut -d= -f3 | tr '\n' ' '
+}
+
+# servo/servo-nightly-builds lists 12 rc releases first, and every release
+# carries the created_at of the tagged commit
+@test "github-nightly: nightly_tag_regex takes the match published last" {
+  record_curl
+  create_test_package "test-nightly-regex" "github-nightly" "upstream:
+  project: dated-nightly/repo
+  nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  version_source: tag_date
+  date_format: '%Y%m%d'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20261021" ]
+  [ "$(nightly_pages)" = "1 " ]
+}
+
+@test "github-nightly: nightly_tag_regex reads the next page" {
+  record_curl
+  create_test_package "test-nightly-regex" "github-nightly" "upstream:
+  project: later-nightly/repo
+  nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  version_source: tag_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.10.21" ]
+  [ "$(nightly_pages)" = "1 2 " ]
+}
+
+@test "github-nightly: nightly_tag_regex reads 3 pages at most" {
+  record_curl
+  create_test_package "test-nightly-regex" "github-nightly" "upstream:
+  project: no-nightly/repo
+  nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  version_source: tag_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No nightly release found for no-nightly/repo"* ]]
+  [ "$(nightly_pages)" = "1 2 3 " ]
+}
+
+@test "github-nightly: nightly_tag_regex stops at the page with a match" {
+  record_curl
+  create_test_package "test-nightly-regex" "github-nightly" "upstream:
+  project: full-nightly/repo
+  nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  version_source: tag_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.10.21" ]
+  [ "$(nightly_pages)" = "1 " ]
+}
+
+@test "github-nightly: nightly_tag_regex stops at a page of fewer than 100" {
+  record_curl
+  create_test_package "test-nightly-regex" "github-nightly" "upstream:
+  project: short-nightly/repo
+  nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  version_source: tag_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No nightly release found for short-nightly/repo"* ]]
+  [ "$(nightly_pages)" = "1 " ]
+}
+
+@test "github-nightly: nightly_tag_regex stops at an empty page" {
+  record_curl
+  create_test_package "test-nightly-regex" "github-nightly" "upstream:
+  project: empty-nightly/repo
+  nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  version_source: tag_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No nightly release found for empty-nightly/repo"* ]]
+  [ "$(nightly_pages)" = "1 " ]
+}
+
 @test "github-nightly: pattern C, separate nightly repo" {
   create_test_package "test-nightly-c" "github-nightly" "upstream:
   project: owner/nightly-builds
@@ -1275,6 +1361,24 @@ EOF
   run "$TEST_TMPDIR/strategies/github-release.sh" "test-neterr"
   [ "$status" -ne 0 ]
   [[ "$output" == *"Failed to fetch"* ]]
+}
+
+@test "github-nightly: nightly_tag_regex fails on curl network error" {
+  create_test_package "test-neterr" "github-nightly" "upstream:
+  project: dated-nightly/repo
+  nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  version_source: tag_date"
+
+  cat >"$TEST_TMPDIR/mock-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+echo "curl: (7) Failed to connect" >&2
+exit 7
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/curl"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-neterr"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch releases for dated-nightly/repo"* ]]
 }
 
 @test "repology: fails on curl network error" {

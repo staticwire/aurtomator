@@ -178,9 +178,11 @@ upstream:
 **What it checks:** GitHub releases of nightly or prerelease builds, in 4 patterns. The fields select the pattern:
 
 - **Pattern A, fixed tag** (default): `nightly_tag` names one tag that moves, as in neovim, ghostty or yazi.
-- **Pattern B, dated tags**: `nightly_tag` is a prefix with a dash, such as `nightly-`. The newest of the last 20 releases whose tag contains it wins (ruffle, servo).
+- **Pattern B, dated tags**: `nightly_tag` is a prefix with a dash, such as `nightly-`. Of the first 20 releases the API lists, the first whose tag contains it wins (ruffle). With `nightly_tag_regex` in place of `nightly_tag`, the strategy reads up to 3 pages of 100 releases and takes the release published last among those whose tag matches the ERE (servo).
 - **Pattern C, separate nightly repo**: `nightly_tag: latest` reads `/releases/latest` of a dedicated build repo (yt-dlp).
 - **Pattern D, channel filter**: `channel` picks the newest of the last 20 releases whose name contains it (brave).
+
+Patterns B and C depend on how a repository files its releases. `/releases/latest` skips pre-releases, and ruffle-rs/ruffle files its nightlies as pre-releases, so pattern C gives its stable `v0.7.1`. `/releases/latest` also sorts by `created_at`, which GitHub sets to the date of the tagged commit, not of the release. Every release of servo/servo-nightly-builds carries `2024-02-14` there, and its release list starts with 12 `v0.x` rc releases, so `nightly_tag: '-'` picks `v0.7.0-rc1`. `nightly_tag_regex` ranks the matches by `published_at` and depends on neither order. A page with fewer than 100 releases, an empty one included, is the last page it reads.
 
 Pattern A:
 
@@ -233,6 +235,7 @@ upstream:
 |-------|----------|-------------|
 | `upstream.project` | yes | `owner/repo` |
 | `upstream.nightly_tag` | no | Tag name or prefix (default: `"nightly"`, `"latest"` for pattern C) |
+| `upstream.nightly_tag_regex` | no | ERE for the tag in pattern B, in place of `nightly_tag` and `channel` |
 | `upstream.version_source` | no | `"tag"` (default), `"release_body"`, `"tag_date"`, `"published_date"` |
 | `upstream.version_pattern` | for `release_body` | Perl regex for the version in the release body. Dashes in the match become `+`. |
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, for `version_source: tag` |
@@ -249,12 +252,12 @@ name: servo-nightly-bin
 strategy: github-nightly
 upstream:
   project: servo/servo-nightly-builds
-  nightly_tag: latest
+  nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
   version_source: tag_date
   date_format: '%Y%m%d'
 ```
 
-`validate-pkg.sh` refuses `date_format` with another `version_source` and a format whose output is not a valid version, such as `%Y-%m-%d`.
+`validate-pkg.sh` refuses `date_format` with another `version_source` and a format whose output is not a valid version, such as `%Y-%m-%d`. It refuses `nightly_tag_regex` next to `nightly_tag` or `channel`, and one that bash cannot compile.
 
 **Authentication:** same as `github-release`.
 

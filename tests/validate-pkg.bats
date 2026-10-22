@@ -754,6 +754,48 @@ pkgver_dash: _"
   [[ "$output" == *"upstream.tag_version_replace names a group tag_version_regex does not have"* ]]
 }
 
+# === nightly_tag_regex validation ===
+
+@test "validate: nightly_tag_regex passes" {
+  create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  version_source: tag_date"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: nightly_tag_regex for another strategy rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  nightly_tag_regex: '^nightly-'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.nightly_tag_regex applies to the github-nightly strategy only"* ]]
+}
+
+@test "validate: nightly_tag_regex next to nightly_tag or channel rejected" {
+  local field
+  for field in 'nightly_tag: nightly-' 'channel: Nightly'; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  nightly_tag_regex: '^nightly-'
+  $field"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"upstream.nightly_tag_regex takes the place of nightly_tag and channel"* ]]
+  done
+}
+
+@test "validate: nightly_tag_regex invalid regex rejected" {
+  create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  nightly_tag_regex: '([0-9]'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.nightly_tag_regex is not valid ERE regex: ([0-9]"* ]]
+}
+
 # === date_format validation ===
 
 @test "validate: date_format with a date version_source passes" {
