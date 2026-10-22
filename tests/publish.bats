@@ -2035,6 +2035,70 @@ write_srcinfo_sources() {
   [ "$status" -eq 0 ]
 }
 
+# A pin holds no version, so a bump that keeps it builds the old code
+@test "check_prepared_srcinfo: rejects a bump that keeps a VCS source at its commit" {
+  local src="git+https://example.com/demo.git?signed#commit=a2d30b96fbb026621ec11692272f0117f35a00fd"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.11.0 "$src" SKIP
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.12.0 "$src" SKIP
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+}
+
+@test "check_prepared_srcinfo: rejects a bump that keeps any VCS pin" {
+  local src sum
+  for sum in SKIP "$H1"; do
+    for src in "git://example.com/demo.git#tag=stable" \
+      "demo::hg+https://example.com/demo#revision=42" \
+      "svn+https://example.com/demo/trunk#revision=42" \
+      "bzr+https://example.com/demo#revision=42" \
+      "fossil+https://example.com/demo#commit=abc123" \
+      "hg+https://example.com/demo#tag=stable"; do
+      write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0 "$src" "$sum"
+      write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.1 "$src" "$sum"
+      run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1
+      [ "$status" -eq 1 ] || {
+        echo "accepted: $src $sum"
+        return 1
+      }
+      [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+    done
+  done
+}
+
+@test "check_prepared_srcinfo: accepts a VCS pin that follows the version" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.11.0 "git+https://example.com/demo.git#tag=v1.11.0" SKIP
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.12.0 "git+https://example.com/demo.git#tag=v1.12.0" SKIP
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: accepts a VCS source on a branch that stays the same" {
+  local src="git+https://example.com/demo.git#branch=main"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.11.0 "$src" SKIP
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.12.0 "$src" SKIP
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
+  [ "$status" -eq 0 ]
+}
+
+# A second repository pinned to a commit, as a submodule often is, may stay
+@test "check_prepared_srcinfo: accepts a VCS pin that stays when another source moves" {
+  local sub="git+https://example.com/sub.git#commit=abc123"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 49.0 \
+    "git+https://example.com/demo.git#tag=49.0" SKIP "$sub" SKIP
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 51.1 \
+    "git+https://example.com/demo.git#tag=51.1" SKIP "$sub" SKIP
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 51.1
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: accepts the AUR copy of a package with a VCS pin" {
+  local src="git+https://example.com/demo.git#commit=abc123"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.11.0 "$src" SKIP
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/old.SRCINFO" 1.11.0
+  [ "$status" -eq 0 ]
+}
+
 # Helper: .SRCINFO of a nightly package with two sources, the first saved
 # under <name>. <sums> gives the checksum arrays as array=checksum pairs,
 # with the checksum of the first source; the second source has $H2.

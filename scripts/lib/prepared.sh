@@ -190,6 +190,16 @@ _is_download() {
   [[ "$1" == *://* && "${url%%://*}" =~ ^(http|https|ftp)$ ]]
 }
 
+# Args: $1=source entry of a .SRCINFO
+# Returns: 0 when makepkg checks it out with a VCS client at a fixed
+#          commit, tag or revision
+_is_vcs_pin() {
+  local url="${1#*::}"
+  [[ "$1" == *://* && "${url%%://*}" =~ ^(bzr|fossil|git|hg|svn)(\+.+)?$ && "$url" == *#* ]] || return 1
+  local fragment="${url#*#}"
+  [[ "${fragment%%=*}" =~ ^(commit|tag|revision)$ ]]
+}
+
 # Args: $1=expected source line, $2=prepared source line
 # Returns: 0 when both save their file under a name before ::, have the same
 #          URL after it, and their names differ in nothing but digits
@@ -208,9 +218,10 @@ _name_differs_in_digits() {
 # the digits in the name of its file, as a nightly package names its
 # download by the date: verify_prepared_sums never fetches it, and makepkg
 # takes the sources from the PKGBUILD. When pkgver changes and a download
-# has a real checksum, some source or checksum has to change too: a pkgver
-# built from another variable, or a source URL without the version, would
-# otherwise label the old files with the new version.
+# has a real checksum, or a VCS source is pinned to a commit, a tag or a
+# revision, some source or checksum has to change too: a pkgver built from
+# another variable, a source URL without the version, or a pin that stays
+# would otherwise label the old files with the new version.
 # Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
@@ -298,7 +309,8 @@ check_prepared_srcinfo() {
           return 1
         fi
         [[ "$new" == "$old" ]] || changed=true
-        if [[ -n "${hashed_sources["${key#source}:$n"]:-}" ]] && _is_download "$old_val"; then
+        if { [[ -n "${hashed_sources["${key#source}:$n"]:-}" ]] && _is_download "$old_val"; } ||
+          _is_vcs_pin "$old_val"; then
           pinned=true
         fi
         ;;
