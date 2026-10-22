@@ -316,8 +316,9 @@ teardown() {
 
 # === git-latest ===
 
-@test "git-latest: returns rCOUNT.HASH format from git repo" {
-  # Create a fake bare repo with some commits
+# Helper: a repo with 3 commits in $fake_repo, and a git that clones it in
+# place of any URL and logs the protocols the strategy allows
+fake_git_upstream() {
   fake_repo="$TEST_TMPDIR/fake-upstream"
   mkdir -p "$fake_repo"
   git -C "$fake_repo" init -q
@@ -329,12 +330,6 @@ teardown() {
     git -C "$fake_repo" commit -q -m "commit $i"
   done
 
-  create_test_package "test-git" "git-latest" "upstream:
-  type: git
-  url: https://git.example.com/repo.git"
-
-  # git that clones the fake repo in place of the URL, and logs the
-  # protocols the strategy allows
   cat >"$MOCK_DIR/git" <<EOF
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
@@ -344,12 +339,36 @@ fi
 exec /usr/bin/git "\$@"
 EOF
   chmod +x "$MOCK_DIR/git"
+}
+
+@test "git-latest: returns rCOUNT.HASH format from git repo" {
+  fake_git_upstream
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git"
 
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
   [ "$status" -eq 0 ]
   # Should match r3.<7-char-hash>
   [[ "$output" =~ ^r3\.[0-9a-f]{7}$ ]]
   [ "$(cat "$TEST_TMPDIR/git-clone")" = "http:https https://git.example.com/repo.git" ]
+}
+
+# fabric-git is r2173.ef2e985d on the AUR: rev-parse --short grows with the
+# repository, and r2173.ef2e985 reads as older
+@test "git-latest: takes the length of the hash from current" {
+  fake_git_upstream
+  local len
+  for len in 8 12; do
+    create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+current: 'r2.$(printf '%0*d' "$len" 0)'"
+
+    run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+    [ "$status" -eq 0 ]
+    [ "$output" = "r3.$(git -C "$fake_repo" rev-parse HEAD | cut -c1-"$len")" ]
+  done
 }
 
 @test "git-latest: refuses a local repository" {

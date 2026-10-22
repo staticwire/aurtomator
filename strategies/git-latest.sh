@@ -18,6 +18,7 @@ pkg_file=$(pkg_file "$NAME")
 host=$(pkg_get "$pkg_file" .upstream.host)
 project=$(pkg_get "$pkg_file" .upstream.project)
 upstream_type=$(pkg_get "$pkg_file" .upstream.type)
+current=$(pkg_get "$pkg_file" '.current // ""')
 
 # Build repo URL based on type
 case "$upstream_type" in
@@ -51,9 +52,17 @@ count=$(git -C "$tmp_dir/repo" rev-list --count HEAD 2>/dev/null) || {
   exit 1
 }
 
-short_hash=$(git -C "$tmp_dir/repo" rev-parse --short=7 HEAD 2>/dev/null) || {
+hash=$(git -C "$tmp_dir/repo" rev-parse HEAD 2>/dev/null) || {
   echo "Failed to get HEAD hash" >&2
   exit 1
 }
 
-echo "r${count}.${short_hash}"
+# The hash takes as many characters as the hash in current. rev-parse
+# --short in a PKGBUILD grows with the repository, and a shorter hash of the
+# same commit reads as an older version.
+hash_len=7
+if [[ "$current" =~ ^r[0-9]+\.([0-9a-f]+)$ ]]; then
+  hash_len=${#BASH_REMATCH[1]}
+fi
+
+echo "r${count}.${hash:0:hash_len}"

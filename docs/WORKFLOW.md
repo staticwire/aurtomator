@@ -322,7 +322,9 @@ upstream:
 | `upstream.project` | depends  | Required for the `github` and `gitlab` types |
 | `upstream.url`     | depends  | Required for the `git` type: full clone URL, `https://` only |
 
-**How the version is extracted:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the short hash (`git rev-parse --short=7 HEAD`) and prints the usual `-git` format `r<count>.<shorthash>`, for example `r431.66db9ce`.
+**How the version is extracted:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the hash of `HEAD` and prints the usual `-git` format `r<count>.<hash>`, for example `r431.66db9ce`. The hash has as many characters as the hash in `current`, and 7 when `current` is empty. `git rev-parse --short` in a `pkgver()` gives more characters as the repository grows: fabric-git is `r2173.ef2e985d` on the AUR, and `vercmp` reads `r2173.ef2e985` of the same commit as older.
+
+`current` must be empty or of the form `r<count>.<hash>`, and `validate-pkg.sh` refuses any other. `vercmp` reads `1.4.0.r47.g0bbf5ad`, the form of `git describe`, as newer than every `r<count>.<hash>`, so each check would be a downgrade and the package would never update.
 
 The clone runs with `GIT_ALLOW_PROTOCOL=http:https`. A URL in a package YAML that comes with a pull request therefore cannot read a local repository or connect to an ssh host with the SSH key of the machine that runs the check.
 
