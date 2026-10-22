@@ -244,7 +244,7 @@ aurtomator includes 14 version detection strategies. Choose by where your upstre
 | `pypi` | PyPI JSON API | Python packages | Auto (stable only) |
 | `npm` | npm registry | Node.js packages | Auto (`latest` tag) |
 | `crates` | crates.io API | Rust packages | Auto (stable only, or `prerelease: true`) |
-| `repology` | Repology API | Fallback across distro repositories | Varies |
+| `repology` | Repology API | Fallback across distro repositories, AUR left out | Varies |
 | `archpkg` | Arch package search | Track official repo versions | N/A |
 | `webpage-scrape` | Any HTTPS page + regex | No API available | None (depends on regex) |
 | `kde-tarball` | download.kde.org | KDE/Plasma packages | None |

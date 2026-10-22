@@ -172,7 +172,8 @@ upstream:
 
 # --- repology ---------------------------------------------------------------
 # Fallback when nothing else fits. Returns the version of the first entry
-# with status "newest".
+# with status "newest" outside the AUR, or the highest "outdated" one when
+# only the AUR is newest. Lags until a distribution packages the release.
 #
 # strategy: repology
 # upstream:

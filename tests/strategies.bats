@@ -406,6 +406,25 @@ teardown() {
   [ "$output" = "5.0.0" ]
 }
 
+# For a package of ours, the AUR entry is our own version
+@test "repology: takes the highest outdated version when only the AUR is newest" {
+  create_test_package "test-repology" "repology" "upstream:
+  repology: aur-ahead"
+
+  run "$TEST_TMPDIR/strategies/repology.sh" "test-repology"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.140.10" ]
+}
+
+@test "repology: takes newest over an outdated version sort -V ranks higher" {
+  create_test_package "test-repology" "repology" "upstream:
+  repology: rc-order"
+
+  run "$TEST_TMPDIR/strategies/repology.sh" "test-repology"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0" ]
+}
+
 # === archpkg ===
 
 @test "archpkg: returns latest version from Arch repos" {
@@ -1085,13 +1104,22 @@ curl_agents() {
   [[ "$output" == *"No version found"* ]]
 }
 
-@test "repology: fails when no newest status" {
-  create_test_package "test-nonew" "repology" "upstream:
-  repology: no-newest"
+@test "repology: fails when only the AUR has a version" {
+  create_test_package "test-aur-only" "repology" "upstream:
+  repology: aur-only"
 
-  run "$TEST_TMPDIR/strategies/repology.sh" "test-nonew"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"No version found"* ]]
+  run "$TEST_TMPDIR/strategies/repology.sh" "test-aur-only"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No version found on Repology for aur-only outside the AUR"* ]]
+}
+
+@test "repology: names a project Repology does not know" {
+  create_test_package "test-missing" "repology" "upstream:
+  repology: missing-project"
+
+  run "$TEST_TMPDIR/strategies/repology.sh" "test-missing"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Project missing-project not found on Repology"* ]]
 }
 
 @test "archpkg: fails on empty results" {
@@ -1205,6 +1233,22 @@ EOF
   run "$TEST_TMPDIR/strategies/github-release.sh" "test-neterr"
   [ "$status" -ne 0 ]
   [[ "$output" == *"Failed to fetch"* ]]
+}
+
+@test "repology: fails on curl network error" {
+  create_test_package "test-neterr" "repology" "upstream:
+  repology: firefox"
+
+  cat >"$TEST_TMPDIR/mock-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+echo "curl: (7) Failed to connect" >&2
+exit 7
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/curl"
+
+  run "$TEST_TMPDIR/strategies/repology.sh" "test-neterr"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch Repology info for firefox"* ]]
 }
 
 @test "github-release: fails on a 404 (curl exit 22)" {

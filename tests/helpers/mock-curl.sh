@@ -37,9 +37,23 @@ case "$url" in
   *crates.io/api/v1/crates/null-crate)
     echo '{"crate": {"max_stable_version": null}}'
     ;;
-  # Repology: no newest status
-  *repology.org/api/v1/project/no-newest)
-    echo '[{"status": "outdated", "version": "1.0"}, {"status": "devel", "version": "2.0-rc1"}]'
+  # Repology: the AUR alone is newest, as for bluemail, and a second AUR
+  # package lags behind it. sort -V puts 1.140.10 above 1.140.9, a string
+  # sort does not.
+  *repology.org/api/v1/project/aur-ahead)
+    echo '[{"repo": "aur", "status": "newest", "version": "1.143.44"}, {"repo": "aur", "status": "outdated", "version": "1.142.0"}, {"repo": "nix_stable_24_05", "status": "outdated", "version": "1.140.9"}, {"repo": "nix_unstable", "status": "outdated", "version": "1.140.10"}]'
+    ;;
+  # Repology: libversion puts 1.0rc1 below 1.0, sort -V above it
+  *repology.org/api/v1/project/rc-order)
+    echo '[{"repo": "debian_13", "status": "outdated", "version": "1.0rc1"}, {"repo": "arch", "status": "newest", "version": "1.0"}]'
+    ;;
+  # Repology: no newest or outdated entry outside the AUR
+  *repology.org/api/v1/project/aur-only)
+    echo '[{"repo": "aur", "status": "newest", "version": "2.0"}, {"repo": "debian_unstable", "status": "devel", "version": "2.1rc1"}, {"repo": "debian_12", "status": "legacy", "version": "0.9"}]'
+    ;;
+  # Repology: a project it does not know, as wingide
+  *repology.org/api/v1/project/missing-project)
+    echo '[]'
     ;;
   # Arch repos: empty results
   *archlinux.org/packages/search/json*name=no-such-pkg*)
