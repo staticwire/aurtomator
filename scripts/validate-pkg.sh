@@ -83,6 +83,19 @@ validate_pkg() {
     fi
   fi
 
+  local branch
+  if [[ $(pkg_get "$file" '.upstream.branch | tag') != "!!null" ]]; then
+    branch=$(pkg_get "$file" '.upstream.branch')
+    if [[ "$strategy" != "git-latest" ]]; then
+      log_err "$file: upstream.branch applies to the git-latest strategy only"
+      ((errors++))
+    # git clone would read a name that starts with - as an option
+    elif ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+      log_err "$file: upstream.branch is not a valid branch name: $branch"
+      ((errors++))
+    fi
+  fi
+
   local prerelease
   prerelease=$(pkg_get "$file" '.upstream.prerelease | tag')
   if [[ "$prerelease" != "!!null" ]]; then

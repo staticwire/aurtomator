@@ -56,7 +56,7 @@ upstream:
   project: group/project
 ```
 
-**Why it works:** `git-latest` makes a bare clone and computes `r{count}.{hash}`, for example `r435.abc1234`, the usual AUR format for `-git` versions. aurtomator writes this value to `pkgver=`, skips `SKIP` checksums and pushes.
+**Why it works:** `git-latest` makes a bare clone and computes `r{count}.{hash}`, for example `r435.abc1234`, the usual AUR format for `-git` versions. aurtomator writes this value to `pkgver=`, skips `SKIP` checksums and pushes. A source pinned to `#branch=` needs `upstream.branch` with the same branch, or the count and the hash come from the default branch.
 
 A `pkgver()` function in the PKGBUILD is fine when it produces the same `r{count}.{hash}` format. The hash takes as many characters as the hash in `current`. A `pkgver()` in the form of `git describe`, such as `1.4.0.r47.g0bbf5ad`, does not fit: `vercmp` reads it as newer than every `r{count}.{hash}`, and `validate-pkg.sh` refuses such a `current`. A user who builds the package later gets a newer value when upstream has moved on, as with every `-git` package on the AUR.
 

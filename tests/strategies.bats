@@ -534,6 +534,39 @@ current: 'r2.$(printf '%0*d' "$len" 0)'"
   done
 }
 
+# makepkg checks out the branch of a source pinned to #branch=
+@test "git-latest: counts the commits of upstream.branch" {
+  fake_git_upstream
+  git -C "$fake_repo" switch -q -c feature HEAD~1
+  local i
+  for i in 4 5; do
+    echo "$i" >"$fake_repo/file.txt"
+    git -C "$fake_repo" commit -q -am "commit $i"
+  done
+  git -C "$fake_repo" switch -q -
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+  branch: feature"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ "$output" = "r4.$(git -C "$fake_repo" rev-parse feature | cut -c1-7)" ]
+}
+
+@test "git-latest: fails on a branch the repository lacks" {
+  fake_git_upstream
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+  branch: nope"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Remote branch nope not found"* ]]
+  [[ "$output" == *"Failed to clone https://git.example.com/repo.git"* ]]
+}
+
 @test "git-latest: refuses a local repository" {
   git init -q "$TEST_TMPDIR/local-repo"
   git -C "$TEST_TMPDIR/local-repo" -c user.name=test -c user.email=test@test \

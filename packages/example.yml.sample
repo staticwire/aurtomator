@@ -151,6 +151,8 @@ upstream:
 #   project: owner/repo                    # required for github|gitlab
 #   host: gitlab.example.com               # required for gitlab
 #   url: https://example.com/repo.git      # required for type=git, https only
+#   branch: develop                        # optional, as #branch= in source;
+#                                          # default: the default branch
 
 # --- pypi / npm / crates ----------------------------------------------------
 # Language registries. PyPI returns stable releases only, and crates too

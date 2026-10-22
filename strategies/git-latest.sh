@@ -4,6 +4,9 @@
 #
 # Input: package name (reads upstream config from package YAML)
 # Output: pkgver in standard -git format: r<count>.<shorthash>
+#
+# upstream.branch: the branch of a source pinned to #branch= (default: the
+#                  default branch of the repository)
 
 set -euo pipefail
 
@@ -19,6 +22,7 @@ host=$(pkg_get "$pkg_file" .upstream.host)
 project=$(pkg_get "$pkg_file" .upstream.project)
 upstream_type=$(pkg_get "$pkg_file" .upstream.type)
 current=$(pkg_get "$pkg_file" '.current // ""')
+branch=$(pkg_get "$pkg_file" '.upstream.branch // ""')
 
 # Build repo URL based on type
 case "$upstream_type" in
@@ -42,7 +46,13 @@ esac
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
-GIT_ALLOW_PROTOCOL=http:https git clone --bare --quiet "$repo_url" "$tmp_dir/repo" || {
+# With --branch, HEAD of the bare clone is that branch, as makepkg checks it
+# out for #branch=.
+clone_args=(--bare --quiet)
+if [[ -n "$branch" ]]; then
+  clone_args+=("--branch=$branch")
+fi
+GIT_ALLOW_PROTOCOL=http:https git clone "${clone_args[@]}" "$repo_url" "$tmp_dir/repo" || {
   echo "Failed to clone $repo_url" >&2
   exit 1
 }

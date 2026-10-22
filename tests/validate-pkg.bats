@@ -96,6 +96,41 @@ current: '$current'"
   done
 }
 
+@test "validate: git-latest branch passes" {
+  local branch
+  for branch in feature/x release-0.11; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+  branch: '$branch'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
+}
+
+# git clone would read -x as an option
+@test "validate: git-latest branch git refuses rejected" {
+  local branch
+  for branch in -x 'a b' a..b HEAD; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+  branch: '$branch'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"upstream.branch is not a valid branch name: $branch"* ]]
+  done
+}
+
+@test "validate: branch for another strategy rejected" {
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+  branch: main"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.branch applies to the git-latest strategy only"* ]]
+}
+
 @test "validate: git-latest git type fails on a URL without HTTPS" {
   create_test_package "mypkg" "git-latest" "upstream:
   type: git
