@@ -10,7 +10,7 @@ setup() {
 
   # Mock gpg: accepts specific key IDs, with or without "!", and logs its
   # arguments to $TEST_TMPDIR/gpg.args
-  cat > "$MOCK_DIR/gpg" <<'MOCKEOF'
+  cat >"$MOCK_DIR/gpg" <<'MOCKEOF'
 #!/usr/bin/env bash
 echo "$*" >>"$TEST_TMPDIR/gpg.args"
 for arg in "$@"; do
@@ -100,14 +100,14 @@ MOCKEOF
   chmod +x "$MOCK_DIR/gpg"
 
   # Mock gpgconf (for kill agent)
-  cat > "$MOCK_DIR/gpgconf" <<'MOCKEOF'
+  cat >"$MOCK_DIR/gpgconf" <<'MOCKEOF'
 #!/usr/bin/env bash
 exit 0
 MOCKEOF
   chmod +x "$MOCK_DIR/gpgconf"
 
   # Mock ssh
-  cat > "$MOCK_DIR/ssh" <<'MOCKEOF'
+  cat >"$MOCK_DIR/ssh" <<'MOCKEOF'
 #!/usr/bin/env bash
 if [[ "$*" == *"aur.archlinux.org"* ]]; then
   echo "Welcome to AUR! Your SSH key is working."
@@ -118,7 +118,7 @@ MOCKEOF
   chmod +x "$MOCK_DIR/ssh"
 
   # Mock gh
-  cat > "$MOCK_DIR/gh" <<'MOCKEOF'
+  cat >"$MOCK_DIR/gh" <<'MOCKEOF'
 #!/usr/bin/env bash
 case "$1" in
   auth)
@@ -281,7 +281,6 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"must contain @"* ]]
 }
-
 
 # === GPG step ===
 

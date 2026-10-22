@@ -509,7 +509,7 @@ fake_git_upstream() {
   git -C "$fake_repo" config user.email "test@test"
   git -C "$fake_repo" config user.name "test"
   for i in 1 2 3; do
-    echo "$i" > "$fake_repo/file.txt"
+    echo "$i" >"$fake_repo/file.txt"
     git -C "$fake_repo" add file.txt
     git -C "$fake_repo" commit -q -m "commit $i"
   done

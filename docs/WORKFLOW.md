@@ -920,7 +920,7 @@ GitHub starts a `workflow_run` workflow only from its file on the default branch
 
 ```bash
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
-shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh
+shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 actionlint
 ```
 
@@ -1041,10 +1041,10 @@ bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
 
 # shfmt (check mode)
-shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh
+shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 
 # shfmt (auto-fix)
-shfmt -w -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh
+shfmt -w -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 
 # actionlint (the workflows, with shellcheck on their run: blocks)
 actionlint

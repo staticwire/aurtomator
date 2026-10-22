@@ -132,10 +132,21 @@ run_blocks() {
     run yq ".jobs.lint.steps[] | select(.name == \"$step\") | .run" "$GITHUB_DIR/workflows/ci.yml"
     [ "$status" -eq 0 ]
     [[ "$output" == "$step "* ]]
-    run bash -c 'cd "$1" && for word in $2; do if [[ "$word" == *.sh ]]; then printf "%s\n" "$word"; fi; done | sort' _ "$root" "$output"
+    run bash -c 'cd "$1" && for word in $2; do if [[ "$word" == scripts/*.sh || "$word" == strategies/*.sh ]]; then printf "%s\n" "$word"; fi; done | sort' _ "$root" "$output"
     [ "$status" -eq 0 ]
     [ "$output" = "$expected" ]
   done
+}
+
+@test "ci: shfmt checks every test file" {
+  local root="$GITHUB_DIR/.." expected
+  expected=$(cd "$root" && find tests -name '*.bats' -o -name '*.sh' | sort)
+  [ -n "$expected" ]
+  run yq '.jobs.lint.steps[] | select(.name == "shfmt") | .run' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && for word in $2; do if [[ "$word" == tests/* ]]; then printf "%s\n" "$word"; fi; done | sort' _ "$root" "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$expected" ]
 }
 
 # Without .shellcheckrc, shellcheck reads a source directive relative to

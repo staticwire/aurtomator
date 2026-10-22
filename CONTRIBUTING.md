@@ -24,7 +24,7 @@ bats tests/ --recursive
 - Bash 5+ with `set -euo pipefail` at the top of every script.
 - Functions in `snake_case`, globals in `UPPER_SNAKE`, function-local variables declared with `local`.
 - Double-quote every expansion: `"$var"`, `"${array[@]}"`.
-- Scripts are `shellcheck` clean and formatted with `shfmt -i 2 -ci`.
+- Scripts are `shellcheck` clean. Scripts and tests are formatted with `shfmt -i 2 -ci`.
 - Every new script in `scripts/` and every new strategy in `strategies/` comes with BATS tests. Strategy tests mock the API responses, and the suite makes no network requests.
 - Commit messages follow Conventional Commits with a component scope, for example `feat(strategy): add forgejo-tag detection` or `fix(scripts): handle empty version output`.
 - GitHub Actions are pinned by commit SHA with a trailing version comment: `uses: actions/checkout@abc1234def5678... # v4.1.7`.
@@ -35,7 +35,7 @@ CI runs these commands:
 
 ```sh
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
-shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh
+shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 actionlint
 for action in .github/actions/*/action.yml; do yq '.runs.steps[] | select(has("run")) | .run' "$action" | shellcheck -s bash -; done
 bats tests/ --recursive

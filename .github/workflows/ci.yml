@@ -55,7 +55,7 @@ jobs:
         run: shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
 
       - name: shfmt
-        run: shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh
+        run: shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 
       # Checks the workflows, and the run blocks with shellcheck
       - name: actionlint

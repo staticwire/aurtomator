@@ -63,7 +63,7 @@ teardown() {
 
 @test "audit_pkgbuild: passes normal binary package" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-bin
 pkgver=1.0.0
 pkgrel=1
@@ -81,7 +81,7 @@ EOF
 # The shape of liblinear on the AUR
 @test "audit_pkgbuild: passes a split package" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgbase=test-split
 pkgname=(test-split python-test-split)
 pkgver=1.0.0
@@ -108,7 +108,7 @@ EOF
 
 @test "audit_pkgbuild: blocks pkgver() with non-git-latest strategy" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-git
 pkgver=r100.abc1234
 pkgrel=1
@@ -130,7 +130,7 @@ EOF
 
 @test "audit_pkgbuild: allows pkgver() with git-latest strategy" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-git
 pkgver=r100.abc1234
 pkgrel=1
@@ -151,7 +151,7 @@ EOF
 
 @test "audit_pkgbuild: warns on patches in source" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-patched
 pkgver=1.0.0
 pkgrel=1
@@ -170,7 +170,7 @@ EOF
 
 @test "audit_pkgbuild: blocks mixed SKIP and real checksums with remote sources" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-mixed
 pkgver=1.0.0
 pkgrel=1
@@ -194,7 +194,7 @@ EOF
   source "$TEST_TMPDIR/scripts/lib.sh"
   # Typical nightly-bin pattern: SKIP for the remote nightly binary,
   # real hashes for local files (e.g. .vim, .install) shipped in the AUR repo
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-nightly
 pkgver=0.13.0
 pkgrel=1
@@ -215,7 +215,7 @@ EOF
 
 @test "audit_pkgbuild: allows pkgver() with github-nightly strategy" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-nightly-pkgver
 pkgver=0.13.0
 pkgrel=1
@@ -236,7 +236,7 @@ EOF
 
 @test "audit_pkgbuild: passes VCS package with only SKIP checksums" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-vcs
 pkgver=r100.abc1234
 pkgrel=1
@@ -253,7 +253,7 @@ EOF
 
 @test "audit_pkgbuild: blocks mixed SKIP and real checksums in arch-specific arrays" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-mixed-arch
 pkgver=1.0.0
 pkgrel=1
@@ -273,7 +273,7 @@ EOF
 
 @test "audit_pkgbuild: blocks a real remote hash listed before SKIP" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-mixed-order
 pkgver=1.0.0
 pkgrel=1
@@ -360,7 +360,7 @@ EOF
 
 @test "has_skip_checksums: finds SKIP in arch-specific arrays" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-arch-skip
 pkgver=1.0.0
 pkgrel=1
@@ -376,7 +376,7 @@ EOF
 
 @test "has_skip_checksums: finds SKIP after a real hash" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-late-skip
 pkgver=1.0.0
 pkgrel=1
@@ -392,7 +392,7 @@ EOF
 
 @test "has_skip_checksums: returns 1 without SKIP" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-no-skip
 pkgver=1.0.0
 pkgrel=1
@@ -408,7 +408,7 @@ EOF
 
 @test "has_skip_checksums: returns 1 when every SKIP belongs to a signature" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-signed
 pkgver=1.0.0
 pkgrel=1
@@ -424,7 +424,7 @@ EOF
 
 @test "has_skip_checksums: finds a VCS SKIP next to the SKIP of a signature" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-signed-vcs
 pkgver=r100.abc1234
 pkgrel=1
@@ -821,7 +821,7 @@ current: '2.0.0'"
 
 @test "check-all: reports errors for broken packages" {
   # Create package with strategy that will fail (nonexistent strategy)
-  cat > "$TEST_TMPDIR/packages/broken.yml" <<EOF
+  cat >"$TEST_TMPDIR/packages/broken.yml" <<EOF
 name: broken
 strategy: nonexistent-strategy
 upstream:
@@ -878,7 +878,7 @@ make_spaced_project() {
 current: '2.0.0'"
 
   # Create minimal README with markers
-  cat > "$TEST_TMPDIR/README.md" <<'EOF'
+  cat >"$TEST_TMPDIR/README.md" <<'EOF'
 # test
 <!-- PACKAGES:START -->
 old content
@@ -1435,7 +1435,7 @@ current: '1.0.0'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 # Maintainer: test
 pkgname=test-vcs-bad
 pkgver=r100.abc1234
@@ -1453,7 +1453,7 @@ pkgver() {
 EOF
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
 
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -1481,7 +1481,7 @@ current: 'r100.abc1234'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 # Maintainer: test
 pkgname=test-vcs-ok
 pkgver=r100.abc1234
@@ -1504,7 +1504,7 @@ EOF
   git -C "$aur_dir" remote add origin "$TEST_TMPDIR/aur-bare-test-vcs-ok.git"
   git -C "$aur_dir" push -q -u origin HEAD
 
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -1514,7 +1514,7 @@ exec /usr/bin/git "\$@"
 MOCKGIT
   chmod +x "$MOCK_DIR/git"
 
-  cat > "$MOCK_DIR/makepkg" <<'EOF'
+  cat >"$MOCK_DIR/makepkg" <<'EOF'
 #!/usr/bin/env bash
 echo "pkgbase = test-vcs-ok"
 echo "pkgname = test-vcs-ok"
@@ -1538,7 +1538,7 @@ current: '1.0.0'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 # Maintainer: test
 pkgname=test-html
 pkgver=1.0.0
@@ -1552,7 +1552,7 @@ sha256sums=('abc123')
 EOF
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
 
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -1563,7 +1563,7 @@ MOCKGIT
   chmod +x "$MOCK_DIR/git"
 
   # Mock curl to return HTML content-type for HEAD requests
-  cat > "$MOCK_DIR/curl" <<'MOCKCURL'
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
 if [[ "$1" == "-sIL" ]]; then
   printf '200 text/html; charset=utf-8'
@@ -1603,7 +1603,7 @@ current: '1.0.0'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 # Maintainer: test <test@example.com>
 pkgname=test-namcap
 pkgver=1.0.0
@@ -1616,7 +1616,7 @@ sha256sums=('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
 EOF
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
 
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -1627,7 +1627,7 @@ MOCKGIT
   chmod +x "$MOCK_DIR/git"
 
   # Mock curl for source URL validation
-  cat > "$MOCK_DIR/curl" <<'MOCKCURL'
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
 if [[ "$1" == "-sIL" ]]; then
   printf '200 application/octet-stream'
@@ -1637,13 +1637,13 @@ echo '{}'
 MOCKCURL
   chmod +x "$MOCK_DIR/curl"
 
-  cat > "$MOCK_DIR/updpkgsums" <<'EOF'
+  cat >"$MOCK_DIR/updpkgsums" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
   chmod +x "$MOCK_DIR/updpkgsums"
 
-  cat > "$MOCK_DIR/makepkg" <<'EOF'
+  cat >"$MOCK_DIR/makepkg" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "--verifysource" ]]; then exit 0; fi
 echo "pkgbase = test-namcap"
@@ -1673,7 +1673,7 @@ current: '1.0.0'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 pkgname=test-namcap-warn
 pkgver=1.0.0
 pkgrel=1
@@ -1686,7 +1686,7 @@ sha256sums=('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
 EOF
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
 
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -1696,7 +1696,7 @@ exec /usr/bin/git "\$@"
 MOCKGIT
   chmod +x "$MOCK_DIR/git"
 
-  cat > "$MOCK_DIR/curl" <<'MOCKCURL'
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
 if [[ "$1" == "-sIL" ]]; then
   printf '200 application/octet-stream'
@@ -1706,13 +1706,13 @@ echo '{}'
 MOCKCURL
   chmod +x "$MOCK_DIR/curl"
 
-  cat > "$MOCK_DIR/updpkgsums" <<'EOF'
+  cat >"$MOCK_DIR/updpkgsums" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
   chmod +x "$MOCK_DIR/updpkgsums"
 
-  cat > "$MOCK_DIR/makepkg" <<'EOF'
+  cat >"$MOCK_DIR/makepkg" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "--verifysource" ]]; then exit 0; fi
 echo "pkgbase = test-namcap-warn"
@@ -1745,7 +1745,7 @@ current: '1.0.0'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 # Maintainer: test
 pkgname=test-detached
 pkgver=1.0.0
@@ -1764,7 +1764,7 @@ EOF
   git -C "$aur_dir" fetch -q origin
   git -C "$aur_dir" checkout -q --detach master
 
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -1774,7 +1774,7 @@ exec /usr/bin/git "\$@"
 MOCKGIT
   chmod +x "$MOCK_DIR/git"
 
-  cat > "$MOCK_DIR/curl" <<'MOCKCURL'
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
 if [[ "$1" == "-sIL" ]]; then
   printf '200 application/octet-stream'
@@ -1784,13 +1784,13 @@ echo '{}'
 MOCKCURL
   chmod +x "$MOCK_DIR/curl"
 
-  cat > "$MOCK_DIR/updpkgsums" <<'EOF'
+  cat >"$MOCK_DIR/updpkgsums" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
   chmod +x "$MOCK_DIR/updpkgsums"
 
-  cat > "$MOCK_DIR/makepkg" <<'EOF'
+  cat >"$MOCK_DIR/makepkg" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "--verifysource" ]]; then exit 0; fi
 echo "pkgbase = test-detached"
@@ -1825,7 +1825,7 @@ current: '1.0.0'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 # Maintainer: test
 pkgname=test-no-origin
 pkgver=1.0.0
@@ -1840,7 +1840,7 @@ EOF
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
   git -C "$aur_dir" checkout -q --detach master
 
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -1893,7 +1893,7 @@ current: '1.0.0'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 pkgname=test-checksums
 pkgver=1.0.0
 pkgrel=1
@@ -1916,7 +1916,7 @@ EOF
 
   # Mock git clone to return our fake AUR dir
   mkdir -p "$MOCK_DIR"
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -1945,7 +1945,7 @@ current: 'r100.abc1234'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 pkgname=test-vcs
 pkgver=r100.abc1234
 pkgrel=1
@@ -1964,7 +1964,7 @@ EOF
   git -C "$aur_dir" push -q -u origin HEAD
 
   # Mock git clone
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -1975,7 +1975,7 @@ MOCKGIT
   chmod +x "$MOCK_DIR/git"
 
   # Mock makepkg --printsrcinfo
-  cat > "$MOCK_DIR/makepkg" <<'EOF'
+  cat >"$MOCK_DIR/makepkg" <<'EOF'
 #!/usr/bin/env bash
 echo "pkgbase = test-vcs"
 echo "pkgname = test-vcs"
@@ -2000,7 +2000,7 @@ current: '1.0.0'"
   git -C "$aur_dir" config user.name "test"
   git -C "$aur_dir" config user.email "test@test"
   git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
 pkgname=test-arch-skip
 pkgver=1.0.0
 pkgrel=1
@@ -2015,7 +2015,7 @@ b2sums_aarch64=('SKIP')
 EOF
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
 
-  cat > "$MOCK_DIR/git" <<MOCKGIT
+  cat >"$MOCK_DIR/git" <<MOCKGIT
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
@@ -2025,7 +2025,7 @@ exec /usr/bin/git "\$@"
 MOCKGIT
   chmod +x "$MOCK_DIR/git"
 
-  cat > "$MOCK_DIR/makepkg" <<'EOF'
+  cat >"$MOCK_DIR/makepkg" <<'EOF'
 #!/usr/bin/env bash
 echo "pkgbase = test-arch-skip"
 echo "pkgname = test-arch-skip"
