@@ -46,6 +46,27 @@ teardown() {
   [ "$output" = "0.1.8" ]
 }
 
+# | ends the pattern of a sed s command
+@test "github-release: tag_version_regex may hold |" {
+  create_test_package "test-regex-bar" "github-release" "upstream:
+  project: custom-suffix/repo
+  tag_version_regex: '^v?([0-9.]+)(-stable|)$'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-regex-bar"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.1.8" ]
+}
+
+@test "github-release: the capture group alone is the version" {
+  create_test_package "test-regex-part" "github-release" "upstream:
+  project: custom-suffix/repo
+  tag_version_regex: '([0-9.]+)'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-regex-part"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.1.8" ]
+}
+
 @test "github-release: tag_version_regex non-matching fails" {
   create_test_package "test-nomatch" "github-release" "upstream:
   project: custom-suffix/repo
@@ -74,6 +95,16 @@ teardown() {
   tag_version_regex: 'bun-v(.*)'"
 
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-tag-regex"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.3.11" ]
+}
+
+@test "github-tag: tag_version_regex may hold |" {
+  create_test_package "test-tag-bar" "github-tag" "upstream:
+  project: custom-prefix/repo
+  tag_version_regex: '^bun-v([0-9.]+)(-stable|)$'"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-tag-bar"
   [ "$status" -eq 0 ]
   [ "$output" = "1.3.11" ]
 }
@@ -174,6 +205,18 @@ teardown() {
   [ "$output" = "3.1.0" ]
 }
 
+# mesa names its releases mesa-26.2.5
+@test "gitlab-tag: tag_version_regex extracts from prefixed tags" {
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: prefix-group/prefix-project
+  tag_version_regex: '^mesa-([0-9.]+)$'"
+
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "26.2.5" ]
+}
+
 @test "gitlab-tag: takes only tags of the form v1.2.3 by default" {
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com
@@ -205,6 +248,17 @@ teardown() {
   run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-gitea"
   [ "$status" -eq 0 ]
   [ "$output" = "1.5.0" ]
+}
+
+@test "gitea-tag: tag_version_regex extracts from prefixed tags" {
+  create_test_package "test-gitea" "gitea-tag" "upstream:
+  host: codeberg.org
+  project: prefix-owner/prefix-repo
+  tag_version_regex: '^mesa-([0-9.]+)$'"
+
+  run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-gitea"
+  [ "$status" -eq 0 ]
+  [ "$output" = "26.2.5" ]
 }
 
 @test "gitea-tag: takes only tags of the form v1.2.3 by default" {
@@ -514,10 +568,22 @@ EOF
   [ "$output" = "3.5.0" ]
 }
 
+@test "github-nightly: tag_version_regex may hold |" {
+  create_test_package "test-nightly-bar" "github-nightly" "upstream:
+  project: custom-nightly/repo
+  nightly_tag: nightly
+  version_source: tag
+  tag_version_regex: '^nightly-v([0-9.]+)(-rc[0-9]+|)$'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-bar"
+  [ "$status" -eq 0 ]
+  [ "$output" = "3.5.0" ]
+}
+
 # === YAML regex fields ===
 
-# A regex field closes the s command of sed and adds the e flag, which
-# runs the pattern space as a command
+# In a sed s command a regex field would close the pattern and add the e
+# flag, which runs the pattern space as a command
 @test "github-release: tag_version_regex runs no command" {
   create_test_package "test-regex-exec" "github-release" "upstream:
   project: custom-prefix/repo

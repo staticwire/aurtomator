@@ -77,8 +77,7 @@ case "$version_source" in
   tag)
     version=$(echo "$release" | yq -r '.tag_name')
     if [[ -n "$tag_version_regex" ]]; then
-      # The regex can close the s command; --sandbox refuses e, r and w
-      extracted=$(echo "$version" | sed --sandbox -nE "s|${tag_version_regex}|\\1|p" | head -1)
+      extracted=$(tag_versions "$tag_version_regex" <<<"$version")
       if [[ -z "$extracted" ]]; then
         echo "tag_version_regex '${tag_version_regex}' did not match tag '${version}'" >&2
         exit 1

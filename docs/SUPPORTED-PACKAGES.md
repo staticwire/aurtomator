@@ -95,7 +95,7 @@ aurtomator does not check the signature. It runs `makepkg --verifysource` with `
 
 ### Non-standard tag formats (tag_version_regex)
 
-`github-release`, `github-tag` and `github-nightly` accept `tag_version_regex` for unusual tag names:
+`github-release`, `github-tag`, `github-nightly`, `gitlab-tag` and `gitea-tag` accept `tag_version_regex` for unusual tag names:
 
 ```yaml
 upstream:
@@ -103,7 +103,7 @@ upstream:
   tag_version_regex: '^release-v?([0-9.]+)-stable$'
 ```
 
-**Why it works:** the ERE capture group extracts the version from any tag format, for example `0.1.8-stable`, `release-v2.3.0` or `app/v1.5.0`.
+**Why it works:** the first capture group of the ERE is the version, whatever the format of the tag, for example `0.1.8-stable`, `release-v2.3.0` or `app/v1.5.0`. bash takes the group, so the regex may hold `|`, in a group after the version: `^v?([0-9.]+)(-stable|)$`.
 
 ### Nightly and prerelease packages
 
@@ -230,7 +230,7 @@ aurtomator includes 14 version detection strategies. Choose by where your upstre
 
 - **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without a token, the limit is 60 requests per hour. `github-tag` reads the tags with `git ls-remote`, outside this limit.
 - **Retries:** a request that a strategy sends with curl tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. The git calls of `git-latest` and `github-tag` make one attempt. A check that still fails within its time budget runs once more after the other packages and a pause of 60 seconds. A failure on both tries fails the package for that run.
-- **Tag strategies take only `v1.2.3` and `1.2.3` by default:** without `tag_pattern`, and without `tag_version_regex` for `github-tag`, `github-tag`, `gitlab-tag` and `gitea-tag` leave out every other tag, `latest`, `1.0.0-rc1` and `1.0.0rc1` included. A `tag_pattern` replaces that filter. They pick the highest tag with `sort -V`, which places `1.0.0-rc1` above `1.0.0`, so a pattern that lets pre-release tags through picks them.
+- **Tag strategies take only `v1.2.3` and `1.2.3` by default:** without `tag_pattern` and `tag_version_regex`, `github-tag`, `gitlab-tag` and `gitea-tag` leave out every other tag, `latest`, `1.0.0-rc1` and `1.0.0rc1` included. Either field replaces that filter. They pick the highest tag with `sort -V`, which places `1.0.0-rc1` above `1.0.0`, so a pattern that lets pre-release tags through picks them.
 - **`gitea-tag` fetches at most 50 tags:** there is no pagination.
 - **`gitlab-tag` has no authentication:** private GitLab projects cannot be queried.
 

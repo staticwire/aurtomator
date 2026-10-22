@@ -103,7 +103,7 @@ aurtomator ships 14 strategies. A strategy is a bash script in `strategies/`. It
 | Field                        | Required | Description                         |
 |------------------------------|----------|-------------------------------------|
 | `upstream.project`           | yes      | `owner/repo` format                 |
-| `upstream.tag_version_regex` | no       | ERE with one capture group, see below |
+| `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, see below |
 
 **How the version is extracted:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases.
 
@@ -118,7 +118,7 @@ upstream:
   project: owner/repo
 ```
 
-**Custom tag format:** for tags like `MeshLab-2025.07` or `0.1.8-stable`, set `tag_version_regex`. The text of its capture group becomes the version. It also works with `github-tag` and `github-nightly`.
+**Custom tag format:** for tags like `MeshLab-2025.07` or `0.1.8-stable`, set `tag_version_regex`. The text of its first capture group becomes the version. bash `[[ =~ ]]` takes the group, so the regex may hold `|`. A group of alternatives has to come after the version, as in `^v?([0-9.]+)(-stable|)$`, because bash knows no group that does not capture: `^(mesa-)?([0-9.]+)$` gives `mesa-`. It also works with `github-tag`, `github-nightly`, `gitlab-tag` and `gitea-tag`.
 
 ```yaml
 name: meshlab-bin
@@ -140,7 +140,7 @@ upstream:
 |------------------------------|----------|------------------------------------------|
 | `upstream.project`           | yes      | `owner/repo` format                      |
 | `upstream.tag_pattern`       | no       | Glob to filter tags (e.g. `release-*`), replaces the default filter |
-| `upstream.tag_version_regex` | no       | ERE with one capture group, replaces the default filter |
+| `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, replaces the default filter |
 
 **How the version is extracted:** reads every tag in one request, outside the API rate limit. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead, where `*` matches anything and the match is anchored at the start. The strategy strips a leading `v`, or applies `tag_version_regex`, and returns the highest tag by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so a `tag_pattern` that lets pre-release tags through picks them.
 
@@ -217,7 +217,7 @@ upstream:
 | `upstream.nightly_tag` | no | Tag name or prefix (default: `"nightly"`, `"latest"` for pattern C) |
 | `upstream.version_source` | no | `"tag"` (default), `"release_body"`, `"tag_date"`, `"published_date"` |
 | `upstream.version_pattern` | for `release_body` | Perl regex for the version in the release body. Dashes in the match become `+`. |
-| `upstream.tag_version_regex` | no | ERE with one capture group, for `version_source: tag` |
+| `upstream.tag_version_regex` | no | ERE whose first capture group is the version, for `version_source: tag` |
 | `upstream.channel` | for pattern D | Text that the release name must contain |
 
 `tag_date` takes the `YYYY-MM-DD` date in the tag and `published_date` the release date, both rendered as `YYYY.MM.DD`.
@@ -268,8 +268,9 @@ upstream:
 | `upstream.host`        | yes      | GitLab hostname (e.g. `invent.kde.org`, `gitlab.com`) |
 | `upstream.project`     | yes      | Project path (e.g. `network/my-kde-app`)              |
 | `upstream.tag_pattern` | no       | Glob to filter tags, replaces the default filter      |
+| `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
 
-**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags. Without `tag_pattern`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names `tag_pattern`. With it, it filters the tags by the pattern. It strips a leading `v` and returns the highest by `sort -V`. There is no authentication, so private projects cannot be queried.
+**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead. It strips a leading `v`, or applies `tag_version_regex`, and returns the highest by `sort -V`. There is no authentication, so private projects cannot be queried.
 
 **Example YAML:**
 
@@ -279,6 +280,17 @@ strategy: gitlab-tag
 upstream:
   host: invent.kde.org
   project: network/my-kde-app
+```
+
+Mesa names its releases `mesa-26.2.5`:
+
+```yaml
+name: my-mesa
+strategy: gitlab-tag
+upstream:
+  host: gitlab.freedesktop.org
+  project: mesa/mesa
+  tag_version_regex: '^mesa-([0-9.]+)$'
 ```
 
 ### 3.6 gitea-tag
@@ -294,8 +306,9 @@ upstream:
 | `upstream.host`        | yes      | Instance hostname (e.g. `codeberg.org`)  |
 | `upstream.project`     | yes      | `owner/repo` format                      |
 | `upstream.tag_pattern` | no       | Glob to filter tags, replaces the default filter |
+| `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
 
-**How the version is extracted:** fetches up to 50 tags without pagination. Without `tag_pattern`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names `tag_pattern`. With it, it filters the tags by the pattern. It strips a leading `v` and returns the highest by `sort -V`.
+**How the version is extracted:** fetches up to 50 tags without pagination. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead. It strips a leading `v`, or applies `tag_version_regex`, and returns the highest by `sort -V`.
 
 **Example YAML:**
 
@@ -1029,6 +1042,8 @@ echo "$version"
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
 | `validate_pkgver <version>`     | Returns 1 for an empty version or one with a character outside `A-Za-z0-9._+` |
 | `release_tags <tags>`           | Prints the tags of the form `v1.2.3` or `1.2.3`, one per line |
+| `tag_versions <ere>`            | Prints the version in each tag of stdin: the first capture group of the ERE, or the tag without a leading `v` when the ERE is empty |
+| `latest_tag_version <tags> <tag_pattern> <ere>` | Prints the highest version among the tags, filtered as the tag strategies filter them |
 | `capture_matches <ere>`         | Prints the first capture group of every match of the ERE in stdin |
 | `ere_valid <ere>`               | Succeeds when bash can compile the ERE              |
 | `log_ok <msg>`                  | Prints a green check mark and the message to stderr |

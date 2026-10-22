@@ -94,6 +94,11 @@ case "$url" in
   *api.github.com/repos/custom-suffix/repo/releases/latest)
     echo '{"tag_name": "0.1.8-stable"}'
     ;;
+  # Tags with a prefix, as mesa names its releases
+  *gitlab.com/api/v4/projects/prefix-group%2Fprefix-project/repository/tags* | \
+    *codeberg.org/api/v1/repos/prefix-owner/prefix-repo/tags*)
+    echo '[{"name": "mesa-26.2.5"}, {"name": "mesa-26.3.0-rc1"}, {"name": "mesa-26.1.0"}]'
+    ;;
   # Tags of which some are not releases, and tags of which none is
   *gitlab.com/api/v4/projects/mixed-group%2Fmixed-project/repository/tags* | \
     *codeberg.org/api/v1/repos/mixed-owner/mixed-repo/tags*)

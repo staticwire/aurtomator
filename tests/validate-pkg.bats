@@ -566,6 +566,15 @@ allow_downgrade: $value"
   [ "$status" -eq 0 ]
 }
 
+# | ends the pattern of a sed s command
+@test "validate: tag_version_regex may hold |" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: '^v?([0-9.]+)(-stable|)$'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
 @test "validate: tag_version_regex invalid regex rejected" {
   create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
@@ -575,14 +584,14 @@ allow_downgrade: $value"
   [[ "$output" == *"not valid ERE regex"* ]]
 }
 
-# The field closes the s command of sed and adds the e flag, which runs the
-# pattern space as a command
+# In a sed s command the field would close the pattern and add the e flag,
+# which runs the pattern space as a command. bash reads it as an ERE.
 @test "validate: tag_version_regex runs no command" {
   create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
   tag_version_regex: '.*|touch $TEST_TMPDIR/pwned|e;s|(x)|y|;#'"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/pwned" ]
 }
 

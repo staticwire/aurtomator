@@ -48,30 +48,4 @@ if [[ -z "$tags" ]]; then
   exit 1
 fi
 
-# Filter by pattern if set, by the form of a release if neither field is
-if [[ -n "$tag_pattern" ]]; then
-  regex="^${tag_pattern//\*/.*}"
-  tags=$(echo "$tags" | grep -E "$regex" || true)
-elif [[ -z "$tag_version_regex" ]]; then
-  tags=$(release_tags "$tags")
-  if [[ -z "$tags" ]]; then
-    echo "No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern or upstream.tag_version_regex" >&2
-    exit 1
-  fi
-fi
-
-# Extract version from tags
-if [[ -n "$tag_version_regex" ]]; then
-  # The regex can close the s command; --sandbox refuses e, r and w
-  version=$(echo "$tags" | sed --sandbox -nE "s|${tag_version_regex}|\\1|p" | sort -V | tail -1)
-else
-  # Default: strip v prefix, sort semver, take latest
-  version=$(echo "$tags" | sed 's/^v//' | sort -V | tail -1)
-fi
-
-if [[ -z "$version" ]]; then
-  echo "No matching tags found" >&2
-  exit 1
-fi
-
-echo "$version"
+latest_tag_version "$tags" "$tag_pattern" "$tag_version_regex"

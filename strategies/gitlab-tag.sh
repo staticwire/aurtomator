@@ -20,6 +20,7 @@ pkg_file=$(pkg_file "$NAME")
 host=$(pkg_get "$pkg_file" .upstream.host)
 project=$(pkg_get "$pkg_file" .upstream.project)
 tag_pattern=$(pkg_get "$pkg_file" '.upstream.tag_pattern // ""')
+tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 
 # URL-encode the project path (e.g., group/project → group%2Fproject)
 project_encoded="${project//\//%2F}"
@@ -35,25 +36,4 @@ if [[ -z "$tags" ]]; then
   exit 1
 fi
 
-# Filter by pattern if set, by the form of a release if not
-if [[ -n "$tag_pattern" ]]; then
-  # Convert glob pattern (v*) to grep regex (^v)
-  regex="^${tag_pattern//\*/.*}"
-  tags=$(echo "$tags" | grep -E "$regex" || true)
-else
-  tags=$(release_tags "$tags")
-  if [[ -z "$tags" ]]; then
-    echo "No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern" >&2
-    exit 1
-  fi
-fi
-
-# Strip v prefix, sort semver, take latest
-version=$(echo "$tags" | sed 's/^v//' | sort -V | tail -1)
-
-if [[ -z "$version" ]]; then
-  echo "No matching tags found" >&2
-  exit 1
-fi
-
-echo "$version"
+latest_tag_version "$tags" "$tag_pattern" "$tag_version_regex"
