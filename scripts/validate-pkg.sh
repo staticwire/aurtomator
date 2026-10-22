@@ -129,20 +129,6 @@ validate_pkg() {
 
   # --- Strategy-specific fields ---
 
-  # Validate optional tag_pattern as regex (used by *-tag strategies)
-  local tag_pattern
-  tag_pattern=$(pkg_get "$file" '.upstream.tag_pattern // ""')
-  if [[ -n "$tag_pattern" && "$tag_pattern" != "null" ]]; then
-    # Strategies convert glob to regex: ^${pattern//\*/.*}
-    local tag_regex="^${tag_pattern//\*/.*}"
-    local grep_rc=0
-    echo "" | grep -qE "$tag_regex" 2>/dev/null || grep_rc=$?
-    if [[ "$grep_rc" -eq 2 ]]; then
-      log_err "$file: upstream.tag_pattern is not valid as regex: $tag_pattern"
-      ((errors++))
-    fi
-  fi
-
   # Validate optional tag_version_regex (used by github-release, github-tag,
   # github-nightly, gitlab-tag and gitea-tag)
   local tag_version_regex

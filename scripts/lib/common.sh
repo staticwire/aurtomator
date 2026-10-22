@@ -107,7 +107,7 @@ github_api() {
 # file, so a shell metacharacter in an upstream tag would execute in CI.
 # The allowlist is narrower than makepkg's own pkgver check on purpose:
 # makepkg only forbids whitespace, '/', ':', '-' and non-ASCII. A word
-# without a digit, such as latest from a tag_pattern, is no version.
+# without a digit, such as latest, is no version.
 # Args: $1=version string
 # Returns: 0=ok, 1=rejected (reason on stderr)
 validate_pkgver() {
@@ -127,9 +127,9 @@ validate_pkgver() {
   fi
 }
 
-# The tags of the form v1.2.3 or 1.2.3, for a tag strategy without a filter
-# of its own. sort -V puts latest, 2.1.0-rc1 and 2.1.0rc1 above 2.1.0, so
-# they are left out.
+# The tags of the form v1.2.3 or 1.2.3, for a tag strategy without
+# tag_version_regex. sort -V puts latest, 2.1.0-rc1 and 2.1.0rc1 above
+# 2.1.0, so they are left out.
 # Args: $1=tags, one per line
 release_tags() {
   grep -E '^v?[0-9]+(\.[0-9]+)*$' <<<"$1" || true
@@ -173,20 +173,17 @@ tag_versions() {
   done
 }
 
-# The highest version among the tags of a tag strategy. tag_pattern keeps
-# the tags it matches from the start, with * for any text. Without either
-# field, only the tags of the form v1.2.3 or 1.2.3 count.
-# Args: $1=tags, one per line, $2=tag_pattern, $3=tag_version_regex,
-#       $4=tag_version_replace
+# The highest version among the tags of a tag strategy. tag_version_regex
+# keeps the tags it matches, and without it only the tags of the form
+# v1.2.3 or 1.2.3 count.
+# Args: $1=tags, one per line, $2=tag_version_regex, $3=tag_version_replace
 # Returns: 1 with the reason on stderr when no tag gives a version
 latest_tag_version() {
-  local tags="$1" pattern="$2" regex="$3" replace="${4:-}" version
-  if [[ -n "$pattern" ]]; then
-    tags=$(grep -E "^${pattern//\*/.*}" <<<"$tags" || true)
-  elif [[ -z "$regex" ]]; then
+  local tags="$1" regex="$2" replace="${3:-}" version
+  if [[ -z "$regex" ]]; then
     tags=$(release_tags "$tags")
     if [[ -z "$tags" ]]; then
-      echo "No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern or upstream.tag_version_regex" >&2
+      echo "No tag of the form v1.2.3 or 1.2.3; set upstream.tag_version_regex" >&2
       return 1
     fi
   fi

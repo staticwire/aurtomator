@@ -152,23 +152,13 @@ teardown() {
   [ "$output" = "2.0.0" ]
 }
 
-@test "github-tag: names both fields when no tag is a release" {
+@test "github-tag: names tag_version_regex when no tag is a release" {
   create_test_package "test-gh-tag" "github-tag" "upstream:
   project: named-owner/named-repo"
 
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern or upstream.tag_version_regex"* ]]
-}
-
-@test "github-tag: tag_pattern replaces the default filter" {
-  create_test_package "test-gh-tag" "github-tag" "upstream:
-  project: mixed-owner/mixed-repo
-  tag_pattern: 'latest'"
-
-  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
-  [ "$status" -eq 0 ]
-  [ "$output" = "latest" ]
+  [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_version_regex"* ]]
 }
 
 @test "github-tag: reads every tag with git ls-remote" {
@@ -273,14 +263,14 @@ teardown() {
   [ "$output" = "2.0.0" ]
 }
 
-@test "gitlab-tag: names tag_pattern when no tag is a release" {
+@test "gitlab-tag: names tag_version_regex when no tag is a release" {
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com
   project: named-group/named-project"
 
   run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern"* ]]
+  [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_version_regex"* ]]
 }
 
 # === gitea-tag ===
@@ -329,14 +319,14 @@ teardown() {
   [ "$output" = "2.0.0" ]
 }
 
-@test "gitea-tag: names tag_pattern when no tag is a release" {
+@test "gitea-tag: names tag_version_regex when no tag is a release" {
   create_test_package "test-gitea" "gitea-tag" "upstream:
   host: codeberg.org
   project: named-owner/named-repo"
 
   run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-gitea"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_pattern"* ]]
+  [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_version_regex"* ]]
 }
 
 # === pypi ===
@@ -1463,35 +1453,46 @@ EOF
   [[ "$output" == *"Failed to fetch release tag 'models'"* ]]
 }
 
-@test "github-tag: tag_pattern filters out all tags" {
+@test "github-tag: tag_version_regex filters out all tags" {
   create_test_package "test-filter" "github-tag" "upstream:
   project: owner/repo
-  tag_pattern: 'release-*'"
+  tag_version_regex: '^release-(.+)$'"
 
-  # The mock returns v2.0.0, v1.9.0 and v1.0.0, and none matches ^release-.*
+  # The mock returns v2.0.0, v1.9.0 and v1.0.0, and none matches ^release-
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-filter"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"No matching tags"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No matching tags found"* ]]
 }
 
-@test "gitlab-tag: tag_pattern filters out all tags" {
+@test "gitlab-tag: tag_version_regex filters out all tags" {
   create_test_package "test-filter" "gitlab-tag" "upstream:
   host: gitlab.com
   project: group/project
-  tag_pattern: 'release-*'"
+  tag_version_regex: '^release-(.+)$'"
 
   run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-filter"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"No matching tags"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No matching tags found"* ]]
 }
 
-@test "gitea-tag: tag_pattern filters out all tags" {
+@test "gitea-tag: tag_version_regex filters out all tags" {
   create_test_package "test-filter" "gitea-tag" "upstream:
   host: codeberg.org
   project: owner/repo
-  tag_pattern: 'release-*'"
+  tag_version_regex: '^release-(.+)$'"
 
   run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-filter"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"No matching tags"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No matching tags found"* ]]
+}
+
+# A pin to one release line leaves out v2.0.0 and the v2.1.0 rc tags
+@test "github-tag: tag_version_regex pins a release line" {
+  create_test_package "test-pin" "github-tag" "upstream:
+  project: mixed-owner/mixed-repo
+  tag_version_regex: '^v(1\\.[0-9.]+)$'"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-pin"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.9.0" ]
 }

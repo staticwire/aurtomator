@@ -681,7 +681,7 @@ EOF
   [ ! -e "$TEST_TMPDIR/pwned" ]
 }
 
-# A tag_pattern, a scraped page or a registry can return a word
+# A tag_version_regex, a scraped page or a registry can return a word
 @test "check-update: rejects a word from the strategy" {
   cat >"$TEST_TMPDIR/strategies/word.sh" <<'EOF'
 #!/usr/bin/env bash

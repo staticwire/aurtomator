@@ -19,10 +19,10 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "validate: github-tag with pattern passes" {
+@test "validate: github-tag with tag_version_regex passes" {
   create_test_package "mypkg" "github-tag" "upstream:
   project: owner/repo
-  tag_pattern: 'v*'"
+  tag_version_regex: '^v(1\\.[0-9.]+)$'"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 0 ]
 }
@@ -295,7 +295,7 @@ EOF
 
 @test "validate: github-tag fails without upstream.project" {
   create_test_package "mypkg" "github-tag" "upstream:
-  tag_pattern: 'v*'"
+  tag_version_regex: '^v(.+)$'"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -ne 0 ]
   [[ "$output" == *"requires 'upstream.project'"* ]]
@@ -670,23 +670,6 @@ pkgver_dash: _"
     [ "$status" -ne 0 ]
     [[ "$output" == *"upstream.prerelease must be true or false"* ]]
   done
-}
-
-@test "validate: tag_pattern valid glob accepted" {
-  create_test_package "mypkg" "github-tag" "upstream:
-  project: owner/repo
-  tag_pattern: 'v*'"
-  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-  [ "$status" -eq 0 ]
-}
-
-@test "validate: tag_pattern invalid regex rejected" {
-  create_test_package "mypkg" "github-tag" "upstream:
-  project: owner/repo
-  tag_pattern: '[invalid'"
-  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"not valid as regex"* ]]
 }
 
 # === tag_version_regex validation ===

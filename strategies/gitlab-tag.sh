@@ -19,7 +19,6 @@ source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 pkg_file=$(pkg_file "$NAME")
 host=$(pkg_get "$pkg_file" .upstream.host)
 project=$(pkg_get "$pkg_file" .upstream.project)
-tag_pattern=$(pkg_get "$pkg_file" '.upstream.tag_pattern // ""')
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 
@@ -37,4 +36,4 @@ if [[ -z "$tags" ]]; then
   exit 1
 fi
 
-latest_tag_version "$tags" "$tag_pattern" "$tag_version_regex" "$tag_version_replace"
+latest_tag_version "$tags" "$tag_version_regex" "$tag_version_replace"

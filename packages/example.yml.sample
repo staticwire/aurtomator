@@ -63,14 +63,13 @@ upstream:
 #   tag_version_replace: '\1.\2.\3'
 
 # --- github-tag -------------------------------------------------------------
-# Reads up to 100 tags from /repos/{project}/tags and keeps v1.2.3 and 1.2.3.
-# tag_pattern or tag_version_regex replaces that filter.
+# Reads every tag with git ls-remote and keeps v1.2.3 and 1.2.3.
+# tag_version_regex replaces that filter, here to pin the 1.36 line.
 #
 # strategy: github-tag
 # upstream:
 #   project: owner/repo                    # required
-#   tag_pattern: 'release-*'               # optional, glob filter
-#   tag_version_regex: 'release-(.+)'      # optional, ERE with a capture group
+#   tag_version_regex: '^v(1\.36\.[0-9]+)$'  # optional, ERE with a capture group
 #   tag_version_replace: '\1'              # optional, \1 to \9 are the groups
 
 # --- github-nightly ---------------------------------------------------------
@@ -123,26 +122,24 @@ upstream:
 
 # --- gitlab-tag -------------------------------------------------------------
 # Any GitLab instance, public API only (no authentication). Keeps the tags
-# v1.2.3 and 1.2.3; tag_pattern or tag_version_regex replaces that filter.
+# v1.2.3 and 1.2.3; tag_version_regex replaces that filter.
 #
 # strategy: gitlab-tag
 # upstream:
 #   host: gitlab.com                       # required, hostname without protocol
 #   project: group/subgroup/project        # required, full path
-#   tag_pattern: 'release-*'               # optional
 #   tag_version_regex: '^mesa-([0-9.]+)$'  # optional, ERE with a capture group
 #   tag_version_replace: '\1'              # optional, \1 to \9 are the groups
 
 # --- gitea-tag --------------------------------------------------------------
 # Codeberg, self-hosted Gitea/Forgejo. Reads at most 50 tags and keeps
-# v1.2.3 and 1.2.3; tag_pattern or tag_version_regex replaces that filter.
+# v1.2.3 and 1.2.3; tag_version_regex replaces that filter.
 #
 # strategy: gitea-tag
 # upstream:
 #   host: codeberg.org                     # required
 #   project: owner/repo                    # required
-#   tag_pattern: 'release-*'               # optional
-#   tag_version_regex: 'release-(.+)'      # optional, ERE with a capture group
+#   tag_version_regex: '^release-(.+)$'      # optional, ERE with a capture group
 #   tag_version_replace: '\1'              # optional, \1 to \9 are the groups
 
 # --- git-latest -------------------------------------------------------------
