@@ -188,12 +188,35 @@ current: '$current'"
   [ "$status" -eq 0 ]
 }
 
-@test "validate: kde-tarball fails with an upstream block" {
+@test "validate: kde-tarball project and path pass" {
   create_test_package "mypkg" "kde-tarball" "upstream:
-  project: other-name"
+  project: alkimia
+  path: unstable/alkimia"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"strategy 'kde-tarball' takes no upstream settings"* ]]
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: kde-tarball project outside the characters of a name rejected" {
+  local project
+  for project in 'a/b' 'a b' '-a' "a'b"; do
+    create_test_package "mypkg" "kde-tarball" "upstream:
+  project: \"$project\""
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"upstream.project must be a tarball name of A-Za-z0-9@._+-: $project"* ]]
+  done
+}
+
+# The path ends up in https://download.kde.org/<path>/
+@test "validate: kde-tarball path that is not a directory on the server rejected" {
+  local path
+  for path in ../etc stable/../x /stable/x stable//x 'stable/x?y' stable/x/ 'stable/a b'; do
+    create_test_package "mypkg" "kde-tarball" "upstream:
+  path: '$path'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"upstream.path must be a directory on download.kde.org, such as unstable/alkimia: $path"* ]]
+  done
 }
 
 @test "validate: webpage-scrape passes" {

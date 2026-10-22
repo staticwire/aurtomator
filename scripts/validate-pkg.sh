@@ -329,9 +329,17 @@ validate_pkg() {
       # No required strategy-specific fields
       ;;
     kde-tarball)
-      # The strategy reads no YAML: the package name is the directory
-      if [[ "$(pkg_get "$file" '.upstream | tag')" != "!!null" ]]; then
-        log_err "$file: strategy 'kde-tarball' takes no upstream settings, the package name is the directory on download.kde.org"
+      local project path
+      project=$(pkg_get "$file" '.upstream.project // ""')
+      path=$(pkg_get "$file" '.upstream.path // ""')
+      if [[ -n "$project" && ! "$project" =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]*$ ]]; then
+        log_err "$file: upstream.project must be a tarball name of A-Za-z0-9@._+-: $project"
+        ((errors++))
+      fi
+      # The path ends up in https://download.kde.org/<path>/. A segment that
+      # starts with a dot would allow ..
+      if [[ -n "$path" && ! "$path" =~ ^[A-Za-z0-9_+-][A-Za-z0-9._+-]*(/[A-Za-z0-9_+-][A-Za-z0-9._+-]*)*$ ]]; then
+        log_err "$file: upstream.path must be a directory on download.kde.org, such as unstable/alkimia: $path"
         ((errors++))
       fi
       ;;

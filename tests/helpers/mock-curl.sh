@@ -67,6 +67,23 @@ case "$url" in
   *download.kde.org/stable/no-versions-here/*)
     echo '<html><body>Parent Directory</body></html>'
     ;;
+  # KDE tarball: a flat directory with builds for other systems, as kdiff3
+  *download.kde.org/stable/kdiff3/)
+    echo '<a href="kdiff3-1.12.6-macos-arm64.dmg">kdiff3-1.12.6-macos-arm64.dmg</a>'
+    echo '<a href="kdiff3-1.12.5.tar.xz">kdiff3-1.12.5.tar.xz</a>'
+    echo '<a href="kdiff3-1.12.6.tar.xz">kdiff3-1.12.6.tar.xz</a>'
+    ;;
+  # KDE tarball: a flat directory of pre-releases outside stable/
+  *download.kde.org/unstable/alkimia/)
+    echo '<a href="alkimia-8.1.76.tar.xz">alkimia-8.1.76.tar.xz</a>'
+    echo '<a href="alkimia-8.1.80.tar.xz">alkimia-8.1.80.tar.xz</a>'
+    echo '<a href="alkimia-8.1.80.tar.xz.sig">alkimia-8.1.80.tar.xz.sig</a>'
+    ;;
+  # KDE tarball: a dot in the name must match a dot alone
+  *download.kde.org/stable/kio.s3/)
+    echo '<a href="kioXs3-9.9.9.tar.xz">kioXs3-9.9.9.tar.xz</a>'
+    echo '<a href="kio.s3-1.0.0.tar.xz">kio.s3-1.0.0.tar.xz</a>'
+    ;;
   # Webpage scrape: no matching versions
   *example.com/empty-page*)
     echo '<html><body>No downloads here</body></html>'

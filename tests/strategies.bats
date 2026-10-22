@@ -455,6 +455,37 @@ teardown() {
   [ "$output" = "1.0.1" ]
 }
 
+@test "kde-tarball: upstream.project names the tarball and the directory" {
+  record_curl
+  create_test_package "kdiff3-mine" "kde-tarball" "upstream:
+  project: kdiff3"
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "kdiff3-mine"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.12.6" ]
+  grep -qx 'https://download.kde.org/stable/kdiff3/' "$TEST_TMPDIR/curl.args"
+}
+
+@test "kde-tarball: upstream.path names the directory" {
+  record_curl
+  create_test_package "alkimia-unstable" "kde-tarball" "upstream:
+  project: alkimia
+  path: unstable/alkimia"
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "alkimia-unstable"
+  [ "$status" -eq 0 ]
+  [ "$output" = "8.1.80" ]
+  grep -qx 'https://download.kde.org/unstable/alkimia/' "$TEST_TMPDIR/curl.args"
+}
+
+@test "kde-tarball: a dot in the name matches a dot alone" {
+  create_test_package "kio.s3" "kde-tarball" ""
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "kio.s3"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0.0" ]
+}
+
 # === webpage-scrape ===
 
 @test "webpage-scrape: returns version matched by pattern" {

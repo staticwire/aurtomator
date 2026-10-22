@@ -194,11 +194,14 @@ upstream:
 #   archpkg: qt6-base                      # optional, defaults to `name` above
 
 # --- kde-tarball ------------------------------------------------------------
-# Reads https://download.kde.org/stable/<name>/ for *.tar.xz releases.
-# Takes no upstream settings: the package name is the directory, and
-# validate-pkg.sh refuses an upstream block.
+# Reads one directory on https://download.kde.org/ for
+# <project>-<version>.tar.xz releases. A directory per version, as for
+# Plasma, does not fit.
 #
 # strategy: kde-tarball
+# upstream:
+#   project: alkimia                       # optional, defaults to `name` above
+#   path: unstable/alkimia                 # optional, defaults to stable/<project>
 
 # --- webpage-scrape ---------------------------------------------------------
 # Any HTTPS page + regex, for upstreams without an API.

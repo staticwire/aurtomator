@@ -73,7 +73,7 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 |----------------|----------|-----------------------------------------------------------------------------|
 | `name`         | yes      | `pkgbase` on the AUR, equal to the file name without `.yml`                 |
 | `strategy`     | yes      | Version detection strategy: a script name in `strategies/` without `.sh`    |
-| `upstream`     | depends  | Strategy-specific settings. `archpkg` and `repology` need none, and `kde-tarball` takes none. |
+| `upstream`     | depends  | Strategy-specific settings. `archpkg`, `repology` and `kde-tarball` need none. |
 | `current`      | no       | Currently tracked version. Written after every push.                        |
 | `last_updated` | no       | Date of the last push, `YYYY-MM-DD`. Written after every push.              |
 | `allow_downgrade` | no    | `true` publishes an upstream version lower than `current`. Default `false`, see [4.3](#43-downgrade-behavior). |
@@ -596,19 +596,34 @@ upstream:
 
 ### 3.14 kde-tarball
 
-**What it checks:** the KDE download server listing (`https://download.kde.org/stable/{name}/`).
+**What it checks:** the KDE download server listing (`https://download.kde.org/{path}/`).
 
-**When to use:** KDE and Plasma packages that publish release tarballs on download.kde.org.
+**When to use:** KDE projects that publish release tarballs in one directory on download.kde.org, such as `stable/kio-s3/kio-s3-1.0.2.tar.xz`. Projects with a directory per version, such as Plasma under `stable/plasma/6.6.3/` or krita under `stable/krita/6.0.4/`, do not fit: the strategy reads one listing.
 
-**YAML fields:** none. The package `name` is the directory on the server, and `validate-pkg.sh` refuses an `upstream` block.
+**YAML fields:**
 
-**How the version is extracted:** matches `{name}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`), and returns the highest by `sort -Vu`.
+| Field              | Required | Description                                                  |
+|--------------------|----------|--------------------------------------------------------------|
+| `upstream.project` | no       | Tarball name. Defaults to the package `name`.                |
+| `upstream.path`    | no       | Directory on download.kde.org. Defaults to `stable/{project}`. |
+
+**How the version is extracted:** matches `{project}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`), and returns the highest by `sort -Vu`. A dot or a plus in `project` matches itself. `validate-pkg.sh` refuses a `project` with a character outside `A-Za-z0-9@._+-`, and a `path` with an empty segment, a segment that starts with a dot, or a character outside `A-Za-z0-9._+-`.
 
 **Example YAML:**
 
 ```yaml
 name: my-kde-app
 strategy: kde-tarball
+```
+
+The pre-releases of alkimia, `8.2.70` at the time of writing, live in `unstable/alkimia/`:
+
+```yaml
+name: alkimia-unstable
+strategy: kde-tarball
+upstream:
+  project: alkimia
+  path: unstable/alkimia
 ```
 
 ## 4. Update Process
