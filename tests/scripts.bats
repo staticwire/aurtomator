@@ -281,6 +281,71 @@ EOF
   [[ "$output" == *"SKIP checksums mixed with real hashes for remote"* ]]
 }
 
+# The tarball and signature pair of lib32-gettext
+@test "audit_pkgbuild: allows the SKIP of a signature next to a real hash" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local ext
+  for ext in sig sign asc; do
+    cat >"$TEST_TMPDIR/test.PKGBUILD" <<EOF
+pkgname=test-signed
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/test-\${pkgver}.tar.gz"{,.$ext})
+sha512sums=('abc123'
+            'SKIP')
+EOF
+    run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "audit_pkgbuild: allows a signature saved under a name before ::" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-signed
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/test-${pkgver}.tar.gz"
+        "test-${pkgver}.tar.gz.sig::https://example.com/signature?v=${pkgver}")
+sha512sums=('abc123'
+            'SKIP')
+EOF
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+  [ "$status" -eq 0 ]
+}
+
+# makepkg reads the name before :: and the whole entry without one
+@test "audit_pkgbuild: blocks the SKIP of a source makepkg would hash" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local sig
+  for sig in "test.key::https://example.com/test.sig" "https://example.com/test.sig?raw=1"; do
+    cat >"$TEST_TMPDIR/test.PKGBUILD" <<EOF
+pkgname=test-signed
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/test-\${pkgver}.tar.gz"
+        "$sig")
+sha512sums=('abc123'
+            'SKIP')
+EOF
+    run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"SKIP checksums mixed with real hashes for remote"* ]]
+  done
+}
+
 # === has_skip_checksums ===
 
 @test "has_skip_checksums: finds SKIP in arch-specific arrays" {
@@ -329,6 +394,37 @@ sha256sums_x86_64=('def456')
 EOF
   run has_skip_checksums "$TEST_TMPDIR/test.PKGBUILD"
   [ "$status" -eq 1 ]
+}
+
+@test "has_skip_checksums: returns 1 when every SKIP belongs to a signature" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-signed
+pkgver=1.0.0
+pkgrel=1
+arch=('x86_64')
+source=("https://example.com/app-${pkgver}.tar.gz"{,.sig})
+source_x86_64=("https://example.com/app-${pkgver}-x86_64.tar.gz"{,.asc})
+sha256sums=('abc123' 'SKIP')
+sha256sums_x86_64=('def456' 'SKIP')
+EOF
+  run has_skip_checksums "$TEST_TMPDIR/test.PKGBUILD"
+  [ "$status" -eq 1 ]
+}
+
+@test "has_skip_checksums: finds a VCS SKIP next to the SKIP of a signature" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-signed-vcs
+pkgver=r100.abc1234
+pkgrel=1
+arch=('any')
+source=("https://example.com/app.tar.gz.sig"
+        "git+https://example.com/repo.git")
+sha256sums=('SKIP' 'SKIP')
+EOF
+  run has_skip_checksums "$TEST_TMPDIR/test.PKGBUILD"
+  [ "$status" -eq 0 ]
 }
 
 # === check-update.sh ===

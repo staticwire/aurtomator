@@ -17,7 +17,7 @@ For every update, aurtomator does exactly this:
 9. Run `makepkg --printsrcinfo` to regenerate `.SRCINFO`
 10. Commit and push to the AUR
 
-Steps 5 to 7 are skipped when any checksum array holds `SKIP`, see [Packages with VCS checksums](#packages-with-vcs-checksums-skip).
+Steps 5 to 7 are skipped when a checksum array holds a `SKIP` other than that of a signature, see [Packages with VCS checksums](#packages-with-vcs-checksums-skip) and [Sources with a signature](#sources-with-a-signature).
 
 aurtomator does not build packages and does not check runtime dependencies. That needs `ldd` or `readelf` on built binaries and is out of scope. Dependency correctness is the maintainer's responsibility.
 
@@ -75,9 +75,23 @@ b2sums_x86_64=('SKIP')
 b2sums_aarch64=('SKIP')
 ```
 
-**Why it works:** aurtomator reads every checksum array, with and without an arch suffix. A `SKIP` at any position makes it skip `updpkgsums`, which would otherwise replace `SKIP` with a real hash.
+**Why it works:** aurtomator reads every checksum array, with and without an arch suffix. A `SKIP` at any position makes it skip `updpkgsums`, which would otherwise replace the `SKIP` of a download with a real hash. The `SKIP` of a signature is the exception, see [Sources with a signature](#sources-with-a-signature).
 
-`updpkgsums` is all-or-nothing: it recalculates every checksum or none. A real hash for a remote source next to `SKIP` is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
+A real hash for a remote source next to a `SKIP` other than that of a signature is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
+
+### Sources with a signature
+
+Packages that download a file and its detached signature, as `lib32-gettext` does:
+
+```bash
+source=("https://example.com/app-${pkgver}.tar.gz"{,.sig})
+sha256sums=('abc123def456...'
+            'SKIP')
+```
+
+**Why it works:** makepkg gives `SKIP` to every source whose file name ends in `.sig`, `.sign` or `.asc`, and `updpkgsums` writes that `SKIP` again. When every `SKIP` of the PKGBUILD belongs to such a source, aurtomator runs steps 5 to 7 as for a package without `SKIP`, and the other sources get new checksums. For a source with a name before `::`, makepkg reads that name and not the URL.
+
+aurtomator does not check the signature. It runs `makepkg --verifysource` with `--skippgpcheck`, and verify skips every `SKIP`, see step 5 of verify in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
 
 ### Non-standard tag formats (tag_version_regex)
 
@@ -126,7 +140,7 @@ A PKGBUILD with a `pkgver()` function and a strategy other than `git-latest` or 
 
 ### Mixed SKIP and real checksums (BLOCKED)
 
-A PKGBUILD with a `SKIP` and a real hash for a remote source, in any order and in any checksum array:
+A PKGBUILD with a `SKIP` and a real hash for a remote source, in any order and in any checksum array. The `SKIP` of a signature does not count, see [Sources with a signature](#sources-with-a-signature).
 
 ```bash
 source=("git+https://example.com/app.git" "https://example.com/data.tar.gz")
@@ -134,9 +148,9 @@ sha256sums=('SKIP'
             'abc123def456...')
 ```
 
-**Detection:** `audit_pkgbuild()` sources the PKGBUILD and pairs every entry of every checksum array (`ck`, `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `b2`, with and without an arch suffix) with the entry at the same index of `source` or `source_<arch>`. A real hash for a URL with `://` next to a `SKIP` blocks the update. A real hash for a local file is allowed, because that file lives in the AUR repo and does not change between versions.
+**Detection:** `audit_pkgbuild()` sources the PKGBUILD and pairs every entry of every checksum array (`ck`, `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `b2`, with and without an arch suffix) with the entry at the same index of `source` or `source_<arch>`. A real hash for a URL with `://` next to a `SKIP` other than that of a signature blocks the update. A real hash for a local file is allowed, because that file lives in the AUR repo and does not change between versions.
 
-**Why:** when aurtomator sees `SKIP`, it skips `updpkgsums`, so the real hash of the remote source would be stale after the version bump.
+**Why:** when aurtomator sees such a `SKIP`, it skips `updpkgsums`, so the real hash of the remote source would be stale after the version bump.
 
 ### Sources that do not follow pkgver (BLOCKED)
 
@@ -150,7 +164,7 @@ A PKGBUILD whose sources take the version from another variable, as with `_pkgve
 
 Upstream moves or renames a release, and the old URL now redirects to an HTML error or download page.
 
-**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text. The check runs only when no checksum array holds `SKIP`: one `SKIP` turns it off for every URL of the package.
+**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text. The check runs only when no checksum array holds a `SKIP` other than that of a signature: one such `SKIP` turns it off for every URL of the package.
 
 **Why:** without this check, `updpkgsums` would hash the HTML page. The checksums would match and the package would fail to install.
 
@@ -177,7 +191,7 @@ When upstream changes the download URL format:
 - Binary renamed: `app-linux-x86_64` to `app-linux-amd64`
 - Major version path change: `v1/app.tar.gz` to `v2/app.tar.gz`
 
-aurtomator does not modify `source=()`. After such a change, source URL validation or `updpkgsums` fails and aurtomator refuses to push. That failure is safe. In a package with a `SKIP` checksum every remote source is `SKIP`, and no step downloads one, so a changed URL there is pushed unnoticed.
+aurtomator does not modify `source=()`. After such a change, source URL validation or `updpkgsums` fails and aurtomator refuses to push. That failure is safe. In a package with a `SKIP` other than that of a signature, every remote source is `SKIP`, and no step downloads one, so a changed URL there is pushed unnoticed.
 
 ### Packages with changing dependencies
 

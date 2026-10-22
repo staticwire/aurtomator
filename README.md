@@ -74,8 +74,8 @@ aurtomator only sets `pkgver`, resets `pkgrel` to 1, and updates checksums and `
 
 - **Split packages**: `pkgname=(...)` arrays
 - **`pkgver()` with the wrong strategy**: use `git-latest` for VCS packages
-- **A `SKIP` next to a real checksum of a remote source**: `updpkgsums` is all-or-nothing
-- **Source URLs returning HTML**: detected by the `Content-Type` check, which runs only when no checksum is `SKIP`
+- **A `SKIP` next to a real checksum of a remote source**: such a `SKIP` turns off `updpkgsums`, and the real checksum would go stale. The `SKIP` of a signature (`.sig`, `.sign`, `.asc`) does not count, because makepkg gives it `SKIP` itself
+- **Source URLs returning HTML**: detected by the `Content-Type` check, which runs only when no checksum is `SKIP` other than that of a signature
 
 Patches in `source=()` trigger a warning and are not blocked.
 

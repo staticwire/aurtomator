@@ -125,7 +125,8 @@ fi
 # UPDATE CHECKSUMS
 # =============================================================================
 
-# updpkgsums would replace a SKIP in any checksum array with a real hash
+# updpkgsums would put a real hash in place of the SKIP of a download,
+# except a signature, which makepkg gives SKIP itself
 if has_skip_checksums "${aur_dir}/PKGBUILD"; then
   log_info "VCS package, skipping checksums"
 else

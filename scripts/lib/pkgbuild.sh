@@ -27,9 +27,14 @@ pkgbuild_checksums() {
 }
 
 # Args: $1=pkgbuild path
-# Returns: 0 when any checksum of the PKGBUILD is SKIP, 1 otherwise
+# Returns: 0 when a checksum is SKIP for a source other than a signature,
+#          1 otherwise. makepkg itself gives SKIP to a source whose file
+#          name ends in .sig, .sign or .asc, so updpkgsums keeps it.
 has_skip_checksums() {
-  pkgbuild_checksums "$1" | awk -F'\t' '$1 == "SKIP" { found = 1 } END { exit !found }'
+  pkgbuild_checksums "$1" | awk -F'\t' '
+    { name = $2; sub(/::.*/, "", name) }
+    $1 == "SKIP" && name !~ /\.(sig|sign|asc)$/ { found = 1 }
+    END { exit !found }'
 }
 
 # =============================================================================
@@ -63,16 +68,15 @@ audit_pkgbuild() {
   fi
 
   # FATAL: SKIP mixed with real hashes for REMOTE sources.
-  # updpkgsums is all-or-nothing, and a SKIP array skips it entirely, so a
-  # real hash for a remote source would go stale on the version bump.
-  # Real hashes for local files (no ://) are fine: they live in the AUR
-  # repo and do not change between versions.
-  if pkgbuild_checksums "$pkgbuild" | awk -F'\t' '
-    $1 == "SKIP" { skip = 1 }
-    $1 != "SKIP" && $2 ~ /:\/\// { remote = 1 }
-    END { exit !(skip && remote) }'; then
+  # A SKIP other than that of a signature makes update-pkg.sh skip
+  # updpkgsums, so a real hash for a remote source would go stale on the
+  # version bump. Real hashes for local files (no ://) are fine: they live
+  # in the AUR repo and do not change between versions.
+  if has_skip_checksums "$pkgbuild" && pkgbuild_checksums "$pkgbuild" | awk -F'\t' '
+    $1 != "SKIP" && $2 ~ /:\/\// { found = 1 }
+    END { exit !found }'; then
     log_err "BLOCKED: SKIP checksums mixed with real hashes for remote sources."
-    log_err "  updpkgsums is all-or-nothing: either all checksums update or none."
+    log_err "  A SKIP other than that of a signature (.sig, .sign, .asc) turns off updpkgsums."
     log_err "  Remote source hashes would become stale on version bump."
     fatals=$((fatals + 1))
   fi
