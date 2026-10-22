@@ -77,6 +77,7 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 | `current`      | no       | Currently tracked version. Written after every push.                        |
 | `last_updated` | no       | Date of the last push, `YYYY-MM-DD`. Written after every push.              |
 | `allow_downgrade` | no    | `true` publishes an upstream version lower than `current`. Default `false`, see [4.3](#43-downgrade-behavior). |
+| `allow_version_jump` | no | `true` publishes a version whose first number has at least two digits more than the first number of `current`. Default `false`, see [4.3](#43-downgrade-behavior). |
 | `pkgver_dash`  | no       | `_` or `.`, the character that stands for each `-` of the upstream version, see below |
 
 Example:
@@ -719,6 +720,16 @@ Every comparison that finds the current version newer than the latest one (`verc
 
 All three count toward `pkg_ok`, so the packages badge stays `brightgreen`. Only `check_failed` and `update_failed` turn it red.
 
+#### Version jumps
+
+An update whose first number has at least two digits more than the first number of `current`, such as `13 → 2026102100` or `4.4215 → 4215`, reaches the AUR only when the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the same upstream than a release: GrapheneOS tags the standalone releases of `hardened_malloc` `1` to `14` and its GrapheneOS builds, such as `2026102100`, in the same repository, and the default tag filter keeps both. Without the flag, `check-all.sh` writes `jump_skipped: <version>`, logs the line below and pushes nothing. `--prepare` and `--publish` apply the same rule. A skipped jump opens no issue and counts toward `pkg_ok`, and `update-readme.sh` renders `jump_skipped: 2026102100` as `⬆️ 2026102100 skipped (version jump)`.
+
+```text
+! hardened_malloc: version jump 13 → 2026102100, skipped: allow_version_jump is not set
+```
+
+A step such as `9 → 10` or `99 → 100` adds one digit and passes. A package that moves to another scheme on purpose, from `1.9` to `2026.1` for example, sets the flag and can remove it once `current` holds the new scheme. Where a repository carries two schemes, `tag_version_regex` picks one.
+
 ### 4.4 Prepare and publish
 
 A PKGBUILD is a bash script, and every step that reads it executes it: the audit, `updpkgsums`, `makepkg --verifysource` and `makepkg --printsrcinfo`. Whoever can push to the AUR repo of a tracked package, a co-maintainer for example, runs code in those steps. Prepare and publish split the update so that this code never runs where the SSH key, the GPG key or a write token is. Code that runs in prepare can write the prepared files and the statuses of every package, so verify checks the checksums against the sources in between, and publish takes the statuses from the check run, which executes no PKGBUILD.
@@ -749,11 +760,11 @@ A PKGBUILD is a bash script, and every step that reads it executes it: the audit
 
 Step 5 accepts both forms of a line other than `pkgver`, `pkgrel`, `source` and the checksums, because only running the PKGBUILD shows which form it yields. Code that runs in prepare can therefore pick the form of each such line in the `.SRCINFO` of any package updated in the same run, and keep `depends = foo>=1.2` where the PKGBUILD derives `foo>=${pkgver}` for version `1.3`. makepkg reads only the PKGBUILD. The AUR stores the description, the URL, the dependencies, the relations and the licenses from `.SRCINFO` and serves them on the package page and through its RPC interface, and yay parses the `.SRCINFO` of every package it clones. That code comes from whoever can push to the AUR repo of a tracked package, as the first paragraph of this section says.
 
-`check-all.sh --prepare <dir>` runs no strategy and needs no `GITHUB_TOKEN`. It takes the versions from the statuses that a check run, `check-all.sh` without a mode, wrote to `.status/` before it, and reads them before the first PKGBUILD runs. It prepares every package with `new_version` or `available_downgrade` into `<dir>/prepared/` and copies the statuses to `<dir>/status/`. A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped` instead, see [4.3](#43-downgrade-behavior). A failed preparation becomes `update_failed`, and a package without a status from the check run becomes `check_failed`. The other statuses stay as the check run wrote them.
+`check-all.sh --prepare <dir>` runs no strategy and needs no `GITHUB_TOKEN`. It takes the versions from the statuses that a check run, `check-all.sh` without a mode, wrote to `.status/` before it, and reads them before the first PKGBUILD runs. It prepares every package with `new_version` or `available_downgrade` into `<dir>/prepared/` and copies the statuses to `<dir>/status/`. A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped` instead, and a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, see [4.3](#43-downgrade-behavior). A failed preparation becomes `update_failed`, and a package without a status from the check run becomes `check_failed`. The other statuses stay as the check run wrote them.
 
 `check-all.sh --verify <dir>` runs `verify-pkg.sh` for every package in `packages/` that has a directory in `<dir>/prepared/`, and runs no strategy. An update that fails is removed from `<dir>/prepared/`, its status in `<dir>/status/` becomes `update_failed`, and `<dir>/status/_error_count` grows by one. Exit code 3 counts as a failure as well: the prepare run writes `base` for every package, so a moved AUR repo looks the same as a wrong `base`. The next run prepares the package again.
 
-`check-all.sh --publish <dir>` takes the statuses of the check run from `.status/`, as `--prepare` does, and writes `.status/` anew. `up_to_date`, `check_failed` and `downgrade_skipped` stay as they are, and a downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped` and is not published. A missing status, and one the check run does not write, become `check_failed`. For a package with `new_version` or `available_downgrade` and a directory in `<dir>/prepared/`, it publishes the version in that status and runs no strategy, so nothing contacts an upstream host while the AUR and GPG keys are in place. Exit code 3, an AUR repo that moved, leaves the status at `new_version` or `available_downgrade` without an error, and the next run prepares the package again. A package with `new_version` or `available_downgrade` and no prepared directory gets the `update_failed` status that the prepare or the verify run wrote for it to `<dir>/status/`, or `update_failed: prepare and verify handed over no update`. Nothing else is taken from `<dir>/status/`, and only a regular file without a NUL byte: the prepare run executes PKGBUILDs, and code from one of them can write the files of every package. `_error_count` is the number of `check_failed` and `update_failed` statuses.
+`check-all.sh --publish <dir>` takes the statuses of the check run from `.status/`, as `--prepare` does, and writes `.status/` anew. `up_to_date`, `check_failed`, `downgrade_skipped` and `jump_skipped` stay as they are. A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped`, a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, and neither is published. A missing status, and one the check run does not write, become `check_failed`. For a package with `new_version` or `available_downgrade` and a directory in `<dir>/prepared/`, it publishes the version in that status and runs no strategy, so nothing contacts an upstream host while the AUR and GPG keys are in place. Exit code 3, an AUR repo that moved, leaves the status at `new_version` or `available_downgrade` without an error, and the next run prepares the package again. A package with `new_version` or `available_downgrade` and no prepared directory gets the `update_failed` status that the prepare or the verify run wrote for it to `<dir>/status/`, or `update_failed: prepare and verify handed over no update`. Nothing else is taken from `<dir>/status/`, and only a regular file without a NUL byte: the prepare run executes PKGBUILDs, and code from one of them can write the files of every package. `_error_count` is the number of `check_failed` and `update_failed` statuses.
 
 ## 5. CI Workflow: check-updates.yml
 
@@ -846,6 +857,7 @@ Steps 9 to 11 run as root with `GH_TOKEN` set to the workflow token, `github.tok
 | `.status/<name>`       | `downgrade: 1.2.0`               | Downgrade pushed to the AUR              |
 | `.status/<name>`       | `available_downgrade: 1.2.0`     | Downgrade found, not pushed yet          |
 | `.status/<name>`       | `downgrade_skipped: 1.2.0`       | Downgrade found, not allowed by the YAML |
+| `.status/<name>`       | `jump_skipped: 2026102100`       | Version jump found, not allowed by the YAML |
 | `.status/<name>`       | `check_failed: <error>`          | The strategy failed                      |
 | `.status/<name>`       | `update_failed: <error>`         | The update failed                        |
 | `.status/_error_count` | `0`                              | Total error count of the run             |
@@ -1117,6 +1129,7 @@ echo "$version"
 | `http_get <url> [curl option]...` | Fetches a URL with `curl`, see 8.3                |
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
 | `validate_pkgver <version>`     | Returns 1 for an empty version, one with a character outside `A-Za-z0-9._+` or one without a digit |
+| `version_jump <current> <new>`  | Returns 0 when the first number of the new version has at least two digits more than the first number of the current one |
 | `release_tags <tags>`           | Prints the tags of the form `v1.2.3` or `1.2.3`, one per line |
 | `tag_version_fill <template>`   | Prints the template with `\1` to `\9` replaced by the groups in `BASH_REMATCH`, returns 1 for a group the last match does not have |
 | `tag_versions <ere> [template]` | Prints the version in each tag of stdin: the template filled from the groups of the ERE (default: `\1`), or the tag without a leading `v` when the ERE is empty |

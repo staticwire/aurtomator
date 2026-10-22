@@ -182,11 +182,12 @@ checked=0
 
 # The version the check run found for a package, printed the way
 # check-update.sh prints it: nothing when up to date, an error on failure.
-# A skipped downgrade prints its version, and the check below skips it again.
+# A skipped downgrade or version jump prints its version, and the check
+# below skips it again.
 checked_version() {
   local status="${CHECKED[$1]:-}"
   case "$status" in
-    "new_version: "* | "available_downgrade: "* | "downgrade_skipped: "*)
+    "new_version: "* | "available_downgrade: "* | "downgrade_skipped: "* | "jump_skipped: "*)
       echo "${status#*: }"
       ;;
     up_to_date) ;;
@@ -226,7 +227,7 @@ run_package() {
           return
         fi
         ;;
-      up_to_date | check_failed:* | "downgrade_skipped: "*)
+      up_to_date | check_failed:* | "downgrade_skipped: "* | "jump_skipped: "*)
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         return
         ;;
@@ -288,6 +289,17 @@ run_package() {
     [[ "$(pkg_get "$pkg_file" '.allow_downgrade // false')" != "true" ]]; then
     log_warn "$pkg_name: DOWNGRADE detected $current → $latest, skipped: allow_downgrade is not set"
     echo "downgrade_skipped: ${latest}" >"${STATUS_DIR}/${pkg_name}"
+    return
+  fi
+
+  # A first number that grows by two digits or more is more often another
+  # version scheme than a release: build tags next to release tags, or a
+  # build number in place of 4.<build>. It reaches the AUR only for a
+  # package that allows it.
+  if version_jump "$current" "$latest" &&
+    [[ "$(pkg_get "$pkg_file" '.allow_version_jump // false')" != "true" ]]; then
+    log_warn "$pkg_name: version jump $current → $latest, skipped: allow_version_jump is not set"
+    echo "jump_skipped: ${latest}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
 

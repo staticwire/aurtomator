@@ -84,6 +84,8 @@ Patches in `source=()` trigger a warning and are not blocked.
 
 aurtomator publishes a version older than the tracked one only when the package YAML sets `allow_downgrade: true`. Without it, the downgrade is skipped: the latest release of a GitHub project can be a maintenance release of an older line. A downgrade is logged with the literal keyword `DOWNGRADE` and shown in the package table with a `⬇️` icon. It counts as a successful run, so the badge stays green. Details are in [docs/WORKFLOW.md section 4.3](docs/WORKFLOW.md#43-downgrade-behavior).
 
+An update whose first number has at least two digits more than that of the tracked version, such as `13 → 2026102100`, is skipped the same way unless the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the upstream, as build tags next to release tags, than a release. It is shown with a `⬆️` icon.
+
 ## Resource usage
 
 All packages run in one workflow run. `check` runs every time, `prepare` and `verify` only for a new version, and `publish` for a new version or a change in the status table. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`. A version check is a few API requests per package, or a bare clone for `git-latest`.

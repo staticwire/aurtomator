@@ -67,12 +67,14 @@ validate_pkg() {
 
   # --- Optional fields ---
 
-  local allow_downgrade
-  allow_downgrade=$(pkg_get "$file" '.allow_downgrade | tag')
-  if [[ "$allow_downgrade" != "!!null" && "$allow_downgrade" != "!!bool" ]]; then
-    log_err "$file: allow_downgrade must be true or false"
-    ((errors++))
-  fi
+  local flag flag_tag
+  for flag in allow_downgrade allow_version_jump; do
+    flag_tag=$(pkg_get "$file" ".${flag} | tag")
+    if [[ "$flag_tag" != "!!null" && "$flag_tag" != "!!bool" ]]; then
+      log_err "$file: $flag must be true or false"
+      ((errors++))
+    fi
+  done
 
   local pkgver_dash=""
   if [[ $(pkg_get "$file" '.pkgver_dash | tag') != "!!null" ]]; then

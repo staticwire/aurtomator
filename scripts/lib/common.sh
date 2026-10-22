@@ -127,6 +127,19 @@ validate_pkgver() {
   fi
 }
 
+# Args: $1=current version, $2=new version
+# Returns: 0 when the first number in the new version has at least two
+#          digits more than the first number in the current one, as in
+#          13 → 2026102100 or 4.4215 → 4215, 1 otherwise
+version_jump() {
+  local old new
+  [[ "$1" =~ [0-9]+ ]] || return 1
+  old="${BASH_REMATCH[0]}"
+  [[ "$2" =~ [0-9]+ ]] || return 1
+  new="${BASH_REMATCH[0]}"
+  ((${#new} >= ${#old} + 2))
+}
+
 # The tags of the form v1.2.3 or 1.2.3, for a tag strategy without
 # tag_version_regex. sort -V puts latest, 2.1.0-rc1 and 2.1.0rc1 above
 # 2.1.0, so they are left out.

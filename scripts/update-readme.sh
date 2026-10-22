@@ -130,6 +130,10 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
         status="⬇️ ${run_status#downgrade_skipped: } skipped (downgrade)"
         ((pkg_ok++)) || true
         ;;
+      jump_skipped:*)
+        status="⬆️ ${run_status#jump_skipped: } skipped (version jump)"
+        ((pkg_ok++)) || true
+        ;;
       check_failed:* | update_failed:*)
         status="❌ failed"
         ((pkg_fail++)) || true

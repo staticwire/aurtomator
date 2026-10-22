@@ -658,6 +658,30 @@ MOCKCURL
   [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed"* ]]
 }
 
+# === version_jump ===
+
+@test "lib.sh: version_jump finds a first number two digits longer" {
+  local pair
+  for pair in "13 2026102100" "4.4215 4215" "1.2 2026.1" "2025.12.13 20261021" "0.9 100.0" "r1.0000000 r504.42cd4ac"; do
+    run bash -c 'source "$0/scripts/lib.sh"; version_jump "$1" "$2"' "$TEST_TMPDIR" "${pair% *}" "${pair#* }"
+    [ "$status" -eq 0 ] || {
+      echo "no jump found: $pair"
+      return 1
+    }
+  done
+}
+
+@test "lib.sh: version_jump leaves a usual step" {
+  local pair
+  for pair in "9 10" "99 100" "0.9 1.0" "1.9 1.10" "2025.12.13 2026.1.2" "r99.abc1234 r100.def5678" "13 14"; do
+    run bash -c 'source "$0/scripts/lib.sh"; version_jump "$1" "$2"' "$TEST_TMPDIR" "${pair% *}" "${pair#* }"
+    [ "$status" -eq 1 ] || {
+      echo "jump found: $pair"
+      return 1
+    }
+  done
+}
+
 # === tag_versions ===
 
 @test "lib.sh: tag_versions fills the groups and keeps every other character" {
@@ -2161,6 +2185,64 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
   grep -q "⬇️ 1.0.0 skipped (downgrade)" "$TEST_TMPDIR/README.md"
+  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
+}
+
+# === version jumps ===
+
+# Helper: a strategy that prints the given version
+# Usage: stand_in_strategy <name> <version>
+stand_in_strategy() {
+  printf '#!/usr/bin/env bash\necho %s\n' "$2" >"$TEST_TMPDIR/strategies/$1.sh"
+  chmod +x "$TEST_TMPDIR/strategies/$1.sh"
+}
+
+# GrapheneOS/hardened_malloc releases 13 and 14 next to OS build tags
+@test "check-all: skips a version jump without allow_version_jump" {
+  stand_in_strategy jump 2026102100
+  create_test_package "pkg-jump" "jump" "current: '13'"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"version jump 13 → 2026102100, skipped: allow_version_jump is not set"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "jump_skipped: 2026102100" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all: writes 'new_version:' for a version jump the package allows" {
+  stand_in_strategy jump 2026102100
+  create_test_package "pkg-jump" "jump" "current: '13'
+allow_version_jump: true"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "new_version: 2026102100" ]
+}
+
+@test "check-all: writes 'new_version:' for a usual step" {
+  stand_in_strategy step 100
+  create_test_package "pkg-step" "step" "current: '99'"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-step")" = "new_version: 100" ]
+}
+
+@test "update-readme: renders a skipped version jump and keeps the badge green" {
+  create_test_package "pkg-jump" "github-release" "upstream:
+  project: owner/repo
+current: '13'"
+
+  echo "jump_skipped: 2026102100" >"$TEST_TMPDIR/.status/pkg-jump"
+
+  cat >"$TEST_TMPDIR/README.md" <<'EOF'
+<!-- PACKAGES:START -->
+<!-- PACKAGES:END -->
+EOF
+  git -C "$TEST_TMPDIR" init -q
+  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
+
+  grep -q "⬆️ 2026102100 skipped (version jump)" "$TEST_TMPDIR/README.md"
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 

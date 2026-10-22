@@ -993,6 +993,19 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
 }
 
+@test "check-all --prepare: prepares no version jump the check run skipped" {
+  create_test_package "jumpy" "github-release" "upstream:
+  project: owner/repo
+current: '13'"
+  echo "jump_skipped: 2026102100" >"$TEST_TMPDIR/.status/jumpy"
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/jumpy")" = "jump_skipped: 2026102100" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
+}
+
 @test "check-all --prepare: records a failed preparation" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
@@ -1064,6 +1077,32 @@ current: '1.0.0'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/older")" = "downgrade_skipped: 0.9.0" ]
+}
+
+@test "check-all --publish: keeps a skipped version jump and publishes nothing" {
+  create_test_package "jumpy" "github-release" "upstream:
+  project: owner/repo
+current: '13'"
+  checked_status jumpy "jump_skipped: 2026102100"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/jumpy")" = "jump_skipped: 2026102100" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all --publish: publishes no version jump of a package that does not allow it" {
+  create_test_package "jumpy" "github-release" "upstream:
+  project: owner/repo
+current: '13'"
+  checked_status jumpy "new_version: 2026102100"
+  mkdir -p "$TEST_TMPDIR/out/prepared/jumpy"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/jumpy")" = "jump_skipped: 2026102100" ]
 }
 
 @test "check-all --publish: marks a package the check run left out" {

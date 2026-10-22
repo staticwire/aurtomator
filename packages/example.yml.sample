@@ -9,6 +9,8 @@
 #
 # Optional:
 #   allow_downgrade - true publishes a version lower than current
+#   allow_version_jump - true publishes a version whose first number has
+#                     at least two digits more than that of current
 #   pkgver_dash     - _ or ., stands for each - of the upstream version,
 #                     which pkgver cannot hold; the PKGBUILD turns it back
 #                     where a URL needs the dash, as in ${pkgver//_/-}
