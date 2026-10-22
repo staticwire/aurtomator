@@ -670,7 +670,7 @@ The workflow runs every hour at minute 17 (`cron: "17 * * * *"`) and by hand thr
 
 ### 5.2 Permissions and container
 
-The workflow has four jobs after a short `image` job. `image` reads the image from `.github/ci-image/Dockerfile`: `archlinux:base-devel`, pinned by digest, so a new image on Docker Hub reaches the jobs with the secrets only through a reviewed commit. Dependabot updates the digest once a month with a pull request, and `ci.yml` runs the tests in the new image before the merge, see [6.3](#63-ci-image-updates). The four jobs run in that image on `ubuntu-latest` with a 30-minute timeout, and `vercmp` from pacman, which `check-all.sh` requires, is the reason `check`, `verify` and `publish` need Arch too. Every install step upgrades `archlinux-keyring` before the system, because a pinned image ages and an old keyring rejects packages signed with a newer packager key. `makepkg` refuses to run as root, so the steps that touch packages in `prepare` and `publish` run as a `builder` user, and `check` runs the strategies as `builder` as well. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`. `verify` executes no PKGBUILD and runs as root.
+The workflow has four jobs after a short `image` job. `image` reads the image from `.github/ci-image/Dockerfile`: `archlinux:base-devel`, pinned by digest, so a new image on Docker Hub reaches the jobs with the secrets only through a reviewed commit. Dependabot updates the digest once a month with a pull request, and `ci.yml` runs the tests in the new image before the merge, see [6.3](#63-ci-image-updates). The four jobs run in that image on `ubuntu-latest` with a 30-minute timeout, and `vercmp` from pacman, which `check-all.sh` requires, is the reason `check`, `verify` and `publish` need Arch too. Every install step upgrades `archlinux-keyring` before the system, because a pinned image ages and an old keyring rejects packages signed with a newer packager key. `makepkg` refuses to run as root, so the steps that touch packages in `prepare` and `publish` run as a `builder` user, and `check` runs the strategies as `builder` as well. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`. `verify` executes no PKGBUILD and runs `check-all.sh` as `builder` too.
 
 | Job | Permissions | Secrets |
 |-----|-------------|---------|
@@ -687,6 +687,8 @@ The workflow has four jobs after a short `image` job. `image` reads the image fr
 Every job checks out the repository with **Checkout:** `actions/checkout`, pinned by commit SHA like every action in this repository, with `persist-credentials: false`, so the workflow token is not written to `.git/config`. In `image` it is the first step. The four jobs after it install their packages first, `git` among them, and check out after that. The workflow never pushes to GitHub with git: the status commit goes through the API.
 
 The four steps that run `check-all.sh` as `builder` stop workflow commands while it runs. Its output carries text that a PKGBUILD, the AUR or an upstream chose: the error text a git server sends, a line of a prepared `.SRCINFO` that `verify` refuses. The runner takes a line as a workflow command when it starts with `::` after leading whitespace, or when it holds `##[` anywhere. A line `::add-mask::true` makes the runner skip the outputs `prepare` and `work` of `check`, so no job after `check` runs. Root prints `::stop-commands::` with a token of 32 hex digits from `/dev/urandom` before the run and `::<token>::` after it, and the runner takes no command in between. The token stays in a variable of root's shell, so `builder` cannot print it. The output goes through a pipe to `cat`, which ends only when no process of `builder` holds the pipe, so nothing `builder` prints comes after the token. The steps run in bash with `pipefail` and exit with the status of `check-all.sh`.
+
+The four steps use the composite action `.github/actions/run-as-builder`. It adds the workspace to `safe.directory` of root's git, gives the workspace to `builder` and runs `check-all.sh` with the words of its input `args`. Its input `keep-env` names the variables of the step that `sudo --preserve-env` passes to `builder`. The runner reads a local action from the workspace when its step starts, and `builder` owns the workspace once `check-all.sh` ran, so no local action follows `run-as-builder` in a job. Hand over runs after `check-all.sh` in `prepare` and in `verify`, so it stays a step of the workflow: `prepare` defines it with the YAML anchor `&hand-over`, and `verify` repeats it with the alias `*hand-over`.
 
 `image`:
 
@@ -713,7 +715,7 @@ The four steps that run `check-all.sh` as `builder` stop workflow commands while
 1. **Install dependencies:** `sudo git jq go-yq`, and the `builder` user.
 2. **Download handoff:** the `handoff` artifact to `handoff/`.
 3. **Verify checksums:** gives the workspace to `builder` and runs `check-all.sh --verify handoff` as `builder`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
-4. **Hand over:** the same step as in `prepare`.
+4. **Hand over:** the same step as in `prepare`, through the alias `*hand-over`.
 5. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
 
 `publish`:
@@ -818,6 +820,8 @@ actionlint
 ```
 
 `-x` follows `source` directives and `-S warning` sets the minimum severity. `-d` fails on any formatting diff, `-i 2` sets two-space indentation, and `-ci` indents `case` branches. `actionlint` checks every file in `.github/workflows/`: the syntax, the expressions, the `needs` of each job, and the `run:` blocks with `shellcheck`.
+
+`actionlint` does not check the `run:` blocks of a composite action. The step `shellcheck the actions` takes them from every `.github/actions/*/action.yml` with the `yq` of the runner image and runs `shellcheck -s bash` on them at its default severity, so an unquoted variable fails the step as it fails `actionlint` in a workflow.
 
 ### 6.2 Test job
 

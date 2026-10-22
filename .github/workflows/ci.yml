@@ -60,6 +60,15 @@ jobs:
       # Checks the workflows, and the run blocks with shellcheck
       - name: actionlint
         run: actionlint
+      # actionlint does not check the run blocks of a composite action. The
+      # default severity fails an unquoted variable, as actionlint does in a
+      # workflow. yq comes with the runner image.
+      - name: shellcheck the actions
+        run: |
+          for action in .github/actions/*/action.yml; do
+            yq '.runs.steps[] | select(has("run")) | .run' "$action" >"$RUNNER_TEMP/run.sh"
+            shellcheck -s bash "$RUNNER_TEMP/run.sh"
+          done
 
   test:
     needs: image

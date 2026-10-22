@@ -20,6 +20,19 @@ run_blocks() {
   done
 }
 
+@test "actions: no run block expands an expression" {
+  local action count=0
+  for action in "$GITHUB_DIR"/actions/*/action.yml; do
+    echo "$action"
+    run yq '.runs.steps[] | select(has("run")) | .run' "$action"
+    [ "$status" -eq 0 ]
+    [ -n "$output" ]
+    [[ "$output" != *'${{'* ]]
+    count=$((count + 1))
+  done
+  [ "$count" -gt 0 ]
+}
+
 @test "ci-image: the Dockerfile pins archlinux:base-devel by digest" {
   run grep -c '^FROM ' "$GITHUB_DIR/ci-image/Dockerfile"
   [ "$output" = "1" ]
@@ -99,6 +112,14 @@ run_blocks() {
   run yq '[.jobs.lint.steps[] | select(.run == "actionlint")] | length' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
+}
+
+# actionlint runs shellcheck on the run blocks of the workflows only
+@test "ci: the lint job checks the run blocks of the actions with shellcheck" {
+  run yq '.jobs.lint.steps[] | select(.name == "shellcheck the actions") | .run' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'.github/actions/*/action.yml'* ]]
+  [[ "$output" == *'shellcheck -s bash "$RUNNER_TEMP/run.sh"'* ]]
 }
 
 @test "ci: the test job runs the suite once, under bashcov, and fails with it" {
@@ -188,9 +209,11 @@ step_run() {
 }
 
 @test "check-updates: the check job decides the run and executes no PKGBUILD" {
+  run yq '[.jobs.check.steps[] | select(.uses == "./.github/actions/run-as-builder") | .with.args // ""] | @json' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[""]' ]
   run yq '.jobs.check.steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"./scripts/check-all.sh"* ]]
   [[ "$output" != *"--prepare"* ]]
   [[ "$output" != *"update-pkg.sh"* ]]
   run yq '.jobs.check.outputs | keys | join(" ")' "$CHECK_UPDATES"
@@ -254,26 +277,62 @@ run_decide_step() {
   [[ "$output" != *"GITHUB_OUTPUT"* ]]
 }
 
+BUILDER_ACTION="$GITHUB_DIR/actions/run-as-builder/action.yml"
+
 # Prints job and step name, tab-separated, of every step that runs
-# check-all.sh, which runs as builder
+# check-all.sh as builder through the run-as-builder action
 builder_steps() {
   yq '.jobs | to_entries[] | .key as $job | .value.steps[] |
-    select((.run // "") | test("scripts/check-all.sh")) | $job + "\t" + .name' "$CHECK_UPDATES"
+    select(.uses == "./.github/actions/run-as-builder") | $job + "\t" + .name' "$CHECK_UPDATES"
 }
 
-# Runs step $2 of job $1 in the shell the step names. sudo records its
-# arguments and environment in $SUDO_LOG, prints $SUDO_OUT on stdout and
-# stderr, leaves two processes behind that print $LATE_OUT after it exits,
-# one holding only stdout and one only stderr, and exits with $SUDO_RC.
-# chown and git do nothing.
+@test "check-updates: check-all.sh runs only through the run-as-builder action" {
+  run run_blocks "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"scripts/check-all.sh"* ]]
+  run builder_steps
+  [ "${#lines[@]}" -eq 4 ]
+}
+
+# The runner reads a local action from the workspace when its step starts.
+# builder owns the workspace once check-all.sh ran, so a local action after
+# that step in the same job could run code that builder wrote.
+@test "check-updates: no local action runs after builder in its job" {
+  local job line after
+  for job in $(yq '.jobs | keys | .[]' "$CHECK_UPDATES"); do
+    after=0
+    run yq ".jobs.$job.steps[] | .uses // \"\"" "$CHECK_UPDATES"
+    [ "$status" -eq 0 ]
+    for line in "${lines[@]}"; do
+      echo "$job: $line"
+      [[ "$after" -eq 0 || "$line" != ./* ]]
+      [[ "$line" != ./.github/actions/run-as-builder ]] || after=1
+    done
+  done
+}
+
+@test "run-as-builder: takes its inputs through the environment" {
+  run yq -o=json -I=0 '.runs.steps[0].env' "$BUILDER_ACTION"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"ARGS":"${{ inputs.args }}","KEEP_ENV":"${{ inputs.keep-env }}"}' ]
+}
+
+# Runs the run-as-builder action with the inputs of step $2 of job $1, in
+# the shell the action names. sudo records its arguments on one line and
+# its environment in $SUDO_LOG, prints $SUDO_OUT on stdout and stderr,
+# leaves two processes behind that print $LATE_OUT after it exits, one
+# holding only stdout and one only stderr, and exits with $SUDO_RC. chown
+# and git log their arguments to chown.log and git.log in the test
+# directory.
 run_builder_step() {
-  local bin="$BATS_TEST_TMPDIR/bin"
+  local bin="$BATS_TEST_TMPDIR/bin" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep
   mkdir -p "$bin"
-  printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
-  printf '#!/bin/sh\nexit 0\n' >"$bin/git"
+  printf '#!/bin/sh\necho "$*" >>"$GITHUB_WORKSPACE/chown.log"\n' >"$bin/chown"
+  printf '#!/bin/sh\necho "$*" >>"$GITHUB_WORKSPACE/git.log"\n' >"$bin/git"
+  rm -f "$BATS_TEST_TMPDIR/chown.log" "$BATS_TEST_TMPDIR/git.log"
   cat >"$bin/sudo" <<'EOF'
 #!/usr/bin/env bash
-{ printf '%s\n' "$@"; env; } >>"$SUDO_LOG"
+{ printf '%s\n' "$*"; env; } >>"$SUDO_LOG"
 printf '%s\n' "$SUDO_OUT"
 printf '%s\n' "$SUDO_OUT" >&2
 if [[ -n "${LATE_OUT:-}" ]]; then
@@ -283,12 +342,42 @@ fi
 exit "${SUDO_RC:-0}"
 EOF
   chmod +x "$bin/chown" "$bin/git" "$bin/sudo"
-  run yq ".jobs.$1.steps[] | select(.name == \"$2\") | .shell" "$CHECK_UPDATES"
+  run yq '.runs.steps[0].shell' "$BUILDER_ACTION"
   [ "$output" = "bash" ]
-  step_run "$1" "$2" >"$BATS_TEST_TMPDIR/step.sh"
+  yq '.runs.steps[0].run' "$BUILDER_ACTION" >"$BATS_TEST_TMPDIR/step.sh"
+  args=$(yq "$step | .with.args // \"\"" "$CHECK_UPDATES")
+  keep=$(yq "$step | .with[\"keep-env\"] // \"\"" "$CHECK_UPDATES")
   rm -f "$SUDO_LOG"
   run env PATH="$bin:$PATH" GITHUB_WORKSPACE="$BATS_TEST_TMPDIR" SUDO_LOG="$SUDO_LOG" \
-    bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+    ARGS="$args" KEEP_ENV="$keep" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "check-updates: each builder step runs check-all.sh in its mode, with only the variables it needs" {
+  local expected entry job name
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  expected=(
+    $'check\tCheck updates\t--preserve-env=GITHUB_TOKEN -u builder ./scripts/check-all.sh'
+    $'prepare\tPrepare updates\t-u builder ./scripts/check-all.sh --prepare handoff'
+    $'verify\tVerify checksums\t-u builder ./scripts/check-all.sh --verify handoff'
+    $'publish\tPublish updates\t--preserve-env=GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder ./scripts/check-all.sh --publish handoff'
+  )
+  for entry in "${expected[@]}"; do
+    IFS=$'\t' read -r job name want <<<"$entry"
+    echo "$job: $name"
+    SUDO_OUT=ok run_builder_step "$job" "$name"
+    [ "$status" -eq 0 ]
+    [ "$(head -n 1 "$SUDO_LOG")" = "$want" ]
+  done
+}
+
+# Root's git refuses a repository that another user owns, and Decide and
+# the commit step of publish run git as root
+@test "run-as-builder: gives the workspace to builder and keeps it safe for root's git" {
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  SUDO_OUT=ok run_builder_step check "Check updates"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/chown.log")" = "-R builder:builder ." ]
+  [ "$(cat "$BATS_TEST_TMPDIR/git.log")" = "config --global --add safe.directory $BATS_TEST_TMPDIR" ]
 }
 
 @test "check-updates: no line of builder reaches the runner as a command" {
@@ -317,6 +406,7 @@ EOF
   local steps step
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   mapfile -t steps < <(builder_steps)
+  [ "${#steps[@]}" -eq 4 ]
   for step in "${steps[@]}"; do
     echo "$step"
     SUDO_OUT="boom" SUDO_RC=3 run_builder_step "${step%%$'\t'*}" "${step#*$'\t'}"
@@ -606,8 +696,8 @@ EOF
 }
 
 @test "check-updates: verify runs as builder and hands over as prepare does" {
-  run step_run verify "Verify checksums"
-  [[ "$output" == *"sudo -u builder ./scripts/check-all.sh --verify handoff"* ]]
+  run yq '.jobs.verify.steps[] | select(.name == "Verify checksums") | .uses + " " + .with.args' "$CHECK_UPDATES"
+  [ "$output" = "./.github/actions/run-as-builder --verify handoff" ]
   [ "$(step_run verify "Hand over")" = "$(step_run prepare "Hand over")" ]
   run yq '[.jobs.verify.steps[].name] | join(",")' "$CHECK_UPDATES"
   [[ "$output" == *"Verify checksums,Hand over,Upload verified handoff"* ]]
@@ -616,11 +706,19 @@ EOF
 }
 
 @test "check-updates: the publish step gets no GitHub token" {
-  run step_run publish "Publish updates"
+  run yq '.jobs.publish.steps[] | select(.name == "Publish updates") | .with["keep-env"]' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [[ "$output" != *GITHUB_TOKEN* ]]
   run yq '.jobs.publish.steps[] | select(.name == "Publish updates") | .env | has("GITHUB_TOKEN")' "$CHECK_UPDATES"
   [ "$output" = "false" ]
+}
+
+# git refuses an empty author name or email in the environment
+@test "check-updates: the publish step names an author when the secrets are empty" {
+  run yq '.jobs.publish.steps[] | select(.name == "Publish updates") | .env.GIT_AUTHOR_NAME' "$CHECK_UPDATES"
+  [ "$output" = "\${{ secrets.AUR_GIT_NAME || 'aurtomator' }}" ]
+  run yq '.jobs.publish.steps[] | select(.name == "Publish updates") | .env.GIT_AUTHOR_EMAIL' "$CHECK_UPDATES"
+  [ "$output" = "\${{ secrets.AUR_GIT_EMAIL || 'aurtomator@users.noreply.github.com' }}" ]
 }
 
 @test "check-updates: publish takes the statuses from the check job" {

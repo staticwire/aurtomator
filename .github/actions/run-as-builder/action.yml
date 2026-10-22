@@ -1,0 +1,45 @@
+name: Run check-all.sh as builder
+description: >-
+  Gives the workspace to builder, runs scripts/check-all.sh as builder with
+  workflow commands stopped, and exits with its status.
+
+# The runner reads this file from the workspace when the step starts. A job
+# uses it before builder has run anything there, and no local action may
+# follow it in the same job: builder owns the workspace from then on.
+
+inputs:
+  args:
+    description: Arguments of check-all.sh
+    required: false
+    default: ""
+  keep-env:
+    description: Comma-separated names of the variables of the step that builder keeps
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ARGS: ${{ inputs.args }}
+        KEEP_ENV: ${{ inputs.keep-env }}
+      run: |
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        chown -R builder:builder .
+        read -ra check_args <<<"$ARGS"
+        options=(-u builder)
+        if [[ -n "$KEEP_ENV" ]]; then
+          options=("--preserve-env=$KEEP_ENV" -u builder)
+        fi
+        # The runner reads ::cmd:: at the start of a line and ##[cmd]
+        # anywhere in it as a workflow command. It ignores both between
+        # stop-commands and the token, and the token stays in this shell.
+        # cat ends only when no process of builder holds the pipe, so
+        # nothing builder prints comes after the token.
+        token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+        echo "::stop-commands::$token"
+        rc=0
+        sudo "${options[@]}" ./scripts/check-all.sh "${check_args[@]}" 2>&1 | cat || rc=$?
+        echo "::$token::"
+        exit "$rc"

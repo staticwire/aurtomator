@@ -37,6 +37,7 @@ CI runs these commands:
 shellcheck -x -S warning scripts/*.sh strategies/*.sh
 shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
 actionlint
+for action in .github/actions/*/action.yml; do yq '.runs.steps[] | select(has("run")) | .run' "$action" | shellcheck -s bash -; done
 bats tests/ --recursive
 ```
 

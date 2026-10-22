@@ -67,24 +67,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # The runner reads a local action from the workspace when its step
+      # starts, and builder owns the workspace once check-all.sh ran, so no
+      # local action follows run-as-builder in a job
       - name: Check updates
-        shell: bash
+        uses: ./.github/actions/run-as-builder
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          chown -R builder:builder .
-          # The runner reads ::cmd:: at the start of a line and ##[cmd]
-          # anywhere in it as a workflow command. It ignores both between
-          # stop-commands and the token, and the token stays in this shell.
-          # cat ends only when no process of builder holds the pipe, so
-          # nothing builder prints comes after the token.
-          token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-          echo "::stop-commands::$token"
-          rc=0
-          sudo --preserve-env=GITHUB_TOKEN -u builder ./scripts/check-all.sh 2>&1 | cat || rc=$?
-          echo "::$token::"
-          exit "$rc"
+        with:
+          keep-env: GITHUB_TOKEN
 
       - name: Decide
         id: decide
@@ -142,22 +133,14 @@ jobs:
           path: .status
 
       - name: Prepare updates
-        shell: bash
-        run: |
-          chown -R builder:builder .
-          # The runner reads ::cmd:: at the start of a line and ##[cmd]
-          # anywhere in it as a workflow command. It ignores both between
-          # stop-commands and the token, and the token stays in this shell.
-          # cat ends only when no process of builder holds the pipe, so
-          # nothing builder prints comes after the token.
-          token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-          echo "::stop-commands::$token"
-          rc=0
-          sudo -u builder ./scripts/check-all.sh --prepare handoff 2>&1 | cat || rc=$?
-          echo "::$token::"
-          exit "$rc"
+        uses: ./.github/actions/run-as-builder
+        with:
+          args: --prepare handoff
 
-      - name: Hand over
+      # verify repeats this step through the anchor. A local action would be
+      # read from the workspace that builder owns by now.
+      - &hand-over
+        name: Hand over
         run: |
           # A process builder started can outlive its step. Stop all of
           # them before root reads anything builder wrote. A zombie runs
@@ -245,66 +228,12 @@ jobs:
       # git and curl read the AUR repo and the sources here, as builder,
       # who cannot reach the Docker socket that root has in a job container
       - name: Verify checksums
-        shell: bash
-        run: |
-          chown -R builder:builder .
-          # The runner reads ::cmd:: at the start of a line and ##[cmd]
-          # anywhere in it as a workflow command. It ignores both between
-          # stop-commands and the token, and the token stays in this shell.
-          # cat ends only when no process of builder holds the pipe, so
-          # nothing builder prints comes after the token.
-          token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-          echo "::stop-commands::$token"
-          rc=0
-          sudo -u builder ./scripts/check-all.sh --verify handoff 2>&1 | cat || rc=$?
-          echo "::$token::"
-          exit "$rc"
+        uses: ./.github/actions/run-as-builder
+        with:
+          args: --verify handoff
 
-      - name: Hand over
-        run: |
-          # A process builder started can outlive its step. Stop all of
-          # them before root reads anything builder wrote. A zombie runs
-          # nothing, and pid 1 of a job container never reaps one, so only
-          # the other processes count, by effective or real user. live exits
-          # with 0 for a running process, 1 for none and 2 when the list
-          # fails, and only 1 lets the step go on.
-          uid=$(id -u builder)
-          live() {
-            procs=$(ps -e -o uid=,ruid=,stat=) || return 2
-            printf '%s\n' "$procs" |
-              awk -v u="$uid" '($1 == u || $2 == u) && $3 !~ /^Z/ { n++ } END { exit !n }'
-          }
-          for _ in $(seq 30); do
-            rc=0
-            live || rc=$?
-            [ "$rc" -eq 1 ] && break
-            pkill -KILL -u builder || true
-            pkill -KILL -U builder || true
-            sleep 1
-          done
-          rc=0
-          live || rc=$?
-          if [ "$rc" -ne 1 ]; then
-            echo "::error::A process of builder is still running, or the process list failed"
-            exit 1
-          fi
-
-          # Copy regular files from the expected paths only, and nothing
-          # else gets uploaded. find does not follow symlinks; -print0,
-          # because a name may hold a newline. A package name never starts
-          # with a dot, so . and .. do not match.
-          mkdir upload
-          if [[ -d handoff && ! -L handoff ]]; then
-            pkg_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
-            (cd handoff && find prepared status -type f -print0 2>/dev/null) |
-              while IFS= read -r -d '' f; do
-                if [[ "$f" =~ ^prepared/${pkg_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
-                  [[ "$f" =~ ^status/${pkg_re}$ ]]; then
-                  [[ -f "handoff/$f" && ! -L "handoff/$f" ]] || continue
-                  install -D -m 0644 "handoff/$f" "upload/$f"
-                fi
-              done
-          fi
+      # The Hand over step of prepare
+      - *hand-over
 
       - name: Upload verified handoff
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -405,27 +334,16 @@ jobs:
           sudo -u builder git config --global user.signingkey "$GPG_KEY_ID"
           sudo -u builder git config --global commit.gpgsign true
 
+      # GPG_KEY_ID comes from Setup GPG, when a key is set. git refuses an
+      # empty author name or email in the environment.
       - name: Publish updates
-        shell: bash
+        uses: ./.github/actions/run-as-builder
         env:
-          AUR_GIT_NAME: ${{ secrets.AUR_GIT_NAME }}
-          AUR_GIT_EMAIL: ${{ secrets.AUR_GIT_EMAIL }}
-        run: |
-          # The runner reads ::cmd:: at the start of a line and ##[cmd]
-          # anywhere in it as a workflow command. It ignores both between
-          # stop-commands and the token, and the token stays in this shell.
-          # cat ends only when no process of builder holds the pipe, so
-          # nothing builder prints comes after the token.
-          token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-          echo "::stop-commands::$token"
-          rc=0
-          sudo -u builder env \
-            GPG_KEY_ID="${GPG_KEY_ID:-}" \
-            GIT_AUTHOR_NAME="${AUR_GIT_NAME:-aurtomator}" \
-            GIT_AUTHOR_EMAIL="${AUR_GIT_EMAIL:-aurtomator@users.noreply.github.com}" \
-            ./scripts/check-all.sh --publish handoff 2>&1 | cat || rc=$?
-          echo "::$token::"
-          exit "$rc"
+          GIT_AUTHOR_NAME: ${{ secrets.AUR_GIT_NAME || 'aurtomator' }}
+          GIT_AUTHOR_EMAIL: ${{ secrets.AUR_GIT_EMAIL || 'aurtomator@users.noreply.github.com' }}
+        with:
+          args: --publish handoff
+          keep-env: GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL
 
       - name: Update README status table
         run: sudo -u builder ./scripts/update-readme.sh
