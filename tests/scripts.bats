@@ -695,6 +695,38 @@ EOF
   [[ "$output" == *"Version string rejected, it holds no digit: 'latest'"* ]]
 }
 
+# npm cli-pride-flags is 1.9.0-1, crates.io pijul 1.0.0-beta.24
+@test "check-update: rejects a dash from the strategy without pkgver_dash" {
+  cat >"$TEST_TMPDIR/strategies/dash.sh" <<'EOF'
+#!/usr/bin/env bash
+echo 1.0.0-beta-24
+EOF
+  chmod +x "$TEST_TMPDIR/strategies/dash.sh"
+  create_test_package "mypkg" "dash" "current: '1.0'"
+
+  run "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed: '1.0.0-beta-24'"* ]]
+}
+
+@test "check-update: pkgver_dash replaces every dash in the version" {
+  cat >"$TEST_TMPDIR/strategies/dash.sh" <<'EOF'
+#!/usr/bin/env bash
+echo 1.0.0-beta-24
+EOF
+  chmod +x "$TEST_TMPDIR/strategies/dash.sh"
+  local result
+  create_test_package "mypkg" "dash" "current: '1.0'
+pkgver_dash: _"
+  result=$("$TEST_TMPDIR/scripts/check-update.sh" "mypkg" 2>/dev/null)
+  [ "$result" = "1.0.0_beta_24" ]
+
+  create_test_package "mypkg" "dash" "current: '1.0'
+pkgver_dash: ."
+  result=$("$TEST_TMPDIR/scripts/check-update.sh" "mypkg" 2>/dev/null)
+  [ "$result" = "1.0.0.beta.24" ]
+}
+
 @test "update-pkg: refuses an injected version before any git call" {
   cat >"$TEST_TMPDIR/mock-bin/git" <<'EOF'
 #!/usr/bin/env bash

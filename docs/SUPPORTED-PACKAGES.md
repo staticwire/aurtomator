@@ -107,6 +107,20 @@ upstream:
 
 `tag_version_replace` builds the version from more than one group, with `\1` to `\9`. For the date tag `2026-09-10`, `'^([0-9]{4})-([0-9]{2})-([0-9]{2})$'` with `'\1.\2.\3'` gives `2026.09.10`. See [WORKFLOW.md section 3.1](WORKFLOW.md#31-github-release).
 
+### Versions with a dash (pkgver_dash)
+
+npm and crates.io versions can hold a dash, such as `1.9.0-1` or `0.10.26+cargo-0.100.0`, and `pkgver` cannot. `pkgver_dash` names the character that stands for it:
+
+```yaml
+name: nodejs-myapp
+strategy: npm
+upstream:
+  registry: myapp
+pkgver_dash: _
+```
+
+**Why it works:** `check-update.sh` replaces every `-` in the output of the strategy, whatever the strategy, and the PKGBUILD turns it back where a source URL needs it, as nodejs-inshellisense does with `${pkgver//_/-}`. `_` and `.` are allowed, and `vercmp` reads them the same. `crates` with `prerelease: true` needs the field, see [WORKFLOW.md section 3.10](WORKFLOW.md#310-crates).
+
 ### Nightly and prerelease packages
 
 `github-nightly` tracks nightly builds in 4 patterns:
@@ -229,7 +243,7 @@ aurtomator includes 14 version detection strategies. Choose by where your upstre
 | `git-latest` | Bare git clone | `-git` packages (commit tracking) | N/A |
 | `pypi` | PyPI JSON API | Python packages | Auto (stable only) |
 | `npm` | npm registry | Node.js packages | Auto (`latest` tag) |
-| `crates` | crates.io API | Rust packages | Auto (stable only) |
+| `crates` | crates.io API | Rust packages | Auto (stable only, or `prerelease: true`) |
 | `repology` | Repology API | Fallback across distro repositories | Varies |
 | `archpkg` | Arch package search | Track official repo versions | N/A |
 | `webpage-scrape` | Any HTTPS page + regex | No API available | None (depends on regex) |

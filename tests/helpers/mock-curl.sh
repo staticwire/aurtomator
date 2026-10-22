@@ -140,6 +140,10 @@ case "$url" in
   *registry.npmjs.org/*/latest)
     echo '{"version": "4.0.0"}'
     ;;
+  # A crate whose highest version is a pre-release, as pijul
+  *crates.io/api/v1/crates/pre-crate)
+    echo '{"crate": {"max_version": "1.0.0-beta.24", "max_stable_version": "0.15.0"}}'
+    ;;
   # crates.io API
   *crates.io/api/v1/crates/*)
     echo '{"crate": {"max_stable_version": "1.0.204"}}'

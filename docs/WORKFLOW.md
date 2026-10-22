@@ -77,6 +77,7 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 | `current`      | no       | Currently tracked version. Written after every push.                        |
 | `last_updated` | no       | Date of the last push, `YYYY-MM-DD`. Written after every push.              |
 | `allow_downgrade` | no    | `true` publishes an upstream version lower than `current`. Default `false`, see [4.3](#43-downgrade-behavior). |
+| `pkgver_dash`  | no       | `_` or `.`, the character that stands for each `-` of the upstream version, see below |
 
 Example:
 
@@ -87,6 +88,8 @@ upstream:
   project: owner/repo
 current: "2.1.0"
 ```
+
+`pkgver` cannot hold a dash, so `check-update.sh` refuses a version such as `1.9.0-1` from npm or `1.0.0-beta.24` from crates.io. With `pkgver_dash`, it replaces every `-` in the output of the strategy before that check. The PKGBUILD turns the character back where a source URL needs the dash, as `${pkgver//_/-}` does for `_`. `vercmp` reads `_` and `.` the same. `.` fits a PKGBUILD that already writes the dash as a dot, such as pijul with `_pkgver=${pkgver/.beta/-beta}`. A version given to `update-pkg.sh` by hand is taken as it is.
 
 ## 3. Strategies
 
@@ -462,8 +465,9 @@ upstream:
 | Field               | Required | Description                        |
 |---------------------|----------|------------------------------------|
 | `upstream.registry` | yes      | Crate name (e.g. `serde`, `tokio`) |
+| `upstream.prerelease` | no     | `true` reads `max_version`, pre-releases included. Needs `pkgver_dash`. Default `false`. |
 
-**How the version is extracted:** reads `.crate.max_stable_version`, which excludes pre-releases. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as the crates.io API policy requires.
+**How the version is extracted:** reads `.crate.max_stable_version`, which excludes pre-releases, or `.crate.max_version` with `prerelease: true`. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as the crates.io API policy requires.
 
 **Example YAML:**
 
@@ -472,6 +476,17 @@ name: rust-serde
 strategy: crates
 upstream:
   registry: serde
+```
+
+A semver pre-release such as `1.0.0-beta.24` holds a dash, so `validate-pkg.sh` refuses `prerelease: true` without `pkgver_dash`, see [section 2](#2-package-yaml-format). pijul gives `1.0.0.beta.24` with:
+
+```yaml
+name: pijul
+strategy: crates
+upstream:
+  registry: pijul
+  prerelease: true
+pkgver_dash: .
 ```
 
 ### 3.11 repology
@@ -1004,7 +1019,7 @@ A strategy is a bash script in `strategies/` that finds the latest upstream vers
 - **Input:** one positional argument, the package name.
 - **Success:** the version on stdout as one line, exit code 0.
 - **Failure:** an error on stderr, a non-zero exit code.
-- **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`, and a version without a digit, such as `latest`.
+- **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`, and a version without a digit, such as `latest`. `pkgver_dash` replaces the dashes before that check, see [section 2](#2-package-yaml-format).
 
 The script can rely on `yq` and `curl`. `scripts/lib/common.sh` provides YAML helpers, `http_get` for requests and logging, and sets `AURTOMATOR_DIR` to the project root.
 

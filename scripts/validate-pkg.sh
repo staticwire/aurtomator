@@ -74,6 +74,31 @@ validate_pkg() {
     ((errors++))
   fi
 
+  local pkgver_dash=""
+  if [[ $(pkg_get "$file" '.pkgver_dash | tag') != "!!null" ]]; then
+    pkgver_dash=$(pkg_get "$file" '.pkgver_dash')
+    if [[ "$pkgver_dash" != "_" && "$pkgver_dash" != "." ]]; then
+      log_err "$file: pkgver_dash must be _ or ."
+      ((errors++))
+    fi
+  fi
+
+  local prerelease
+  prerelease=$(pkg_get "$file" '.upstream.prerelease | tag')
+  if [[ "$prerelease" != "!!null" ]]; then
+    if [[ "$prerelease" != "!!bool" ]]; then
+      log_err "$file: upstream.prerelease must be true or false"
+      ((errors++))
+    elif [[ "$strategy" != "crates" ]]; then
+      log_err "$file: upstream.prerelease applies to the crates strategy only"
+      ((errors++))
+    # A semver pre-release always holds a dash
+    elif [[ $(pkg_get "$file" '.upstream.prerelease') == true && -z "$pkgver_dash" ]]; then
+      log_err "$file: upstream.prerelease needs pkgver_dash"
+      ((errors++))
+    fi
+  fi
+
   # --- Strategy-specific fields ---
 
   # Validate optional tag_pattern as regex (used by *-tag strategies)

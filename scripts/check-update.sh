@@ -18,6 +18,7 @@ readonly PKG_FILE
 # Read package config
 strategy=$(pkg_get "$PKG_FILE" .strategy)
 current=$(pkg_get "$PKG_FILE" '.current // ""')
+dash=$(pkg_get "$PKG_FILE" '.pkgver_dash // ""')
 
 # Run strategy
 strategy_script="${AURTOMATOR_DIR}/strategies/${strategy}.sh"
@@ -36,6 +37,12 @@ latest=$("$strategy_script" "$PKG_NAME") || {
 if [[ -z "$latest" ]]; then
   log_err "Strategy returned empty version"
   exit 1
+fi
+
+# pkgver holds no dash. The PKGBUILD turns pkgver_dash back into a dash
+# where a URL needs one, as in ${pkgver//_/-}.
+if [[ -n "$dash" ]]; then
+  latest=${latest//-/"$dash"}
 fi
 
 validate_pkgver "$latest" || exit 1

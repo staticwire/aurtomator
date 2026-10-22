@@ -372,6 +372,29 @@ teardown() {
   [ "$output" = "1.0.204" ]
 }
 
+@test "crates: prerelease reads max_version" {
+  create_test_package "test-crates" "crates" "upstream:
+  registry: pre-crate
+  prerelease: true"
+
+  run "$TEST_TMPDIR/strategies/crates.sh" "test-crates"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0.0-beta.24" ]
+}
+
+@test "crates: reads max_stable_version without prerelease" {
+  local field
+  for field in '' 'prerelease: false'; do
+    create_test_package "test-crates" "crates" "upstream:
+  registry: pre-crate
+  $field"
+
+    run "$TEST_TMPDIR/strategies/crates.sh" "test-crates"
+    [ "$status" -eq 0 ]
+    [ "$output" = "0.15.0" ]
+  done
+}
+
 # === repology ===
 
 @test "repology: returns newest version from Repology" {

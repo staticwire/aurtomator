@@ -539,6 +539,81 @@ allow_downgrade: $value"
   done
 }
 
+@test "validate: pkgver_dash _ or . passes" {
+  local value
+  for value in _ .; do
+    create_test_package "mypkg" "npm" "upstream:
+  registry: cli-pride-flags
+pkgver_dash: '$value'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "validate: pkgver_dash other than _ or . rejected" {
+  local value
+  for value in "'+'" "'-'" "'__'" "''" 1; do
+    create_test_package "mypkg" "npm" "upstream:
+  registry: cli-pride-flags
+pkgver_dash: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"pkgver_dash must be _ or ."* ]]
+  done
+}
+
+# === crates prerelease validation ===
+
+@test "validate: crates prerelease with pkgver_dash passes" {
+  create_test_package "mypkg" "crates" "upstream:
+  registry: pijul
+  prerelease: true
+pkgver_dash: ."
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+# A semver pre-release always holds a dash
+@test "validate: crates prerelease without pkgver_dash rejected" {
+  create_test_package "mypkg" "crates" "upstream:
+  registry: pijul
+  prerelease: true"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.prerelease needs pkgver_dash"* ]]
+}
+
+@test "validate: crates prerelease false without pkgver_dash passes" {
+  create_test_package "mypkg" "crates" "upstream:
+  registry: serde
+  prerelease: false"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: prerelease for another strategy rejected" {
+  create_test_package "mypkg" "npm" "upstream:
+  registry: cli-pride-flags
+  prerelease: true
+pkgver_dash: _"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.prerelease applies to the crates strategy only"* ]]
+}
+
+@test "validate: prerelease that is not a boolean rejected" {
+  local value
+  for value in yes '"true"' 1; do
+    create_test_package "mypkg" "crates" "upstream:
+  registry: pijul
+  prerelease: $value
+pkgver_dash: _"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"upstream.prerelease must be true or false"* ]]
+  done
+}
+
 @test "validate: tag_pattern valid glob accepted" {
   create_test_package "mypkg" "github-tag" "upstream:
   project: owner/repo
