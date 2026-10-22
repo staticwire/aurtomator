@@ -94,6 +94,15 @@ case "$url" in
   *api.github.com/repos/custom-suffix/repo/releases/latest)
     echo '{"tag_name": "0.1.8-stable"}'
     ;;
+  # Date tags, as servo names its nightlies and vinceliuice its themes.
+  # servo published 2026-10-21 after midnight UTC.
+  *api.github.com/repos/dated-owner/dated-repo/releases/latest)
+    echo '{"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z"}'
+    ;;
+  *gitlab.com/api/v4/projects/dated-group%2Fdated-project/repository/tags* | \
+    *codeberg.org/api/v1/repos/dated-owner/dated-repo/tags*)
+    echo '[{"name": "2025-12-27"}, {"name": "v2025-02-10"}, {"name": "2026-09-10"}]'
+    ;;
   # Tags with a prefix, as mesa names its releases
   *gitlab.com/api/v4/projects/prefix-group%2Fprefix-project/repository/tags* | \
     *codeberg.org/api/v1/repos/prefix-owner/prefix-repo/tags*)

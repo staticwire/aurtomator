@@ -17,6 +17,8 @@
 #                             "tag" (default), "release_body", "tag_date", "published_date"
 #   upstream.version_pattern - regex for extracting version from release body (pattern A)
 #   upstream.channel        - filter releases by name (pattern D)
+#   upstream.date_format    - format of date(1) for tag_date and published_date
+#                             (default: "%Y.%m.%d")
 
 set -euo pipefail
 
@@ -34,8 +36,19 @@ version_source=$(pkg_get "$pkg_file" '.upstream.version_source // "tag"')
 channel=$(pkg_get "$pkg_file" '.upstream.channel // ""')
 version_pattern=$(pkg_get "$pkg_file" '.upstream.version_pattern // ""')
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
+tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
+date_format=$(pkg_get "$pkg_file" '.upstream.date_format // "%Y.%m.%d"')
 
 api="https://api.github.com/repos/${owner_repo}"
+
+# A date in date_format. -u keeps the day of a UTC timestamp whatever the
+# time zone of the machine. Prints nothing when there is no date.
+# Args: $1=date or timestamp
+format_date() {
+  if [[ -n "$1" && "$1" != "null" ]]; then
+    date -u -d "$1" +"$date_format"
+  fi
+}
 
 # Fetch release based on pattern. channel and nightly_tag reach yq through
 # the environment so that quotes in them cannot break the expression.
@@ -77,7 +90,7 @@ case "$version_source" in
   tag)
     version=$(echo "$release" | yq -r '.tag_name')
     if [[ -n "$tag_version_regex" ]]; then
-      extracted=$(tag_versions "$tag_version_regex" <<<"$version")
+      extracted=$(tag_versions "$tag_version_regex" "$tag_version_replace" <<<"$version")
       if [[ -z "$extracted" ]]; then
         echo "tag_version_regex '${tag_version_regex}' did not match tag '${version}'" >&2
         exit 1
@@ -89,7 +102,8 @@ case "$version_source" in
     ;;
   tag_date)
     tag=$(echo "$release" | yq -r '.tag_name')
-    version=$(echo "$tag" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | tr '-' '.' || true)
+    date=$(echo "$tag" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+    version=$(format_date "$date")
     ;;
   release_body)
     if [[ -z "$version_pattern" ]]; then
@@ -102,7 +116,7 @@ case "$version_source" in
     version="${version//-/+}"
     ;;
   published_date)
-    version=$(echo "$release" | yq -r '.published_at' | cut -dT -f1 | tr '-' '.')
+    version=$(format_date "$(echo "$release" | yq -r '.published_at')")
     ;;
   *)
     echo "Unknown version_source: $version_source" >&2

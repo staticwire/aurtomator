@@ -21,6 +21,7 @@ host=$(pkg_get "$pkg_file" .upstream.host)
 owner_repo=$(pkg_get "$pkg_file" .upstream.project)
 tag_pattern=$(pkg_get "$pkg_file" '.upstream.tag_pattern // ""')
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
+tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 
 tags=$(http_get "https://${host}/api/v1/repos/${owner_repo}/tags?limit=50" |
   yq -r '.[].name') || {
@@ -33,4 +34,4 @@ if [[ -z "$tags" ]]; then
   exit 1
 fi
 
-latest_tag_version "$tags" "$tag_pattern" "$tag_version_regex"
+latest_tag_version "$tags" "$tag_pattern" "$tag_version_regex" "$tag_version_replace"

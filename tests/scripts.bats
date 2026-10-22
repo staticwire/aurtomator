@@ -658,6 +658,15 @@ MOCKCURL
   [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed"* ]]
 }
 
+# === tag_versions ===
+
+@test "lib.sh: tag_versions fills the groups and keeps every other character" {
+  run bash -c 'source "$0/scripts/lib.sh"; tag_versions "$1" "$2" <<<"$3"' "$TEST_TMPDIR" \
+    '^([0-9]+)-([0-9]+)$' 'r1.\2\1\0' '10-20'
+  [ "$status" -eq 0 ]
+  [ "$output" = 'r1.2010\0' ]
+}
+
 @test "check-update: rejects an injected version from the strategy" {
   cat >"$TEST_TMPDIR/strategies/injected.sh" <<'EOF'
 #!/usr/bin/env bash

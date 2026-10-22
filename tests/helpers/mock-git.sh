@@ -27,6 +27,9 @@ case "${*: -1}" in
   https://github.com/custom-prefix/repo.git)
     tags=(bun-v1.3.11 bun-v1.2.0 bun-v1.0.0)
     ;;
+  https://github.com/dated-owner/dated-repo.git)
+    tags=(2025-12-27 v2025-02-10 2026-09-10)
+    ;;
   https://github.com/mixed-owner/mixed-repo.git)
     tags=(latest v2.1.0-rc1 v2.1.0rc2 v2.0.0 v1.9.0)
     ;;

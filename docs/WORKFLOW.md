@@ -104,6 +104,7 @@ aurtomator ships 14 strategies. A strategy is a bash script in `strategies/`. It
 |------------------------------|----------|-------------------------------------|
 | `upstream.project`           | yes      | `owner/repo` format                 |
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, see below |
+| `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex` (default: `\1`), see below |
 
 **How the version is extracted:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases.
 
@@ -118,7 +119,7 @@ upstream:
   project: owner/repo
 ```
 
-**Custom tag format:** for tags like `MeshLab-2025.07` or `0.1.8-stable`, set `tag_version_regex`. The text of its first capture group becomes the version. bash `[[ =~ ]]` takes the group, so the regex may hold `|`. A group of alternatives has to come after the version, as in `^v?([0-9.]+)(-stable|)$`, because bash knows no group that does not capture: `^(mesa-)?([0-9.]+)$` gives `mesa-`. It also works with `github-tag`, `github-nightly`, `gitlab-tag` and `gitea-tag`.
+**Custom tag format:** for tags like `MeshLab-2025.07` or `0.1.8-stable`, set `tag_version_regex`. The text of its first capture group becomes the version. bash `[[ =~ ]]` takes the group, so the regex may hold `|`. A group of alternatives has to come after the version, as in `^v?([0-9.]+)(-stable|)$`, because bash knows no group that does not capture: `^(mesa-)?([0-9.]+)$` gives `mesa-`.
 
 ```yaml
 name: meshlab-bin
@@ -127,6 +128,19 @@ upstream:
   project: cnr-isti-vclab/meshlab
   tag_version_regex: 'MeshLab-(.*)'
 ```
+
+`tag_version_replace` builds the version from more than one group. `\1` to `\9` stand for the groups of `tag_version_regex`, and every other character is copied. The tag `2026-09-10` gives `2026.09.10` here:
+
+```yaml
+name: whitesur-icon-theme
+strategy: github-release
+upstream:
+  project: vinceliuice/WhiteSur-icon-theme
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\1.\2.\3'
+```
+
+`validate-pkg.sh` refuses `tag_version_replace` without `tag_version_regex`, with a character other than `A-Za-z0-9._+` outside `\1` to `\9`, or with a group the regex does not have. Both fields also work with `github-tag`, `github-nightly`, `gitlab-tag` and `gitea-tag`.
 
 ### 3.2 github-tag
 
@@ -141,8 +155,9 @@ upstream:
 | `upstream.project`           | yes      | `owner/repo` format                      |
 | `upstream.tag_pattern`       | no       | Glob to filter tags (e.g. `release-*`), replaces the default filter |
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, replaces the default filter |
+| `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**How the version is extracted:** reads every tag in one request, outside the API rate limit. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead, where `*` matches anything and the match is anchored at the start. The strategy strips a leading `v`, or applies `tag_version_regex`, and returns the highest tag by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so a `tag_pattern` that lets pre-release tags through picks them.
+**How the version is extracted:** reads every tag in one request, outside the API rate limit. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead, where `*` matches anything and the match is anchored at the start. The strategy strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so a `tag_pattern` that lets pre-release tags through picks them.
 
 **Authentication:** when `GITHUB_TOKEN` is set in the environment, git sends it to `github.com` as `Authorization: Basic` with the user `x-access-token`, which a private repository needs. The header reaches git through `GIT_CONFIG_*` variables, so the token does not appear on a command line. git allows only `https` and asks for no password on the terminal.
 
@@ -218,9 +233,25 @@ upstream:
 | `upstream.version_source` | no | `"tag"` (default), `"release_body"`, `"tag_date"`, `"published_date"` |
 | `upstream.version_pattern` | for `release_body` | Perl regex for the version in the release body. Dashes in the match become `+`. |
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, for `version_source: tag` |
+| `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
+| `upstream.date_format` | no | Format of `date` for `tag_date` and `published_date` (default: `%Y.%m.%d`) |
 | `upstream.channel` | for pattern D | Text that the release name must contain |
 
-`tag_date` takes the `YYYY-MM-DD` date in the tag and `published_date` the release date, both rendered as `YYYY.MM.DD`.
+`tag_date` takes the `YYYY-MM-DD` date in the tag and `published_date` the UTC date of `published_at`. `date -u` renders both with `date_format`, `YYYY.MM.DD` by default. The two dates can differ: the servo release `2026-10-21` was published at `2026-10-22T00:25:00Z`.
+
+A package whose `pkgver` has the form `20251213` needs `date_format: '%Y%m%d'`, because `vercmp` ranks `20251213` above `2026.10.21` and the default form never counts as newer:
+
+```yaml
+name: servo-nightly-bin
+strategy: github-nightly
+upstream:
+  project: servo/servo-nightly-builds
+  nightly_tag: latest
+  version_source: tag_date
+  date_format: '%Y%m%d'
+```
+
+`validate-pkg.sh` refuses `date_format` with another `version_source` and a format whose output is not a valid version, such as `%Y-%m-%d`.
 
 **Authentication:** same as `github-release`.
 
@@ -269,8 +300,9 @@ upstream:
 | `upstream.project`     | yes      | Project path (e.g. `network/my-kde-app`)              |
 | `upstream.tag_pattern` | no       | Glob to filter tags, replaces the default filter      |
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
+| `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead. It strips a leading `v`, or applies `tag_version_regex`, and returns the highest by `sort -V`. There is no authentication, so private projects cannot be queried.
+**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. There is no authentication, so private projects cannot be queried.
 
 **Example YAML:**
 
@@ -307,8 +339,9 @@ upstream:
 | `upstream.project`     | yes      | `owner/repo` format                      |
 | `upstream.tag_pattern` | no       | Glob to filter tags, replaces the default filter |
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
+| `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**How the version is extracted:** fetches up to 50 tags without pagination. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead. It strips a leading `v`, or applies `tag_version_regex`, and returns the highest by `sort -V`.
+**How the version is extracted:** fetches up to 50 tags without pagination. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`.
 
 **Example YAML:**
 
@@ -1042,8 +1075,9 @@ echo "$version"
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
 | `validate_pkgver <version>`     | Returns 1 for an empty version, one with a character outside `A-Za-z0-9._+` or one without a digit |
 | `release_tags <tags>`           | Prints the tags of the form `v1.2.3` or `1.2.3`, one per line |
-| `tag_versions <ere>`            | Prints the version in each tag of stdin: the first capture group of the ERE, or the tag without a leading `v` when the ERE is empty |
-| `latest_tag_version <tags> <tag_pattern> <ere>` | Prints the highest version among the tags, filtered as the tag strategies filter them |
+| `tag_version_fill <template>`   | Prints the template with `\1` to `\9` replaced by the groups in `BASH_REMATCH`, returns 1 for a group the last match does not have |
+| `tag_versions <ere> [template]` | Prints the version in each tag of stdin: the template filled from the groups of the ERE (default: `\1`), or the tag without a leading `v` when the ERE is empty |
+| `latest_tag_version <tags> <tag_pattern> <ere> [template]` | Prints the highest version among the tags, filtered as the tag strategies filter them |
 | `capture_matches <ere>`         | Prints the first capture group of every match of the ERE in stdin |
 | `ere_valid <ere>`               | Succeeds when bash can compile the ERE              |
 | `log_ok <msg>`                  | Prints a green check mark and the message to stderr |

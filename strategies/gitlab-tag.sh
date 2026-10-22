@@ -21,6 +21,7 @@ host=$(pkg_get "$pkg_file" .upstream.host)
 project=$(pkg_get "$pkg_file" .upstream.project)
 tag_pattern=$(pkg_get "$pkg_file" '.upstream.tag_pattern // ""')
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
+tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 
 # URL-encode the project path (e.g., group/project → group%2Fproject)
 project_encoded="${project//\//%2F}"
@@ -36,4 +37,4 @@ if [[ -z "$tags" ]]; then
   exit 1
 fi
 
-latest_tag_version "$tags" "$tag_pattern" "$tag_version_regex"
+latest_tag_version "$tags" "$tag_pattern" "$tag_version_regex" "$tag_version_replace"

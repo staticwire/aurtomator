@@ -22,6 +22,7 @@ pkg_file=$(pkg_file "$NAME")
 owner_repo=$(pkg_get "$pkg_file" .upstream.project)
 tag_pattern=$(pkg_get "$pkg_file" '.upstream.tag_pattern // ""')
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
+tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 
 # The tags API answers 100 tags at most per page. git takes the token from
 # the environment: as an argument, it is visible in ps to every local user.
@@ -48,4 +49,4 @@ if [[ -z "$tags" ]]; then
   exit 1
 fi
 
-latest_tag_version "$tags" "$tag_pattern" "$tag_version_regex"
+latest_tag_version "$tags" "$tag_pattern" "$tag_version_regex" "$tag_version_replace"

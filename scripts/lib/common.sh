@@ -135,18 +135,40 @@ release_tags() {
   grep -E '^v?[0-9]+(\.[0-9]+)*$' <<<"$1" || true
 }
 
-# The version in each tag of stdin, one per line: the first capture group
-# of tag_version_regex where it matches, or the tag without a leading v
-# when the regex is empty. bash takes the group, so the regex may hold |,
-# which ends the pattern of a sed s command.
-# Args: $1=tag_version_regex or empty
+# The version a match of tag_version_regex gives: the template with \1 to
+# \9 replaced by the groups in BASH_REMATCH and every other character kept.
+# Args: $1=tag_version_replace
+# Returns: 1 when the template names a group the regex does not have
+tag_version_fill() {
+  local template="$1" version="" i n
+  for ((i = 0; i < ${#template}; i++)); do
+    n=${template:i+1:1}
+    if [[ "${template:i:1}" == "\\" && "$n" == [1-9] ]]; then
+      if ((n >= ${#BASH_REMATCH[@]})); then
+        echo "tag_version_replace names \\$n, a group tag_version_regex does not have" >&2
+        return 1
+      fi
+      version+=${BASH_REMATCH[n]}
+      i=$((i + 1))
+    else
+      version+=${template:i:1}
+    fi
+  done
+  printf '%s\n' "$version"
+}
+
+# The version in each tag of stdin, one per line: tag_version_replace
+# filled from the groups of tag_version_regex where it matches, or the tag
+# without a leading v when the regex is empty. bash takes the groups, so
+# the regex may hold |, which ends the pattern of a sed s command.
+# Args: $1=tag_version_regex or empty, $2=tag_version_replace (default \1)
 tag_versions() {
-  local regex="$1" tag
+  local regex="$1" replace="${2:-\\1}" tag
   while IFS= read -r tag; do
     if [[ -z "$regex" ]]; then
       printf '%s\n' "${tag#v}"
     elif [[ "$tag" =~ $regex ]]; then
-      printf '%s\n' "${BASH_REMATCH[1]}"
+      tag_version_fill "$replace" || return 1
     fi
   done
 }
@@ -154,10 +176,11 @@ tag_versions() {
 # The highest version among the tags of a tag strategy. tag_pattern keeps
 # the tags it matches from the start, with * for any text. Without either
 # field, only the tags of the form v1.2.3 or 1.2.3 count.
-# Args: $1=tags, one per line, $2=tag_pattern, $3=tag_version_regex
+# Args: $1=tags, one per line, $2=tag_pattern, $3=tag_version_regex,
+#       $4=tag_version_replace
 # Returns: 1 with the reason on stderr when no tag gives a version
 latest_tag_version() {
-  local tags="$1" pattern="$2" regex="$3" version
+  local tags="$1" pattern="$2" regex="$3" replace="${4:-}" version
   if [[ -n "$pattern" ]]; then
     tags=$(grep -E "^${pattern//\*/.*}" <<<"$tags" || true)
   elif [[ -z "$regex" ]]; then
@@ -167,7 +190,7 @@ latest_tag_version() {
       return 1
     fi
   fi
-  version=$(tag_versions "$regex" <<<"$tags" | sort -V | tail -1)
+  version=$(tag_versions "$regex" "$replace" <<<"$tags" | sort -V | tail -1)
   if [[ -z "$version" ]]; then
     echo "No matching tags found" >&2
     return 1

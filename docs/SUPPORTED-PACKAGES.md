@@ -105,6 +105,8 @@ upstream:
 
 **Why it works:** the first capture group of the ERE is the version, whatever the format of the tag, for example `0.1.8-stable`, `release-v2.3.0` or `app/v1.5.0`. bash takes the group, so the regex may hold `|`, in a group after the version: `^v?([0-9.]+)(-stable|)$`.
 
+`tag_version_replace` builds the version from more than one group, with `\1` to `\9`. For the date tag `2026-09-10`, `'^([0-9]{4})-([0-9]{2})-([0-9]{2})$'` with `'\1.\2.\3'` gives `2026.09.10`. See [WORKFLOW.md section 3.1](WORKFLOW.md#31-github-release).
+
 ### Nightly and prerelease packages
 
 `github-nightly` tracks nightly builds in 4 patterns:
@@ -114,7 +116,7 @@ upstream:
 - **Separate nightly repo**, for example yt-dlp-nightly-builds
 - **Channel filter**, for example the brave-browser Nightly channel
 
-The version comes from the tag name, the release body, the tag date or the publish date. `strategies/github-nightly.sh` lists the fields.
+The version comes from the tag name, the release body, the tag date or the publish date. `strategies/github-nightly.sh` lists the fields. `date_format` sets the form of the two dates, `YYYY.MM.DD` by default, and `'%Y%m%d'` fits a `pkgver` such as `20251213`. See [WORKFLOW.md section 3.3](WORKFLOW.md#33-github-nightly).
 
 A fixed tag keeps its download URL, so a PKGBUILD can save the download under a name with the date, as `neovim-nightly-bin` does with `_date="$(date -u +%Y%m%d)"` and `"$_pkgname-$_date.tar.gz::<url>"`. This works when the checksum of that source is `SKIP`: only the digits of the name may change from one update to the next. See step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
 

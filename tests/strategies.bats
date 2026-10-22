@@ -77,6 +77,29 @@ teardown() {
   [[ "$output" == *"tag_version_regex 'docker-v(.*)' did not match tag '0.1.8-stable'"* ]]
 }
 
+@test "github-release: tag_version_replace builds the version from the groups" {
+  create_test_package "test-replace" "github-release" "upstream:
+  project: dated-owner/dated-repo
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1.\\2.\\3'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-replace"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.10.21" ]
+}
+
+@test "github-release: tag_version_replace fails on a group the regex lacks" {
+  create_test_package "test-replace" "github-release" "upstream:
+  project: dated-owner/dated-repo
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1.\\4'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-replace"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'tag_version_replace names \4, a group tag_version_regex does not have'* ]]
+  [[ "$output" != *"did not match"* ]]
+}
+
 # === github-tag ===
 
 @test "github-tag: returns latest tag sorted by semver" {
@@ -107,6 +130,17 @@ teardown() {
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-tag-bar"
   [ "$status" -eq 0 ]
   [ "$output" = "1.3.11" ]
+}
+
+@test "github-tag: tag_version_replace builds the version from the groups" {
+  create_test_package "test-tag-replace" "github-tag" "upstream:
+  project: dated-owner/dated-repo
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1.\\2.\\3'"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-tag-replace"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.09.10" ]
 }
 
 @test "github-tag: takes only tags of the form v1.2.3 by default" {
@@ -217,6 +251,18 @@ teardown() {
   [ "$output" = "26.2.5" ]
 }
 
+@test "gitlab-tag: tag_version_replace builds the version from the groups" {
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: dated-group/dated-project
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1\\2\\3'"
+
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20260910" ]
+}
+
 @test "gitlab-tag: takes only tags of the form v1.2.3 by default" {
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com
@@ -259,6 +305,18 @@ teardown() {
   run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-gitea"
   [ "$status" -eq 0 ]
   [ "$output" = "26.2.5" ]
+}
+
+@test "gitea-tag: tag_version_replace builds the version from the groups" {
+  create_test_package "test-gitea" "gitea-tag" "upstream:
+  host: codeberg.org
+  project: dated-owner/dated-repo
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1.\\2.\\3'"
+
+  run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-gitea"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.09.10" ]
 }
 
 @test "gitea-tag: takes only tags of the form v1.2.3 by default" {
@@ -578,6 +636,67 @@ EOF
   run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-bar"
   [ "$status" -eq 0 ]
   [ "$output" = "3.5.0" ]
+}
+
+# servo-nightly-bin uses 20251213, which vercmp ranks above 2026.10.21
+@test "github-nightly: tag_version_replace with version_source=tag" {
+  create_test_package "test-nightly-replace" "github-nightly" "upstream:
+  project: dated-owner/dated-repo
+  nightly_tag: latest
+  version_source: tag
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1\\2\\3'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-replace"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20261021" ]
+}
+
+@test "github-nightly: date_format with tag_date" {
+  create_test_package "test-nightly-format" "github-nightly" "upstream:
+  project: owner/dated-repo
+  nightly_tag: 'nightly-'
+  version_source: tag_date
+  date_format: '%Y%m%d'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-format"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20260326" ]
+}
+
+@test "github-nightly: date_format with published_date" {
+  create_test_package "test-nightly-format" "github-nightly" "upstream:
+  project: dated-owner/dated-repo
+  nightly_tag: latest
+  version_source: published_date
+  date_format: '%Y%m%d'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-format"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20261022" ]
+}
+
+# Published at 2026-10-22T00:25:00Z, which is still 2026-10-21 at UTC-10
+@test "github-nightly: published_date is the date in UTC" {
+  create_test_package "test-nightly-utc" "github-nightly" "upstream:
+  project: dated-owner/dated-repo
+  nightly_tag: latest
+  version_source: published_date"
+
+  run env TZ=XXX10 "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-utc"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.10.22" ]
+}
+
+@test "github-nightly: fails when the release holds no published_at" {
+  create_test_package "test-nightly-nodate" "github-nightly" "upstream:
+  project: owner/repo
+  nightly_tag: latest
+  version_source: published_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-nodate"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not extract version from nightly release"* ]]
 }
 
 # === YAML regex fields ===

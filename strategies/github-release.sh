@@ -20,6 +20,7 @@ source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 pkg_file=$(pkg_file "$NAME")
 owner_repo=$(pkg_get "$pkg_file" .upstream.project)
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
+tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 
 version=$(github_api "https://api.github.com/repos/${owner_repo}/releases/latest" |
   yq -r '.tag_name') || {
@@ -34,7 +35,7 @@ fi
 
 # Extract version from tag
 if [[ -n "$tag_version_regex" ]]; then
-  extracted=$(tag_versions "$tag_version_regex" <<<"$version")
+  extracted=$(tag_versions "$tag_version_regex" "$tag_version_replace" <<<"$version")
   if [[ -z "$extracted" ]]; then
     echo "tag_version_regex '${tag_version_regex}' did not match tag '${version}'" >&2
     exit 1

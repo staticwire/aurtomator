@@ -106,6 +106,39 @@ validate_pkg() {
     fi
   fi
 
+  local tag_version_replace
+  tag_version_replace=$(pkg_get "$file" '.upstream.tag_version_replace // ""')
+  if [[ -n "$tag_version_replace" ]]; then
+    if [[ -z "$tag_version_regex" ]]; then
+      log_err "$file: upstream.tag_version_replace needs upstream.tag_version_regex"
+      ((errors++))
+    elif [[ ! "$tag_version_replace" =~ ^([A-Za-z0-9._+]|\\[1-9])+$ ]]; then
+      log_err "$file: upstream.tag_version_replace may hold only A-Za-z0-9 . _ + and \\1 to \\9: $tag_version_replace"
+      ((errors++))
+    # $regex|^ matches the empty string and fills BASH_REMATCH with every
+    # group of the regex, so tag_version_fill finds a missing group as it
+    # does at run time
+    elif ere_valid "$tag_version_regex" &&
+      ! { [[ "" =~ $tag_version_regex|^ ]] && tag_version_fill "$tag_version_replace" >/dev/null 2>&1; }; then
+      log_err "$file: upstream.tag_version_replace names a group tag_version_regex does not have: $tag_version_replace"
+      ((errors++))
+    fi
+  fi
+
+  local date_format version_source sample
+  date_format=$(pkg_get "$file" '.upstream.date_format')
+  if [[ "$date_format" != "null" ]]; then
+    version_source=$(pkg_get "$file" '.upstream.version_source // "tag"')
+    sample=$(date -u -d 2026-01-02 +"$date_format")
+    if [[ "$version_source" != "tag_date" && "$version_source" != "published_date" ]]; then
+      log_err "$file: upstream.date_format applies to version_source tag_date and published_date only"
+      ((errors++))
+    elif ! validate_pkgver "$sample" 2>/dev/null; then
+      log_err "$file: upstream.date_format must give a valid version, it gives ${sample@Q}"
+      ((errors++))
+    fi
+  fi
+
   case "$strategy" in
     github-release | github-tag | github-nightly)
       local project

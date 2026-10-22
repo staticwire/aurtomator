@@ -603,3 +603,82 @@ allow_downgrade: $value"
   [ "$status" -ne 0 ]
   [[ "$output" == *"capture group"* ]]
 }
+
+# === tag_version_replace validation ===
+
+@test "validate: tag_version_replace with the groups of the regex passes" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1.\\2.\\3'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: tag_version_replace without tag_version_regex rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_replace: '\\1'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.tag_version_replace needs upstream.tag_version_regex"* ]]
+}
+
+@test "validate: tag_version_replace with a character a version lacks rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1-\\2'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'upstream.tag_version_replace may hold only A-Za-z0-9 . _ + and \1 to \9'* ]]
+}
+
+@test "validate: tag_version_replace naming a group the regex lacks rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1.\\4'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.tag_version_replace names a group tag_version_regex does not have"* ]]
+}
+
+# === date_format validation ===
+
+@test "validate: date_format with a date version_source passes" {
+  local source
+  for source in tag_date published_date; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: $source
+  date_format: '%Y%m%d'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
+}
+
+# Without version_source the strategy reads the tag
+@test "validate: date_format with another version_source rejected" {
+  local source
+  for source in 'version_source: tag' 'version_source: release_body' ''; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  $source
+  version_pattern: 'v\\K\\S+'
+  date_format: '%Y%m%d'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"upstream.date_format applies to version_source tag_date and published_date only"* ]]
+  done
+}
+
+@test "validate: date_format that gives no valid version rejected" {
+  create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: tag_date
+  date_format: '%Y-%m-%d'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.date_format must give a valid version, it gives '2026-01-02'"* ]]
+}
