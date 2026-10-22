@@ -108,11 +108,25 @@ aur_add_file() {
   git -C "$AUR_REMOTE" rev-parse HEAD >"$PREPARED/base"
 }
 
-# Helper: makepkg that prints a fixed .SRCINFO, namcap that finds nothing
+# Helper: makepkg that prints a fixed .SRCINFO, the given file or a single
+# pkgbase line, and namcap that finds nothing
+# Usage: mock_pkg_tools [.SRCINFO]
 mock_pkg_tools() {
-  printf '#!/usr/bin/env bash\necho "pkgbase = demo"\n' >"$MOCK_DIR/makepkg"
+  if [[ -n "${1:-}" ]]; then
+    printf '#!/usr/bin/env bash\ncat %q\n' "$1" >"$MOCK_DIR/makepkg"
+  else
+    printf '#!/usr/bin/env bash\necho "pkgbase = demo"\n' >"$MOCK_DIR/makepkg"
+  fi
   printf '#!/usr/bin/env bash\nexit 0\n' >"$MOCK_DIR/namcap"
   chmod +x "$MOCK_DIR/makepkg" "$MOCK_DIR/namcap"
+}
+
+# Helper: a curl that answers the source check with a file, and an
+# updpkgsums that keeps the checksums
+mock_source_tools() {
+  printf '#!/usr/bin/env bash\nprintf "200 application/octet-stream"\n' >"$MOCK_DIR/curl"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$MOCK_DIR/updpkgsums"
+  chmod +x "$MOCK_DIR/curl" "$MOCK_DIR/updpkgsums"
 }
 
 # === update-pkg.sh --prepare ===
@@ -159,14 +173,79 @@ current: '0.9.0'"
 current: '1.0.0'"
   write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 SKIP SKIP
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
-  mock_pkg_tools
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
 
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0
   [ "$status" -eq 0 ]
   git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx 'pkgver=1.1.0'
-  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "pkgbase = demo" ]
+  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
+}
+
+# Helper: PKGBUILD whose pkgver= line is <pkgver line> and whose one source
+# is <source>, built from the variables of <head>, with the checksum $H1
+# Usage: write_pkgbuild_from <path> <head> <pkgver line> <source>
+write_pkgbuild_from() {
+  cat >"$1" <<EOF
+$2
+pkgname=demo
+$3
+pkgrel=1
+pkgdesc="demo"
+arch=('any')
+url="https://example.com"
+license=('MIT')
+source=("$4")
+sha256sums=('$H1')
+
+package() {
+  :
+}
+EOF
+}
+
+# pkgver="${_pkgver//-/.}" with the source built from _pkgver
+@test "update-pkg: refuses a bump that changes no source and no checksum" {
+  create_test_package "demo" "github-tag" "upstream:
+  project: owner/repo
+current: '2025.04.03'"
+  # shellcheck disable=SC2016
+  write_pkgbuild_from "$OLD" '_pkgver=2025-04-03' 'pkgver="${_pkgver//-/.}"' \
+    'demo-$_pkgver.tar.gz::https://example.com/archive/$_pkgver.tar.gz'
+  local src="demo-2025-04-03.tar.gz::https://example.com/archive/2025-04-03.tar.gz"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2025.04.03 "$src" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2026.09.10 "$src" "$H1"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 2026.09.10
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+# pkgver built from an array that the source uses too
+@test "update-pkg: refuses a source that keeps the old version" {
+  create_test_package "demo" "github-tag" "upstream:
+  project: owner/repo
+current: '6.00.3091'"
+  # shellcheck disable=SC2016
+  write_pkgbuild_from "$OLD" '_pkver=(6.00 3091)' 'pkgver=${_pkver[0]}.${_pkver[1]}' \
+    'https://example.com/player-${_pkver[0]}.${_pkver[1]}beta7-x86_64.tar.zst'
+  local src="https://example.com/player-6.00.3091beta7-x86_64.tar.zst"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 6.00.3091 "$src" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 6.00.3092 "$src" "$H1"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 6.00.3092
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
 @test "update-pkg: --prepare needs a directory" {
@@ -1743,6 +1822,83 @@ write_srcinfo_lookalike() {
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
   [ "$status" -eq 1 ]
   [[ "$output" == *"changes more than the version"* ]]
+}
+
+# Helper: .SRCINFO with the given pkgver and sources, each with its sha256sum
+# Usage: write_srcinfo_sources <path> <pkgver> [<source> <sha256sum>]...
+write_srcinfo_sources() {
+  local path=$1 pkgver=$2 i
+  shift 2
+  {
+    printf '%s\n' "pkgbase = demo" $'\tpkgver = '"$pkgver" $'\tpkgrel = 1'
+    for ((i = 1; i <= $#; i += 2)); do
+      printf '\tsource = %s\n' "${!i}"
+    done
+    for ((i = 2; i <= $#; i += 2)); do
+      printf '\tsha256sums = %s\n' "${!i}"
+    done
+    printf '%s\n' "" "pkgname = demo"
+  } >"$path"
+}
+
+# pkgver="${_pkgver//-/.}" with the source built from _pkgver
+@test "check_prepared_srcinfo: rejects a bump that changes no source and no checksum" {
+  local src="demo-2025-04-03.tar.gz::https://example.com/archive/2025-04-03.tar.gz"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2025.04.03 "$src" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2026.09.10 "$src" "$H1"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2026.09.10
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+}
+
+@test "check_prepared_srcinfo: rejects a source without the version that keeps its checksum" {
+  local src="https://example.com/download/latest/player-x86_64.tar.zst"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 6.00.3091 "$src" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 6.00.3092 "$src" "$H1"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 6.00.3092
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+}
+
+# prepare hands over the AUR files when the AUR already has the version
+@test "check_prepared_srcinfo: accepts the AUR copy itself" {
+  local src="https://example.com/download/latest/player-x86_64.tar.zst"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 6.00.3091 "$src" "$H1"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/old.SRCINFO" 6.00.3091
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: accepts a source without the version and a new checksum" {
+  local src="https://example.com/download/latest/player-x86_64.tar.zst"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 6.00.3091 "$src" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 6.00.3092 "$src" "$H3"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 6.00.3092
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: accepts a new source with the same checksum" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.0 "https://example.com/demo-2.0.tar.gz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.1 "https://example.com/demo-2.1.tar.gz" "$H1"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  [ "$status" -eq 0 ]
+}
+
+# makepkg fetches a VCS source at build time, and a local file keeps its hash
+@test "check_prepared_srcinfo: accepts a VCS source and a local file that stay the same" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" r100.abc1234 \
+    "demo::git+https://example.com/demo.git" SKIP demo.desktop "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" r101.def5678 \
+    "demo::git+https://example.com/demo.git" SKIP demo.desktop "$H1"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" r101.def5678
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: accepts a download that stays the same with a SKIP checksum" {
+  local src="https://example.com/releases/download/nightly/demo-linux.tar.gz"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0 "$src" SKIP
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.1.0 "$src" SKIP
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 0 ]
 }
 
 # Helper: .SRCINFO of a nightly package with two sources, the first saved

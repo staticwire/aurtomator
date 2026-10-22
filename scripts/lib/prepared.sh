@@ -166,10 +166,11 @@ _bump_version() {
   printf '%s\n' "$out"
 }
 
-# Print "<arch suffix>:<index>" for every source entry of a .SRCINFO that is
-# SKIP in each checksum array with the same arch suffix
+# Print "SKIP <arch suffix>:<index>" for every source entry of a .SRCINFO
+# that is SKIP in each checksum array with the same arch suffix, and
+# "HASH <arch suffix>:<index>" for every other one
 # Args: $1=.SRCINFO
-_skip_sources() {
+_source_checksums() {
   awk -F' = ' '
     { key = $1; sub(/^[ \t]+/, "", key) }
     key ~ /^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$/ {
@@ -177,8 +178,16 @@ _skip_sources() {
       listed[entry] = 1
       if ($2 != "SKIP") hashed[entry] = 1
     }
-    END { for (entry in listed) if (!(entry in hashed)) print entry }
+    END { for (entry in listed) print (entry in hashed ? "HASH " : "SKIP ") entry }
   ' "$1"
+}
+
+# Args: $1=source entry of a .SRCINFO
+# Returns: 0 when makepkg downloads it over http, https or ftp, as
+#          verify_prepared_sums does
+_is_download() {
+  local url="${1#*::}"
+  [[ "$1" == *://* && "${url%%://*}" =~ ^(http|https|ftp)$ ]]
 }
 
 # Args: $1=expected source line, $2=prepared source line
@@ -198,7 +207,10 @@ _name_differs_in_digits() {
 # from pkgver. A source that is SKIP in every checksum array may also change
 # the digits in the name of its file, as a nightly package names its
 # download by the date: verify_prepared_sums never fetches it, and makepkg
-# takes the sources from the PKGBUILD.
+# takes the sources from the PKGBUILD. When pkgver changes and a download
+# has a real checksum, some source or checksum has to change too: a pkgver
+# built from another variable, or a source URL without the version, would
+# otherwise label the old files with the new version.
 # Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
@@ -222,13 +234,17 @@ check_prepared_srcinfo() {
   local old_ver
   old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
 
-  local -A skip_sources=() source_counts=()
-  local entry
-  while read -r entry; do
-    skip_sources["$entry"]=1
-  done < <(_skip_sources "$1")
+  local -A skip_sources=() hashed_sources=() source_counts=()
+  local checksum entry
+  while read -r checksum entry; do
+    if [[ "$checksum" == SKIP ]]; then
+      skip_sources["$entry"]=1
+    else
+      hashed_sources["$entry"]=1
+    fi
+  done < <(_source_checksums "$1")
 
-  local i old new key kind old_val new_val n expected
+  local i old new key kind old_val new_val n expected pinned=false changed=false
   for i in "${!new_lines[@]}"; do
     old="${old_lines[$i]}"
     new="${new_lines[$i]}"
@@ -269,6 +285,7 @@ check_prepared_srcinfo() {
           log_err "Prepared .SRCINFO line $((i + 1)) is not a checksum matching the AUR copy: $new"
           return 1
         fi
+        [[ "$new" == "$old" ]] || changed=true
         ;;
       source)
         n="${source_counts[$key]:-0}"
@@ -280,6 +297,10 @@ check_prepared_srcinfo() {
           log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $new"
           return 1
         fi
+        [[ "$new" == "$old" ]] || changed=true
+        if [[ -n "${hashed_sources["${key#source}:$n"]:-}" ]] && _is_download "$old_val"; then
+          pinned=true
+        fi
         ;;
       *)
         if [[ "$new" != "$old" && "$new" != "$(_bump_version "$old" "$old_ver" "$version")" ]]; then
@@ -289,6 +310,10 @@ check_prepared_srcinfo() {
         ;;
     esac
   done
+  if [[ "$pinned" == true && "$changed" == false && "$version" != "$old_ver" ]]; then
+    log_err "Prepared .SRCINFO changes no source and no checksum, so the new version would hold the files of the old one"
+    return 1
+  fi
   return 0
 }
 

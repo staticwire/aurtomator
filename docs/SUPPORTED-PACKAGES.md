@@ -138,6 +138,14 @@ sha256sums=('SKIP'
 
 **Why:** when aurtomator sees `SKIP`, it skips `updpkgsums`, so the real hash of the remote source would be stale after the version bump.
 
+### Sources that do not follow pkgver (BLOCKED)
+
+A PKGBUILD whose sources take the version from another variable, as with `_pkgver=2025-04-03` and `pkgver="${_pkgver//-/.}"`, or a download URL without the version, such as `https://example.org/download/latest/player.tar.zst`, whose file has not changed.
+
+**Detection:** the `.SRCINFO` check refuses a new `pkgver` when no source and no checksum changed and a download over `http`, `https` or `ftp` has a real checksum. Publish runs it, and `update-pkg.sh` runs it before the commit. See step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
+
+**Why:** `sed` sets only `pkgver`. When the sources stay the same, `updpkgsums` hashes the old files again, and the new version would hold them.
+
 ### Source URL returns HTML (BLOCKED)
 
 Upstream moves or renames a release, and the old URL now redirects to an HTML error or download page.

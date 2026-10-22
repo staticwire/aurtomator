@@ -1316,6 +1316,7 @@ pkgver() {
   printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
 }
 EOF
+  printf '%s\n' "pkgbase = test-vcs-ok" "pkgname = test-vcs-ok" >"$aur_dir/.SRCINFO"
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
   # A bare remote, so the push of the copied clone succeeds
   git init --bare -q "$TEST_TMPDIR/aur-bare-test-vcs-ok.git"
@@ -1575,6 +1576,7 @@ license=('MIT')
 source=("https://example.com/test-${pkgver}.tar.gz")
 sha256sums=('abc123')
 EOF
+  printf '%s\n' "pkgbase = test-detached" "pkgname = test-detached" >"$aur_dir/.SRCINFO"
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
   git -C "$aur_dir" remote add origin "$bare_dir"
   git -C "$aur_dir" push -q origin master
@@ -1773,6 +1775,7 @@ license=('MIT')
 source=("git+https://example.com/repo.git")
 sha256sums=('SKIP')
 EOF
+  printf '%s\n' "pkgbase = test-vcs" "pkgname = test-vcs" >"$aur_dir/.SRCINFO"
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
   # A bare remote, so the push of the copied clone succeeds
   git init --bare -q "$TEST_TMPDIR/aur-bare-test-vcs.git"
