@@ -793,7 +793,7 @@ For every `.status/` entry with `check_failed:` or `update_failed:`, the step:
 
 1. Creates the `auto-update` label when it is missing.
 2. Skips the package when an open `auto-update` issue already has the title `❌ <package>: check failed` or `❌ <package>: update failed`, so a package never gets a second issue while one is open. The step compares the titles of up to 1000 open issues and uses no search, because a search splits `foo-bar` into words and finds the issue of `foo-bar` for `foo`.
-3. Opens an issue titled `❌ <package>: check failed` or `❌ <package>: update failed`, after the status, with the package, the status, a link to the run and the error. The error holds text from upstream, a rejected tag name for example, so it stands in a code block, where links, images and mentions do not render, and is cut to its last 4000 characters. `builder` writes the body with `failure_issue_body` from `lib.sh`, so the step runs no code from the workspace as root.
+3. Opens an issue titled `❌ <package>: check failed` or `❌ <package>: update failed`, after the status, with the package, the status, a link to the run and the error. The error holds text from upstream, a rejected tag name for example, so it stands in a code block, where links, images and mentions do not render, and is cut to its last 4000 characters. `builder` writes the body with `failure_issue_body` from `scripts/lib/issue.sh`, so the step runs no code from the workspace as root.
 
 The step belongs to `publish`, which runs for a new version or a change in the status table. A package that keeps failing gets its issue in the run where it starts failing. An issue closed while the package still fails comes back in the next run that reaches `publish`.
 
@@ -814,12 +814,12 @@ GitHub starts a `workflow_run` workflow only from its file on the default branch
 `ubuntu-latest`, 5-minute timeout. It installs `shellcheck` from apt, and `shfmt` v3.14.1 and `actionlint` v1.7.12 with `go install`, then runs:
 
 ```bash
-shellcheck -x -S warning scripts/*.sh strategies/*.sh
-shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
+shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
+shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh
 actionlint
 ```
 
-`-x` follows `source` directives and `-S warning` sets the minimum severity. `-d` fails on any formatting diff, `-i 2` sets two-space indentation, and `-ci` indents `case` branches. `actionlint` checks every file in `.github/workflows/`: the syntax, the expressions, the `needs` of each job, and the `run:` blocks with `shellcheck`.
+`-x` follows the `source` directives, and `.shellcheckrc` makes shellcheck look for their files next to the script. `-S warning` sets the minimum severity. `-d` fails on any formatting diff, `-i 2` sets two-space indentation, and `-ci` indents `case` branches. `actionlint` checks every file in `.github/workflows/`: the syntax, the expressions, the `needs` of each job, and the `run:` blocks with `shellcheck`.
 
 `actionlint` does not check the `run:` blocks of a composite action. The step `shellcheck the actions` takes them from every `.github/actions/*/action.yml` with the `yq` of the runner image and runs `shellcheck -s bash` on them at its default severity, so an unquoted variable fails the step as it fails `actionlint` in a workflow.
 
@@ -928,13 +928,13 @@ bats tests/setup.bats
 
 ```bash
 # shellcheck
-shellcheck -x -S warning scripts/*.sh strategies/*.sh
+shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
 
 # shfmt (check mode)
-shfmt -d -i 2 -ci scripts/*.sh strategies/*.sh
+shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh
 
 # shfmt (auto-fix)
-shfmt -w -i 2 -ci scripts/*.sh strategies/*.sh
+shfmt -w -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh
 
 # actionlint (the workflows, with shellcheck on their run: blocks)
 actionlint
@@ -951,7 +951,7 @@ A strategy is a bash script in `strategies/` that finds the latest upstream vers
 - **Failure:** an error on stderr, a non-zero exit code.
 - **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`.
 
-The script can rely on `yq` and `curl`. `scripts/lib.sh` provides YAML helpers, `http_get` for requests and logging, and sets `AURTOMATOR_DIR` to the project root.
+The script can rely on `yq` and `curl`. `scripts/lib/common.sh` provides YAML helpers, `http_get` for requests and logging, and sets `AURTOMATOR_DIR` to the project root.
 
 ### 8.2 Template
 
@@ -969,8 +969,8 @@ readonly NAME="${1:?Usage: my-strategy.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 
-# shellcheck source=../scripts/lib.sh
-source "${SCRIPT_DIR}/../scripts/lib.sh"
+# shellcheck source=../scripts/lib/common.sh
+source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 
 pkg_file=$(pkg_file "$NAME")
 my_field=$(pkg_get "$pkg_file" .upstream.my_field)
@@ -992,8 +992,8 @@ echo "$version"
 ### 8.3 Checklist
 
 1. **Location:** `strategies/<name>.sh`, executable (`chmod +x`). `<name>` is the value of the YAML `strategy` field.
-2. **Header:** `set -euo pipefail`, then source `lib.sh` for `pkg_file`, `pkg_get` and logging.
-3. **HTTP:** `http_get <url> [curl option]...` from `lib.sh`. It runs `curl -sfL --max-time 30` and tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. `-f` fails on HTTP errors and `-L` follows redirects. A test in `tests/strategies.bats` fails when a strategy calls `curl` itself.
+2. **Header:** `set -euo pipefail`, then source `scripts/lib/common.sh` for `pkg_file`, `pkg_get` and logging. `tests/strategies.bats` runs every strategy with `common.sh` as the only file of `scripts/`.
+3. **HTTP:** `http_get <url> [curl option]...` from `common.sh`. It runs `curl -sfL --max-time 30` and tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. `-f` fails on HTTP errors and `-L` follows redirects. A test in `tests/strategies.bats` fails when a strategy calls `curl` itself.
 4. **Result:** check for an empty string and for `null` from `yq`.
 5. **Prefix:** strip a leading `v` with `${version#v}` when upstream tags look like `v1.0.0`.
 6. **Validation:** add the checks of its required fields to `scripts/validate-pkg.sh`. The name needs no entry: every script in `strategies/` is a valid strategy.
@@ -1007,7 +1007,7 @@ echo "$version"
 
 9. **Docs:** the strategies table in `README.md`, a section in this file, and an example in `packages/example.yml.sample`.
 
-### 8.4 Available lib.sh functions
+### 8.4 Functions in lib/common.sh
 
 | Function                        | Description                                         |
 |---------------------------------|-----------------------------------------------------|
@@ -1016,6 +1016,12 @@ echo "$version"
 | `pkg_set <file> <query> <val>`  | Writes a field to a YAML file with yq               |
 | `require_cmd <cmd>`             | Exits 1 if the command is not in `PATH`             |
 | `load_config`                   | Sources `.aurtomator.conf` if present               |
+| `http_get <url> [curl option]...` | Fetches a URL with `curl`, see 8.3                |
+| `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
+| `validate_pkgver <version>`     | Returns 1 for an empty version or one with a character outside `A-Za-z0-9._+` |
+| `release_tags <tags>`           | Prints the tags of the form `v1.2.3` or `1.2.3`, one per line |
+| `capture_matches <ere>`         | Prints the first capture group of every match of the ERE in stdin |
+| `ere_valid <ere>`               | Succeeds when bash can compile the ERE              |
 | `log_ok <msg>`                  | Prints a green check mark and the message to stderr |
 | `log_warn <msg>`                | Prints a yellow `!` and the message to stderr       |
 | `log_err <msg>`                 | Prints a red cross and the message to stderr        |

@@ -122,6 +122,37 @@ run_blocks() {
   [[ "$output" == *'shellcheck -s bash "$RUNNER_TEMP/run.sh"'* ]]
 }
 
+# The lint steps check only the files they name: shellcheck -x reads a
+# sourced file but reports nothing in it, and shfmt does not read it
+@test "ci: shellcheck and shfmt check every script in scripts and strategies" {
+  local root="$GITHUB_DIR/.." step expected
+  expected=$(cd "$root" && find scripts strategies -name '*.sh' | sort)
+  [ -n "$expected" ]
+  for step in shellcheck shfmt; do
+    run yq ".jobs.lint.steps[] | select(.name == \"$step\") | .run" "$GITHUB_DIR/workflows/ci.yml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "$step "* ]]
+    run bash -c 'cd "$1" && for word in $2; do if [[ "$word" == *.sh ]]; then printf "%s\n" "$word"; fi; done | sort' _ "$root" "$output"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$expected" ]
+  done
+}
+
+# Without .shellcheckrc, shellcheck reads a source directive relative to
+# the current directory, and -S warning hides the SC1091 it gives for a
+# file it cannot follow
+@test "ci: every shellcheck source directive names a file next to its script" {
+  local root="$GITHUB_DIR/.." file target count=0
+  grep -qx 'source-path=SCRIPTDIR' "$root/.shellcheckrc"
+  while IFS=: read -r file target; do
+    [[ "$target" != /dev/null ]] || continue
+    echo "$file: $target"
+    [ -f "$root/$(dirname "$file")/$target" ]
+    count=$((count + 1))
+  done < <(cd "$root" && grep -o '# shellcheck source=[^ ]*' scripts/*.sh scripts/lib/*.sh strategies/*.sh | sed 's/# shellcheck source=//')
+  [ "$count" -gt 0 ]
+}
+
 @test "ci: the test job runs the suite once, under bashcov, and fails with it" {
   run yq '[.jobs.test.steps[] | select(has("run")) | .run | select(test("bats tests/"))] | length' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]

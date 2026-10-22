@@ -16,8 +16,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 readonly MAX_SIZE=5242880 # 5MB
 
-# shellcheck source=../scripts/lib.sh
-source "${SCRIPT_DIR}/../scripts/lib.sh"
+# shellcheck source=../scripts/lib/common.sh
+source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 require_cmd curl
 
 pkg_file=$(pkg_file "$NAME")

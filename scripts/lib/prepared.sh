@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+#
+# prepared.sh - Checks of a prepared update against the AUR copy
+#
+# The job that executes a PKGBUILD holds no secrets, so the files it hands
+# over are untrusted. The job that pushes accepts them only when they differ
+# from the AUR copy in pkgver, pkgrel and checksum values. None of these
+# checks sources the file.
+#
+# Sourced by lib.sh, after common.sh.
+
+# awk keeps a NUL byte, $(...) drops it and mapfile cuts the line at it, so
+# a file with one is compared as something it is not
+# Args: $1=file
+# Returns: 0 when the file holds a NUL byte
+_has_nul() {
+  [[ "$(tr -d '\000' <"$1" | wc -c)" -ne "$(wc -c <"$1")" ]]
+}
+
+# Split a PKGBUILD into lines of five kinds, without executing it:
+#   SKEL<TAB>line          every line, with pkgver=, pkgrel= and each
+#                          top-level checksum array replaced by a placeholder
+#   PKGVER|PKGREL<TAB>val  the value of a pkgver= or pkgrel= line
+#   SUM<TAB>array<TAB>index<TAB>HASH|SKIP  one line per checksum
+#   SUMVAL<TAB>array<TAB>value  the same checksum with its value
+#   BAD<TAB>text           anything in a checksum array but a quoted
+#                          checksum, a comment or a line continuation
+# Args: $1=pkgbuild path
+_pkgbuild_parts() {
+  awk '
+    function tokens(text,   n, i, t, parts) {
+      n = split(text, parts, /[ \t]+/)
+      for (i = 1; i <= n; i++) {
+        t = parts[i]
+        if (t == "") continue
+        if (t !~ /^(\047([0-9a-fA-F]+|SKIP)\047|"([0-9a-fA-F]+|SKIP)")$/) {
+          print "BAD\t" NR ": " t
+          continue
+        }
+        print "SUM\t" name "\t" idx++ "\t" (t ~ /SKIP/ ? "SKIP" : "HASH")
+        print "SUMVAL\t" name "\t" substr(t, 2, length(t) - 2)
+      }
+    }
+    # As bash does: a # that starts a word comments out the rest of the
+    # line, and a backslash at the end of a line outside a comment joins
+    # the next line, which inside the parentheses is only a separator
+    function body(text,   raw, cont, end, rest) {
+      raw = text
+      sub(/(^|[ \t])#.*/, "", text)
+      cont = text == raw && text ~ /(^|[ \t])\\$/
+      if (cont) text = substr(text, 1, length(text) - 1)
+      end = index(text, ")")
+      if (!end) {
+        tokens(text)
+        return 1
+      }
+      tokens(substr(text, 1, end - 1))
+      rest = substr(text, end + 1) (cont ? "\\" : "")
+      if (rest !~ /^[ \t]*$/) print "BAD\t" NR ": " rest
+      return 0
+    }
+    in_sums { in_sums = body($0); next }
+    /^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?=\(/ {
+      name = substr($0, 1, index($0, "=") - 1)
+      idx = 0
+      print "SKEL\tSUMS " name
+      in_sums = body(substr($0, index($0, "(") + 1))
+      next
+    }
+    /^pkgver=/ { print "SKEL\tPKGVER"; print "PKGVER\t" substr($0, 8); next }
+    /^pkgrel=/ { print "SKEL\tPKGREL"; print "PKGREL\t" substr($0, 8); next }
+    { print "SKEL\t" $0 }
+    END { if (in_sums) print "BAD\tunterminated " name }
+  ' "$1"
+}
+
+# Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=expected version
+# Returns: 0 when the prepared file changes only pkgver (to $3), pkgrel
+#          (to 1) and checksum values, 1 otherwise (reason on stderr)
+check_prepared_pkgbuild() {
+  local version="$3"
+  local old_parts new_parts value
+  if ! old_parts=$(_pkgbuild_parts "$1") || ! new_parts=$(_pkgbuild_parts "$2"); then
+    log_err "Could not read the PKGBUILD to compare"
+    return 1
+  fi
+  if _has_nul "$2"; then
+    log_err "Prepared PKGBUILD holds a NUL byte"
+    return 1
+  fi
+
+  if grep -q $'^BAD\t' <<<"$new_parts"; then
+    log_err "Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array:"
+    grep $'^BAD\t' <<<"$new_parts" | cut -f2- >&2
+    return 1
+  fi
+  if [[ "$(grep $'^SKEL\t' <<<"$old_parts")" != "$(grep $'^SKEL\t' <<<"$new_parts")" ]]; then
+    log_err "Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"
+    return 1
+  fi
+  if [[ "$(grep $'^SUM\t' <<<"$old_parts")" != "$(grep $'^SUM\t' <<<"$new_parts")" ]]; then
+    log_err "Prepared PKGBUILD changes the checksum arrays: their names, lengths or SKIP entries differ from the AUR"
+    return 1
+  fi
+  while IFS=$'\t' read -r _ value; do
+    if [[ "$value" != "$version" ]]; then
+      log_err "Prepared PKGBUILD has pkgver=${value}, expected ${version}"
+      return 1
+    fi
+  done < <(grep $'^PKGVER\t' <<<"$new_parts")
+  while IFS=$'\t' read -r _ value; do
+    if [[ "$value" != "1" ]]; then
+      log_err "Prepared PKGBUILD has pkgrel=${value}, expected 1"
+      return 1
+    fi
+  done < <(grep $'^PKGREL\t' <<<"$new_parts")
+  return 0
+}
+
+# Replace the old version in a line with the new one, and also the forms a
+# PKGBUILD derives from pkgver: dots turned into underscores, the part
+# before the first +, and the version without its last component, such as
+# ${pkgver%.*} in the frameworks/6.19/ directory of KDE Frameworks. That
+# last form counts only while it keeps a dot, as a lone major version is
+# too common in other text. One pass from left to right, longest form
+# first, so a replaced part is not matched again: with 5.1.0 -> 5.10.0 the
+# 5.1 at the start of 5.10.0 stays.
+# Args: $1=line, $2=old version, $3=new version
+_bump_version() {
+  local rest="$1" old="$2" new="$3" out="" i matched
+  if [[ -z "$old" ]]; then
+    printf '%s\n' "$rest"
+    return 0
+  fi
+  local -a olds=("$old") news=("$new")
+  if [[ "$old" == *.* ]]; then
+    olds+=("${old//./_}")
+    news+=("${new//./_}")
+  fi
+  if [[ "$old" == *+* ]]; then
+    olds+=("${old%%+*}")
+    news+=("${new%%+*}")
+  fi
+  old="${old%%+*}"
+  new="${new%%+*}"
+  if [[ "${old%.*}" == *.* ]]; then
+    olds+=("${old%.*}")
+    news+=("${new%.*}")
+  fi
+
+  while [[ -n "$rest" ]]; do
+    matched=false
+    for i in "${!olds[@]}"; do
+      if [[ "$rest" == "${olds[$i]}"* ]]; then
+        out+="${news[$i]}"
+        rest="${rest:${#olds[$i]}}"
+        matched=true
+        break
+      fi
+    done
+    if [[ "$matched" == false ]]; then
+      out+="${rest:0:1}"
+      rest="${rest:1}"
+    fi
+  done
+  printf '%s\n' "$out"
+}
+
+# Print "<arch suffix>:<index>" for every source entry of a .SRCINFO that is
+# SKIP in each checksum array with the same arch suffix
+# Args: $1=.SRCINFO
+_skip_sources() {
+  awk -F' = ' '
+    { key = $1; sub(/^[ \t]+/, "", key) }
+    key ~ /^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$/ {
+      entry = substr(key, index(key, "sums") + 4) ":" count[key]++
+      listed[entry] = 1
+      if ($2 != "SKIP") hashed[entry] = 1
+    }
+    END { for (entry in listed) if (!(entry in hashed)) print entry }
+  ' "$1"
+}
+
+# Args: $1=expected source line, $2=prepared source line
+# Returns: 0 when both save their file under a name before ::, have the same
+#          URL after it, and their names differ in nothing but digits
+_name_differs_in_digits() {
+  [[ "$1" == *::* && "$2" == *::* && "${1#*::}" == "${2#*::}" ]] || return 1
+  [[ "$(sed -E 's/[0-9]+/0/g' <<<"${1%%::*}")" == "$(sed -E 's/[0-9]+/0/g' <<<"${2%%::*}")" ]]
+}
+
+# A .SRCINFO is generated, so line N of the prepared file must be line N of
+# the AUR file, with these changes: pkgver is the new version, pkgrel is 1,
+# a checksum keeps its key and stays a SKIP or a hash, a source has the old
+# version replaced by the new one (see _bump_version), and any other line
+# either stays or has the version replaced in the same way. A license, a
+# dependency or a pkgdesc can hold the old version without deriving it
+# from pkgver. A source that is SKIP in every checksum array may also change
+# the digits in the name of its file, as a nightly package names its
+# download by the date: verify_prepared_sums never fetches it, and makepkg
+# takes the sources from the PKGBUILD.
+# Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version
+# Returns: 0 when that holds, 1 otherwise (reason on stderr)
+check_prepared_srcinfo() {
+  local version="$3"
+  if [[ ! -r "$1" || ! -r "$2" ]]; then
+    log_err "Could not read the .SRCINFO to compare"
+    return 1
+  fi
+  if _has_nul "$2"; then
+    log_err "Prepared .SRCINFO holds a NUL byte"
+    return 1
+  fi
+  local -a old_lines new_lines
+  mapfile -t old_lines <"$1"
+  mapfile -t new_lines <"$2"
+  if [[ "${#old_lines[@]}" -ne "${#new_lines[@]}" ]]; then
+    log_err "Prepared .SRCINFO adds or removes lines"
+    return 1
+  fi
+
+  local old_ver
+  old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
+
+  local -A skip_sources=() source_counts=()
+  local entry
+  while read -r entry; do
+    skip_sources["$entry"]=1
+  done < <(_skip_sources "$1")
+
+  local i old new key kind old_val new_val n expected
+  for i in "${!new_lines[@]}"; do
+    old="${old_lines[$i]}"
+    new="${new_lines[$i]}"
+    key="${new%% = *}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    new_val="${new#* = }"
+    old_val="${old#* = }"
+    if [[ "$key" == "pkgver" || "$key" == "pkgrel" ]]; then
+      kind="$key"
+    elif [[ "$key" =~ ^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?$ ]]; then
+      kind=sums
+    elif [[ "$key" =~ ^source(_[A-Za-z0-9_]+)?$ ]]; then
+      kind=source
+    else
+      kind=other
+    fi
+    if [[ "$kind" != "other" && "${old%% = *}" != "${new%% = *}" ]]; then
+      log_err "Prepared .SRCINFO line $((i + 1)) has another key than the AUR copy: $new"
+      return 1
+    fi
+    case "$kind" in
+      pkgver)
+        [[ "$new_val" == "$version" ]] || {
+          log_err "Prepared .SRCINFO has pkgver = ${new_val}, expected ${version}"
+          return 1
+        }
+        ;;
+      pkgrel)
+        [[ "$new_val" == "1" ]] || {
+          log_err "Prepared .SRCINFO has pkgrel = ${new_val}, expected 1"
+          return 1
+        }
+        ;;
+      sums)
+        if [[ ! "$new_val" =~ ^([0-9a-fA-F]+|SKIP)$ ]] ||
+          [[ "$new_val" == "SKIP" && "$old_val" != "SKIP" ]] ||
+          [[ "$new_val" != "SKIP" && "$old_val" == "SKIP" ]]; then
+          log_err "Prepared .SRCINFO line $((i + 1)) is not a checksum matching the AUR copy: $new"
+          return 1
+        fi
+        ;;
+      source)
+        n="${source_counts[$key]:-0}"
+        source_counts[$key]=$((n + 1))
+        expected=$(_bump_version "$old" "$old_ver" "$version")
+        if [[ "$new" != "$expected" ]] &&
+          ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
+            _name_differs_in_digits "$expected" "$new"; }; then
+          log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $new"
+          return 1
+        fi
+        ;;
+      *)
+        if [[ "$new" != "$old" && "$new" != "$(_bump_version "$old" "$old_ver" "$version")" ]]; then
+          log_err "Prepared .SRCINFO line $((i + 1)) changes more than the version: $new"
+          return 1
+        fi
+        ;;
+    esac
+  done
+  return 0
+}
+
+# Check the layout of a prepared directory and print its base, the AUR
+# commit the update was prepared from
+# Args: $1=prepared dir
+# Returns: 0 when the layout holds, 1 otherwise (reason on stderr)
+prepared_base() {
+  local f base
+  if [[ -L "$1" || ! -d "$1" ]]; then
+    log_err "Prepared directory is missing or a symlink: $1"
+    return 1
+  fi
+  for f in PKGBUILD .SRCINFO base; do
+    if [[ ! -f "$1/$f" || -L "$1/$f" ]]; then
+      log_err "Prepared $f is missing or not a regular file"
+      return 1
+    fi
+  done
+  base=$(<"$1/base")
+  if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
+    log_err "Prepared base is not a commit id"
+    return 1
+  fi
+  echo "$base"
+}
+
+# Check a prepared PKGBUILD and .SRCINFO against the AUR repo at their base
+# Args: $1=AUR repo, $2=prepared dir, $3=expected version
+# Returns: 0 when both files pass, 1 otherwise (reason on stderr)
+check_prepared_files() {
+  local f
+  # git keeps symlinks, and cp writes through one
+  for f in PKGBUILD .SRCINFO; do
+    if [[ -L "$1/$f" || ! -f "$1/$f" ]]; then
+      log_err "$f in the AUR repo is missing, a symlink or not a regular file"
+      return 1
+    fi
+  done
+  check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" &&
+    check_prepared_srcinfo "$1/.SRCINFO" "$2/.SRCINFO" "$3"
+}

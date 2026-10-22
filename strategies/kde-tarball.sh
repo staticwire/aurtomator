@@ -14,8 +14,8 @@ readonly URL="https://download.kde.org/stable/${NAME}/"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 
-# shellcheck source=../scripts/lib.sh
-source "${SCRIPT_DIR}/../scripts/lib.sh"
+# shellcheck source=../scripts/lib/common.sh
+source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 
 page=$(http_get "$URL") || {
   echo "Failed to fetch $URL" >&2

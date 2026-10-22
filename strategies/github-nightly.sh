@@ -24,8 +24,8 @@ readonly NAME="${1:?Usage: github-nightly.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 
-# shellcheck source=../scripts/lib.sh
-source "${SCRIPT_DIR}/../scripts/lib.sh"
+# shellcheck source=../scripts/lib/common.sh
+source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 
 pkg_file=$(pkg_file "$NAME")
 owner_repo=$(pkg_get "$pkg_file" .upstream.project)

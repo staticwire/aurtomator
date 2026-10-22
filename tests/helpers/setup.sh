@@ -13,11 +13,12 @@ setup_test_env() {
   # Create mock package dir structure
   mkdir -p "$TEST_TMPDIR/packages"
   mkdir -p "$TEST_TMPDIR/strategies"
-  mkdir -p "$TEST_TMPDIR/scripts"
+  mkdir -p "$TEST_TMPDIR/scripts/lib"
   mkdir -p "$TEST_TMPDIR/.status"
 
   # Symlink all scripts and strategies for bashcov coverage tracking
   ln -sf "$PROJECT_DIR/scripts/"*.sh "$TEST_TMPDIR/scripts/"
+  ln -sf "$PROJECT_DIR/scripts/lib/"*.sh "$TEST_TMPDIR/scripts/lib/"
   ln -sf "$PROJECT_DIR/strategies/"*.sh "$TEST_TMPDIR/strategies/"
 
   # Put mock curl first in PATH

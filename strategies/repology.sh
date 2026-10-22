@@ -13,8 +13,8 @@ readonly NAME="${1:?Usage: repology.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 
-# shellcheck source=../scripts/lib.sh
-source "${SCRIPT_DIR}/../scripts/lib.sh"
+# shellcheck source=../scripts/lib/common.sh
+source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 
 pkg_file=$(pkg_file "$NAME")
 repology_name=$(pkg_get "$pkg_file" '.upstream.repology // .name')

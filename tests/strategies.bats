@@ -4,6 +4,8 @@ load helpers/setup.sh
 
 setup() {
   setup_test_env
+  # A strategy needs scripts/lib/common.sh and nothing else of scripts/
+  find "$TEST_TMPDIR/scripts" -type l ! -name common.sh -delete
 }
 
 teardown() {
