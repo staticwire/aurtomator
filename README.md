@@ -52,7 +52,7 @@ The setup script configures your identity (git author for AUR commits), SSH acce
 | Strategy           | Source              | Use for                              |
 |--------------------|---------------------|--------------------------------------|
 | `github-release`   | GitHub Releases API | GitHub-hosted projects with releases |
-| `github-tag`       | GitHub Tags API     | GitHub projects without releases     |
+| `github-tag`       | `git ls-remote`     | GitHub projects without releases     |
 | `github-nightly`   | GitHub Releases API | Nightly/prerelease builds (4 patterns) |
 | `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag    |
 | `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                  |

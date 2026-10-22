@@ -17,10 +17,6 @@ case "$url" in
   *api.github.com/repos/null-owner/null-repo/releases/latest)
     echo '{"message": "Not Found"}'
     ;;
-  # GitHub Tags: empty array
-  *api.github.com/repos/empty-owner/empty-repo/tags*)
-    echo '[]'
-    ;;
   # GitLab Tags: empty array
   *gitlab.com/api/v4/projects/empty-group%2Fempty-project/repository/tags*)
     echo '[]'
@@ -98,18 +94,12 @@ case "$url" in
   *api.github.com/repos/custom-suffix/repo/releases/latest)
     echo '{"tag_name": "0.1.8-stable"}'
     ;;
-  # Custom prefix tags for github-tag
-  *api.github.com/repos/custom-prefix/repo/tags*)
-    echo '[{"name": "bun-v1.3.11"}, {"name": "bun-v1.2.0"}, {"name": "bun-v1.0.0"}]'
-    ;;
   # Tags of which some are not releases, and tags of which none is
-  *api.github.com/repos/mixed-owner/mixed-repo/tags* | \
-    *gitlab.com/api/v4/projects/mixed-group%2Fmixed-project/repository/tags* | \
+  *gitlab.com/api/v4/projects/mixed-group%2Fmixed-project/repository/tags* | \
     *codeberg.org/api/v1/repos/mixed-owner/mixed-repo/tags*)
     echo '[{"name": "latest"}, {"name": "v2.1.0-rc1"}, {"name": "v2.1.0rc2"}, {"name": "v2.0.0"}, {"name": "v1.9.0"}]'
     ;;
-  *api.github.com/repos/named-owner/named-repo/tags* | \
-    *gitlab.com/api/v4/projects/named-group%2Fnamed-project/repository/tags* | \
+  *gitlab.com/api/v4/projects/named-group%2Fnamed-project/repository/tags* | \
     *codeberg.org/api/v1/repos/named-owner/named-repo/tags*)
     echo '[{"name": "latest"}, {"name": "nightly"}]'
     ;;
@@ -119,10 +109,6 @@ case "$url" in
   # GitHub Release API
   *api.github.com/repos/*/releases/latest)
     echo '{"tag_name": "v2.0.0"}'
-    ;;
-  # GitHub Tags API
-  *api.github.com/repos/*/tags*)
-    echo '[{"name": "v2.0.0"}, {"name": "v1.9.0"}, {"name": "v1.0.0"}]'
     ;;
   # GitLab Tags API
   *gitlab.com/api/v4/projects/*/repository/tags*)

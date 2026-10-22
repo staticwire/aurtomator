@@ -130,7 +130,7 @@ upstream:
 
 ### 3.2 github-tag
 
-**What it checks:** GitHub Tags API (`/repos/{owner}/{repo}/tags`).
+**What it checks:** the tags of the repository, read with `git ls-remote --tags --refs https://github.com/{owner}/{repo}.git`.
 
 **When to use:** GitHub projects with tags and no releases.
 
@@ -142,9 +142,9 @@ upstream:
 | `upstream.tag_pattern`       | no       | Glob to filter tags (e.g. `release-*`), replaces the default filter |
 | `upstream.tag_version_regex` | no       | ERE with one capture group, replaces the default filter |
 
-**How the version is extracted:** fetches the first 100 tags. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead, where `*` matches anything and the match is anchored at the start. The strategy strips a leading `v`, or applies `tag_version_regex`, and returns the highest tag by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so a `tag_pattern` that lets pre-release tags through picks them.
+**How the version is extracted:** reads every tag in one request, outside the API rate limit. Without `tag_pattern` and `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names both fields. `tag_pattern` filters the tags instead, where `*` matches anything and the match is anchored at the start. The strategy strips a leading `v`, or applies `tag_version_regex`, and returns the highest tag by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so a `tag_pattern` that lets pre-release tags through picks them.
 
-**Authentication:** same as `github-release`.
+**Authentication:** when `GITHUB_TOKEN` is set in the environment, git sends it to `github.com` as `Authorization: Basic` with the user `x-access-token`, which a private repository needs. The header reaches git through `GIT_CONFIG_*` variables, so the token does not appear on a command line. git allows only `https` and asks for no password on the terminal.
 
 **Example YAML:**
 

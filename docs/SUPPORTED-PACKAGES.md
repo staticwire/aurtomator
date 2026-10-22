@@ -212,7 +212,7 @@ aurtomator includes 14 version detection strategies. Choose by where your upstre
 | Strategy | Source | Best for | Pre-release filter |
 |---|---|---|---|
 | `github-release` | GitHub Releases API | Most GitHub projects | Auto (excludes pre-releases) |
-| `github-tag` | GitHub Tags API | Projects without formal releases | Auto (`v1.2.3` tags only) |
+| `github-tag` | `git ls-remote` | Projects without formal releases | Auto (`v1.2.3` tags only) |
 | `github-nightly` | GitHub Releases API | Nightly/dev builds (4 patterns) | Nightly-specific |
 | `github-asset` | GitHub Releases API | Assets re-uploaded on a fixed tag (model zoos) | N/A (fixed tag) |
 | `gitlab-tag` | GitLab Tags API | GitLab.com, invent.kde.org, self-hosted | Auto (`v1.2.3` tags only) |
@@ -228,8 +228,8 @@ aurtomator includes 14 version detection strategies. Choose by where your upstre
 
 ### Strategy limitations
 
-- **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without a token, the limit is 60 requests per hour.
-- **Retries:** a strategy request tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. A check that still fails within its time budget runs once more after the other packages and a pause of 60 seconds. A failure on both tries fails the package for that run.
+- **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without a token, the limit is 60 requests per hour. `github-tag` reads the tags with `git ls-remote`, outside this limit.
+- **Retries:** a request that a strategy sends with curl tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. The git calls of `git-latest` and `github-tag` make one attempt. A check that still fails within its time budget runs once more after the other packages and a pause of 60 seconds. A failure on both tries fails the package for that run.
 - **Tag strategies take only `v1.2.3` and `1.2.3` by default:** without `tag_pattern`, and without `tag_version_regex` for `github-tag`, `github-tag`, `gitlab-tag` and `gitea-tag` leave out every other tag, `latest`, `1.0.0-rc1` and `1.0.0rc1` included. A `tag_pattern` replaces that filter. They pick the highest tag with `sort -V`, which places `1.0.0-rc1` above `1.0.0`, so a pattern that lets pre-release tags through picks them.
 - **`gitea-tag` fetches at most 50 tags:** there is no pagination.
 - **`gitlab-tag` has no authentication:** private GitLab projects cannot be queried.

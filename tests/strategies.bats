@@ -6,6 +6,8 @@ setup() {
   setup_test_env
   # A strategy needs scripts/lib/common.sh and nothing else of scripts/
   find "$TEST_TMPDIR/scripts" -type l ! -name common.sh -delete
+  cp "$TESTS_DIR/helpers/mock-git.sh" "$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/git"
 }
 
 teardown() {
@@ -102,6 +104,61 @@ teardown() {
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
   [ "$status" -eq 0 ]
   [ "$output" = "latest" ]
+}
+
+@test "github-tag: reads every tag with git ls-remote" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: paged-owner/paged-repo"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "14" ]
+  [ "$(cat "$TEST_TMPDIR/ls-remote.args")" = "ls-remote --tags --refs https://github.com/paged-owner/paged-repo.git" ]
+}
+
+@test "github-tag: reads the tags over https only, without a terminal prompt" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: owner/repo"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 0 ]
+  grep -qx 'GIT_ALLOW_PROTOCOL=https' "$TEST_TMPDIR/ls-remote.env"
+  grep -qx 'GIT_TERMINAL_PROMPT=0' "$TEST_TMPDIR/ls-remote.env"
+}
+
+@test "github-tag: fails when git cannot read the tags" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: missing-owner/missing-repo"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch tags for missing-owner/missing-repo"* ]]
+}
+
+@test "github-tag: gives GITHUB_TOKEN to git in the environment, never as an argument" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: owner/repo"
+  export GITHUB_TOKEN=standin-token
+  local basic
+  basic=$(printf 'x-access-token:standin-token' | base64 -w0)
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 0 ]
+  grep -qx 'GIT_CONFIG_COUNT=1' "$TEST_TMPDIR/ls-remote.env"
+  grep -qx 'GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader' "$TEST_TMPDIR/ls-remote.env"
+  grep -qx "GIT_CONFIG_VALUE_0=Authorization: Basic $basic" "$TEST_TMPDIR/ls-remote.env"
+  ! grep -q -e standin-token -e "$basic" "$TEST_TMPDIR/ls-remote.args"
+}
+
+@test "github-tag: gives git no token without GITHUB_TOKEN" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: owner/repo"
+  unset GITHUB_TOKEN
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 0 ]
+  [ -s "$TEST_TMPDIR/ls-remote.env" ]
+  ! grep -qE '^GIT_CONFIG_(COUNT|KEY_0|VALUE_0)=' "$TEST_TMPDIR/ls-remote.env"
 }
 
 # === gitlab-tag ===
@@ -599,12 +656,11 @@ EOF
 
 # === GITHUB_TOKEN ===
 
-# Helper: one package for each GitHub strategy, and a curl that appends its
-# arguments to curl.args and its stdin to curl.stdin before it answers
+# Helper: one package for each GitHub strategy that calls the API, and a
+# curl that appends its arguments to curl.args and its stdin to curl.stdin
+# before it answers
 setup_github_strategies() {
   create_test_package "gh-release" "github-release" "upstream:
-  project: owner/repo"
-  create_test_package "gh-tag" "github-tag" "upstream:
   project: owner/repo"
   create_test_package "gh-asset" "github-asset" "upstream:
   project: owner/models-repo
@@ -627,11 +683,12 @@ EOF
   chmod +x "$MOCK_DIR/curl"
 }
 
-# Helper: run every GitHub strategy. Stdin is /dev/null, so the recording
-# curl does not wait when a strategy gives it nothing to read.
+# Helper: run every GitHub strategy that calls the API. Stdin is /dev/null,
+# so the recording curl does not wait when a strategy gives it nothing to
+# read.
 run_github_strategies() {
   local strategy
-  for strategy in release tag asset nightly; do
+  for strategy in release asset nightly; do
     run "$TEST_TMPDIR/strategies/github-${strategy}.sh" "gh-${strategy}" </dev/null
     [ "$status" -eq 0 ]
   done
