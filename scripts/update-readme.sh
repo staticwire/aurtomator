@@ -148,7 +148,7 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
   fi
 
   table_rows+="
-| [${name}](https://aur.archlinux.org/packages/${name}) | ${current} | ${strategy} | ${last_updated} | ${status} |"
+| [${name}](https://aur.archlinux.org/pkgbase/${name}) | ${current} | ${strategy} | ${last_updated} | ${status} |"
   ((pkg_count++)) || true
 done
 

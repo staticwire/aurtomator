@@ -118,17 +118,24 @@ The version comes from the tag name, the release body, the tag date or the publi
 
 A fixed tag keeps its download URL, so a PKGBUILD can save the download under a name with the date, as `neovim-nightly-bin` does with `_date="$(date -u +%Y%m%d)"` and `"$_pkgname-$_date.tar.gz::<url>"`. This works when the checksum of that source is `SKIP`: only the digits of the name may change from one update to the next. See step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
 
+### Split packages
+
+Packages with a `pkgbase`, a `pkgname` array and a `package_*()` function for each package, as liblinear:
+
+```bash
+pkgbase=liblinear
+pkgname=(liblinear python-liblinear)
+pkgver=2.50
+source=("https://www.csie.ntu.edu.tw/~cjlin/$pkgbase/$pkgbase-$pkgver.tar.gz")
+```
+
+**Why it works:** `pkgver`, `pkgrel`, the sources and the checksums belong to the `pkgbase`, so the update is the same as for a single package. The AUR keeps a split package in one git repository named after the `pkgbase`, and the `name` in the package YAML is that `pkgbase`. A line in the section of one package in `.SRCINFO`, such as `depends = foo=1.2.3` from `depends=("foo=$pkgver")`, may change only by the version, as every other line.
+
+A change of the `pkgname` array upstream, a new package or a dropped one, is not detected, as with `depends`. See [Packages with changing dependencies](#packages-with-changing-dependencies).
+
 ## Not supported (blocked or detected)
 
 aurtomator detects these cases and blocks the update or warns.
-
-### Split packages (BLOCKED)
-
-Packages with `pkgname=(foo foo-libs foo-doc)` and several `package_*()` functions.
-
-**Detection:** `audit_pkgbuild()` checks for `pkgname=(` and blocks.
-
-**Why:** aurtomator can update `pkgver`, but it cannot tell when subpackages need different `depends` or when the `pkgname` array itself changes upstream.
 
 ### pkgver() with the wrong strategy (BLOCKED)
 

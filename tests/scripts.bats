@@ -78,22 +78,32 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "audit_pkgbuild: blocks split packages" {
+# The shape of liblinear on the AUR
+@test "audit_pkgbuild: passes a split package" {
   source "$TEST_TMPDIR/scripts/lib.sh"
   cat > "$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
-pkgname=(test-split test-split-libs)
+pkgbase=test-split
+pkgname=(test-split python-test-split)
 pkgver=1.0.0
 pkgrel=1
 pkgdesc="test"
 arch=('x86_64')
 url="https://example.com"
 license=('MIT')
-source=("https://example.com/test-${pkgver}.tar.gz")
+source=("https://example.com/$pkgbase-$pkgver.tar.gz")
 sha256sums=('abc123')
+
+package_test-split() {
+  install -Dm755 test-split "$pkgdir/usr/bin/test-split"
+}
+
+package_python-test-split() {
+  depends=("test-split=$pkgver")
+  install -Dm644 test_split.py "$pkgdir/usr/lib/test_split.py"
+}
 EOF
   run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Split package"* ]]
+  [ "$status" -eq 0 ]
 }
 
 @test "audit_pkgbuild: blocks pkgver() with non-git-latest strategy" {
@@ -820,6 +830,20 @@ EOF
   grep -q "github-release" "$TEST_TMPDIR/README.md"
 }
 
+# The name in a package YAML is the pkgbase. The AUR shows a split package
+# under /pkgbase/<name>, and sends /pkgbase/<name> of any other package to
+# /packages/<name>.
+@test "update-readme: links each package to its pkgbase on the AUR" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  printf '%s\n' "# test" "<!-- PACKAGES:START -->" "<!-- PACKAGES:END -->" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '| [pkg-a](https://aur.archlinux.org/pkgbase/pkg-a) |' "$TEST_TMPDIR/README.md"
+}
+
 @test "update-readme: shows failed status from .status/" {
   create_test_package "pkg-fail" "github-release" "upstream:
   type: github
@@ -1333,46 +1357,6 @@ MOCKEOF
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "mypkg" "2.0.0"
   [ "$status" -ne 0 ]
   [[ "$output" == *"Failed to clone"* ]]
-}
-
-@test "update-pkg: audit blocks split packages" {
-  create_test_package "test-split" "github-release" "upstream:
-  project: owner/repo
-current: '1.0.0'"
-
-  aur_dir="$TEST_TMPDIR/aur-test-split"
-  mkdir -p "$aur_dir"
-  git -C "$aur_dir" init -q
-  git -C "$aur_dir" config user.name "test"
-  git -C "$aur_dir" config user.email "test@test"
-  git -C "$aur_dir" config commit.gpgsign false
-  cat > "$aur_dir/PKGBUILD" <<'EOF'
-# Maintainer: test
-pkgname=(test-split test-split-libs)
-pkgver=1.0.0
-pkgrel=1
-pkgdesc="split test"
-arch=('x86_64')
-url="https://example.com"
-license=('MIT')
-source=("https://example.com/test-${pkgver}.tar.gz")
-sha256sums=('abc123')
-EOF
-  git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
-
-  cat > "$MOCK_DIR/git" <<MOCKGIT
-#!/usr/bin/env bash
-if [[ "\$1" == "clone" ]]; then
-  cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
-  exit 0
-fi
-exec /usr/bin/git "\$@"
-MOCKGIT
-  chmod +x "$MOCK_DIR/git"
-
-  run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-split" "2.0.0"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Split package"* ]]
 }
 
 @test "update-pkg: audit blocks pkgver() with wrong strategy" {

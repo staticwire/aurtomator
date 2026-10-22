@@ -50,12 +50,6 @@ audit_pkgbuild() {
   local warnings=0
   local fatals=0
 
-  # FATAL: Split packages (pkgname is array)
-  if grep -qE '^pkgname=\(' "$pkgbuild"; then
-    log_err "BLOCKED: Split package detected (pkgname is array). Not supported."
-    fatals=$((fatals + 1))
-  fi
-
   # FATAL: pkgver() with incompatible strategy (version mismatch)
   # git-latest and github-nightly are designed for packages with pkgver()
   if grep -qE '^pkgver\(\)' "$pkgbuild"; then

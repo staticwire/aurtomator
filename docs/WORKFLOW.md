@@ -67,11 +67,11 @@ flowchart TD
 
 ## 2. Package YAML Format
 
-Each package has a file at `packages/<name>.yml`. The file name, the `name` field and the AUR package name are the same.
+Each package has a file at `packages/<name>.yml`. The file name, the `name` field and the `pkgbase` on the AUR are the same. The `pkgbase` names the AUR git repository, and it is the package name, except for a split package such as `pkgbase=liblinear` with `pkgname=(liblinear python-liblinear)`.
 
 | Field          | Required | Description                                                                 |
 |----------------|----------|-----------------------------------------------------------------------------|
-| `name`         | yes      | AUR package name, equal to the file name without `.yml`                     |
+| `name`         | yes      | `pkgbase` on the AUR, equal to the file name without `.yml`                 |
 | `strategy`     | yes      | Version detection strategy: a script name in `strategies/` without `.sh`    |
 | `upstream`     | depends  | Strategy-specific settings. `archpkg` and `repology` need none, and `kde-tarball` takes none. |
 | `current`      | no       | Currently tracked version. Written after every push.                        |
@@ -580,7 +580,7 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--
 2. Wait 2 seconds, then clone `ssh://aur@aur.archlinux.org/<package-name>.git` into a temporary directory, with up to 3 attempts 5 seconds apart. A clone without a PKGBUILD stops the update.
 3. When the clone lands on a detached `HEAD`, reset `master` to `origin/master`, so the push is a fast-forward.
 4. Warn when the PKGBUILD has no `# Maintainer:` line.
-5. Audit the PKGBUILD. Split packages, `pkgver()` with the wrong strategy and mixed checksums block the update. Patches only warn. See [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md).
+5. Audit the PKGBUILD. `pkgver()` with the wrong strategy and mixed checksums block the update. Patches only warn. See [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md).
 6. Set `pkgver` with `sed` and reset `pkgrel=1`. When the PKGBUILD does not change, the AUR already has this version: the script writes it to `current` and exits with code 2.
 7. Unless a checksum array holds a `SKIP` other than that of a signature, validate every source URL, run `updpkgsums`, and verify the result with `makepkg --verifysource --skippgpcheck`. A signature is a source whose file name ends in `.sig`, `.sign` or `.asc`, and makepkg gives it `SKIP` itself. Any failure stops the update.
 8. Run `namcap` when it is installed. Errors stop the update. Warnings are printed.
@@ -756,7 +756,7 @@ Steps 9 to 11 run as root with `GH_TOKEN` set to the workflow token, `github.tok
 `update-readme.sh` rewrites two blocks of `README.md`:
 
 1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: CI, Codecov and static badges for the repository in `origin`. A public repository gets its own tokenless Codecov badge. A private one, or a failed API call, links the upstream aurtomator badge.
-2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`.
+2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`.
 
 #### .status/ directory format
 
@@ -787,8 +787,8 @@ The color is `brightgreen` with no failures and `red` otherwise.
 ```markdown
 | Package | Version | Strategy | Updated | Status |
 |---------|---------|----------|---------|--------|
-| [my-package](https://aur.archlinux.org/packages/my-package) | 1.0.1 | kde-tarball | 2026-10-01 | ✅ up to date |
-| [other-pkg](https://aur.archlinux.org/packages/other-pkg) | 2.0.0 | github-release | 2026-10-14 | 🔄 updated to 2.0.0 |
+| [my-package](https://aur.archlinux.org/pkgbase/my-package) | 1.0.1 | kde-tarball | 2026-10-01 | ✅ up to date |
+| [other-pkg](https://aur.archlinux.org/pkgbase/other-pkg) | 2.0.0 | github-release | 2026-10-14 | 🔄 updated to 2.0.0 |
 ```
 
 ### 5.5 Verified commit

@@ -248,6 +248,81 @@ current: '6.00.3091'"
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
+# Helper: split PKGBUILD in the shape of liblinear, with the checksum <sum>
+# Usage: write_split_pkgbuild <path> <pkgver> <pkgrel> <sum>
+write_split_pkgbuild() {
+  cat >"$1" <<EOF
+pkgbase=demo
+pkgname=(demo python-demo)
+pkgver=$2
+pkgrel=$3
+pkgdesc="demo"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/\$pkgbase-\$pkgver.tar.gz")
+sha256sums=('$4')
+
+package_demo() {
+  install -Dm755 demo "\$pkgdir/usr/bin/demo"
+}
+
+package_python-demo() {
+  pkgdesc="Python bindings for demo"
+  depends=("demo=\$pkgver")
+  install -Dm644 demo.py "\$pkgdir/usr/lib/demo.py"
+}
+EOF
+}
+
+# Helper: the .SRCINFO makepkg --printsrcinfo prints for write_split_pkgbuild
+# Usage: write_split_srcinfo <path> <pkgver> <pkgrel> <sum>
+write_split_srcinfo() {
+  printf '%s\n' \
+    "pkgbase = demo" \
+    $'\tpkgdesc = demo' \
+    $'\tpkgver = '"$2" \
+    $'\tpkgrel = '"$3" \
+    $'\turl = https://example.com' \
+    $'\tarch = x86_64' \
+    $'\tlicense = MIT' \
+    $'\tsource = https://example.com/demo-'"$2"'.tar.gz' \
+    $'\tsha256sums = '"$4" \
+    "" \
+    "pkgname = demo" \
+    "" \
+    "pkgname = python-demo" \
+    $'\tpkgdesc = Python bindings for demo' \
+    $'\tdepends = demo='"$2" >"$1"
+}
+
+@test "a split package goes through prepare, verify and publish" {
+  create_test_package "demo" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  local old_sum new_sum
+  old_sum=$(printf 'source of %s\n' https://example.com/demo-1.0.0.tar.gz | sha256sum | cut -d' ' -f1)
+  new_sum=$(printf 'source of %s\n' https://example.com/demo-1.1.0.tar.gz | sha256sum | cut -d' ' -f1)
+  write_split_pkgbuild "$OLD" 1.0.0 2 "$old_sum"
+  write_split_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$old_sum"
+  write_split_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$new_sum"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+  printf '#!/usr/bin/env bash\nsed -i s/%s/%s/ PKGBUILD\n' "$old_sum" "$new_sum" >"$MOCK_DIR/updpkgsums"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  mock_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$TEST_TMPDIR/out/demo"
+  [ "$status" -eq 0 ]
+  write_split_pkgbuild "$NEW" 1.1.0 1 "$new_sum"
+  [ "$(git -C "$AUR_REMOTE" show HEAD:PKGBUILD)" = "$(cat "$NEW")" ]
+  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
+}
+
 # The tarball and signature pair of lib32-gettext
 @test "update-pkg: updates the checksums next to the SKIP of a signature" {
   create_test_package "demo" "github-release" "upstream:
