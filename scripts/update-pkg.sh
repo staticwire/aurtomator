@@ -192,7 +192,8 @@ fi
 # The checks that publish-pkg.sh runs, against the files of the clone's HEAD
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
-check_prepared_files "$aur_files" "$aur_dir" "$NEW_VERSION" "$(pkg_get "$PKG_FILE" '.pkgver_dash // ""')" || exit 1
+check_prepared_files "$aur_files" "$aur_dir" "$NEW_VERSION" "$(pkg_get "$PKG_FILE" '.pkgver_dash // ""')" \
+  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" || exit 1
 
 # =============================================================================
 # DRY RUN CHECK

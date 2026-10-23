@@ -375,6 +375,60 @@ EOF
   [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
 }
 
+# Helper: the AUR at 4.4215 of a package with pkgver_format: '4.%s', whose
+# source takes the build from ${pkgver#4.}, and the .SRCINFO makepkg prints
+# for 4.4216 in new.SRCINFO. Sets OLD_SUM and NEW_SUM, the checksums of the
+# two downloads.
+setup_format_package() {
+  create_test_package "demo" "webpage-scrape" "upstream:
+  url: https://example.com/updates.json
+  pattern: 'latest_version: ([0-9]+)'
+current: '4.4215'
+pkgver_format: '4.%s'"
+  OLD_SUM=$(printf 'source of %s\n' https://example.com/demo_build_4215.tar.xz | sha256sum | cut -d' ' -f1)
+  NEW_SUM=$(printf 'source of %s\n' https://example.com/demo_build_4216.tar.xz | sha256sum | cut -d' ' -f1)
+  cat >"$OLD" <<EOF
+pkgname=demo
+pkgver=4.4215
+pkgrel=1
+pkgdesc="demo"
+arch=('any')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/demo_build_\${pkgver#4.}.tar.xz")
+sha256sums=('$OLD_SUM')
+
+package() {
+  :
+}
+EOF
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 4.4215 https://example.com/demo_build_4215.tar.xz "$OLD_SUM"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 4.4216 https://example.com/demo_build_4216.tar.xz "$NEW_SUM"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+  printf '#!/usr/bin/env bash\nsed -i s/%s/%s/ PKGBUILD\n' "$OLD_SUM" "$NEW_SUM" >"$MOCK_DIR/updpkgsums"
+}
+
+@test "a package with pkgver_format goes through prepare, verify and publish" {
+  setup_format_package
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 4.4216 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  mock_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 4.4216 "$TEST_TMPDIR/out/demo"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
+}
+
+@test "update-pkg: pushes a package with pkgver_format" {
+  setup_format_package
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 4.4216
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
+}
+
 @test "update-pkg: updates the checksums next to the SKIP of a VCS source" {
   create_test_package "demo" "github-release" "upstream:
   project: owner/repo
@@ -2263,6 +2317,64 @@ write_srcinfo_sources() {
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 .
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
+}
+
+# pkgver 4.4215 for build 4215 with pkgver_format '4.%s', and the build in
+# the URL from ${pkgver#4.}
+@test "check_prepared_srcinfo: accepts a source with the upstream version of pkgver_format" {
+  local url=https://example.com/app_build
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 4.4215 "app_4_4215.tar.xz::${url}_4215_x64.tar.xz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 4.4216 "app_4_4216.tar.xz::${url}_4216_x64.tar.xz" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216 "" '4.%s'
+  [ "$status" -eq 0 ]
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
+}
+
+@test "check_prepared_srcinfo: rejects another number in place of the upstream version" {
+  local url=https://example.com/app_build
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 4.4215 "${url}_4215_x64.tar.xz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 4.4216 "${url}_4217_x64.tar.xz" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216 "" '4.%s'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
+}
+
+@test "_unformat_version: prints the version inside the format" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run _unformat_version 4.4215 '4.%s'
+  [ "$status" -eq 0 ]
+  [ "$output" = "4215" ]
+  run _unformat_version 2.0.1.git '%s.git'
+  [ "$output" = "2.0.1" ]
+}
+
+@test "_unformat_version: prints nothing for a version outside the format" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run _unformat_version 3.4215 '4.%s'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # Without %s, the format is both the text before and the text after it
+  run _unformat_version 4.4 4
+  [ -z "$output" ]
+}
+
+@test "check_prepared_srcinfo: accepts another line with the upstream version of pkgver_format" {
+  local url=https://example.com/app_build
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 4.4215 "${url}_4215_x64.tar.xz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 4.4216 "${url}_4216_x64.tar.xz" "$H2"
+  sed -i $'/^\tsource = /a \tnoextract = app_build_4215_x64.tar.xz' "$TEST_TMPDIR/old.SRCINFO"
+  sed -i $'/^\tsource = /a \tnoextract = app_build_4216_x64.tar.xz' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216 "" '4.%s'
+  [ "$status" -eq 0 ]
+}
+
+# An empty form matches at every position and never moves on
+@test "_bump_version: skips an empty upstream form" {
+  run timeout 10 bash -c 'source "$1/scripts/lib.sh"; _bump_version "demo-1.0-1" 1.0 1.1 "" 2' _ "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "demo-1.1-1" ]
 }
 
 @test "check_prepared_srcinfo: accepts the AUR copy of a package with a VCS pin" {

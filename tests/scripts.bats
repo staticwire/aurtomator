@@ -898,6 +898,28 @@ pkgver_dash: ."
   [ "$result" = "1.0.0.beta.24" ]
 }
 
+@test "check-update: pkgver_format puts the version of the strategy into pkgver" {
+  stand_in_strategy build 4216
+  create_test_package "mypkg" "build" "current: '4.4215'
+pkgver_format: '4.%s'"
+
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
+  [ "$status" -eq 0 ]
+  [ "$output" = "4.4216" ]
+  [[ "$stderr" == *"mypkg: update available 4.4215 → 4.4216"* ]]
+}
+
+@test "check-update: pkgver_format compares the formatted version with current" {
+  stand_in_strategy build 4215
+  create_test_package "mypkg" "build" "current: '4.4215'
+pkgver_format: '4.%s'"
+
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"mypkg is up to date (4.4215)"* ]]
+}
+
 @test "update-pkg: refuses an injected version before any git call" {
   cat >"$TEST_TMPDIR/mock-bin/git" <<'EOF'
 #!/usr/bin/env bash

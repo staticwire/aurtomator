@@ -664,6 +664,31 @@ pkgver_dash: $value"
   done
 }
 
+@test "validate: pkgver_format with %s once passes" {
+  create_test_package "mypkg" "repology" "current: '4.4215'
+pkgver_format: '4.%s'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: pkgver_format without %s once or with other characters rejected" {
+  local value
+  for value in "'4.'" "'%s.%s'" "'4-%s'" "'4 %s'" "'4:%s'" "''" 4; do
+    create_test_package "mypkg" "repology" "pkgver_format: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"pkgver_format must hold %s once, with only A-Za-z0-9 . _ + around it"* ]]
+  done
+}
+
+@test "validate: current outside pkgver_format rejected" {
+  create_test_package "mypkg" "repology" "current: '3.4215'
+pkgver_format: '4.%s'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"current 3.4215 does not fit pkgver_format 4.%s"* ]]
+}
+
 # === crates prerelease validation ===
 
 @test "validate: crates prerelease with pkgver_dash passes" {

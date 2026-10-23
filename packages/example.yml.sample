@@ -14,6 +14,10 @@
 #   pkgver_dash     - _ or ., stands for each - of the upstream version,
 #                     which pkgver cannot hold; the PKGBUILD turns it back
 #                     where a URL needs the dash, as in ${pkgver//_/-}
+#   pkgver_format   - the upstream version with a fixed text around it, %s
+#                     in its place, as 4.%s for pkgver 4.4215 of build 4215;
+#                     the PKGBUILD cuts the text off where a URL needs the
+#                     build, as in ${pkgver#4.}
 #
 # Written by update-pkg.sh after every push, do not edit by hand:
 #   current      - last pushed version

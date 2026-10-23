@@ -124,8 +124,10 @@ check_prepared_pkgbuild() {
 # last form counts only while it keeps a dot, as a lone major version is
 # too common in other text. One pass from left to right, longest form
 # first, so a replaced part is not matched again: with 5.1.0 -> 5.10.0 the
-# 5.1 at the start of 5.10.0 stays.
-# Args: $1=line, $2=old version, $3=new version
+# 5.1 at the start of 5.10.0 stays. With pkgver_format, the upstream
+# version inside the version is the last form, as 4215 in 4.4215.
+# Args: $1=line, $2=old version, $3=new version, $4=old upstream version,
+#       $5=new upstream version
 _bump_version() {
   local rest="$1" old="$2" new="$3" out="" i matched
   if [[ -z "$old" ]]; then
@@ -147,6 +149,11 @@ _bump_version() {
     olds+=("${old%.*}")
     news+=("${new%.*}")
   fi
+  # An empty form would match at every position and never move on
+  if [[ -n "${4:-}" && -n "${5:-}" ]]; then
+    olds+=("$4")
+    news+=("$5")
+  fi
 
   while [[ -n "$rest" ]]; do
     matched=false
@@ -164,6 +171,17 @@ _bump_version() {
     fi
   done
   printf '%s\n' "$out"
+}
+
+# Print the upstream version inside a version of pkgver_format, the part
+# in place of %s, or nothing when the version does not fit the format
+# Args: $1=version, $2=pkgver_format
+_unformat_version() {
+  local prefix="${2%%"%s"*}" suffix="${2#*"%s"}" version="$1"
+  if [[ "$2" == *%s* && "$version" == "$prefix"*"$suffix" ]]; then
+    version="${version#"$prefix"}"
+    printf '%s\n' "${version%"$suffix"}"
+  fi
 }
 
 # Print the line with each form of the version that has a dash in place of
@@ -265,12 +283,14 @@ _drop_trailing_blank() {
 # another variable, a source URL without the version, or a pin that stays
 # would otherwise label the old files with the new version. With
 # pkgver_dash, a version with a dash in place of that character, as
-# ${pkgver//_/-} writes it, counts as the version.
+# ${pkgver//_/-} writes it, counts as the version. With pkgver_format, so
+# does the upstream version inside it, as ${pkgver#4.} writes 4215.
 # Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version,
-#       $4=pkgver_dash character of the package, if any
+#       $4=pkgver_dash character of the package, if any,
+#       $5=pkgver_format of the package, if any
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
-  local version="$3" dash="${4:-}"
+  local version="$3" dash="${4:-}" format="${5:-}"
   if [[ ! -r "$1" || ! -r "$2" ]]; then
     log_err "Could not read the .SRCINFO to compare"
     return 1
@@ -289,8 +309,12 @@ check_prepared_srcinfo() {
     return 1
   fi
 
-  local old_ver
+  local old_ver old_up="" new_up=""
   old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
+  if [[ -n "$format" ]]; then
+    old_up=$(_unformat_version "$old_ver" "$format")
+    new_up=$(_unformat_version "$version" "$format")
+  fi
 
   local -A skip_sources=() hashed_sources=() source_counts=()
   local checksum entry
@@ -348,7 +372,7 @@ check_prepared_srcinfo() {
       source)
         n="${source_counts[$key]:-0}"
         source_counts[$key]=$((n + 1))
-        expected=$(_bump_version "$old" "$old_ver" "$version")
+        expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
         if [[ "$new" != "$expected" ]] &&
           ! _bumped_with_dash "$old" "$new" "$old_ver" "$version" "$dash" &&
           ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
@@ -363,7 +387,7 @@ check_prepared_srcinfo() {
         fi
         ;;
       *)
-        if [[ "$new" != "$old" && "$new" != "$(_bump_version "$old" "$old_ver" "$version")" ]] &&
+        if [[ "$new" != "$old" && "$new" != "$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")" ]] &&
           ! _bumped_with_dash "$old" "$new" "$old_ver" "$version" "$dash"; then
           log_err "Prepared .SRCINFO line $((i + 1)) changes more than the version: $new"
           return 1
@@ -404,7 +428,8 @@ prepared_base() {
 
 # Check a prepared PKGBUILD and .SRCINFO against the AUR repo at their base
 # Args: $1=AUR repo, $2=prepared dir, $3=expected version,
-#       $4=pkgver_dash character of the package, if any
+#       $4=pkgver_dash character of the package, if any,
+#       $5=pkgver_format of the package, if any
 # Returns: 0 when both files pass, 1 otherwise (reason on stderr)
 check_prepared_files() {
   local f
@@ -416,5 +441,5 @@ check_prepared_files() {
     fi
   done
   check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" &&
-    check_prepared_srcinfo "$1/.SRCINFO" "$2/.SRCINFO" "$3" "${4:-}"
+    check_prepared_srcinfo "$1/.SRCINFO" "$2/.SRCINFO" "$3" "${4:-}" "${5:-}"
 }

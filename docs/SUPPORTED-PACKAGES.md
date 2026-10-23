@@ -121,6 +121,21 @@ pkgver_dash: _
 
 **Why it works:** `check-update.sh` replaces every `-` in the output of the strategy, whatever the strategy, and the PKGBUILD turns it back where a source URL needs it, as nodejs-inshellisense does with `${pkgver//_/-}`. The `.SRCINFO` check of verify and publish counts that form as the version. A pre-release in this form, such as `1.0.0.beta.24`, sorts above its final release, so the final release is skipped as a downgrade, and the AUR package needs an `epoch`, which aurtomator does not write. `_` and `.` are allowed, and `vercmp` reads them the same. `crates` with `prerelease: true` needs the field, see [WORKFLOW.md section 3.10](WORKFLOW.md#310-crates).
 
+### Versions with text around the upstream version (pkgver_format)
+
+Some PKGBUILDs put a fixed text around the upstream version, such as `4.4215` for build `4215`, and cut it off again in the source URL. `pkgver_format` names that text, with `%s` in place of the upstream version:
+
+```yaml
+name: my-package
+strategy: webpage-scrape
+upstream:
+  url: https://example.com/updates.json
+  pattern: '"latest_version": ([0-9]+)'
+pkgver_format: '4.%s'
+```
+
+**Why it works:** `check-update.sh` puts the output of the strategy in place of `%s`, whatever the strategy, and the PKGBUILD cuts the text off where a source URL needs the upstream version, as with `${pkgver#4.}`. The `.SRCINFO` check of verify and publish counts the upstream version inside the old and the new `pkgver` as the version. See [WORKFLOW.md section 2](WORKFLOW.md#2-package-yaml-format).
+
 ### Nightly and prerelease packages
 
 `github-nightly` tracks nightly builds in 4 patterns:

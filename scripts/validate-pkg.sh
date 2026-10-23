@@ -85,6 +85,19 @@ validate_pkg() {
     fi
   fi
 
+  local pkgver_format formatted
+  if [[ $(pkg_get "$file" '.pkgver_format | tag') != "!!null" ]]; then
+    pkgver_format=$(pkg_get "$file" '.pkgver_format')
+    formatted=$(pkg_get "$file" '.current // ""')
+    if [[ ! "$pkgver_format" =~ ^[A-Za-z0-9._+]*%s[A-Za-z0-9._+]*$ ]]; then
+      log_err "$file: pkgver_format must hold %s once, with only A-Za-z0-9 . _ + around it"
+      ((errors++))
+    elif [[ -n "$formatted" && -z "$(_unformat_version "$formatted" "$pkgver_format")" ]]; then
+      log_err "$file: current $formatted does not fit pkgver_format $pkgver_format"
+      ((errors++))
+    fi
+  fi
+
   local branch
   if [[ $(pkg_get "$file" '.upstream.branch | tag') != "!!null" ]]; then
     branch=$(pkg_get "$file" '.upstream.branch')

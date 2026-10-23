@@ -19,6 +19,7 @@ readonly PKG_FILE
 strategy=$(pkg_get "$PKG_FILE" .strategy)
 current=$(pkg_get "$PKG_FILE" '.current // ""')
 dash=$(pkg_get "$PKG_FILE" '.pkgver_dash // ""')
+format=$(pkg_get "$PKG_FILE" '.pkgver_format // ""')
 
 # Run strategy
 strategy_script="${AURTOMATOR_DIR}/strategies/${strategy}.sh"
@@ -43,6 +44,13 @@ fi
 # where a URL needs one, as in ${pkgver//_/-}.
 if [[ -n "$dash" ]]; then
   latest=${latest//-/"$dash"}
+fi
+
+# pkgver is the upstream version with the text of pkgver_format around it,
+# as 4.4215 for build 4215. The PKGBUILD cuts that text off where a URL
+# needs the upstream version, as in ${pkgver#4.}.
+if [[ -n "$format" ]]; then
+  latest=${format/"%s"/"$latest"}
 fi
 
 validate_pkgver "$latest" || exit 1
