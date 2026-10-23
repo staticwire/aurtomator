@@ -804,3 +804,59 @@ EOF
   [[ "$output" == *"ssh-keygen -p -N '' -f $TEST_TMPDIR/ssh-pass/key-ci"* ]]
   [ ! -e "$TEST_TMPDIR/.aurtomator.conf" ]
 }
+
+# Helper: log every gh call to $TEST_TMPDIR/gh.args, then run the mock
+log_gh_calls() {
+  mv "$MOCK_DIR/gh" "$MOCK_DIR/gh-mock"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/gh.args"\nexec "%s/gh-mock" "$@"\n' \
+    "$TEST_TMPDIR" "$MOCK_DIR" >"$MOCK_DIR/gh"
+  chmod +x "$MOCK_DIR/gh"
+}
+
+@test "setup secrets: refuses a passphrase-protected key from --ssh-key and sets no secret" {
+  write_full_config "VALIDKEY123"
+  mkdir -p "$TEST_TMPDIR/ssh-pass"
+  ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
+  log_gh_calls
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --ssh-key "$TEST_TMPDIR/ssh-pass/key" --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ SSH key has a passphrase: $TEST_TMPDIR/ssh-pass/key"* ]]
+  [[ "$output" == *"ssh-keygen -p -N '' -f $TEST_TMPDIR/ssh-pass/key-ci"* ]]
+  ! grep -q '^secret set' "$TEST_TMPDIR/gh.args"
+}
+
+# A config saved before the ssh step refused such a key
+@test "setup secrets: refuses a passphrase-protected key from the saved config" {
+  mkdir -p "$TEST_TMPDIR/ssh-pass"
+  ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
+  printf 'AUR_SSH_KEY=%q\n' "$TEST_TMPDIR/ssh-pass/key" >"$TEST_TMPDIR/.aurtomator.conf"
+  log_gh_calls
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ SSH key has a passphrase: $TEST_TMPDIR/ssh-pass/key"* ]]
+  ! grep -q '^secret set' "$TEST_TMPDIR/gh.args"
+}
+
+@test "setup secrets: refuses a missing SSH key" {
+  write_full_config "VALIDKEY123"
+  log_gh_calls
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --ssh-key "$TEST_TMPDIR/ssh/missing.pem" --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ SSH key not found: $TEST_TMPDIR/ssh/missing.pem"* ]]
+  ! grep -q '^secret set' "$TEST_TMPDIR/gh.args"
+}
+
+@test "setup secrets: manual path refuses a passphrase-protected key" {
+  mock_gh_unavailable
+  write_full_config ""
+  mkdir -p "$TEST_TMPDIR/ssh-pass"
+  ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --ssh-key "$TEST_TMPDIR/ssh-pass/key" --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ SSH key has a passphrase: $TEST_TMPDIR/ssh-pass/key"* ]]
+  [[ "$output" != *"Contents of: $TEST_TMPDIR/ssh-pass/key"* ]]
+}

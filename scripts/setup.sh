@@ -132,15 +132,9 @@ setup_identity() {
   ok "Git author: $GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>"
 }
 
-setup_ssh() {
-  header "ssh" "SSH key for aur.archlinux.org"
-
-  if [[ -z "$AUR_SSH_KEY" ]]; then
-    AUR_SSH_KEY=$(ask "Path to SSH private key for AUR" "$HOME/.ssh/aur_ed25519")
-  fi
-  # Expand ~ to home dir
-  AUR_SSH_KEY="${AUR_SSH_KEY/#\~/$HOME}"
-
+# Returns: 0 when AUR_SSH_KEY is a private key without a passphrase, which
+#          CI can use, 1 otherwise, with the reason and the fix printed
+check_ssh_key() {
   if [[ ! -f "$AUR_SSH_KEY" ]]; then
     fail "SSH key not found: $AUR_SSH_KEY"
     printf "\n  Generate one:\n"
@@ -152,7 +146,7 @@ setup_ssh() {
   local key_check
   key_check=$(ssh-keygen -y -f "$AUR_SSH_KEY" -P "" 2>&1) || true
   if [[ "$key_check" == ssh-* ]]; then
-    ok "SSH key: $AUR_SSH_KEY"
+    return 0
   elif echo "$key_check" | grep -qi "incorrect passphrase"; then
     fail "SSH key has a passphrase: $AUR_SSH_KEY"
     printf "\n  CI uses the key without a prompt. Remove the passphrase from a copy:\n"
@@ -164,6 +158,19 @@ setup_ssh() {
     fail "Not a valid private key: $AUR_SSH_KEY"
     return 1
   fi
+}
+
+setup_ssh() {
+  header "ssh" "SSH key for aur.archlinux.org"
+
+  if [[ -z "$AUR_SSH_KEY" ]]; then
+    AUR_SSH_KEY=$(ask "Path to SSH private key for AUR" "$HOME/.ssh/aur_ed25519")
+  fi
+  # Expand ~ to home dir
+  AUR_SSH_KEY="${AUR_SSH_KEY/#\~/$HOME}"
+
+  check_ssh_key || return 1
+  ok "SSH key: $AUR_SSH_KEY"
 
   local pubkey="${AUR_SSH_KEY}.pub"
   if [[ -f "$pubkey" ]]; then
@@ -333,6 +340,9 @@ setup_gpg() {
 
 setup_secrets() {
   header "secrets" "GitHub Secrets"
+
+  # The ssh step is not run when secrets runs alone or with a saved config
+  check_ssh_key || return 1
 
   local has_gh=false
   if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
