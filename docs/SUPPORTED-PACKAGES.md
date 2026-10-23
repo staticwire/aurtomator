@@ -17,7 +17,7 @@ For every update, aurtomator does exactly this:
 9. Run `makepkg --printsrcinfo` to regenerate `.SRCINFO`
 10. Commit and push to the AUR
 
-Steps 5 to 7 are skipped when a checksum array holds a `SKIP` other than that of a signature, see [Packages with VCS checksums](#packages-with-vcs-checksums-skip) and [Sources with a signature](#sources-with-a-signature).
+Steps 5 to 7 are skipped when a checksum array holds a `SKIP` other than that of a signature and no remote source has a real checksum, see [Packages with VCS checksums](#packages-with-vcs-checksums-skip) and [Sources with a signature](#sources-with-a-signature).
 
 aurtomator does not build packages and does not check runtime dependencies. That needs `ldd` or `readelf` on built binaries and is out of scope. Dependency correctness is the maintainer's responsibility.
 
@@ -75,9 +75,9 @@ b2sums_x86_64=('SKIP')
 b2sums_aarch64=('SKIP')
 ```
 
-**Why it works:** aurtomator reads every checksum array, with and without an arch suffix. A `SKIP` at any position makes it skip `updpkgsums`, which would otherwise replace the `SKIP` of a download with a real hash. The `SKIP` of a signature is the exception, see [Sources with a signature](#sources-with-a-signature).
+**Why it works:** aurtomator reads every checksum array, with and without an arch suffix. A `SKIP` at any position makes it skip `updpkgsums`, which would otherwise replace the `SKIP` of a download with a real hash and clone the repository of every VCS source. The `SKIP` of a signature is the exception, see [Sources with a signature](#sources-with-a-signature). `updpkgsums` also runs next to the `SKIP` of a VCS source without a pin when a remote source has a real hash.
 
-A real hash for a remote source next to a `SKIP` other than that of a signature is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
+A real hash for a remote source next to a `SKIP` other than that of a signature or of a VCS source without a pin is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
 
 ### Sources with a signature
 
@@ -163,17 +163,17 @@ A PKGBUILD with a `pkgver()` function and a strategy other than `git-latest` or 
 
 ### Mixed SKIP and real checksums (BLOCKED)
 
-A PKGBUILD with a `SKIP` and a real hash for a remote source, in any order and in any checksum array. The `SKIP` of a signature does not count, see [Sources with a signature](#sources-with-a-signature).
+A PKGBUILD with a `SKIP` and a real hash for a remote source, in any order and in any checksum array. The `SKIP` of a signature does not count, see [Sources with a signature](#sources-with-a-signature), and neither does that of a VCS source without a `#commit=`, `#tag=` or `#revision=` pin: makepkg writes both itself, so `updpkgsums` keeps them.
 
 ```bash
-source=("git+https://example.com/app.git" "https://example.com/data.tar.gz")
+source=("git+https://example.com/app.git#commit=1a2b3c4" "https://example.com/data.tar.gz")
 sha256sums=('SKIP'
             'abc123def456...')
 ```
 
-**Detection:** `audit_pkgbuild()` sources the PKGBUILD and pairs every entry of every checksum array (`ck`, `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `b2`, with and without an arch suffix) with the entry at the same index of `source` or `source_<arch>`. A real hash for a URL with `://` next to a `SKIP` other than that of a signature blocks the update. A real hash for a local file is allowed, because that file lives in the AUR repo and does not change between versions.
+**Detection:** `audit_pkgbuild()` sources the PKGBUILD and pairs every entry of every checksum array (`ck`, `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `b2`, with and without an arch suffix) with the entry at the same index of `source` or `source_<arch>`. A real hash for a URL with `://` next to any other `SKIP` blocks the update. A real hash for a local file is allowed, because that file lives in the AUR repo and does not change between versions.
 
-**Why:** when aurtomator sees such a `SKIP`, it skips `updpkgsums`, so the real hash of the remote source would be stale after the version bump.
+**Why:** `updpkgsums` would replace such a `SKIP` with a real hash, and without `updpkgsums` the real hash of the remote source would be stale after the version bump.
 
 ### Sources that do not follow pkgver (BLOCKED)
 

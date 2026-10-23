@@ -375,6 +375,42 @@ EOF
   [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
 }
 
+@test "update-pkg: updates the checksums next to the SKIP of a VCS source" {
+  create_test_package "demo" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  cat >"$OLD" <<EOF
+pkgname=demo
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="demo"
+arch=('any')
+url="https://example.com"
+license=('MIT')
+source=("demo::git+https://example.com/demo.git"
+        "https://example.com/data-\${pkgver}.tar.gz")
+sha256sums=('SKIP'
+            '$H1')
+
+package() {
+  :
+}
+EOF
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0 \
+    demo::git+https://example.com/demo.git SKIP https://example.com/data-1.0.0.tar.gz "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.1.0 \
+    demo::git+https://example.com/demo.git SKIP https://example.com/data-1.1.0.tar.gz "$H2"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+  printf '#!/usr/bin/env bash\nsed -i s/%s/%s/ PKGBUILD\n' "$H1" "$H2" >"$MOCK_DIR/updpkgsums"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Updating checksums"* ]]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "            '$H2')"
+}
+
 # The tarball and signature pair of lib32-gettext
 @test "update-pkg: updates the checksums next to the SKIP of a signature" {
   create_test_package "demo" "github-release" "upstream:

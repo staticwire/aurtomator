@@ -178,7 +178,7 @@ pkgdesc="test"
 arch=('x86_64')
 url="https://example.com"
 license=('MIT')
-source=("git+https://example.com/repo.git"
+source=("git+https://example.com/repo.git#commit=abc123"
         "https://example.com/config-${pkgver}.tar.gz")
 sha256sums=('SKIP'
             'abc123')
@@ -261,7 +261,7 @@ pkgdesc="test"
 arch=('x86_64')
 url="https://example.com"
 license=('MIT')
-source_x86_64=("git+https://example.com/repo.git"
+source_x86_64=("git+https://example.com/repo.git#commit=abc123"
                "https://example.com/data-${pkgver}.tar.gz")
 sha256sums_x86_64=('SKIP'
                    'abc123')
@@ -282,7 +282,7 @@ arch=('x86_64')
 url="https://example.com"
 license=('MIT')
 source=("https://example.com/data-${pkgver}.tar.gz"
-        "git+https://example.com/repo.git")
+        "git+https://example.com/repo.git#commit=abc123")
 sha256sums=('abc123'
             'SKIP')
 EOF
@@ -352,6 +352,83 @@ sha512sums=('abc123'
 EOF
     run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
     [ "$status" -eq 1 ]
+    [[ "$output" == *"SKIP checksums mixed with real hashes for remote"* ]]
+  done
+}
+
+# makepkg -g writes SKIP for a VCS source without a pin, as for a signature
+@test "audit_pkgbuild: allows the SKIP of a VCS source without a pin next to a real hash" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local vcs
+  for vcs in "git+https://example.com/app.git" "app::git+https://example.com/app.git#branch=main" \
+    "hg+https://example.com/app" "svn+https://example.com/app/trunk" \
+    "bzr+https://example.com/app" "fossil+https://example.com/app"; do
+    cat >"$TEST_TMPDIR/test.PKGBUILD" <<EOF
+pkgname=test-vcs-data
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("$vcs"
+        "https://example.com/data-\${pkgver}.tar.gz")
+sha256sums=('SKIP'
+            'abc123')
+EOF
+    run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+    [ "$status" -eq 0 ] || {
+      echo "blocked: $vcs"
+      return 1
+    }
+  done
+}
+
+# libadwaita-without-adwaita: makepkg -g hashes a local file
+@test "audit_pkgbuild: blocks the SKIP of a local file next to a real remote hash" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-local-skip
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/app-${pkgver}.tar.gz"
+        "theme.diff")
+sha256sums=('abc123'
+            'SKIP')
+EOF
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SKIP checksums mixed with real hashes for remote"* ]]
+}
+
+# makepkg -g hashes a VCS source at a commit, a tag or a revision
+@test "audit_pkgbuild: blocks the SKIP of a pinned VCS source next to a real hash" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local vcs
+  for vcs in "git+https://example.com/app.git#commit=abc123" "app::git+https://example.com/app.git?signed#tag=v1" \
+    "hg+https://example.com/app#revision=4" "bzr+https://example.com/app#revision=4"; do
+    cat >"$TEST_TMPDIR/test.PKGBUILD" <<EOF
+pkgname=test-vcs-data
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("$vcs"
+        "https://example.com/data-\${pkgver}.tar.gz")
+sha256sums=('SKIP'
+            'abc123')
+EOF
+    run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+    [ "$status" -eq 1 ] || {
+      echo "allowed: $vcs"
+      return 1
+    }
     [[ "$output" == *"SKIP checksums mixed with real hashes for remote"* ]]
   done
 }

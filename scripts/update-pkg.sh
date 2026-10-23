@@ -125,9 +125,11 @@ fi
 # UPDATE CHECKSUMS
 # =============================================================================
 
-# updpkgsums would put a real hash in place of the SKIP of a download,
-# except a signature, which makepkg gives SKIP itself
-if has_skip_checksums "${aur_dir}/PKGBUILD"; then
+# updpkgsums would put a real hash in place of the SKIP of a download or of
+# a pinned VCS source, and the audit blocks such a SKIP next to a remote
+# hash. Next to the SKIP of a VCS source without a pin, updpkgsums runs only
+# for a remote hash, since makepkg -g clones the repository.
+if has_skip_checksums "${aur_dir}/PKGBUILD" && ! has_remote_hash "${aur_dir}/PKGBUILD"; then
   log_info "VCS package, skipping checksums"
 else
   # Validate source URLs before downloading
