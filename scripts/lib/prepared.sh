@@ -166,6 +166,37 @@ _bump_version() {
   printf '%s\n' "$out"
 }
 
+# Print the line with each form of the version that has a dash in place of
+# the pkgver_dash character turned back into the version, as
+# ${pkgver//_/-} writes 0.0.1-rc.20 for pkgver 0.0.1_rc.20
+# Args: $1=line, $2=version, $3=pkgver_dash character
+_undash_version() {
+  local rest="$1" version="$2" dash="$3" re="" out="" c i match
+  for ((i = 0; i < ${#version}; i++)); do
+    c="${version:i:1}"
+    if [[ "$c" == "$dash" ]]; then
+      re+="[$c-]"
+    else
+      re+="[$c]"
+    fi
+  done
+  while [[ -n "$re" && "$rest" =~ $re ]]; do
+    match="${BASH_REMATCH[0]}"
+    out+="${rest%%"$match"*}${version}"
+    rest="${rest#*"$match"}"
+  done
+  printf '%s\n' "$out$rest"
+}
+
+# Args: $1=AUR line, $2=prepared line, $3=old version, $4=new version,
+#       $5=pkgver_dash character
+# Returns: 0 when the prepared line is the AUR line with the version
+#          replaced, once a dash in place of the pkgver_dash character in
+#          either version counts as that character
+_bumped_with_dash() {
+  [[ "$(_undash_version "$2" "$4" "$5")" == "$(_bump_version "$(_undash_version "$1" "$3" "$5")" "$3" "$4")" ]]
+}
+
 # Print "SKIP <arch suffix>:<index>" for every source entry of a .SRCINFO
 # that is SKIP in each checksum array with the same arch suffix, and
 # "HASH <arch suffix>:<index>" for every other one
@@ -221,11 +252,14 @@ _name_differs_in_digits() {
 # has a real checksum, or a VCS source is pinned to a commit, a tag or a
 # revision, some source or checksum has to change too: a pkgver built from
 # another variable, a source URL without the version, or a pin that stays
-# would otherwise label the old files with the new version.
-# Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version
+# would otherwise label the old files with the new version. With
+# pkgver_dash, a version with a dash in place of that character, as
+# ${pkgver//_/-} writes it, counts as the version.
+# Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version,
+#       $4=pkgver_dash character of the package, if any
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
-  local version="$3"
+  local version="$3" dash="${4:-}"
   if [[ ! -r "$1" || ! -r "$2" ]]; then
     log_err "Could not read the .SRCINFO to compare"
     return 1
@@ -303,6 +337,7 @@ check_prepared_srcinfo() {
         source_counts[$key]=$((n + 1))
         expected=$(_bump_version "$old" "$old_ver" "$version")
         if [[ "$new" != "$expected" ]] &&
+          ! _bumped_with_dash "$old" "$new" "$old_ver" "$version" "$dash" &&
           ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
             _name_differs_in_digits "$expected" "$new"; }; then
           log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $new"
@@ -315,7 +350,8 @@ check_prepared_srcinfo() {
         fi
         ;;
       *)
-        if [[ "$new" != "$old" && "$new" != "$(_bump_version "$old" "$old_ver" "$version")" ]]; then
+        if [[ "$new" != "$old" && "$new" != "$(_bump_version "$old" "$old_ver" "$version")" ]] &&
+          ! _bumped_with_dash "$old" "$new" "$old_ver" "$version" "$dash"; then
           log_err "Prepared .SRCINFO line $((i + 1)) changes more than the version: $new"
           return 1
         fi
@@ -354,7 +390,8 @@ prepared_base() {
 }
 
 # Check a prepared PKGBUILD and .SRCINFO against the AUR repo at their base
-# Args: $1=AUR repo, $2=prepared dir, $3=expected version
+# Args: $1=AUR repo, $2=prepared dir, $3=expected version,
+#       $4=pkgver_dash character of the package, if any
 # Returns: 0 when both files pass, 1 otherwise (reason on stderr)
 check_prepared_files() {
   local f
@@ -366,5 +403,5 @@ check_prepared_files() {
     fi
   done
   check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" &&
-    check_prepared_srcinfo "$1/.SRCINFO" "$2/.SRCINFO" "$3"
+    check_prepared_srcinfo "$1/.SRCINFO" "$2/.SRCINFO" "$3" "${4:-}"
 }

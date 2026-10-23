@@ -119,7 +119,7 @@ upstream:
 pkgver_dash: _
 ```
 
-**Why it works:** `check-update.sh` replaces every `-` in the output of the strategy, whatever the strategy, and the PKGBUILD turns it back where a source URL needs it, as nodejs-inshellisense does with `${pkgver//_/-}`. `_` and `.` are allowed, and `vercmp` reads them the same. `crates` with `prerelease: true` needs the field, see [WORKFLOW.md section 3.10](WORKFLOW.md#310-crates).
+**Why it works:** `check-update.sh` replaces every `-` in the output of the strategy, whatever the strategy, and the PKGBUILD turns it back where a source URL needs it, as nodejs-inshellisense does with `${pkgver//_/-}`. The `.SRCINFO` check of verify and publish counts that form as the version. `_` and `.` are allowed, and `vercmp` reads them the same. `crates` with `prerelease: true` needs the field, see [WORKFLOW.md section 3.10](WORKFLOW.md#310-crates).
 
 ### Nightly and prerelease packages
 

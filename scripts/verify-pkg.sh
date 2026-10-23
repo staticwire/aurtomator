@@ -20,7 +20,8 @@ require_cmd curl
 
 readonly PKG_NAME="${1:?Usage: verify-pkg.sh <package-name> <prepared-dir>}"
 readonly PREPARED="${2:?Usage: verify-pkg.sh <package-name> <prepared-dir>}"
-pkg_file "$PKG_NAME" >/dev/null
+PKG_FILE="$(pkg_file "$PKG_NAME")"
+readonly PKG_FILE
 
 base=$(prepared_base "$PREPARED") || exit 1
 version=$(sed -n 's/^pkgver=//p' "${PREPARED}/PKGBUILD" | head -1)
@@ -42,7 +43,7 @@ fi
 
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
-check_prepared_files "$aur_files" "$PREPARED" "$version" || exit 1
+check_prepared_files "$aur_files" "$PREPARED" "$version" "$(pkg_get "$PKG_FILE" '.pkgver_dash // ""')" || exit 1
 mkdir "${tmp_dir}/downloads"
 verify_prepared_sums "$aur_files" "$PREPARED" "${tmp_dir}/downloads" || exit 1
 log_ok "Checksums of $PKG_NAME $version match the sources"

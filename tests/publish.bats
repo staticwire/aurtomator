@@ -323,6 +323,58 @@ current: '1.0.0'"
   [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
 }
 
+# Helper: the AUR at 0.0.1_rc.20 of a package with pkgver_dash: _, whose
+# source restores the dash, and the .SRCINFO makepkg prints for 0.0.4 in
+# new.SRCINFO. Sets OLD_SUM and NEW_SUM, the checksums of the two downloads.
+setup_dash_package() {
+  create_test_package "demo" "npm" "upstream:
+  registry: demo
+current: '0.0.1_rc.20'
+pkgver_dash: _"
+  OLD_SUM=$(printf 'source of %s\n' https://example.com/demo-0.0.1-rc.20.tgz | sha256sum | cut -d' ' -f1)
+  NEW_SUM=$(printf 'source of %s\n' https://example.com/demo-0.0.4.tgz | sha256sum | cut -d' ' -f1)
+  cat >"$OLD" <<EOF
+pkgname=demo
+pkgver=0.0.1_rc.20
+pkgrel=1
+pkgdesc="demo"
+arch=('any')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/demo-\${pkgver//_/-}.tgz")
+sha256sums=('$OLD_SUM')
+
+package() {
+  :
+}
+EOF
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 0.0.1_rc.20 https://example.com/demo-0.0.1-rc.20.tgz "$OLD_SUM"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 0.0.4 https://example.com/demo-0.0.4.tgz "$NEW_SUM"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+  printf '#!/usr/bin/env bash\nsed -i s/%s/%s/ PKGBUILD\n' "$OLD_SUM" "$NEW_SUM" >"$MOCK_DIR/updpkgsums"
+}
+
+@test "a package with pkgver_dash goes through prepare, verify and publish" {
+  setup_dash_package
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 0.0.4 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  mock_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 0.0.4 "$TEST_TMPDIR/out/demo"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
+}
+
+@test "update-pkg: pushes a package with pkgver_dash" {
+  setup_dash_package
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 0.0.4
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
+}
+
 # The tarball and signature pair of lib32-gettext
 @test "update-pkg: updates the checksums next to the SKIP of a signature" {
   create_test_package "demo" "github-release" "upstream:
@@ -2129,6 +2181,52 @@ write_srcinfo_sources() {
     "git+https://example.com/demo.git#tag=51.1" SKIP "$sub" SKIP
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 51.1
   [ "$status" -eq 0 ]
+}
+
+# pijul: pkgver 1.0.0.beta.11 with pkgver_dash ., the crate URL keeps the dash
+@test "check_prepared_srcinfo: accepts a source with the dash that pkgver_dash replaced" {
+  local url=https://static.crates.io/crates/pijul/pijul
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0.beta.11 "pijul-1.0.0.beta.11.tar.gz::$url-1.0.0-beta.11.crate" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 "pijul-1.0.0.beta.24.tar.gz::$url-1.0.0-beta.24.crate" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 .
+  [ "$status" -eq 0 ]
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
+}
+
+# nodejs-inshellisense: pkgver 0.0.1_rc.20 with pkgver_dash _, ${pkgver//_/-}
+@test "check_prepared_srcinfo: accepts another line with the dash that pkgver_dash replaced" {
+  local url=https://registry.npmjs.org/@microsoft/inshellisense/-/inshellisense
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 0.0.1_rc.20 "$url-0.0.1-rc.20.tgz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 0.0.4 "$url-0.0.4.tgz" "$H2"
+  sed -i $'/^\tsource = /a \tnoextract = inshellisense-0.0.1-rc.20.tgz' "$TEST_TMPDIR/old.SRCINFO"
+  sed -i $'/^\tsource = /a \tnoextract = inshellisense-0.0.4.tgz' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.0.4 _
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: rejects another character in place of a dot with pkgver_dash" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 0.0.1_rc.20 "https://example.com/0.0.1-rc.20/demo.tgz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 0.0.4 "https://example.com/0x0x4/demo.tgz" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.0.4 _
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
+}
+
+# An empty pattern matches the empty string at every pass
+@test "_undash_version: keeps the line for an empty version" {
+  run timeout 10 bash -c 'source "$1/scripts/lib.sh"; _undash_version "demo-1-0" "" .' _ "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "demo-1-0" ]
+}
+
+@test "check_prepared_srcinfo: rejects a dash outside the version with pkgver_dash" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0.beta.11 "https://static.crates.io/pijul-1.0.0-beta.11.crate" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 "https://static-crates.io/pijul-1.0.0-beta.24.crate" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 .
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
 
 @test "check_prepared_srcinfo: accepts the AUR copy of a package with a VCS pin" {

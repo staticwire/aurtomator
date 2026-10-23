@@ -60,7 +60,7 @@ fi
 
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
-check_prepared_files "$aur_files" "$PREPARED" "$VERSION" || exit 1
+check_prepared_files "$aur_files" "$PREPARED" "$VERSION" "$(pkg_get "$PKG_FILE" '.pkgver_dash // ""')" || exit 1
 
 # The clone has no checkout: the index takes the tree of HEAD, and the two
 # prepared files enter it byte for byte. git add would pass them through
