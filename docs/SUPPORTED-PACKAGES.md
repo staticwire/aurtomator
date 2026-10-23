@@ -103,7 +103,7 @@ upstream:
   tag_version_regex: '^release-v?([0-9.]+)-stable$'
 ```
 
-**Why it works:** the first capture group of the ERE is the version, whatever the format of the tag, for example `0.1.8-stable`, `release-v2.3.0` or `app/v1.5.0`. bash takes the group, so the regex may hold `|`, in a group after the version: `^v?([0-9.]+)(-stable|)$`.
+**Why it works:** the first capture group of the ERE is the version, whatever the format of the tag, for example `0.1.8-stable`, `release-v2.3.0` or `app/v1.5.0`. bash takes the group, so the regex may hold `|`, in a group after the version: `^v?([0-9.]+)(-stable|)$`. With `github-release`, the regex also picks the release of one product in a repository that releases several, see [WORKFLOW.md section 3.1](WORKFLOW.md#31-github-release).
 
 `tag_version_replace` builds the version from more than one group, with `\1` to `\9`. For the date tag `2026-09-10`, `'^([0-9]{4})-([0-9]{2})-([0-9]{2})$'` with `'\1.\2.\3'` gives `2026.09.10`. See [WORKFLOW.md section 3.1](WORKFLOW.md#31-github-release).
 

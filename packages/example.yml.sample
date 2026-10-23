@@ -52,7 +52,10 @@ upstream:
 # =============================================================================
 
 # --- github-release ---------------------------------------------------------
-# Reads /repos/{project}/releases/latest, which skips pre-releases.
+# Reads /repos/{project}/releases/latest, which skips pre-releases. With
+# tag_version_regex, reads the release list, up to 10 pages of 100, and takes
+# the matching release published last, pre-releases left out: one product of
+# a repository that releases several.
 #
 # strategy: github-release
 # upstream:

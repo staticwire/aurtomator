@@ -74,7 +74,111 @@ teardown() {
 
   run "$TEST_TMPDIR/strategies/github-release.sh" "test-nomatch"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"tag_version_regex 'docker-v(.*)' did not match tag '0.1.8-stable'"* ]]
+  [[ "$output" == *"No release of custom-suffix/repo outside pre-releases among the newest 1000 has a tag that tag_version_regex 'docker-v(.*)' matches"* ]]
+}
+
+# tutao/tutanota releases a web, a desktop and mobile apps
+@test "github-release: tag_version_regex takes the matching release published last" {
+  record_curl
+  create_test_package "test-multi" "github-release" "upstream:
+  project: multi-product/repo
+  tag_version_regex: '^app-desktop-release-(.*)$'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-multi"
+  [ "$status" -eq 0 ]
+  [ "$output" = "362.0" ]
+  [ "$(nightly_pages)" = "1 " ]
+  [ "$(grep -c 'releases/latest' "$TEST_TMPDIR/curl.args")" = "0" ]
+}
+
+@test "github-release: tag_version_regex reads the next page" {
+  record_curl
+  create_test_package "test-pages" "github-release" "upstream:
+  project: later-nightly/repo
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1.\\2.\\3'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-pages"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.10.21" ]
+  [ "$(nightly_pages)" = "1 2 " ]
+}
+
+@test "github-release: tag_version_regex stops at a full page with a match" {
+  record_curl
+  create_test_package "test-pages" "github-release" "upstream:
+  project: full-nightly/repo
+  tag_version_regex: '^([0-9-]+)$'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-pages"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-10-21" ]
+  [ "$(nightly_pages)" = "1 " ]
+}
+
+@test "github-release: tag_version_regex stops at a short page" {
+  record_curl
+  create_test_package "test-pages" "github-release" "upstream:
+  project: short-nightly/repo
+  tag_version_regex: '^([0-9-]+)$'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-pages"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No release of short-nightly/repo outside pre-releases among the newest 1000"* ]]
+  [ "$(nightly_pages)" = "1 " ]
+}
+
+@test "github-release: tag_version_regex reads at most 10 pages" {
+  record_curl
+  create_test_package "test-pages" "github-release" "upstream:
+  project: no-nightly/repo
+  tag_version_regex: '^([0-9-]+)$'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-pages"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"github-nightly with nightly_tag_regex reads pre-releases"* ]]
+  [ "$(nightly_pages)" = "1 2 3 4 5 6 7 8 9 10 " ]
+}
+
+@test "github-release: tag_version_regex fails when the list cannot be read" {
+  create_test_package "test-pages" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: '^v(.*)$'"
+  printf '#!/usr/bin/env bash\nexit 7\n' >"$TEST_TMPDIR/mock-bin/curl"
+  chmod +x "$TEST_TMPDIR/mock-bin/curl"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-pages"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch releases for owner/repo"* ]]
+}
+
+# FreeTubeApp/FreeTube files every release as a pre-release
+@test "github-release: names github-nightly for a project with pre-releases only" {
+  create_test_package "test-pre" "github-release" "upstream:
+  project: prerelease-only/repo"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-pre"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"prerelease-only/repo has no release outside pre-releases, which /releases/latest leaves out; github-nightly with nightly_tag_regex reads pre-releases"* ]]
+}
+
+@test "github-release: names github-tag for a project without releases" {
+  create_test_package "test-none" "github-release" "upstream:
+  project: no-releases/repo"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-none"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no-releases/repo has no releases; github-tag reads its tags"* ]]
+}
+
+@test "github-release: keeps the fetch error when the list has a release" {
+  create_test_package "test-stable" "github-release" "upstream:
+  project: stable-list/repo"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-stable"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch latest release for stable-list/repo"* ]]
+  [[ "$output" != *"pre-releases"* ]]
 }
 
 @test "github-release: tag_version_replace builds the version from the groups" {
@@ -662,6 +766,18 @@ nightly_pages() {
   [ "$status" -eq 0 ]
   [ "$output" = "20261021" ]
   [ "$(nightly_pages)" = "1 " ]
+}
+
+# FreeTubeApp/FreeTube files every release as a pre-release
+@test "github-nightly: nightly_tag_regex takes a pre-release" {
+  create_test_package "test-nightly-pre" "github-nightly" "upstream:
+  project: prerelease-only/repo
+  nightly_tag_regex: '^v[0-9.]+-beta$'
+  tag_version_regex: '^v([0-9.]+)-beta$'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-pre"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.25.3" ]
 }
 
 @test "github-nightly: nightly_tag_regex reads the next page" {

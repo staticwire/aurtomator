@@ -46,19 +46,6 @@ nightly_tag_regex=$(pkg_get "$pkg_file" '.upstream.nightly_tag_regex // ""')
 
 api="https://api.github.com/repos/${owner_repo}"
 
-# The tag of the release published last among those whose tag matches
-# nightly_tag_regex, or nothing. A draft holds no published_at.
-# Args: $1=releases JSON
-latest_match() {
-  local published tag
-  yq -r '.[] | select(.published_at != null) | [.published_at, .tag_name] | @tsv' <<<"$1" |
-    while IFS=$'\t' read -r published tag; do
-      if [[ "$tag" =~ $nightly_tag_regex ]]; then
-        printf '%s\t%s\n' "$published" "$tag"
-      fi
-    done | sort | tail -1 | cut -f2
-}
-
 # A date in date_format. -u keeps the day of a UTC timestamp whatever the
 # time zone of the machine. Prints nothing when there is no date.
 # Args: $1=date or timestamp
@@ -71,24 +58,11 @@ format_date() {
 # Fetch release based on pattern. channel and nightly_tag reach yq through
 # the environment so that quotes in them cannot break the expression.
 if [[ -n "$nightly_tag_regex" ]]; then
-  # Pattern B with a regex. The API lists releases by created_at, the date
-  # of the tagged commit, so the match published last wins. A page with
-  # fewer than 100 releases is the last one.
-  release=""
-  for page in 1 2 3; do
-    releases_json=$(github_api "${api}/releases?per_page=100&page=${page}") || {
-      echo "Failed to fetch releases for ${owner_repo}" >&2
-      exit 1
-    }
-    tag=$(latest_match "$releases_json")
-    if [[ -n "$tag" ]]; then
-      release=$(echo "$releases_json" | TAG="$tag" yq -r '[.[] | select(.tag_name == strenv(TAG))][0]')
-      break
-    fi
-    if (($(yq 'length' <<<"$releases_json") < 100)); then
-      break
-    fi
-  done
+  # Pattern B with a regex
+  release=$(github_release_matching "$api" "$nightly_tag_regex" 3) || {
+    echo "Failed to fetch releases for ${owner_repo}" >&2
+    exit 1
+  }
 elif [[ "$nightly_tag" == "latest" ]]; then
   # Pattern C: separate nightly repo, use /releases/latest
   release=$(github_api "${api}/releases/latest") || {

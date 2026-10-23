@@ -161,14 +161,45 @@ case "$url" in
   *api.github.com/repos/custom-prefix/repo/releases/latest)
     echo '{"tag_name": "MeshLab-2025.07"}'
     ;;
+  *"api.github.com/repos/custom-prefix/repo/releases?per_page=100&page=1")
+    echo '[{"tag_name": "MeshLab-2025.07", "published_at": "2025-07-01T00:00:00Z", "prerelease": false}]'
+    ;;
   # Custom suffix tag format
   *api.github.com/repos/custom-suffix/repo/releases/latest)
     echo '{"tag_name": "0.1.8-stable"}'
+    ;;
+  *"api.github.com/repos/custom-suffix/repo/releases?per_page=100&page=1")
+    echo '[{"tag_name": "0.1.8-stable", "published_at": "2025-10-27T17:18:07Z", "prerelease": false}]'
     ;;
   # Date tags, as servo names its nightlies and vinceliuice its themes.
   # servo published 2026-10-21 after midnight UTC.
   *api.github.com/repos/dated-owner/dated-repo/releases/latest)
     echo '{"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z"}'
+    ;;
+  *"api.github.com/repos/dated-owner/dated-repo/releases?per_page=100&page=1")
+    echo '[{"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z", "prerelease": false}]'
+    ;;
+  # Several products in one repository, as tutao/tutanota: an older match
+  # first in the API order, a newer pre-release and a draft of the product
+  *"api.github.com/repos/multi-product/repo/releases?per_page=100&page=1")
+    echo '[{"tag_name": "app-desktop-release-361.0", "published_at": "2026-10-12T08:34:32Z", "prerelease": false}, {"tag_name": "app-web-release-362.0", "published_at": "2026-10-21T08:32:50Z", "prerelease": false}, {"tag_name": "app-desktop-release-363.0", "published_at": "2026-10-22T00:00:00Z", "prerelease": true}, {"tag_name": "app-desktop-release-362.0", "published_at": "2026-10-21T08:33:13Z", "prerelease": false}, {"tag_name": "app-desktop-release-364.0", "published_at": null, "prerelease": false}]'
+    ;;
+  # /releases/latest answers 404 when every release is a pre-release, as
+  # for FreeTubeApp/FreeTube, and when there is no release at all
+  *api.github.com/repos/prerelease-only/repo/releases/latest | \
+    *api.github.com/repos/no-releases/repo/releases/latest | \
+    *api.github.com/repos/stable-list/repo/releases/latest)
+    exit 22
+    ;;
+  *"api.github.com/repos/prerelease-only/repo/releases?per_page=100" | \
+    *"api.github.com/repos/prerelease-only/repo/releases?per_page=100&page=1")
+    echo '[{"tag_name": "v0.25.3-beta", "published_at": "2026-10-01T00:00:00Z", "prerelease": true}]'
+    ;;
+  *"api.github.com/repos/no-releases/repo/releases?per_page=100")
+    echo '[]'
+    ;;
+  *"api.github.com/repos/stable-list/repo/releases?per_page=100")
+    echo '[{"tag_name": "v2.0.0", "published_at": "2026-10-01T00:00:00Z", "prerelease": false}]'
     ;;
   *gitlab.com/api/v4/projects/dated-group%2Fdated-project/repository/tags* | \
     *codeberg.org/api/v1/repos/dated-owner/dated-repo/tags*)

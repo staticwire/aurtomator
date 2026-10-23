@@ -98,6 +98,43 @@ github_api() {
   http_get "$1" "${auth[@]}" <<<"Authorization: Bearer ${GITHUB_TOKEN:-}"
 }
 
+# Args: $1=releases JSON, $2=ERE, $3=yq filter of the releases
+_latest_release_tag() {
+  local published tag
+  yq -r ".[] | $3 | [.published_at, .tag_name] | @tsv" <<<"$1" |
+    while IFS=$'\t' read -r published tag; do
+      if [[ "$tag" =~ $2 ]]; then
+        printf '%s\t%s\n' "$published" "$tag"
+      fi
+    done | sort | tail -1 | cut -f2
+}
+
+# Print the release published last whose tag matches the ERE, as JSON, or
+# nothing. Reads pages of 100 releases until a page has a match or holds
+# fewer than 100, at most the given number of pages. The API lists releases
+# by created_at, the date of the tagged commit, so the match published last
+# wins. A draft holds no published_at.
+# Args: $1=API URL of the repository, $2=ERE, $3=most pages to read,
+#       $4="stable" to leave out pre-releases
+# Returns: 1 when a request fails
+github_release_matching() {
+  local filter='select(.published_at != null)' page json tag
+  if [[ "${4:-}" == stable ]]; then
+    filter+=' | select(.prerelease != true)'
+  fi
+  for ((page = 1; page <= $3; page++)); do
+    json=$(github_api "$1/releases?per_page=100&page=${page}") || return 1
+    tag=$(_latest_release_tag "$json" "$2" "$filter") || return 1
+    if [[ -n "$tag" ]]; then
+      TAG="$tag" yq -r '[.[] | select(.tag_name == strenv(TAG))][0]' <<<"$json"
+      return 0
+    fi
+    if (($(yq 'length' <<<"$json") < 100)); then
+      return 0
+    fi
+  done
+}
+
 # =============================================================================
 # VERSION VALIDATION
 # =============================================================================

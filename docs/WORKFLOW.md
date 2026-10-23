@@ -100,7 +100,7 @@ aurtomator ships 14 strategies. A strategy is a bash script in `strategies/`. It
 
 ### 3.1 github-release
 
-**What it checks:** GitHub Releases API (`/repos/{owner}/{repo}/releases/latest`).
+**What it checks:** GitHub Releases API: `/repos/{owner}/{repo}/releases/latest`, or the release list with `tag_version_regex`.
 
 **When to use:** GitHub projects that publish releases.
 
@@ -112,7 +112,17 @@ aurtomator ships 14 strategies. A strategy is a bash script in `strategies/`. It
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, see below |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex` (default: `\1`), see below |
 
-**How the version is extracted:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases.
+**How the version is extracted:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases. When it answers 404, the strategy reads the release list to say why: a list of pre-releases only gets a message that names `github-nightly` with `nightly_tag_regex`, an empty list one that names `github-tag`.
+
+With `tag_version_regex`, the strategy reads the release list instead, 100 releases a page, until a page has a release whose tag the regex matches or the list ends, at most 10 pages. It takes the match published last and leaves out drafts and pre-releases. A repository that releases several products then gives the release of the product the regex names, whatever `/releases/latest` returns. tutao/tutanota publishes its web, desktop and mobile apps as separate releases:
+
+```yaml
+name: tutanota-desktop-bin
+strategy: github-release
+upstream:
+  project: tutao/tutanota
+  tag_version_regex: '^tutanota-desktop-release-(.*)$'
+```
 
 **Authentication:** when `GITHUB_TOKEN` is set in the environment, it is sent as a Bearer token. curl reads the header from stdin, so the token does not appear on a command line. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without it, for example in a local run, the limit is 60 requests per hour.
 
@@ -1132,6 +1142,7 @@ echo "$version"
 | `load_config`                   | Sources `.aurtomator.conf` if present               |
 | `http_get <url> [curl option]...` | Fetches a URL with `curl`, see 8.3                |
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
+| `github_release_matching <api> <ere> <pages> [stable]` | Prints the release published last whose tag matches the ERE, as JSON, from up to `<pages>` pages of 100 releases; `stable` leaves out pre-releases |
 | `validate_pkgver <version>`     | Returns 1 for an empty version, one with a character outside `A-Za-z0-9._+` or one without a digit |
 | `version_jump <current> <new>`  | Returns 0 when the first number of the new version has at least two digits more than the first number of the current one |
 | `release_tags <tags>`           | Prints the tags of the form `v1.2.3` or `1.2.3`, one per line |
