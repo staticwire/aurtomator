@@ -239,6 +239,17 @@ _name_differs_in_digits() {
   [[ "$(sed -E 's/[0-9]+/0/g' <<<"${1%%::*}")" == "$(sed -E 's/[0-9]+/0/g' <<<"${2%%::*}")" ]]
 }
 
+# Drop the empty lines at the end of an array. makepkg --printsrcinfo ends
+# a .SRCINFO at its last line, while some AUR copies end in an empty line,
+# as those mksrcinfo v8 wrote do.
+# Args: $1=name of the array
+_drop_trailing_blank() {
+  local -n lines_ref="$1"
+  while ((${#lines_ref[@]} > 0)) && [[ -z "${lines_ref[-1]}" ]]; do
+    unset 'lines_ref[-1]'
+  done
+}
+
 # A .SRCINFO is generated, so line N of the prepared file must be line N of
 # the AUR file, with these changes: pkgver is the new version, pkgrel is 1,
 # a checksum keeps its key and stays a SKIP or a hash, a source has the old
@@ -271,6 +282,8 @@ check_prepared_srcinfo() {
   local -a old_lines new_lines
   mapfile -t old_lines <"$1"
   mapfile -t new_lines <"$2"
+  _drop_trailing_blank old_lines
+  _drop_trailing_blank new_lines
   if [[ "${#old_lines[@]}" -ne "${#new_lines[@]}" ]]; then
     log_err "Prepared .SRCINFO adds or removes lines"
     return 1

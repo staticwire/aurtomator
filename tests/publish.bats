@@ -2326,6 +2326,32 @@ write_srcinfo_arch() {
   [[ "$output" == *"Prepared .SRCINFO adds or removes lines"* ]]
 }
 
+# haskell-haxml: an older makepkg ended .SRCINFO with a blank line
+@test "check_prepared_srcinfo: accepts an AUR copy that ends in a blank line" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  echo >>"$TEST_TMPDIR/old.SRCINFO"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: accepts a prepared copy that ends in blank lines" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  printf '\n\n' >>"$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: rejects a blank line added inside" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  sed -i $'s/^\tlicense = MIT$/\tlicense = MIT\\n/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO adds or removes lines"* ]]
+}
+
 @test "check_prepared_srcinfo: rejects a line with another key than the AUR copy" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
