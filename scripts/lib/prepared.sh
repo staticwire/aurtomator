@@ -118,14 +118,15 @@ check_prepared_pkgbuild() {
 }
 
 # Replace the old version in a line with the new one, and also the forms a
-# PKGBUILD derives from pkgver: dots turned into underscores, the part
-# before the first +, and the version without its last component, such as
-# ${pkgver%.*} in the frameworks/6.19/ directory of KDE Frameworks. That
-# last form counts only while it keeps a dot, as a lone major version is
-# too common in other text. One pass from left to right, longest form
-# first, so a replaced part is not matched again: with 5.1.0 -> 5.10.0 the
-# 5.1 at the start of 5.10.0 stays. With pkgver_format, the upstream
-# version inside the version is the last form, as 4215 in 4.4215.
+# PKGBUILD derives from pkgver: dots and plus signs turned into
+# underscores, the part before the first +, and the version without its
+# last component, such as ${pkgver%.*} in the frameworks/6.19/ directory
+# of KDE Frameworks. That last form counts only while it keeps a dot, as a
+# lone major version is too common in other text. One pass from left to
+# right, longest form first, so a replaced part is not matched again: with
+# 5.1.0 -> 5.10.0 the 5.1 at the start of 5.10.0 stays. With
+# pkgver_format, the upstream version inside the version is the last form,
+# as 4215 in 4.4215.
 # Args: $1=line, $2=old version, $3=new version, $4=old upstream version,
 #       $5=new upstream version
 _bump_version() {
@@ -135,9 +136,9 @@ _bump_version() {
     return 0
   fi
   local -a olds=("$old") news=("$new")
-  if [[ "$old" == *.* ]]; then
-    olds+=("${old//./_}")
-    news+=("${new//./_}")
+  if [[ "$old" == *[.+]* ]]; then
+    olds+=("${old//[.+]/_}")
+    news+=("${new//[.+]/_}")
   fi
   if [[ "$old" == *+* ]]; then
     olds+=("${old%%+*}")

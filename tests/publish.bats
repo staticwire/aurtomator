@@ -2074,6 +2074,23 @@ write_srcinfo_line() {
   [ "$status" -eq 0 ]
 }
 
+# Temurin early access: pkgver 28+21 for tag jdk-28+21-ea-beta, whose assets
+# are named 28_21, in the repository of the major version
+temurin_source() {
+  printf 'source = https://github.com/adoptium/temurin%s-binaries/releases/download/jdk-%s-ea-beta/OpenJDK-jdk_x64_linux_hotspot_%s-ea.tar.gz' \
+    "${1%%+*}" "$1" "${1/+/_}"
+}
+
+@test "check_prepared_srcinfo: accepts the version with underscores for plus signs" {
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 28+21 "$(temurin_source 28+21)"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 28+22 "$(temurin_source 28+22)"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 28+22
+  [ "$status" -eq 0 ]
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 29+1 "$(temurin_source 29+1)"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 29+1
+  [ "$status" -eq 0 ]
+}
+
 @test "check_prepared_srcinfo: replaces each version form once" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 5.1.0 "source = https://example.com/5.1/demo-5.1.0.tar.gz"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 5.10.0 "source = https://example.com/5.10/demo-5.10.0.tar.gz"
