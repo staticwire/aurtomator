@@ -184,7 +184,10 @@ upstream:
 #
 # strategy: repology
 # upstream:
-#   repology: project-name                 # optional, defaults to `name` above
+#   repology: project-name                 # optional, defaults to `name` above;
+#                                          # a Python, Ruby, Perl or Haskell
+#                                          # library is <language>:<name>,
+#                                          # as ruby:rmagick
 
 # --- archpkg ----------------------------------------------------------------
 # Follows the pkgver of a package in the Arch official repos, without

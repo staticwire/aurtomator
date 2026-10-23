@@ -230,7 +230,9 @@ aurtomator does not touch `.install` files. When a new version needs migration s
 
 ## Version detection strategies
 
-aurtomator includes 14 version detection strategies. Choose by where your upstream publishes releases:
+aurtomator includes 14 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree. The streamrip PKGBUILD builds the git tag `v2.2.0` from GitHub, while PyPI still holds `2.1.0`, so `pypi` reports a downgrade on every run. A vendor page can sit behind a bot check that its download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
+
+By where the upstream publishes releases:
 
 | Strategy | Source | Best for | Pre-release filter |
 |---|---|---|---|
