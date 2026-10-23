@@ -279,9 +279,10 @@ _drop_trailing_blank() {
 # download by the date: verify_prepared_sums never fetches it, and makepkg
 # takes the sources from the PKGBUILD. When pkgver changes and a download
 # has a real checksum, or a VCS source is pinned to a commit, a tag or a
-# revision, some source or checksum has to change too: a pkgver built from
-# another variable, a source URL without the version, or a pin that stays
-# would otherwise label the old files with the new version. With
+# revision, some source URL or checksum has to change too: a pkgver built
+# from another variable, a source URL without the version, a pin that
+# stays, or a version only in the name a download is saved under, the part
+# before ::, would otherwise label the old files with the new version. With
 # pkgver_dash, a version with a dash in place of that character, as
 # ${pkgver//_/-} writes it, counts as the version. With pkgver_format, so
 # does the upstream version inside it, as ${pkgver#4.} writes 4215.
@@ -380,7 +381,7 @@ check_prepared_srcinfo() {
           log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $new"
           return 1
         fi
-        [[ "$new" == "$old" ]] || changed=true
+        [[ "${new_val#*::}" == "${old_val#*::}" ]] || changed=true
         if { [[ -n "${hashed_sources["${key#source}:$n"]:-}" ]] && _is_download "$old_val"; } ||
           _is_vcs_pin "$old_val"; then
           pinned=true
@@ -396,7 +397,7 @@ check_prepared_srcinfo() {
     esac
   done
   if [[ "$pinned" == true && "$changed" == false && "$version" != "$old_ver" ]]; then
-    log_err "Prepared .SRCINFO changes no source and no checksum, so the new version would hold the files of the old one"
+    log_err "Prepared .SRCINFO changes no source URL and no checksum, so the new version would hold the files of the old one"
     return 1
   fi
   return 0

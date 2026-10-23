@@ -207,7 +207,7 @@ EOF
 }
 
 # pkgver="${_pkgver//-/.}" with the source built from _pkgver
-@test "update-pkg: refuses a bump that changes no source and no checksum" {
+@test "update-pkg: refuses a bump that changes no source URL and no checksum" {
   create_test_package "demo" "github-tag" "upstream:
   project: owner/repo
 current: '2025.04.03'"
@@ -223,7 +223,7 @@ current: '2025.04.03'"
 
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 2026.09.10
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+  [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
@@ -2157,13 +2157,13 @@ write_srcinfo_sources() {
 }
 
 # pkgver="${_pkgver//-/.}" with the source built from _pkgver
-@test "check_prepared_srcinfo: rejects a bump that changes no source and no checksum" {
+@test "check_prepared_srcinfo: rejects a bump that changes no source URL and no checksum" {
   local src="demo-2025-04-03.tar.gz::https://example.com/archive/2025-04-03.tar.gz"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2025.04.03 "$src" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2026.09.10 "$src" "$H1"
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2026.09.10
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+  [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
 }
 
 @test "check_prepared_srcinfo: rejects a source without the version that keeps its checksum" {
@@ -2172,7 +2172,23 @@ write_srcinfo_sources() {
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 6.00.3092 "$src" "$H1"
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 6.00.3092
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+  [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
+}
+
+# pamac-aur saves the archive of a commit as pamac-$pkgver-$pkgrel.zip
+@test "check_prepared_srcinfo: rejects a bump that changes only the name a download is saved under" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0 "demo-1.0.0.zip::https://example.com/archive/363e794.zip" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.1.0 "demo-1.1.0.zip::https://example.com/archive/363e794.zip" "$H1"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
+}
+
+@test "check_prepared_srcinfo: accepts a bump that changes the name and the URL of a download" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0 "demo-1.0.0.zip::https://example.com/archive/v1.0.0.zip" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.1.0 "demo-1.1.0.zip::https://example.com/archive/v1.1.0.zip" "$H1"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 0 ]
 }
 
 # prepare hands over the AUR files when the AUR already has the version
@@ -2223,7 +2239,7 @@ write_srcinfo_sources() {
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.12.0 "$src" SKIP
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+  [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
 }
 
 @test "check_prepared_srcinfo: rejects a bump that keeps any VCS pin" {
@@ -2242,7 +2258,7 @@ write_srcinfo_sources() {
         echo "accepted: $src $sum"
         return 1
       }
-      [[ "$output" == *"Prepared .SRCINFO changes no source and no checksum"* ]]
+      [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
     done
   done
 }
