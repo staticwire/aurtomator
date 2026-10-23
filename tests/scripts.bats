@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 
 load helpers/setup.sh
+bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test_env
@@ -1377,7 +1378,7 @@ EOF
   grep -q "# Header Before" "$TEST_TMPDIR/README.md"
   grep -q "# Footer After" "$TEST_TMPDIR/README.md"
   # Old content should be replaced
-  ! grep -q "old table" "$TEST_TMPDIR/README.md"
+  run ! grep -q "old table" "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: shows updated status" {
@@ -2225,7 +2226,7 @@ EOF
   grep -q "⬇️ downgraded to 1.0.0" "$TEST_TMPDIR/README.md"
   # Downgrades count toward pkg_ok, so the badge stays green.
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
-  ! grep -q "packages-.*-red" "$TEST_TMPDIR/README.md"
+  run ! grep -q "packages-.*-red" "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: renders available_downgrade icon with (downgrade) suffix" {

@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 
 load helpers/setup.sh
+bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test_env
@@ -313,7 +314,7 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"MASTERKEY001 is a primary key"* ]]
   [[ "$output" == *"gpg --quick-add-key"* ]]
-  ! grep -q 'export-secret' "$TEST_TMPDIR/gpg.args"
+  run ! grep -q 'export-secret' "$TEST_TMPDIR/gpg.args"
 }
 
 @test "setup gpg: refuses a primary key given by its fingerprint" {
@@ -507,6 +508,7 @@ EOF
 
 @test "setup secrets: sets all secrets via gh" {
   write_full_config "VALIDKEY123"
+  log_gh_calls
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
@@ -514,6 +516,7 @@ EOF
   [[ "$output" == *"AUR_GIT_EMAIL"* ]]
   [[ "$output" == *"AUR_SSH_KEY"* ]]
   [[ "$output" == *"GPG_SIGNING_KEY"* ]]
+  grep -qx 'secret set AUR_SSH_KEY -R test/repo' "$TEST_TMPDIR/gh.args"
 }
 
 @test "setup secrets: shows manual instructions without gh" {
@@ -823,7 +826,7 @@ log_gh_calls() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"✗ SSH key has a passphrase: $TEST_TMPDIR/ssh-pass/key"* ]]
   [[ "$output" == *"ssh-keygen -p -N '' -f $TEST_TMPDIR/ssh-pass/key-ci"* ]]
-  ! grep -q '^secret set' "$TEST_TMPDIR/gh.args"
+  [ ! -e "$TEST_TMPDIR/gh.args" ]
 }
 
 # A config saved before the ssh step refused such a key
@@ -836,7 +839,7 @@ log_gh_calls() {
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 1 ]
   [[ "$output" == *"✗ SSH key has a passphrase: $TEST_TMPDIR/ssh-pass/key"* ]]
-  ! grep -q '^secret set' "$TEST_TMPDIR/gh.args"
+  [ ! -e "$TEST_TMPDIR/gh.args" ]
 }
 
 @test "setup secrets: refuses a missing SSH key" {
@@ -846,7 +849,7 @@ log_gh_calls() {
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --ssh-key "$TEST_TMPDIR/ssh/missing.pem" --non-interactive
   [ "$status" -eq 1 ]
   [[ "$output" == *"✗ SSH key not found: $TEST_TMPDIR/ssh/missing.pem"* ]]
-  ! grep -q '^secret set' "$TEST_TMPDIR/gh.args"
+  [ ! -e "$TEST_TMPDIR/gh.args" ]
 }
 
 @test "setup secrets: manual path refuses a passphrase-protected key" {

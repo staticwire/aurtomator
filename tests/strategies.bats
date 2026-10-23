@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 
 load helpers/setup.sh
+bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test_env
@@ -306,7 +307,7 @@ teardown() {
   grep -qx 'GIT_CONFIG_COUNT=1' "$TEST_TMPDIR/ls-remote.env"
   grep -qx 'GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader' "$TEST_TMPDIR/ls-remote.env"
   grep -qx "GIT_CONFIG_VALUE_0=Authorization: Basic $basic" "$TEST_TMPDIR/ls-remote.env"
-  ! grep -q -e standin-token -e "$basic" "$TEST_TMPDIR/ls-remote.args"
+  run ! grep -q -e standin-token -e "$basic" "$TEST_TMPDIR/ls-remote.args"
 }
 
 @test "github-tag: gives git no token without GITHUB_TOKEN" {
@@ -317,7 +318,7 @@ teardown() {
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
   [ "$status" -eq 0 ]
   [ -s "$TEST_TMPDIR/ls-remote.env" ]
-  ! grep -qE '^GIT_CONFIG_(COUNT|KEY_0|VALUE_0)=' "$TEST_TMPDIR/ls-remote.env"
+  run ! grep -qE '^GIT_CONFIG_(COUNT|KEY_0|VALUE_0)=' "$TEST_TMPDIR/ls-remote.env"
 }
 
 # === gitlab-tag ===
@@ -1212,14 +1213,14 @@ run_github_strategies() {
   calls=$(wc -l <"$TEST_TMPDIR/curl.args")
   [ "$(grep -c -- '-H @-' "$TEST_TMPDIR/curl.args")" -eq "$calls" ]
   [ "$(grep -cx 'Authorization: Bearer standin-token' "$TEST_TMPDIR/curl.stdin")" -eq "$calls" ]
-  ! grep -q standin-token "$TEST_TMPDIR/curl.args"
+  run ! grep -q standin-token "$TEST_TMPDIR/curl.args"
 }
 
 @test "github strategies: send no Authorization header without GITHUB_TOKEN" {
   setup_github_strategies
   unset GITHUB_TOKEN
   run_github_strategies
-  ! grep -q -- '-H' "$TEST_TMPDIR/curl.args"
+  run ! grep -q -- '-H' "$TEST_TMPDIR/curl.args"
 }
 
 @test "github strategies: try a failed request again" {
@@ -1279,7 +1280,7 @@ curl_agents() {
   [ "$status" -eq 0 ]
   [ "$(curl_agents | wc -l)" -eq 4 ]
   [ "$(curl_agents | sort -u)" = "aurtomator/1.0" ]
-  ! grep -qi 'user-agent' "$TEST_TMPDIR/curl.args"
+  run ! grep -qi 'user-agent' "$TEST_TMPDIR/curl.args"
 }
 
 @test "webpage-scrape: sends upstream.user_agent in place of aurtomator/1.0" {

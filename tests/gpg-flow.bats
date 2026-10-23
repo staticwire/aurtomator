@@ -300,7 +300,9 @@ stage_aur_update() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"GPG signing failed, pushing unsigned commit"* ]]
   [ "$(git -C "$TEST_TMPDIR/aur-remote.git" log -1 --format=%s)" = "2.0.0 release from test" ]
-  ! git -C "$TEST_TMPDIR/aur-remote.git" cat-file commit HEAD | grep -q '^gpgsig'
+  run git -C "$TEST_TMPDIR/aur-remote.git" cat-file commit HEAD
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output" != *$'\ngpgsig '* ]]
 }
 
 # =============================================================================
