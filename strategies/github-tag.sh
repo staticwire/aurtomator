@@ -33,12 +33,11 @@ github_tags() {
       GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
       export GIT_CONFIG_VALUE_0
     fi
-    GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 \
-      git ls-remote --tags --refs "https://github.com/$1.git"
+    remote_tags "https://github.com/$1.git"
   )
 }
 
-tags=$(github_tags "$owner_repo" | cut -f2 | sed 's|^refs/tags/||') || {
+tags=$(github_tags "$owner_repo") || {
   echo "Failed to fetch tags for ${owner_repo}" >&2
   exit 1
 }

@@ -21,11 +21,12 @@
 #
 # Strategies:
 #   github-release   GitHub Releases API
-#   github-tag       GitHub Tags API
+#   github-tag       GitHub tags, git ls-remote
 #   github-nightly   GitHub nightly/prerelease builds (4 patterns)
 #   github-asset     GitHub release assets re-uploaded on a fixed tag
 #   gitlab-tag       GitLab Tags API (gitlab.com, invent.kde.org, self-hosted)
 #   gitea-tag        Gitea / Forgejo / Codeberg Tags
+#   git-tag          any HTTPS git repository, git ls-remote
 #   git-latest       bare git clone, produces rCOUNT.HASH (for -git packages)
 #   pypi             PyPI JSON API
 #   npm              npm registry
@@ -145,6 +146,18 @@ upstream:
 #   host: codeberg.org                     # required
 #   project: owner/repo                    # required
 #   tag_version_regex: '^release-(.+)$'      # optional, ERE with a capture group
+#   tag_version_replace: '\1'              # optional, \1 to \9 are the groups
+
+# --- git-tag ----------------------------------------------------------------
+# Any HTTPS git repository: sourcehut, kernel.org, Savannah, or a GitLab or
+# Gitea project with more tags than gitlab-tag and gitea-tag read. Reads
+# every tag with git ls-remote, without authentication, and keeps v1.2.3
+# and 1.2.3; tag_version_regex replaces that filter.
+#
+# strategy: git-tag
+# upstream:
+#   url: https://git.sr.ht/~owner/repo     # required, https only
+#   tag_version_regex: '^v([0-9.]+)$'      # optional, ERE with a capture group
 #   tag_version_replace: '\1'              # optional, \1 to \9 are the groups
 
 # --- git-latest -------------------------------------------------------------

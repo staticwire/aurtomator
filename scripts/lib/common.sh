@@ -221,6 +221,14 @@ version_jump() {
   ((${#new} >= ${#old} + 2))
 }
 
+# Print every tag name of a git repository, one per line, from git
+# ls-remote over https only and without a terminal prompt
+# Args: $1=HTTPS URL of the repository
+remote_tags() {
+  GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 \
+    git ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||'
+}
+
 # The tags of the form v1.2.3 or 1.2.3, for a tag strategy without
 # tag_version_regex. sort -V puts latest, 2.1.0-rc1 and 2.1.0rc1 above
 # 2.1.0, so they are left out.

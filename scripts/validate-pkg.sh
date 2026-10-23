@@ -132,7 +132,7 @@ validate_pkg() {
   # --- Strategy-specific fields ---
 
   # Validate optional tag_version_regex (used by github-release, github-tag,
-  # github-nightly, gitlab-tag and gitea-tag)
+  # github-nightly, gitlab-tag, gitea-tag and git-tag)
   local tag_version_regex
   tag_version_regex=$(pkg_get "$file" '.upstream.tag_version_regex // ""')
   if [[ -n "$tag_version_regex" && "$tag_version_regex" != "null" ]]; then
@@ -217,6 +217,17 @@ validate_pkg() {
       fi
       if [[ -z "$project" || "$project" == "null" ]]; then
         log_err "$file: strategy '$strategy' requires 'upstream.project'"
+        ((errors++))
+      fi
+      ;;
+    git-tag)
+      local url
+      url=$(pkg_get "$file" '.upstream.url // ""')
+      if [[ -z "$url" || "$url" == "null" ]]; then
+        log_err "$file: strategy 'git-tag' requires 'upstream.url'"
+        ((errors++))
+      elif [[ "$url" != https://* ]]; then
+        log_err "$file: upstream.url must use HTTPS: $url"
         ((errors++))
       fi
       ;;

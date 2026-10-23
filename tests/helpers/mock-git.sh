@@ -39,6 +39,14 @@ case "${*: -1}" in
   https://github.com/*)
     tags=(v2.0.0 v1.9.0 v1.0.0)
     ;;
+  # A host without a tags API, as git.sr.ht for wvkbd
+  https://git.example.org/~owner/repo)
+    tags=(v0.9 v0.19 v0.20 latest)
+    ;;
+  https://git.example.org/~owner/prefixed)
+    tags=(release-1.2 release-1.10 release-1.9)
+    ;;
+  https://git.example.org/~owner/empty) ;;
   *)
     echo "fatal: unexpected repository ${*: -1}" >&2
     exit 128

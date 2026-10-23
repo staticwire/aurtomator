@@ -374,6 +374,30 @@ EOF
   [[ "$output" == *"requires 'upstream.host'"* ]]
 }
 
+@test "validate: git-tag passes" {
+  create_test_package "mypkg" "git-tag" "upstream:
+  url: https://git.example.org/~owner/repo
+  tag_version_regex: '^release-(.+)$'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: git-tag fails without upstream.url" {
+  create_test_package "mypkg" "git-tag" "upstream:
+  project: owner/repo"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"strategy 'git-tag' requires 'upstream.url'"* ]]
+}
+
+@test "validate: git-tag fails with a URL other than HTTPS" {
+  create_test_package "mypkg" "git-tag" "upstream:
+  url: http://git.example.org/~owner/repo"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.url must use HTTPS: http://git.example.org/~owner/repo"* ]]
+}
+
 @test "validate: git-latest fails without upstream.type" {
   create_test_package "mypkg" "git-latest" "upstream:
   project: owner/repo"

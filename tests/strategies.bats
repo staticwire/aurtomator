@@ -321,6 +321,78 @@ teardown() {
   run ! grep -qE '^GIT_CONFIG_(COUNT|KEY_0|VALUE_0)=' "$TEST_TMPDIR/ls-remote.env"
 }
 
+# === git-tag ===
+
+@test "git-tag: returns the latest release tag of any git host" {
+  create_test_package "test-git-tag" "git-tag" "upstream:
+  url: https://git.example.org/~owner/repo"
+
+  run "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.20" ]
+}
+
+@test "git-tag: reads every tag with git ls-remote over https, without a terminal prompt" {
+  create_test_package "test-git-tag" "git-tag" "upstream:
+  url: https://git.example.org/~owner/repo"
+
+  run "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/ls-remote.args")" = "ls-remote --tags --refs https://git.example.org/~owner/repo" ]
+  grep -qx 'GIT_ALLOW_PROTOCOL=https' "$TEST_TMPDIR/ls-remote.env"
+  grep -qx 'GIT_TERMINAL_PROMPT=0' "$TEST_TMPDIR/ls-remote.env"
+}
+
+@test "git-tag: tag_version_replace builds the version from the groups" {
+  create_test_package "test-git-tag" "git-tag" "upstream:
+  url: https://git.example.org/~owner/prefixed
+  tag_version_regex: '^release-([0-9]+)\\.([0-9]+)$'
+  tag_version_replace: '\\1.\\2.0'"
+
+  run "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.10.0" ]
+}
+
+@test "git-tag: sends the host no GITHUB_TOKEN" {
+  create_test_package "test-git-tag" "git-tag" "upstream:
+  url: https://git.example.org/~owner/repo"
+  export GITHUB_TOKEN=standin-token
+
+  run "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 0 ]
+  [ -s "$TEST_TMPDIR/ls-remote.env" ]
+  run ! grep -qE '^GIT_CONFIG_(COUNT|KEY_0|VALUE_0)=' "$TEST_TMPDIR/ls-remote.env"
+}
+
+@test "git-tag: fails when git cannot read the tags" {
+  create_test_package "test-git-tag" "git-tag" "upstream:
+  url: https://git.example.org/~owner/missing"
+
+  run "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch tags from https://git.example.org/~owner/missing"* ]]
+}
+
+@test "git-tag: fails on a repository without tags" {
+  create_test_package "test-git-tag" "git-tag" "upstream:
+  url: https://git.example.org/~owner/empty"
+
+  run "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 1 ]
+  [ "$output" = "No tags found at https://git.example.org/~owner/empty" ]
+}
+
+@test "git-tag: refuses a URL other than HTTPS" {
+  create_test_package "test-git-tag" "git-tag" "upstream:
+  url: http://git.example.org/~owner/repo"
+
+  run "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 1 ]
+  [ "$output" = "Only HTTPS URLs supported: http://git.example.org/~owner/repo" ]
+  [ ! -e "$TEST_TMPDIR/ls-remote.args" ]
+}
+
 # === gitlab-tag ===
 
 @test "gitlab-tag: returns latest tag from GitLab" {

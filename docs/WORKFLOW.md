@@ -96,7 +96,7 @@ A pre-release mapped this way sorts above its final release: `vercmp 1.0.0.beta.
 
 ## 3. Strategies
 
-aurtomator ships 14 strategies. A strategy is a bash script in `strategies/`. It takes the package name, reads its settings from the package YAML, queries the upstream, and prints one version string on stdout. On failure it prints an error to stderr and exits non-zero. The HTTP-based strategies use `curl` with a 30-second timeout, and the tag-based ones strip a leading `v`.
+aurtomator ships 15 strategies. A strategy is a bash script in `strategies/`. It takes the package name, reads its settings from the package YAML, queries the upstream, and prints one version string on stdout. On failure it prints an error to stderr and exits non-zero. The HTTP-based strategies use `curl` with a 30-second timeout, and the tag-based ones strip a leading `v`.
 
 ### 3.1 github-release
 
@@ -329,7 +329,7 @@ upstream:
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
 | `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. There is no authentication, so private projects cannot be queried.
+**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. There is no authentication, so private projects cannot be queried.
 
 **Example YAML:**
 
@@ -367,7 +367,7 @@ upstream:
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
 | `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**How the version is extracted:** fetches up to 50 tags without pagination. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`.
+**How the version is extracted:** fetches up to 50 tags without pagination; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`.
 
 **Example YAML:**
 
@@ -655,6 +655,40 @@ strategy: kde-tarball
 upstream:
   project: alkimia
   path: unstable/alkimia
+```
+
+### 3.15 git-tag
+
+**What it checks:** the tags of any git repository, read with `git ls-remote --tags --refs {url}`.
+
+**When to use:** hosts without a tags API, such as sourcehut, kernel.org and Savannah, and a GitLab or Gitea project with more tags than `gitlab-tag` or `gitea-tag` read.
+
+**YAML fields:**
+
+| Field                        | Required | Description                              |
+|------------------------------|----------|------------------------------------------|
+| `upstream.url`               | yes      | HTTPS URL of the repository              |
+| `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, replaces the default filter |
+| `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
+
+**How the version is extracted:** reads every tag in one request, as `github-tag` does, and picks the version the same way: without `tag_version_regex`, the tags of the form `v1.2.3` or `1.2.3`, without a leading `v`, the highest by `sort -V`. git allows only `https`, asks for no password on the terminal and sends no `GITHUB_TOKEN`, so only a public repository works. `validate-pkg.sh` refuses a `url` that does not start with `https://`. A repository behind the bot check of its site fails with the message of git, which names the page of the redirect.
+
+**Example YAML:**
+
+```yaml
+name: my-package
+strategy: git-tag
+upstream:
+  url: https://git.sr.ht/~owner/repo
+```
+
+The `.git` URL of a GitLab or Gitea project works the same way:
+
+```yaml
+name: my-package
+strategy: git-tag
+upstream:
+  url: https://gitlab.gnome.org/GNOME/gtk.git
 ```
 
 ## 4. Update Process
@@ -1155,6 +1189,7 @@ echo "$version"
 | `github_release_matching <api> <ere> <pages> [stable]` | Prints the release published last whose tag matches the ERE, as JSON, from up to `<pages>` pages of 100 releases; `stable` leaves out pre-releases |
 | `validate_pkgver <version>`     | Returns 1 for an empty version, one with a character outside `A-Za-z0-9._+` or one without a digit |
 | `version_jump <current> <new>`  | Returns 0 when the first number of the new version has at least two digits more than the first number of the current one |
+| `remote_tags <url>`             | Prints every tag name of a git repository from `git ls-remote`, over `https` only and without a terminal prompt |
 | `release_tags <tags>`           | Prints the tags of the form `v1.2.3` or `1.2.3`, one per line |
 | `tag_version_fill <template>`   | Prints the template with `\1` to `\9` replaced by the groups in `BASH_REMATCH`, returns 1 for a group the last match does not have |
 | `tag_versions <ere> [template]` | Prints the version in each tag of stdin: the template filled from the groups of the ERE (default: `\1`), or the tag without a leading `v` when the ERE is empty |

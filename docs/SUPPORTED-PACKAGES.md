@@ -95,7 +95,7 @@ aurtomator does not check the signature. It runs `makepkg --verifysource` with `
 
 ### Non-standard tag formats (tag_version_regex)
 
-`github-release`, `github-tag`, `github-nightly`, `gitlab-tag` and `gitea-tag` accept `tag_version_regex` for unusual tag names:
+`github-release`, `github-tag`, `github-nightly`, `gitlab-tag`, `gitea-tag` and `git-tag` accept `tag_version_regex` for unusual tag names:
 
 ```yaml
 upstream:
@@ -230,7 +230,7 @@ aurtomator does not touch `.install` files. When a new version needs migration s
 
 ## Version detection strategies
 
-aurtomator includes 14 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree. The streamrip PKGBUILD builds the git tag `v2.2.0` from GitHub, while PyPI still holds `2.1.0`, so `pypi` reports a downgrade on every run. A vendor page can sit behind a bot check that its download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
+aurtomator includes 15 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree. The streamrip PKGBUILD builds the git tag `v2.2.0` from GitHub, while PyPI still holds `2.1.0`, so `pypi` reports a downgrade on every run. A vendor page can sit behind a bot check that its download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
 
 By where the upstream publishes releases:
 
@@ -242,6 +242,7 @@ By where the upstream publishes releases:
 | `github-asset` | GitHub Releases API | Assets re-uploaded on a fixed tag (model zoos) | N/A (fixed tag) |
 | `gitlab-tag` | GitLab Tags API | GitLab.com, invent.kde.org, self-hosted | Auto (`v1.2.3` tags only) |
 | `gitea-tag` | Gitea/Forgejo Tags API | Codeberg, self-hosted Gitea | Auto (`v1.2.3` tags only) |
+| `git-tag` | `git ls-remote` | Any HTTPS git host: sourcehut, kernel.org, Savannah | Auto (`v1.2.3` tags only) |
 | `git-latest` | Bare git clone | `-git` packages (commit tracking) | N/A |
 | `pypi` | PyPI JSON API | Python packages | Auto (stable only) |
 | `npm` | npm registry | Node.js packages | Auto (`latest` tag) |
@@ -254,9 +255,9 @@ By where the upstream publishes releases:
 ### Strategy limitations
 
 - **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without a token, the limit is 60 requests per hour. `github-tag` reads the tags with `git ls-remote`, outside this limit.
-- **Retries:** a request that a strategy sends with curl tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. The git calls of `git-latest` and `github-tag` make one attempt. A check that still fails within its time budget runs once more after the other packages and a pause of 60 seconds. A failure on both tries fails the package for that run.
-- **Tag strategies take only `v1.2.3` and `1.2.3` by default:** without `tag_version_regex`, `github-tag`, `gitlab-tag` and `gitea-tag` leave out every other tag, `latest`, `1.0.0-rc1` and `1.0.0rc1` included. `tag_version_regex` replaces that filter. They pick the highest version with `sort -V`, which places `1.0.0-rc1` above `1.0.0`, so a regex that lets pre-release tags through picks them. A plain number is of that form too, so a repository that tags its releases `13` and `14` and its builds `2026102100` gives the build; `check-all.sh` holds such a step as a version jump, see [WORKFLOW.md section 4.3](WORKFLOW.md#43-downgrade-behavior), and `tag_version_regex: '^([0-9]{1,3})$'` keeps the releases.
-- **`gitea-tag` fetches at most 50 tags:** there is no pagination.
+- **Retries:** a request that a strategy sends with curl tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. The git calls of `git-latest`, `github-tag` and `git-tag` make one attempt. A check that still fails within its time budget runs once more after the other packages and a pause of 60 seconds. A failure on both tries fails the package for that run.
+- **Tag strategies take only `v1.2.3` and `1.2.3` by default:** without `tag_version_regex`, `github-tag`, `gitlab-tag`, `gitea-tag` and `git-tag` leave out every other tag, `latest`, `1.0.0-rc1` and `1.0.0rc1` included. `tag_version_regex` replaces that filter. They pick the highest version with `sort -V`, which places `1.0.0-rc1` above `1.0.0`, so a regex that lets pre-release tags through picks them. A plain number is of that form too, so a repository that tags its releases `13` and `14` and its builds `2026102100` gives the build; `check-all.sh` holds such a step as a version jump, see [WORKFLOW.md section 4.3](WORKFLOW.md#43-downgrade-behavior), and `tag_version_regex: '^([0-9]{1,3})$'` keeps the releases.
+- **`gitlab-tag` and `gitea-tag` fetch at most 100 and 50 tags:** there is no pagination. `git-tag` with the `.git` URL of the project reads every tag.
 - **`gitlab-tag` has no authentication:** private GitLab projects cannot be queried.
 
 ### Upstreams behind a bot check
@@ -279,7 +280,6 @@ Some sites answer a client without a browser with a check page in place of the d
 
 These need `webpage-scrape` or a custom strategy:
 
-- SourceHut (git.sr.ht)
 - Go module proxy (proxy.golang.org)
 - Private registries (GitLab, npm, PyPI)
 - FTP servers
@@ -288,7 +288,7 @@ These need `webpage-scrape` or a custom strategy:
 
 | Tool | Detection | Update | Push | Approach |
 |---|---|---|---|---|
-| **aurtomator** | 14 built-in strategies | pkgver sed + updpkgsums | Auto push to AUR | Fully automated, self-hosted |
+| **aurtomator** | 15 built-in strategies | pkgver sed + updpkgsums | Auto push to AUR | Fully automated, self-hosted |
 | **nvchecker** | 40+ sources, TOML config | No | No | Detection only |
 | **aurpublish** | No | No | git subtree push | Workflow tool for maintainers |
 | **aur-auto-update** | nvchecker | pkgver bump | Auto push | Centralized bot (add as co-maintainer) |

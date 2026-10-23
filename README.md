@@ -47,7 +47,7 @@ The setup script configures your identity (git author for AUR commits), SSH acce
 
 ## Strategies
 
-14 built-in version detection strategies:
+15 built-in version detection strategies:
 
 | Strategy           | Source              | Use for                              |
 |--------------------|---------------------|--------------------------------------|
@@ -57,6 +57,7 @@ The setup script configures your identity (git author for AUR commits), SSH acce
 | `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag    |
 | `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                  |
 | `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea          |
+| `git-tag`          | `git ls-remote`     | Any HTTPS git host, such as sourcehut |
 | `git-latest`       | `git clone --bare`  | `-git` packages, any HTTPS git repo  |
 | `pypi`             | PyPI JSON API       | Python packages                      |
 | `npm`              | npm registry        | Node.js packages                     |
