@@ -5,12 +5,27 @@
 # IMPORTANT: Specific patterns MUST come before wildcard patterns
 # to avoid shellcheck SC2221/SC2222 (pattern ordering).
 
+# The URL is the last argument. curl takes the last -w.
+write_out=""
+prev=""
 for arg in "$@"; do
+  if [[ "$prev" == -w ]]; then
+    write_out="$arg"
+  fi
+  prev="$arg"
   url="$arg"
 done
 
 case "$url" in
   # --- Specific error/null patterns (must be before wildcards) ---
+
+  # The bot check of a site, as on forge.soutade.fr: a redirect to an HTML
+  # page that answers 200
+  *codeberg.org/api/v1/repos/gated-owner/gated-repo/tags* | \
+    *gitlab.com/api/v4/projects/gated-group%2Fgated-project/repository/tags*)
+    effective_url="${url%%/api/*}/402.html"
+    echo '<!DOCTYPE html><html><body><h1>Are you Human?</h1></body></html>'
+    ;;
 
   # GitHub Release: a body without tag_name. A real 404 is exit 22 with
   # no body, see the tests of curl exit codes.
@@ -276,3 +291,8 @@ case "$url" in
     exit 1
     ;;
 esac
+
+# http_get_json asks for the URL of the last answer after the body
+if [[ "$write_out" == '\n%{url_effective}'* ]]; then
+  printf '\n%s' "${effective_url:-$url}"
+fi

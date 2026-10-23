@@ -22,7 +22,7 @@ owner_repo=$(pkg_get "$pkg_file" .upstream.project)
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 
-tags=$(http_get "https://${host}/api/v1/repos/${owner_repo}/tags?limit=50" |
+tags=$(http_get_json "https://${host}/api/v1/repos/${owner_repo}/tags?limit=50" |
   yq -r '.[].name') || {
   echo "Failed to fetch tags from ${host}/${owner_repo}" >&2
   exit 1

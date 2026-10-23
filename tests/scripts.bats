@@ -677,7 +677,76 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = "-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused -A aurtomator/1.0 --max-redirs 5 https://example.invalid/a" ]
+  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
+}
+
+# Helper: a curl that writes $CURL_STDERR to stderr, as its -w does on a
+# failure, and exits $CURL_RC
+mock_curl_failure() {
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
+#!/usr/bin/env bash
+printf '%b' "$CURL_STDERR" >&2
+exit "$CURL_RC"
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+}
+
+@test "lib.sh: http_get names the URL of the last answer and the error" {
+  mock_curl_failure
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  CURL_RC=22 CURL_STDERR='https://example.com/b\tThe requested URL returned error: 404\t' run http_get https://example.com/a
+  [ "$status" -eq 22 ]
+  [ "$output" = "https://example.com/b: The requested URL returned error: 404" ]
+}
+
+# anydesk.com sends this answer to every client without JavaScript,
+# whatever its User-Agent
+@test "lib.sh: http_get names a Cloudflare challenge" {
+  mock_curl_failure
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 403\tchallenge' run http_get https://example.com/a
+  [ "$status" -eq 22 ]
+  [ "$output" = "https://example.com/a: The requested URL returned error: 403, a Cloudflare challenge, which only a browser passes" ]
+}
+
+# curl refuses a malformed URL before -w writes anything
+@test "lib.sh: http_get names the URL and the exit code when curl writes nothing" {
+  mock_curl_failure
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  CURL_RC=3 CURL_STDERR='' run http_get 'https://[bad'
+  [ "$status" -eq 3 ]
+  [ "$output" = "https://[bad: curl exit 3" ]
+}
+
+# curl writes its own message for an unknown option, -s or not
+@test "lib.sh: http_get passes a message of curl through" {
+  mock_curl_failure
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  CURL_RC=2 CURL_STDERR='curl: option --bad: is unknown\n' run http_get https://example.com/a --bad
+  [ "$status" -eq 2 ]
+  [ "$output" = "curl: option --bad: is unknown" ]
+}
+
+@test "lib.sh: http_get_json asks curl for the URL of the last answer" {
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >"$TEST_TMPDIR/curl.args"
+printf '[\n  {"name": "v1.0.0"}\n]\n\nhttps://example.com/a'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get_json https://example.com/a
+  [ "$status" -eq 0 ]
+  [ "$output" = $'[\n  {"name": "v1.0.0"}\n]' ]
+  [ "$(grep -x -A1 -- -w "$TEST_TMPDIR/curl.args" | tail -1)" = '\n%{url_effective}%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated}' ]
+}
+
+@test "lib.sh: http_get_json stops at a failed request" {
+  mock_curl_failure
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 404\t' run http_get_json https://example.com/a
+  [ "$status" -eq 22 ]
+  [ "$output" = "https://example.com/a: The requested URL returned error: 404" ]
 }
 
 # script from util-linux runs the command on a terminal of its own

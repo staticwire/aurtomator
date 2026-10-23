@@ -78,12 +78,56 @@ pkg_file() {
 # Mozilla/5.0 with HTTP 403. webpage-scrape.sh sets upstream.user_agent here.
 USER_AGENT="aurtomator/1.0"
 
+# What curl writes to stderr on a failure: the URL of the last answer, the
+# error and the cf-mitigated header, which Cloudflare sets to "challenge"
+# on the page of its bot check
+HTTP_FAILURE='%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated}'
+
+# Args: $1=URL, the rest: curl options
+_curl_get() {
+  curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
+    -A "$USER_AGENT" -w "$HTTP_FAILURE" "${@:2}" "$1"
+}
+
 # GET a URL for a strategy. curl tries a timeout, a refused connection and
-# an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more.
+# an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more. A
+# failure prints the URL of the last answer after redirects and the error.
 # Usage: http_get <url> [curl option]...
 http_get() {
-  curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
-    -A "$USER_AGENT" "${@:2}" "$1"
+  local failure rc=0 url error mitigated
+  # The answer goes out through fd 3, and stderr into failure
+  { failure=$(_curl_get "$@" 2>&1 >&3 3>&-); } 3>&1 || rc=$?
+  if ((rc == 0)); then
+    return 0
+  fi
+  if [[ "$failure" == *$'\t'* ]]; then
+    IFS=$'\t' read -r url error mitigated <<<"$failure"
+    failure="${url}: ${error}"
+    if [[ "$mitigated" == challenge ]]; then
+      failure+=", a Cloudflare challenge, which only a browser passes"
+    fi
+  elif [[ -z "$failure" ]]; then
+    failure="${1}: curl exit ${rc}"
+  fi
+  printf '%s\n' "$failure" >&2
+  return "$rc"
+}
+
+# GET a URL that answers JSON and print the answer. The bot check of a
+# site answers an HTML page with HTTP 200, often after a redirect, so an
+# answer that is not a JSON object or array fails and names the URL it
+# came from.
+# Usage: http_get_json <url> [curl option]...
+http_get_json() {
+  local answer url
+  answer=$(http_get "$@" -w "\n%{url_effective}${HTTP_FAILURE}") || return
+  url=${answer##*$'\n'}
+  answer=${answer%$'\n'*}
+  if [[ ! "$(yq 'tag' <<<"$answer" 2>/dev/null)" =~ ^!!(map|seq)$ ]]; then
+    printf '%s: the answer is not JSON\n' "$url" >&2
+    return 1
+  fi
+  printf '%s\n' "$answer"
 }
 
 # GET a GitHub API URL, with GITHUB_TOKEN when it is set. curl reads the

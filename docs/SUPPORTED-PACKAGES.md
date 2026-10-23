@@ -257,6 +257,22 @@ aurtomator includes 14 version detection strategies. Choose by where your upstre
 - **`gitea-tag` fetches at most 50 tags:** there is no pagination.
 - **`gitlab-tag` has no authentication:** private GitLab projects cannot be queried.
 
+### Upstreams behind a bot check
+
+Some sites answer a client without a browser with a check page in place of the data. A failed check names which kind it met.
+
+- **Cloudflare challenge:** the answer is HTTP 403 with the header `cf-mitigated: challenge`. Only a browser passes it, whatever the User-Agent, so `upstream.user_agent` does not help. The check fails with `<url>: The requested URL returned error: 403, a Cloudflare challenge, which only a browser passes`. The host the PKGBUILD downloads from, or a package repository of the vendor, often answers without the challenge. For anydesk-bin, the page `https://anydesk.com/en/downloads/linux` is behind it, while `download.anydesk.com` and the apt repository are not:
+
+  ```yaml
+  name: anydesk-bin
+  strategy: webpage-scrape
+  upstream:
+    url: https://deb.anydesk.com/dists/all/main/binary-amd64/Packages
+    pattern: 'Version: ([0-9.]+)'
+  ```
+
+- **A check of the site itself:** forge.soutade.fr redirects every request without its cookie to a page that asks "Are you Human?", the API, git and the archives alike. `gitea-tag` and `gitlab-tag` fail with the URL of that page, and the source check refuses the archives as HTML, see [Source URL returns HTML](#source-url-returns-html-blocked). aurtomator sends no cookie, so a package whose upstream sits behind such a check, as libgourou, is not supported.
+
 ### Upstream sources not covered
 
 These need `webpage-scrape` or a custom strategy:

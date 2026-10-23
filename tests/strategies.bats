@@ -1343,6 +1343,28 @@ curl_agents() {
   [[ "$output" == *"No tags found"* ]]
 }
 
+@test "gitlab-tag: names the page a bot check answers in place of the tags" {
+  create_test_package "test-gated" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: gated-group/gated-project"
+
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gated"
+  [ "$status" -eq 1 ]
+  [ "$output" = "https://gitlab.com/402.html: the answer is not JSON
+Failed to fetch tags from gitlab.com/gated-group/gated-project" ]
+}
+
+@test "gitea-tag: names the page a bot check answers in place of the tags" {
+  create_test_package "test-gated" "gitea-tag" "upstream:
+  host: codeberg.org
+  project: gated-owner/gated-repo"
+
+  run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-gated"
+  [ "$status" -eq 1 ]
+  [ "$output" = "https://codeberg.org/402.html: the answer is not JSON
+Failed to fetch tags from codeberg.org/gated-owner/gated-repo" ]
+}
+
 @test "pypi: fails on null version" {
   create_test_package "test-null" "pypi" "upstream:
   registry: null-package"

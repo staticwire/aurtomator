@@ -25,7 +25,7 @@ tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 # URL-encode the project path (e.g., group/project → group%2Fproject)
 project_encoded="${project//\//%2F}"
 
-tags=$(http_get "https://${host}/api/v4/projects/${project_encoded}/repository/tags?per_page=100" |
+tags=$(http_get_json "https://${host}/api/v4/projects/${project_encoded}/repository/tags?per_page=100" |
   yq -r '.[].name') || {
   echo "Failed to fetch tags from ${host}/${project}" >&2
   exit 1
