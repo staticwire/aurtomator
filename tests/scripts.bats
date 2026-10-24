@@ -129,6 +129,27 @@ EOF
   [[ "$output" == *"pkgver() function"* ]]
 }
 
+@test "audit_pkgbuild: the pkgver() block says to drop pkgver() or use git-latest" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-nightly-bin
+pkgver=20261022
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("test.tar.xz::https://example.com/releases/download/nightly/test.tar.xz")
+sha256sums=('SKIP')
+pkgver() {
+  date +%Y%m%d
+}
+EOF
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-asset"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Drop pkgver() so that sed sets pkgver, or use 'git-latest' for a package built from git."* ]]
+}
+
 @test "audit_pkgbuild: allows pkgver() with git-latest strategy" {
   source "$TEST_TMPDIR/scripts/lib.sh"
   cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'

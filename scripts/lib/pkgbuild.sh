@@ -88,7 +88,7 @@ audit_pkgbuild() {
     if [[ "$strategy" != "git-latest" && "$strategy" != "github-nightly" ]]; then
       log_err "BLOCKED: pkgver() function detected with strategy '$strategy'."
       log_err "  pkgver() computes version at build time, sed replacement is meaningless."
-      log_err "  Use strategy 'git-latest' or 'github-nightly' for these packages."
+      log_err "  Drop pkgver() so that sed sets pkgver, or use 'git-latest' for a package built from git."
       fatals=$((fatals + 1))
     fi
   fi
