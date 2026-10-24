@@ -186,6 +186,115 @@ current: '1.0.0'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
 }
 
+@test "update-pkg --dry-run: shows the PKGBUILD diff and pushes nothing" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[DRY RUN] Would push demo 1.1.0 to AUR"* ]]
+  [[ "$output" == *"-pkgver=1.0.0"*"+pkgver=1.1.0"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+}
+
+@test "update-pkg: writes current when the AUR already has the version" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '0.9.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.0.0
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "update-pkg: refuses an unknown option" {
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --bogus
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unknown option: --bogus"* ]]
+}
+
+@test "update-pkg: fails when the AUR repo holds no PKGBUILD" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  local work="$TEST_TMPDIR/aur-work-demo"
+  git -C "$work" rm -q PKGBUILD
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid \
+    -c commit.gpgsign=false commit -qm "drop PKGBUILD"
+  git -C "$work" push -q "$AUR_REMOTE" master
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No PKGBUILD found in AUR repo"* ]]
+}
+
+# Helper: demo 1.0.0 on the AUR with real checksums, a source check that
+# passes and an updpkgsums that keeps the checksums
+setup_hashed_demo() {
+  create_test_package "demo" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 "$H1" "$H2"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+}
+
+@test "update-pkg: stops when updpkgsums fails" {
+  setup_hashed_demo
+  printf '#!/usr/bin/env bash\nexit 1\n' >"$MOCK_DIR/updpkgsums"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"updpkgsums failed, refusing to push stale checksums"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
+@test "update-pkg: stops when makepkg --verifysource fails" {
+  setup_hashed_demo
+  cat >"$MOCK_DIR/makepkg" <<'EOF'
+#!/usr/bin/env bash
+[[ " $* " == *" --verifysource "* ]] && exit 1
+echo "pkgbase = demo"
+EOF
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Checksum verification failed, aborting"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
+@test "update-pkg: stops when makepkg --printsrcinfo fails" {
+  setup_hashed_demo
+  cat >"$MOCK_DIR/makepkg" <<'EOF'
+#!/usr/bin/env bash
+[[ " $* " == *" --printsrcinfo "* ]] && exit 1
+exit 0
+EOF
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"makepkg --printsrcinfo failed"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
 # Helper: PKGBUILD whose pkgver= line is <pkgver line> and whose one source
 # is <source>, built from the variables of <head>, with the checksum $H1
 # Usage: write_pkgbuild_from <path> <head> <pkgver line> <source>

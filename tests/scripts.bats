@@ -2531,6 +2531,44 @@ EOF
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
+@test "check-all: --prepare, --verify and --publish need a directory" {
+  local option
+  for option in --prepare --verify --publish; do
+    run "$TEST_TMPDIR/scripts/check-all.sh" "$option"
+    [ "$status" -eq 1 ]
+    [ "$output" = "$option needs a directory" ]
+  done
+}
+
+@test "check-all: --dry-run reaches update-pkg.sh" {
+  create_test_package "pkg-up" "github-release" "upstream:
+  type: github
+  project: owner/repo
+current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
+  cat >"$TEST_TMPDIR/scripts/update-pkg.sh" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$TEST_TMPDIR/update-pkg.args"
+EOF
+  chmod +x "$TEST_TMPDIR/scripts/update-pkg.sh"
+
+  "$TEST_TMPDIR/scripts/check-all.sh" --update --dry-run 2>/dev/null || true
+  [ "$(cat "$TEST_TMPDIR/update-pkg.args")" = "pkg-up 2.0.0 --dry-run" ]
+}
+
+@test "check-all: writes 'up_to_date' when --update finds the version on the AUR" {
+  create_test_package "pkg-up" "github-release" "upstream:
+  type: github
+  project: owner/repo
+current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
+  printf '#!/usr/bin/env bash\nexit 2\n' >"$TEST_TMPDIR/scripts/update-pkg.sh"
+  chmod +x "$TEST_TMPDIR/scripts/update-pkg.sh"
+
+  "$TEST_TMPDIR/scripts/check-all.sh" --update 2>/dev/null || true
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-up")" = "up_to_date" ]
+}
+
 @test "check-all: writes 'updated:' status after --update on normal upgrade (regression)" {
   # Current 1.0.0 < latest 2.0.0: the normal upgrade path.
   # Verifies the is_downgrade=false branch of the new status-writing logic.

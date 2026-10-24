@@ -495,6 +495,22 @@ EOF
   [[ "$output" == *"requires 'upstream.host'"* ]]
 }
 
+@test "validate: git-latest gitlab fails without project" {
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: gitlab
+  host: gitlab.example.com"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"git-latest type 'gitlab' requires 'upstream.project'"* ]]
+}
+
+@test "validate: refuses a YAML file that does not parse" {
+  printf '%s\n' 'name: mypkg' 'strategy: [github-release' >"$TEST_TMPDIR/packages/mypkg.yml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid YAML syntax: "*"mypkg.yml"* ]]
+}
+
 @test "validate: git-latest git fails without url" {
   create_test_package "mypkg" "git-latest" "upstream:
   type: git"
