@@ -1569,6 +1569,79 @@ EOF
   grep -q "actions/workflows" "$TEST_TMPDIR/README.md"
 }
 
+# Helper: a README with both marker pairs and a line between them
+readme_with_badges() {
+  printf '%s\n' '# test' '<!-- BADGES:START -->' 'old badges' '<!-- BADGES:END -->' \
+    'text between' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: a public fork gets its own CI and Codecov badges" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  readme_with_badges
+  git -C "$TEST_TMPDIR" init -q
+  git -C "$TEST_TMPDIR" remote add origin "git@github.com:someone/fork.git"
+  cat >"$MOCK_DIR/curl" <<EOF
+#!/usr/bin/env bash
+echo "\${@: -1}" >>"$TEST_TMPDIR/curl-urls.log"
+echo '{"private": false}'
+EOF
+  chmod +x "$MOCK_DIR/curl"
+
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Badges updated (repo: someone/fork)"* ]]
+  grep -qx 'https://api.github.com/repos/someone/fork' "$TEST_TMPDIR/curl-urls.log"
+  local badges
+  badges=$(sed -n '3p' "$TEST_TMPDIR/README.md")
+  [[ "$badges" == "[![Lint & Test](https://github.com/someone/fork/actions/workflows/ci.yml/badge.svg)](https://github.com/someone/fork/actions/workflows/ci.yml) [![codecov](https://codecov.io/github/someone/fork/graph/badge.svg)](https://codecov.io/github/someone/fork) [![Bash]"* ]]
+  [[ "$badges" == *"[![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)" ]]
+  grep -qx 'text between' "$TEST_TMPDIR/README.md"
+  run ! grep -q 'old badges' "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: without a GitHub origin only the static badges remain" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  readme_with_badges
+  git -C "$TEST_TMPDIR" init -q
+
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Badges updated (repo: unknown)"* ]]
+  local badges
+  badges=$(sed -n '3p' "$TEST_TMPDIR/README.md")
+  [[ "$badges" == *"[![Bash]"*"[![AUR]"*"[![License]"* ]]
+  [[ "$badges" != *"Lint & Test"* && "$badges" != *"codecov"* ]]
+}
+
+@test "update-readme: an unknown status reads as tracking" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  echo "something_new" >"$TEST_TMPDIR/.status/pkg-a"
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '| 1.0.0 | github-release | — | ✅ tracking |' "$TEST_TMPDIR/README.md"
+  grep -qF 'packages-1%2F1-brightgreen' "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: a package without current is new" {
+  create_test_package "pkg-new" "github-release" "upstream:
+  project: owner/repo"
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '| [pkg-new](https://aur.archlinux.org/pkgbase/pkg-new) | — | github-release | — | 🆕 new |' "$TEST_TMPDIR/README.md"
+}
+
 # === update-readme.sh: last_updated column ===
 
 @test "update-readme: shows last_updated date in table" {
