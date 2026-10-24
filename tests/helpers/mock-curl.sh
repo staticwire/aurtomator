@@ -74,6 +74,10 @@ case "$url" in
   *archlinux.org/packages/search/json*name=no-such-pkg*)
     echo '{"results": []}'
     ;;
+  # Arch repos: an entry without pkgver
+  *archlinux.org/packages/search/json*name=no-pkgver*)
+    echo '{"results": [{"repo": "extra", "pkgname": "no-pkgver"}]}'
+    ;;
   # Arch repos: an entry with an epoch, as ffmpeg 2:9.0.2-2
   *archlinux.org/packages/search/json*name=ffmpeg*)
     echo '{"results": [{"repo": "extra", "epoch": 2, "pkgver": "9.0.2", "pkgrel": "2"}]}'

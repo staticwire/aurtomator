@@ -794,6 +794,30 @@ EOF
 
 # fabric-git is r2173.ef2e985d on the AUR: rev-parse --short grows with the
 # repository, and r2173.ef2e985 reads as older
+@test "git-latest: clones github.com for the github type" {
+  fake_git_upstream
+  create_test_package "test-git" "git-latest" "upstream:
+  type: github
+  project: owner/repo"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/git-clone")" = "http:https https://github.com/owner/repo.git" ]
+}
+
+@test "git-latest: fails on a repository without commits" {
+  fake_git_upstream
+  rm -rf "$fake_repo"
+  git init -q "$fake_repo"
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to count commits"* ]]
+}
+
 @test "git-latest: takes the length of the hash from current" {
   fake_git_upstream
   local len
@@ -1817,6 +1841,100 @@ EOF
   run "$TEST_TMPDIR/strategies/github-release.sh" "test-404"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Failed to fetch latest release for owner/repo"* ]]
+}
+
+# Helper: a curl that fails to connect, as for a network failure
+curl_fails() {
+  cat >"$TEST_TMPDIR/mock-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+echo "curl: (7) Failed to connect" >&2
+exit 7
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/curl"
+}
+
+@test "github-nightly: each pattern names the fetch that failed" {
+  curl_fails
+  local yaml expected
+  while IFS='|' read -r yaml expected; do
+    create_test_package "test-neterr" "github-nightly" "upstream:
+  project: owner/repo
+  $yaml"
+    run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-neterr"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$expected"* ]]
+  done <<'EOF'
+nightly_tag: latest|Failed to fetch latest release for owner/repo
+channel: Nightly|Failed to fetch releases for owner/repo
+nightly_tag: nightly-|Failed to fetch releases for owner/repo
+nightly_tag: nightly|Failed to fetch release tag 'nightly' for owner/repo
+EOF
+}
+
+@test "github-nightly: release_body needs version_pattern" {
+  create_test_package "test-nopattern" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: release_body"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nopattern"
+  [ "$status" -eq 1 ]
+  [ "$output" = "version_pattern required for release_body source" ]
+}
+
+@test "github-nightly: fails on an unknown version_source" {
+  create_test_package "test-badsource" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: bogus"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-badsource"
+  [ "$status" -eq 1 ]
+  [ "$output" = "Unknown version_source: bogus" ]
+}
+
+@test "webpage-scrape: fails on curl network error" {
+  curl_fails
+  create_test_package "test-neterr" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'pkg-([0-9.]+)'"
+
+  run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-neterr"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch https://example.com/releases"* ]]
+}
+
+@test "archpkg: fails on curl network error" {
+  curl_fails
+  create_test_package "test-neterr" "archpkg" "upstream:
+  archpkg: qt6-base"
+
+  run "$TEST_TMPDIR/strategies/archpkg.sh" "test-neterr"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch Arch package info for qt6-base"* ]]
+}
+
+@test "archpkg: fails on an entry without pkgver" {
+  create_test_package "test-nopkgver" "archpkg" "upstream:
+  archpkg: no-pkgver"
+
+  run "$TEST_TMPDIR/strategies/archpkg.sh" "test-nopkgver"
+  [ "$status" -eq 1 ]
+  [ "$output" = "No version found for no-pkgver" ]
+}
+
+@test "pypi, npm and crates name the registry on a curl network error" {
+  curl_fails
+  local strategy expected
+  while IFS='|' read -r strategy expected; do
+    create_test_package "test-neterr" "$strategy" "upstream:
+  registry: some-package"
+    run "$TEST_TMPDIR/strategies/$strategy.sh" "test-neterr"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$expected"* ]]
+  done <<'EOF'
+pypi|Failed to fetch PyPI info for some-package
+npm|Failed to fetch npm info for some-package
+crates|Failed to fetch crates.io info for some-package
+EOF
 }
 
 @test "github-asset: fails on curl network error" {
