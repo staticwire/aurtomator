@@ -61,7 +61,7 @@ ask() {
       echo "$default"
       return
     fi
-    fail "No default for: $prompt (--non-interactive mode)"
+    fail "No default for: $prompt (--non-interactive mode)" >&2
     exit 1
   fi
   local reply

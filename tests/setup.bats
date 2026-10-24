@@ -875,6 +875,16 @@ log_gh_calls() {
   grep -qx 'secret set AUR_SSH_KEY -R someone/repo' "$TEST_TMPDIR/gh.args"
 }
 
+# ask runs inside $(...), so a message on stdout went into the variable
+@test "setup secrets: names the missing repo in non-interactive mode" {
+  write_full_config ""
+  git -C "$TEST_TMPDIR" remote remove origin
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ No default for: GitHub repo (owner/name) (--non-interactive mode)"* ]]
+}
+
 @test "setup ssh: asks for the key path with a default" {
   run "$TEST_TMPDIR/scripts/setup.sh" ssh <<<"$TEST_TMPDIR/ssh/aur.pem"
   [ "$status" -eq 0 ]
