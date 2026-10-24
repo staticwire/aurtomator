@@ -87,10 +87,16 @@ if ! grep -q "$PKG_START" "$README"; then
   exit 1
 fi
 
+# The table is HTML, since a Markdown table cell takes no attributes. nowrap
+# keeps Strategy, Updated and Status on one line, and the package name wraps.
+table_row() {
+  printf '\n<tr><td>%s</td><td>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td></tr>' "$@"
+}
+
 # Badge and table header are assembled after the loop (need counts)
 table_rows=""
-table_header="| Package | Version | Strategy | Updated | Status |
-|---------|---------|----------|---------|--------|"
+table_header="<table>
+<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>"
 
 pkg_count=0
 pkg_ok=0
@@ -154,8 +160,8 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
     ((pkg_ok++)) || true
   fi
 
-  table_rows+="
-| [${name}](https://aur.archlinux.org/pkgbase/${name}) | ${current} | ${strategy} | ${last_updated} | ${status} |"
+  table_rows+=$(table_row "<a href=\"https://aur.archlinux.org/pkgbase/${name}\">${name}</a>" \
+    "$current" "$strategy" "$last_updated" "$status")
   ((pkg_count++)) || true
 done
 
@@ -185,11 +191,12 @@ table+="
 ${table_header}"
 
 if [[ "$pkg_count" -eq 0 ]]; then
-  table+="
-| *No packages configured* | — | — | — | — |"
+  table+=$(table_row "<em>No packages configured</em>" — — — —)
 else
   table+="$table_rows"
 fi
+table+="
+</table>"
 
 # Replace between markers
 {

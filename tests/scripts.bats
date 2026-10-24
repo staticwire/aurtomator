@@ -1085,7 +1085,7 @@ make_spaced_project() {
   git -C "$SPACED" init -q
   run "$SPACED/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  grep -q '\[pkg\]' "$SPACED/README.md"
+  grep -qF '>pkg</a>' "$SPACED/README.md"
 }
 
 # === update-readme.sh ===
@@ -1125,7 +1125,27 @@ current: '2.0.0'"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  grep -qF '| [pkg-a](https://aur.archlinux.org/pkgbase/pkg-a) |' "$TEST_TMPDIR/README.md"
+  grep -qF '<td><a href="https://aur.archlinux.org/pkgbase/pkg-a">pkg-a</a></td>' "$TEST_TMPDIR/README.md"
+}
+
+# GitHub keeps nowrap on an HTML table cell, and a Markdown cell takes none
+@test "update-readme: keeps strategy, date and status on one line" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'
+last_updated: '2026-10-22'"
+  echo "up_to_date" >"$TEST_TMPDIR/.status/pkg-a"
+  printf '%s\n' "# test" "<!-- PACKAGES:START -->" "<!-- PACKAGES:END -->" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '/PACKAGES:START/,/PACKAGES:END/p' "$TEST_TMPDIR/README.md" | sed '1,2d')" = '
+<table>
+<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>
+<tr><td><a href="https://aur.archlinux.org/pkgbase/pkg-a">pkg-a</a></td><td>1.0.0</td><td nowrap>github-release</td><td nowrap>2026-10-22</td><td nowrap>✅ up to date</td></tr>
+</table>
+<!-- PACKAGES:END -->' ]
 }
 
 @test "update-readme: shows failed status from .status/" {
@@ -1497,7 +1517,11 @@ EOF
 EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  grep -q "No packages configured" "$TEST_TMPDIR/README.md"
+  [ "$(sed -n '/<table>/,$p' "$TEST_TMPDIR/README.md")" = '<table>
+<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>
+<tr><td><em>No packages configured</em></td><td>—</td><td nowrap>—</td><td nowrap>—</td><td nowrap>—</td></tr>
+</table>
+<!-- PACKAGES:END -->' ]
 }
 
 @test "update-readme: preserves content outside markers" {
@@ -1648,7 +1672,7 @@ current: '1.0.0'"
 
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  grep -qF '| 1.0.0 | github-release | — | ✅ tracking |' "$TEST_TMPDIR/README.md"
+  grep -qF '<td>1.0.0</td><td nowrap>github-release</td><td nowrap>—</td><td nowrap>✅ tracking</td>' "$TEST_TMPDIR/README.md"
   grep -qF 'packages-1%2F1-brightgreen' "$TEST_TMPDIR/README.md"
 }
 
@@ -1660,7 +1684,7 @@ current: '1.0.0'"
 
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  grep -qF '| [pkg-new](https://aur.archlinux.org/pkgbase/pkg-new) | — | github-release | — | 🆕 new |' "$TEST_TMPDIR/README.md"
+  grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/pkg-new">pkg-new</a></td><td>—</td><td nowrap>github-release</td><td nowrap>—</td><td nowrap>🆕 new</td></tr>' "$TEST_TMPDIR/README.md"
 }
 
 # A package that has not been checked yet has failed nothing
@@ -1710,8 +1734,7 @@ current: '1.0.0'"
 EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  # Table should have 5 columns with dash for missing last_updated
-  grep -q "| — |" "$TEST_TMPDIR/README.md"
+  grep -qF '<td nowrap>github-release</td><td nowrap>—</td>' "$TEST_TMPDIR/README.md"
 }
 
 # === update-pkg.sh: argument validation ===

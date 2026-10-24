@@ -978,11 +978,14 @@ https://img.shields.io/badge/packages-<ok>%2F<total>-<color>
 
 #### Status table
 
-```markdown
-| Package | Version | Strategy | Updated | Status |
-|---------|---------|----------|---------|--------|
-| [my-package](https://aur.archlinux.org/pkgbase/my-package) | 1.0.1 | kde-tarball | 2026-10-01 | ✅ up to date |
-| [other-pkg](https://aur.archlinux.org/pkgbase/other-pkg) | 2.0.0 | github-release | 2026-10-14 | 🔄 updated to 2.0.0 |
+The table is HTML, since a Markdown table cell takes no attributes. GitHub keeps `nowrap` on a cell, so Strategy, Updated and Status stay on one line and a long package name wraps.
+
+```html
+<table>
+<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>
+<tr><td><a href="https://aur.archlinux.org/pkgbase/my-package">my-package</a></td><td>1.0.1</td><td nowrap>kde-tarball</td><td nowrap>2026-10-01</td><td nowrap>✅ up to date</td></tr>
+<tr><td><a href="https://aur.archlinux.org/pkgbase/other-pkg">other-pkg</a></td><td>2.0.0</td><td nowrap>github-release</td><td nowrap>2026-10-14</td><td nowrap>🔄 updated to 2.0.0</td></tr>
+</table>
 ```
 
 ### 5.5 Verified commit
