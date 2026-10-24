@@ -73,6 +73,25 @@ has_remote_hash() {
 # PKGBUILD AUDIT
 # =============================================================================
 
+# bash prints a function in one layout: a header line, "{", one command a
+# line with a ; at its end, and "}"
+# Args: $1=pkgbuild path
+# Returns: 0 when pkgver() holds only cd lines and one printf or echo of
+#          $pkgver, ${pkgver} or ${pkgver//-/.}, as streamrip has it. pkgver
+#          holds no dash, so each prints the pkgver that sed sets.
+pkgver_prints_pkgver() {
+  local body
+  body=$(bash -c 'source "$1" 2>/dev/null; declare -f pkgver' -- "$1" 2>/dev/null) || return 1
+  awk '
+    NR <= 2 || /^}$/ { next }
+    { sub(/^ +/, ""); sub(/;$/, "") }
+    /^cd [^;&|]+( \|\| (return|exit))?$/ { next }
+    /^(printf|echo) "?\$(pkgver|\{pkgver(\/\/?-\/[^}]*)?\})"?$/ { prints++; next }
+    { other = 1 }
+    END { exit !(prints == 1 && !other) }
+  ' <<<"$body"
+}
+
 # Audit PKGBUILD for unsupported features before updating.
 # Args: $1=pkgbuild path, $2=strategy name
 # Returns: 0=ok, 1=fatal (block update), 2=warnings only
@@ -83,9 +102,10 @@ audit_pkgbuild() {
   local fatals=0
 
   # FATAL: pkgver() with incompatible strategy (version mismatch)
-  # git-latest and github-nightly are designed for packages with pkgver()
+  # git-latest and github-nightly are designed for packages with pkgver(),
+  # and a pkgver() that only prints pkgver keeps what sed sets
   if grep -qE '^pkgver\(\)' "$pkgbuild"; then
-    if [[ "$strategy" != "git-latest" && "$strategy" != "github-nightly" ]]; then
+    if [[ "$strategy" != "git-latest" && "$strategy" != "github-nightly" ]] && ! pkgver_prints_pkgver "$pkgbuild"; then
       log_err "BLOCKED: pkgver() function detected with strategy '$strategy'."
       log_err "  pkgver() computes version at build time, sed replacement is meaningless."
       log_err "  Drop pkgver() so that sed sets pkgver, or use 'git-latest' for a package built from git."

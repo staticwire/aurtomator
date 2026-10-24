@@ -172,7 +172,7 @@ aurtomator detects these cases and blocks the update or warns.
 
 A PKGBUILD with a `pkgver()` function and a strategy other than `git-latest` or `github-nightly`, for example `github-release`.
 
-**Detection:** `audit_pkgbuild()` checks for a `pkgver()` function and the strategy. Release and tag strategies report release versions, which do not match what `pkgver()` computes at build time.
+**Detection:** `audit_pkgbuild()` checks for a `pkgver()` function and the strategy. Release and tag strategies report release versions, which do not match what `pkgver()` computes at build time. A `pkgver()` that only prints `pkgver` passes: `cd` lines and one `printf` or `echo` of `$pkgver`, `${pkgver}` or `${pkgver//-/.}`, as streamrip has `cd streamrip` and `printf "${pkgver//-/.}"`. `pkgver` holds no dash, so such a function prints the `pkgver` that `sed` sets.
 
 **Correct approach:** a package built from a git checkout uses `strategy: git-latest`. A binary from a release tag that never moves drops `pkgver()` and sets `pkgver` to a date, which `github-asset` takes from the `updated_at` of the newest listed asset. The URLs name the tag as text:
 

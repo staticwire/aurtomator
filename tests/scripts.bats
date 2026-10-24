@@ -182,6 +182,40 @@ EOF
   [[ "$output" == *"Drop pkgver() so that sed sets pkgver, or use 'git-latest' for a package built from git."* ]]
 }
 
+# Helper: test.PKGBUILD at 2.2.0 whose pkgver() has the given body
+write_pkgver_pkgbuild() {
+  # shellcheck disable=SC2016
+  printf '%s\n' 'pkgname=test' 'pkgver=2.2.0' 'pkgrel=1' 'arch=(any)' \
+    'source=("https://example.com/test-$pkgver.tar.gz")' "sha256sums=('abc123')" \
+    'pkgver() {' "$1" '}' >"$TEST_TMPDIR/test.PKGBUILD"
+}
+
+# streamrip on the AUR: pkgver holds no dash, so its pkgver() prints the
+# pkgver that sed sets
+@test "audit_pkgbuild: allows a pkgver() that only prints pkgver" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local body
+  # shellcheck disable=SC2016
+  for body in $'  cd streamrip\n  printf "${pkgver//-/.}"' $'  cd "$srcdir/streamrip" || return\n  echo $pkgver' '  echo "${pkgver}"'; do
+    write_pkgver_pkgbuild "$body"
+    run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-tag"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "audit_pkgbuild: blocks a pkgver() that does more than print pkgver" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local body
+  # shellcheck disable=SC2016
+  for body in '  printf "${pkgver//_/.}"' '  echo "${pkgver}rc1"' $'  echo "$pkgver"\n  echo "$pkgver"' \
+    '  echo "$pkgver" | tr . _' $'  cd streamrip && git pull\n  echo "$pkgver"'; do
+    write_pkgver_pkgbuild "$body"
+    run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-tag"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"BLOCKED: pkgver() function detected with strategy 'github-tag'."* ]]
+  done
+}
+
 @test "audit_pkgbuild: allows pkgver() with git-latest strategy" {
   source "$TEST_TMPDIR/scripts/lib.sh"
   cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
