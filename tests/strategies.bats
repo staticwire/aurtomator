@@ -1702,8 +1702,8 @@ Failed to fetch tags from codeberg.org/gated-owner/gated-repo" ]
   pattern: 'pkg-([0-9.]+)'"
 
   run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-nourl"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"Only HTTPS URLs supported: null"* ]]
+  [ "$status" -eq 1 ]
+  [ "$output" = "Missing upstream.url or upstream.pattern in package YAML" ]
 }
 
 @test "webpage-scrape: fails on missing pattern" {
@@ -1711,8 +1711,8 @@ Failed to fetch tags from codeberg.org/gated-owner/gated-repo" ]
   url: https://example.com/releases"
 
   run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-nopat"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"No versions matched pattern 'null'"* ]]
+  [ "$status" -eq 1 ]
+  [ "$output" = "Missing upstream.url or upstream.pattern in package YAML" ]
 }
 
 @test "webpage-scrape: fails on non-HTTPS url" {

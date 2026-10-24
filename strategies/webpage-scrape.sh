@@ -22,8 +22,8 @@ source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 require_cmd curl
 
 pkg_file=$(pkg_file "$NAME")
-url=$(pkg_get "$pkg_file" .upstream.url)
-pattern=$(pkg_get "$pkg_file" .upstream.pattern)
+url=$(pkg_get "$pkg_file" '.upstream.url // ""')
+pattern=$(pkg_get "$pkg_file" '.upstream.pattern // ""')
 user_agent=$(pkg_get "$pkg_file" '.upstream.user_agent // ""')
 
 if [[ -z "$url" || -z "$pattern" ]]; then
