@@ -76,11 +76,13 @@ validate_pkg() {
     fi
   done
 
-  local pkgver_dash=""
+  # '' drops the dash, so pkgver_dash counts as set when it is empty
+  local pkgver_dash="" dash_set=false
   if [[ $(pkg_get "$file" '.pkgver_dash | tag') != "!!null" ]]; then
+    dash_set=true
     pkgver_dash=$(pkg_get "$file" '.pkgver_dash')
-    if [[ "$pkgver_dash" != "_" && "$pkgver_dash" != "." ]]; then
-      log_err "$file: pkgver_dash must be _ or ."
+    if [[ "$pkgver_dash" != "_" && "$pkgver_dash" != "." && -n "$pkgver_dash" ]]; then
+      log_err "$file: pkgver_dash must be _, . or ''"
       ((errors++))
     fi
   fi
@@ -160,7 +162,7 @@ validate_pkg() {
       log_err "$file: upstream.prerelease applies to the crates strategy only"
       ((errors++))
     # A semver pre-release always holds a dash
-    elif [[ $(pkg_get "$file" '.upstream.prerelease') == true && -z "$pkgver_dash" ]]; then
+    elif [[ $(pkg_get "$file" '.upstream.prerelease') == true && "$dash_set" == false ]]; then
       log_err "$file: upstream.prerelease needs pkgver_dash"
       ((errors++))
     fi

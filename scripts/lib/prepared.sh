@@ -187,12 +187,17 @@ _unformat_version() {
 
 # Print the line with each form of the version that has a dash in place of
 # the pkgver_dash character turned back into the version, as
-# ${pkgver//_/-} writes 0.0.1-rc.20 for pkgver 0.0.1_rc.20
-# Args: $1=line, $2=version, $3=pkgver_dash character
+# ${pkgver//_/-} writes 0.0.1-rc.20 for pkgver 0.0.1_rc.20. With drop, for
+# pkgver_dash: '', a form with a dash between two characters counts, as
+# ${pkgver/rc/-rc} writes 2.5.0-rc1 for pkgver 2.5.0rc1.
+# Args: $1=line, $2=version, $3=pkgver_dash character or drop
 _undash_version() {
   local rest="$1" version="$2" dash="$3" re="" out="" c i match
   for ((i = 0; i < ${#version}; i++)); do
     c="${version:i:1}"
+    if [[ "$dash" == drop ]] && ((i > 0)); then
+      re+="-?"
+    fi
     if [[ "$c" == "$dash" ]]; then
       re+="[$c-]"
     else
@@ -208,10 +213,10 @@ _undash_version() {
 }
 
 # Args: $1=AUR line, $2=prepared line, $3=old version, $4=new version,
-#       $5=pkgver_dash character
+#       $5=pkgver_dash character or drop
 # Returns: 0 when the prepared line is the AUR line with the version
 #          replaced, once a dash in place of the pkgver_dash character in
-#          either version counts as that character
+#          either version counts as that character, or as nothing for drop
 _bumped_with_dash() {
   [[ "$(_undash_version "$2" "$4" "$5")" == "$(_bump_version "$(_undash_version "$1" "$3" "$5")" "$3" "$4")" ]]
 }
@@ -285,10 +290,11 @@ _drop_trailing_blank() {
 # stays, or a version only in the name a download is saved under, the part
 # before ::, would otherwise label the old files with the new version. With
 # pkgver_dash, a version with a dash in place of that character, as
-# ${pkgver//_/-} writes it, counts as the version. With pkgver_format, so
+# ${pkgver//_/-} writes it, counts as the version, and with pkgver_dash: ''
+# a version with a dash between two characters. With pkgver_format, so
 # does the upstream version inside it, as ${pkgver#4.} writes 4215.
 # Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version,
-#       $4=pkgver_dash character of the package, if any,
+#       $4=pkgver_dash character of the package or drop, if any,
 #       $5=pkgver_format of the package, if any
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
@@ -430,7 +436,7 @@ prepared_base() {
 
 # Check a prepared PKGBUILD and .SRCINFO against the AUR repo at their base
 # Args: $1=AUR repo, $2=prepared dir, $3=expected version,
-#       $4=pkgver_dash character of the package, if any,
+#       $4=pkgver_dash character of the package or drop, if any,
 #       $5=pkgver_format of the package, if any
 # Returns: 0 when both files pass, 1 otherwise (reason on stderr)
 check_prepared_files() {

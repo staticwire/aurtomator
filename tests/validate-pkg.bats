@@ -729,9 +729,9 @@ allow_version_jump: $value"
   done
 }
 
-@test "validate: pkgver_dash _ or . passes" {
+@test "validate: pkgver_dash _, . or '' passes" {
   local value
-  for value in _ .; do
+  for value in _ . ""; do
     create_test_package "mypkg" "npm" "upstream:
   registry: cli-pride-flags
 pkgver_dash: '$value'"
@@ -740,15 +740,15 @@ pkgver_dash: '$value'"
   done
 }
 
-@test "validate: pkgver_dash other than _ or . rejected" {
+@test "validate: pkgver_dash other than _, . or '' rejected" {
   local value
-  for value in "'+'" "'-'" "'__'" "''" 1; do
+  for value in "'+'" "'-'" "'__'" "' '" "drop" 1; do
     create_test_package "mypkg" "npm" "upstream:
   registry: cli-pride-flags
 pkgver_dash: $value"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"pkgver_dash must be _ or ."* ]]
+    [[ "$output" == *"pkgver_dash must be _, . or ''"* ]]
   done
 }
 
@@ -780,12 +780,15 @@ pkgver_format: '4.%s'"
 # === crates prerelease validation ===
 
 @test "validate: crates prerelease with pkgver_dash passes" {
-  create_test_package "mypkg" "crates" "upstream:
+  local value
+  for value in . "''"; do
+    create_test_package "mypkg" "crates" "upstream:
   registry: pijul
   prerelease: true
-pkgver_dash: ."
-  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-  [ "$status" -eq 0 ]
+pkgver_dash: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
 }
 
 # A semver pre-release always holds a dash

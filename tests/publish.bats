@@ -434,33 +434,36 @@ current: '1.0.0'"
   [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
 }
 
-# Helper: the AUR at 0.0.1_rc.20 of a package with pkgver_dash: _, whose
-# source restores the dash, and the .SRCINFO makepkg prints for 0.0.4 in
-# new.SRCINFO. Sets OLD_SUM and NEW_SUM, the checksums of the two downloads.
+# Helper: the AUR at an old pkgver of a package with the given pkgver_dash,
+# whose source restores the dash, and the .SRCINFO makepkg prints for the
+# new pkgver in new.SRCINFO. Sets OLD_SUM and NEW_SUM, the checksums of the
+# two downloads.
+# Usage: setup_dash_package <pkgver_dash> <source> <old pkgver> <old upstream version> <new pkgver> <new upstream version>
 setup_dash_package() {
+  local dash="$1" source="$2" old="$3" old_up="$4" new="$5" new_up="$6"
   create_test_package "demo" "npm" "upstream:
   registry: demo
-current: '0.0.1_rc.20'
-pkgver_dash: _"
-  OLD_SUM=$(printf 'source of %s\n' https://example.com/demo-0.0.1-rc.20.tgz | sha256sum | cut -d' ' -f1)
-  NEW_SUM=$(printf 'source of %s\n' https://example.com/demo-0.0.4.tgz | sha256sum | cut -d' ' -f1)
+current: '$old'
+pkgver_dash: '$dash'"
+  OLD_SUM=$(printf 'source of %s\n' "https://example.com/demo-$old_up.tgz" | sha256sum | cut -d' ' -f1)
+  NEW_SUM=$(printf 'source of %s\n' "https://example.com/demo-$new_up.tgz" | sha256sum | cut -d' ' -f1)
   cat >"$OLD" <<EOF
 pkgname=demo
-pkgver=0.0.1_rc.20
+pkgver=$old
 pkgrel=1
 pkgdesc="demo"
 arch=('any')
 url="https://example.com"
 license=('MIT')
-source=("https://example.com/demo-\${pkgver//_/-}.tgz")
+source=("$source")
 sha256sums=('$OLD_SUM')
 
 package() {
   :
 }
 EOF
-  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 0.0.1_rc.20 https://example.com/demo-0.0.1-rc.20.tgz "$OLD_SUM"
-  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 0.0.4 https://example.com/demo-0.0.4.tgz "$NEW_SUM"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" "$old" "https://example.com/demo-$old_up.tgz" "$OLD_SUM"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" "$new" "https://example.com/demo-$new_up.tgz" "$NEW_SUM"
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
   mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
   mock_source_tools
@@ -468,7 +471,8 @@ EOF
 }
 
 @test "a package with pkgver_dash goes through prepare, verify and publish" {
-  setup_dash_package
+  # shellcheck disable=SC2016
+  setup_dash_package _ 'https://example.com/demo-${pkgver//_/-}.tgz' 0.0.1_rc.20 0.0.1-rc.20 0.0.4 0.0.4
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 0.0.4 --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   mock_downloads
@@ -479,9 +483,32 @@ EOF
   [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
 }
 
+# pkgver 2.5.0rc1 for 2.5.0-rc1, which vercmp puts below 2.5.0
+@test "a package with pkgver_dash '' goes through prepare, verify and publish" {
+  # shellcheck disable=SC2016
+  setup_dash_package '' 'https://example.com/demo-${pkgver/rc/-rc}.tgz' 2.5.0rc1 2.5.0-rc1 2.5.0rc2 2.5.0-rc2
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 2.5.0rc2 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  mock_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 2.5.0rc2 "$TEST_TMPDIR/out/demo"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
+}
+
 @test "update-pkg: pushes a package with pkgver_dash" {
-  setup_dash_package
+  # shellcheck disable=SC2016
+  setup_dash_package _ 'https://example.com/demo-${pkgver//_/-}.tgz' 0.0.1_rc.20 0.0.1-rc.20 0.0.4 0.0.4
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 0.0.4
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
+}
+
+@test "update-pkg: pushes a package with pkgver_dash ''" {
+  # shellcheck disable=SC2016
+  setup_dash_package '' 'https://example.com/demo-${pkgver/rc/-rc}.tgz' 2.5.0rc1 2.5.0-rc1 2.5.0rc2 2.5.0-rc2
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 2.5.0rc2
   [ "$status" -eq 0 ]
   [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
 }
@@ -2438,6 +2465,34 @@ write_srcinfo_sources() {
   sed -i $'/^\tsource = /a \tnoextract = inshellisense-0.0.4.tgz' "$TEST_TMPDIR/new.SRCINFO"
   run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.0.4 _
   [ "$status" -eq 0 ]
+}
+
+# pkgver_dash '', the token drop: pkgver 2.5.0rc1 for the tag v2.5.0-rc1
+@test "check_prepared_srcinfo: accepts a source with the dash that pkgver_dash '' dropped" {
+  local url=https://example.com/releases/download
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.5.0rc1 "$url/v2.5.0-rc1/demo-2.5.0-rc1.tgz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.5.0 "$url/v2.5.0/demo-2.5.0.tgz" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0 drop
+  [ "$status" -eq 0 ]
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
+}
+
+@test "check_prepared_srcinfo: rejects a dash dropped before the version with pkgver_dash ''" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.5.0rc1 "https://example.com/demo-2.5.0-rc1.tgz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 "https://example.com/demo2.5.0-rc2.tgz" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 drop
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
+}
+
+@test "check_prepared_srcinfo: rejects a dash outside the version with pkgver_dash ''" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.5.0rc1 "https://example.com/demo-2.5.0-rc1.tgz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 "https://example-com/demo-2.5.0-rc2.tgz" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 drop
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
 
 @test "check_prepared_srcinfo: rejects another character in place of a dot with pkgver_dash" {

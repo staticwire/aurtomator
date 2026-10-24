@@ -68,6 +68,30 @@ teardown() {
   [ "$output" = "nightly" ]
 }
 
+# vercmp reads a dash as the pkgrel separator and finds 2.5.0-rc1 equal to
+# 2.5.0. Dropped, as pkgver_dash: '' does, the dash gives 2.5.0rc1.
+@test "lib.sh: newest_version puts a pre-release after a dash below its release" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run newest_version <<<$'2.5.0\n2.5.0-rc1\n2.4.6'
+  [ "$output" = "2.5.0" ]
+  run newest_version <<<$'2.5.0-rc1\n2.5.0'
+  [ "$output" = "2.5.0" ]
+  run newest_version <<<$'2.4.6\n2.5.0-rc1\n2.5.0-rc2'
+  [ "$output" = "2.5.0-rc2" ]
+  run newest_version <<<$'1.0.0-beta.3\n1.0.0-beta.24'
+  [ "$output" = "1.0.0-beta.24" ]
+}
+
+@test "lib.sh: newest_version reads a dash before a digit as a dot" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run newest_version <<<$'2025-12-27\n2026-01-05\n2025-04-03'
+  [ "$output" = "2026-01-05" ]
+  run newest_version <<<$'1.9.0\n1.9.0-1'
+  [ "$output" = "1.9.0-1" ]
+  run newest_version <<<$'1.2-3\n1.3'
+  [ "$output" = "1.3" ]
+}
+
 # === audit_pkgbuild ===
 
 @test "audit_pkgbuild: passes normal binary package" {
@@ -954,6 +978,17 @@ pkgver_dash: _"
 pkgver_dash: ."
   result=$("$TEST_TMPDIR/scripts/check-update.sh" "mypkg" 2>/dev/null)
   [ "$result" = "1.0.0.beta.24" ]
+}
+
+# vercmp puts 1.0.0beta24 below 1.0.0, so the release needs no epoch
+@test "check-update: pkgver_dash '' drops every dash in the version" {
+  stand_in_strategy dash 1.0.0-beta-24
+  create_test_package "mypkg" "dash" "current: '1.0'
+pkgver_dash: ''"
+
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0.0beta24" ]
 }
 
 @test "check-update: pkgver_format puts the version of the strategy into pkgver" {

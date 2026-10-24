@@ -13,7 +13,9 @@
 #                     at least two digits more than that of current
 #   pkgver_dash     - _ or ., stands for each - of the upstream version,
 #                     which pkgver cannot hold; the PKGBUILD turns it back
-#                     where a URL needs the dash, as in ${pkgver//_/-}
+#                     where a URL needs the dash, as in ${pkgver//_/-}.
+#                     '' drops the dash: 2.5.0rc1 for 2.5.0-rc1, below
+#                     2.5.0, put back as in ${pkgver/rc/-rc}
 #   pkgver_format   - the upstream version with a fixed text around it, %s
 #                     in its place, as 4.%s for pkgver 4.4215 of build 4215;
 #                     the PKGBUILD cuts the text off where a URL needs the

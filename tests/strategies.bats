@@ -268,16 +268,14 @@ teardown() {
   [ "$output" = "2.1.0" ]
 }
 
-# pkgver_dash turns 2.1.0-rc1 into 2.1.0.rc1 or 2.1.0_rc1, which vercmp puts
-# above 2.1.0. vercmp reads the dash itself as the pkgrel separator.
-@test "github-tag: compares a dash as the dot of pkgver_dash" {
+@test "github-tag: takes a release over its pre-release after a dash" {
   create_test_package "test-gh-tag" "github-tag" "upstream:
   project: rc-owner/dash-repo
   tag_version_regex: '^v([0-9.]+(-rc[0-9]+)?)$'"
 
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
   [ "$status" -eq 0 ]
-  [ "$output" = "2.1.0-rc1" ]
+  [ "$output" = "2.1.0" ]
 }
 
 @test "github-tag: names tag_version_regex when no tag is a release" {

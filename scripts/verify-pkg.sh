@@ -43,7 +43,7 @@ fi
 
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
-check_prepared_files "$aur_files" "$PREPARED" "$version" "$(pkg_get "$PKG_FILE" '.pkgver_dash // ""')" \
+check_prepared_files "$aur_files" "$PREPARED" "$version" "$(pkgver_dash "$PKG_FILE")" \
   "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" || exit 1
 mkdir "${tmp_dir}/downloads"
 verify_prepared_sums "$aur_files" "$PREPARED" "${tmp_dir}/downloads" || exit 1

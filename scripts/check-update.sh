@@ -18,7 +18,7 @@ readonly PKG_FILE
 # Read package config
 strategy=$(pkg_get "$PKG_FILE" .strategy)
 current=$(pkg_get "$PKG_FILE" '.current // ""')
-dash=$(pkg_get "$PKG_FILE" '.pkgver_dash // ""')
+dash=$(pkgver_dash "$PKG_FILE")
 format=$(pkg_get "$PKG_FILE" '.pkgver_format // ""')
 
 # Run strategy
@@ -41,8 +41,12 @@ if [[ -z "$latest" ]]; then
 fi
 
 # pkgver holds no dash. The PKGBUILD turns pkgver_dash back into a dash
-# where a URL needs one, as in ${pkgver//_/-}.
-if [[ -n "$dash" ]]; then
+# where a URL needs one, as in ${pkgver//_/-}. pkgver_dash: '' drops the
+# dash, so 2.5.0-rc1 gives 2.5.0rc1, which vercmp puts below 2.5.0, and the
+# PKGBUILD puts it back as in ${pkgver/rc/-rc}.
+if [[ "$dash" == drop ]]; then
+  latest=${latest//-/}
+elif [[ -n "$dash" ]]; then
   latest=${latest//-/"$dash"}
 fi
 
