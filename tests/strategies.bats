@@ -257,6 +257,29 @@ teardown() {
   [ "$output" = "2.0.0" ]
 }
 
+# vercmp, as pacman, puts 2.1.0rc2 below 2.1.0
+@test "github-tag: takes a release over its pre-releases" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: rc-owner/glued-repo
+  tag_version_regex: '^v([0-9.]+([a-z]+[0-9]+)?)$'"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.1.0" ]
+}
+
+# pkgver_dash turns 2.1.0-rc1 into 2.1.0.rc1 or 2.1.0_rc1, which vercmp puts
+# above 2.1.0. vercmp reads the dash itself as the pkgrel separator.
+@test "github-tag: compares a dash as the dot of pkgver_dash" {
+  create_test_package "test-gh-tag" "github-tag" "upstream:
+  project: rc-owner/dash-repo
+  tag_version_regex: '^v([0-9.]+(-rc[0-9]+)?)$'"
+
+  run "$TEST_TMPDIR/strategies/github-tag.sh" "test-gh-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.1.0-rc1" ]
+}
+
 @test "github-tag: names tag_version_regex when no tag is a release" {
   create_test_package "test-gh-tag" "github-tag" "upstream:
   project: named-owner/named-repo"
@@ -583,6 +606,15 @@ teardown() {
   [ "$output" = "1.140.10" ]
 }
 
+@test "repology: takes an outdated release over its pre-release" {
+  create_test_package "test-repology" "repology" "upstream:
+  repology: rc-outdated"
+
+  run "$TEST_TMPDIR/strategies/repology.sh" "test-repology"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0" ]
+}
+
 @test "repology: takes newest over an outdated version sort -V ranks higher" {
   create_test_package "test-repology" "repology" "upstream:
   repology: rc-order"
@@ -750,6 +782,16 @@ teardown() {
   run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-scrape-path"
   [ "$status" -eq 0 ]
   [ "$output" = "7.0.0" ]
+}
+
+@test "webpage-scrape: takes a release over its pre-release" {
+  create_test_package "test-scrape" "webpage-scrape" "upstream:
+  url: https://example.com/prereleases
+  pattern: 'test-scrape-([0-9.]+(rc[0-9]+)?)\\.tar\\.gz'"
+
+  run "$TEST_TMPDIR/strategies/webpage-scrape.sh" "test-scrape"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.1.0" ]
 }
 
 # === git-latest ===

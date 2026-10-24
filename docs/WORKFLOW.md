@@ -185,7 +185,7 @@ upstream:
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, replaces the default filter |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**Version:** reads every tag in one request, outside the API rate limit. Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names the field. `tag_version_regex` keeps the tags it matches instead. The strategy strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so a `tag_version_regex` that lets pre-release tags through picks them.
+**Version:** reads every tag in one request, outside the API rate limit. Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names the field. `tag_version_regex` keeps the tags it matches instead. The strategy strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the newest version by `vercmp`, the order of pacman: `1.0.0rc1` is below `1.0.0`. A dash counts as the dot that `pkgver_dash` makes of it, see [section 2](#2-package-yaml-format), and `1.0.0.rc1` is above `1.0.0`, so a `tag_version_regex` that lets `1.0.0-rc1` through picks it over `1.0.0`.
 
 **Authentication:** when `GITHUB_TOKEN` is set in the environment, git sends it to `github.com` as `Authorization: Basic` with the user `x-access-token`, which a private repository needs. The header reaches git through `GIT_CONFIG_*` variables, so the token does not appear on a command line. git allows only `https` and asks for no password on the terminal.
 
@@ -342,7 +342,7 @@ upstream:
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
 | `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**Version:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. There is no authentication, so private projects cannot be queried.
+**Version:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the newest version by `vercmp`, as [github-tag](#32-github-tag) does. There is no authentication, so private projects cannot be queried.
 
 **Example YAML:**
 
@@ -380,7 +380,7 @@ upstream:
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
 | `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**Version:** fetches up to 50 tags without pagination; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`.
+**Version:** fetches up to 50 tags without pagination; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the newest version by `vercmp`, as [github-tag](#32-github-tag) does.
 
 **Example YAML:**
 
@@ -556,7 +556,7 @@ pkgver_dash: .
 |---------------------|----------|--------------------------------------------------------------|
 | `upstream.repology` | no       | Repology project name. Defaults to the package `name`.       |
 
-**Version:** returns the version of the first entry with `status == "newest"` outside the AUR. The AUR entries are left out, because for a package of ours they hold our own version. When only the AUR is newest, the strategy returns the highest `outdated` version outside the AUR by `sort -V`, and a `current` above it reads as a downgrade, see [4.3](#43-downgrade-behavior). The version is the normalized `version` field of Repology: the OpenBSD entry of qodem gives `1.0.1`, and its `origversion` is `1.0.1p1`. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as Repology asks.
+**Version:** returns the version of the first entry with `status == "newest"` outside the AUR. The AUR entries are left out, because for a package of ours they hold our own version. When only the AUR is newest, the strategy returns the newest `outdated` version outside the AUR by `vercmp`, and a `current` above it reads as a downgrade, see [4.3](#43-downgrade-behavior). The version is the normalized `version` field of Repology: the OpenBSD entry of qodem gives `1.0.1`, and its `origversion` is `1.0.1p1`. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as Repology asks.
 
 The version lags behind upstream until a distribution other than the AUR packages the new release. A project that Repology does not know, such as `wingide` in place of `wing-ide`, fails the check with `Project <name> not found on Repology`. A project with no `newest` or `outdated` entry outside the AUR fails with `No version found on Repology for <name> outside the AUR`.
 
@@ -627,7 +627,7 @@ upstream:
 1. Fetches the page: HTTPS only, at most 5 redirects and 5 MB, with the User-Agent `aurtomator/1.0` or `upstream.user_agent`. SourceForge answers a bare `Mozilla/5.0` with HTTP 403. `validate-pkg.sh` refuses a `user_agent` with a character outside printable ASCII, because curl sends the text after a line break as a header of its own.
 2. Finds every match with `grep -oE`.
 3. Takes the first capture group of each match with bash `[[ =~ ]]`, so the pattern may hold any character, `/` included.
-4. Sorts with `sort -Vu` and returns the highest version.
+4. Returns the newest version by `vercmp`, as [github-tag](#32-github-tag) does.
 
 `validate-pkg.sh` compiles the pattern with bash, which refuses some patterns that `grep -E` takes, `(?:...)` among them.
 
@@ -720,7 +720,7 @@ upstream:
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, replaces the default filter |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**Version:** reads every tag in one request, as `github-tag` does, and picks the version the same way: without `tag_version_regex`, the tags of the form `v1.2.3` or `1.2.3`, without a leading `v`, the highest by `sort -V`. git allows only `https`, asks for no password on the terminal and sends no `GITHUB_TOKEN`, so only a public repository works. `validate-pkg.sh` refuses a `url` that does not start with `https://`. A repository behind the bot check of its site fails with the message of git, which names the page of the redirect.
+**Version:** reads every tag in one request, as `github-tag` does, and picks the version the same way: without `tag_version_regex`, the tags of the form `v1.2.3` or `1.2.3`, without a leading `v`, the newest by `vercmp`. git allows only `https`, asks for no password on the terminal and sends no `GITHUB_TOKEN`, so only a public repository works. `validate-pkg.sh` refuses a `url` that does not start with `https://`. A repository behind the bot check of its site fails with the message of git, which names the page of the redirect.
 
 **Example YAML:**
 

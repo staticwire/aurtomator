@@ -60,6 +60,14 @@ teardown() {
   [ "$output" = "owner/repo" ]
 }
 
+# vercmp puts an empty string above a version of letters only
+@test "lib.sh: newest_version skips an empty line" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run newest_version <<<$'nightly\n\nlatest'
+  [ "$status" -eq 0 ]
+  [ "$output" = "nightly" ]
+}
+
 # === audit_pkgbuild ===
 
 @test "audit_pkgbuild: passes normal binary package" {

@@ -47,12 +47,11 @@ page=$(http_get "$url" --max-redirs 5 --max-filesize "$MAX_SIZE") || {
 }
 
 # The first capture group of every match
-versions=$(echo "$page" | capture_matches "$pattern" | sort -Vu)
+versions=$(echo "$page" | capture_matches "$pattern")
 
 if [[ -z "$versions" ]]; then
   echo "No versions matched pattern '$pattern' at $url" >&2
   exit 1
 fi
 
-# Latest version (last after sort -V)
-echo "$versions" | tail -1
+newest_version <<<"$versions"

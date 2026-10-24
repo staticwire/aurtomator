@@ -36,8 +36,7 @@ fi
 # the highest outdated entry is what the other repositories have.
 version=$(yq -r '[.[] | select(.repo != "aur" and .status == "newest")] | .[0].version' <<<"$entries")
 if [[ "$version" == "null" ]]; then
-  version=$(yq -r '.[] | select(.repo != "aur" and .status == "outdated") | .version' <<<"$entries" |
-    sort -V | tail -1)
+  version=$(yq -r '.[] | select(.repo != "aur" and .status == "outdated") | .version' <<<"$entries" | newest_version)
 fi
 
 if [[ -z "$version" || "$version" == "null" ]]; then

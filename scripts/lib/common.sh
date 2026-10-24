@@ -229,9 +229,26 @@ remote_tags() {
     git ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||'
 }
 
+# The newest of the versions on stdin, one per line, in the order of
+# pacman: vercmp puts 2.1.0rc1 below 2.1.0, where sort -V puts it above.
+# vercmp reads a dash as the pkgrel separator, so a dash is compared as the
+# dot that pkgver_dash makes of it.
+newest_version() {
+  local version newest=""
+  while IFS= read -r version; do
+    [[ -n "$version" ]] || continue
+    if [[ -z "$newest" ]] || (($(vercmp "${version//-/.}" "${newest//-/.}") > 0)); then
+      newest=$version
+    fi
+  done
+  if [[ -n "$newest" ]]; then
+    printf '%s\n' "$newest"
+  fi
+}
+
 # The tags of the form v1.2.3 or 1.2.3, for a tag strategy without
-# tag_version_regex. sort -V puts latest, 2.1.0-rc1 and 2.1.0rc1 above
-# 2.1.0, so they are left out.
+# tag_version_regex. latest, 2.1.0-rc1 and 2.1.0rc1 are left out, so a
+# pre-release is never the version.
 # Args: $1=tags, one per line
 release_tags() {
   grep -E '^v?[0-9]+(\.[0-9]+)*$' <<<"$1" || true
@@ -289,7 +306,7 @@ latest_tag_version() {
       return 1
     fi
   fi
-  version=$(tag_versions "$regex" "$replace" <<<"$tags" | sort -V | tail -1)
+  version=$(tag_versions "$regex" "$replace" <<<"$tags" | newest_version)
   if [[ -z "$version" ]]; then
     echo "No matching tags found" >&2
     return 1

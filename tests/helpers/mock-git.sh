@@ -36,6 +36,14 @@ case "${*: -1}" in
   https://github.com/named-owner/named-repo.git)
     tags=(latest nightly)
     ;;
+  # Pre-releases glued to the number, which sort -V puts above the release
+  https://github.com/rc-owner/glued-repo.git)
+    tags=(v2.0.0 v2.1.0 v2.1.0beta1 v2.1.0rc2)
+    ;;
+  # A pre-release after a dash, listed after its release
+  https://github.com/rc-owner/dash-repo.git)
+    tags=(v2.1.0 v2.1.0-rc1)
+    ;;
   https://github.com/*)
     tags=(v2.0.0 v1.9.0 v1.0.0)
     ;;

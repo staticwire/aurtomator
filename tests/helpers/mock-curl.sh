@@ -53,10 +53,15 @@ case "$url" in
     echo '{"crate": {"max_stable_version": null}}'
     ;;
   # Repology: the AUR alone is newest, as for bluemail, and a second AUR
-  # package lags behind it. sort -V puts 1.140.10 above 1.140.9, a string
+  # package lags behind it. vercmp puts 1.140.10 above 1.140.9, a string
   # sort does not.
   *repology.org/api/v1/project/aur-ahead)
     echo '[{"repo": "aur", "status": "newest", "version": "1.143.44"}, {"repo": "aur", "status": "outdated", "version": "1.142.0"}, {"repo": "nix_stable_24_05", "status": "outdated", "version": "1.140.9"}, {"repo": "nix_unstable", "status": "outdated", "version": "1.140.10"}]'
+    ;;
+  # Repology: only the AUR is newest, and an outdated pre-release is glued
+  # to the number of an outdated release
+  *repology.org/api/v1/project/rc-outdated)
+    echo '[{"repo": "aur", "status": "newest", "version": "1.1"}, {"repo": "fedora_40", "status": "outdated", "version": "1.0"}, {"repo": "debian_13", "status": "outdated", "version": "1.0rc1"}]'
     ;;
   # Repology: libversion puts 1.0rc1 below 1.0, sort -V above it
   *repology.org/api/v1/project/rc-order)
@@ -349,6 +354,12 @@ case "$url" in
   # Webpage scrape (generic HTML)
   *example.com/releases*)
     echo '<a href="/download/test-scrape-7.0.0.tar.gz">test-scrape-7.0.0.tar.gz</a>'
+    ;;
+  # Webpage scrape: a release and a pre-release glued to its number
+  *example.com/prereleases*)
+    echo '<a href="test-scrape-2.0.0.tar.gz">test-scrape-2.0.0.tar.gz</a>'
+    echo '<a href="test-scrape-2.1.0.tar.gz">test-scrape-2.1.0.tar.gz</a>'
+    echo '<a href="test-scrape-2.1.0rc1.tar.gz">test-scrape-2.1.0rc1.tar.gz</a>'
     ;;
 
   # Fallback: error, simulates a network failure
