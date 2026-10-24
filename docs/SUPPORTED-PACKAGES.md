@@ -145,7 +145,7 @@ pkgver_format: '4.%s'
 - **Separate nightly repo**, for example yt-dlp-nightly-builds. It reads `/releases/latest`, which skips pre-releases, so a repository that files its nightlies as pre-releases, such as ruffle, needs dated tags.
 - **Channel filter**, for example the brave-browser Nightly channel
 
-The version comes from the tag name, the release body, the tag date or the publish date. `strategies/github-nightly.sh` lists the fields. `date_format` sets the form of the two dates, `YYYY.MM.DD` by default, and `'%Y%m%d'` fits a `pkgver` such as `20251213`. See [WORKFLOW.md section 3.3](WORKFLOW.md#33-github-nightly).
+The version comes from the tag name, the release body, the tag date or the publish date. `strategies/github-nightly.sh` lists the fields. A release that keeps its tag and its publish date while its assets are replaced, such as the `nightly` release of `wezterm/wezterm`, published in 2019, is tracked by the date of the assets with `github-asset`, see [pkgver() with the wrong strategy](#pkgver-with-the-wrong-strategy-blocked). `date_format` sets the form of the two dates, `YYYY.MM.DD` by default, and `'%Y%m%d'` fits a `pkgver` such as `20251213`. See [WORKFLOW.md section 3.3](WORKFLOW.md#33-github-nightly).
 
 A fixed tag keeps its download URL, so a PKGBUILD can save the download under a name with the date, as `neovim-nightly-bin` does with `_date="$(date -u +%Y%m%d)"` and `"$_pkgname-$_date.tar.gz::<url>"`. This works when the checksum of that source is `SKIP`: only the digits of the name may change from one update to the next. See step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
 
@@ -174,7 +174,25 @@ A PKGBUILD with a `pkgver()` function and a strategy other than `git-latest` or 
 
 **Detection:** `audit_pkgbuild()` checks for a `pkgver()` function and the strategy. Release and tag strategies report release versions, which do not match what `pkgver()` computes at build time.
 
-**Correct approach:** use `strategy: git-latest` for packages with `pkgver()`.
+**Correct approach:** a package built from a git checkout uses `strategy: git-latest`. A binary from a release tag that never moves drops `pkgver()` and sets `pkgver` to a date, which `github-asset` takes from the `updated_at` of the newest listed asset. The URLs name the tag as text:
+
+```bash
+pkgver=20261023
+source=("wezterm-nightly.Ubuntu24.04.tar.xz::https://github.com/wezterm/wezterm/releases/download/nightly/wezterm-nightly.Ubuntu24.04.tar.xz")
+sha256sums=('SKIP')
+```
+
+```yaml
+name: wezterm-nightly-bin
+strategy: github-asset
+upstream:
+  project: wezterm/wezterm
+  tag: nightly
+  assets:
+    - wezterm-nightly.Ubuntu24.04.tar.xz
+```
+
+A URL built from `$pkgver`, such as `releases/download/${pkgver}/` for the tag `continuous`, would point at a tag named after the date, which does not exist. With `SKIP` checksums no step downloads the source, so the bump reaches the AUR, see [Packages with changing source URLs](#packages-with-changing-source-urls). A version that a project publishes as a text asset is read with `webpage-scrape`, see [WORKFLOW.md section 3.13](WORKFLOW.md#313-webpage-scrape).
 
 ### Mixed SKIP and real checksums (BLOCKED)
 

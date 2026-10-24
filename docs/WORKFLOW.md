@@ -113,7 +113,7 @@ aurtomator ships 15 strategies. A strategy is a bash script in `strategies/`. It
 
 ### 3.1 github-release
 
-**What it checks:** GitHub Releases API: `/repos/{owner}/{repo}/releases/latest`, or the release list with `tag_version_regex`.
+**Upstream:** GitHub Releases API: `/repos/{owner}/{repo}/releases/latest`, or the release list with `tag_version_regex`.
 
 **When to use:** GitHub projects that publish releases.
 
@@ -125,7 +125,7 @@ aurtomator ships 15 strategies. A strategy is a bash script in `strategies/`. It
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, see below |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex` (default: `\1`), see below |
 
-**How the version is extracted:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases. When it answers 404, the strategy reads the release list to say why: a list of pre-releases only gets a message that names `github-nightly` with `nightly_tag_regex`, an empty list one that names `github-tag`.
+**Version:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases. When it answers 404, the strategy reads the release list to say why: a list of pre-releases only gets a message that names `github-nightly` with `nightly_tag_regex`, an empty list one that names `github-tag`.
 
 With `tag_version_regex`, the strategy reads the release list instead, 100 releases a page, until a page has a release whose tag the regex matches or the list ends, at most 10 pages. It takes the match published last and leaves out drafts and pre-releases. A repository that releases several products then gives the release of the product the regex names, whatever `/releases/latest` returns. tutao/tutanota publishes its web, desktop and mobile apps as separate releases:
 
@@ -173,7 +173,7 @@ upstream:
 
 ### 3.2 github-tag
 
-**What it checks:** the tags of the repository, read with `git ls-remote --tags --refs https://github.com/{owner}/{repo}.git`.
+**Upstream:** the tags of the repository, read with `git ls-remote --tags --refs https://github.com/{owner}/{repo}.git`.
 
 **When to use:** GitHub projects with tags and no releases.
 
@@ -185,7 +185,7 @@ upstream:
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, replaces the default filter |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**How the version is extracted:** reads every tag in one request, outside the API rate limit. Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names the field. `tag_version_regex` keeps the tags it matches instead. The strategy strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so a `tag_version_regex` that lets pre-release tags through picks them.
+**Version:** reads every tag in one request, outside the API rate limit. Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names the field. `tag_version_regex` keeps the tags it matches instead. The strategy strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. `sort -V` places `1.0.0-rc1` above `1.0.0`, so a `tag_version_regex` that lets pre-release tags through picks them.
 
 **Authentication:** when `GITHUB_TOKEN` is set in the environment, git sends it to `github.com` as `Authorization: Basic` with the user `x-access-token`, which a private repository needs. The header reaches git through `GIT_CONFIG_*` variables, so the token does not appear on a command line. git allows only `https` and asks for no password on the terminal.
 
@@ -210,7 +210,7 @@ upstream:
 
 ### 3.3 github-nightly
 
-**What it checks:** GitHub releases of nightly or prerelease builds, in 4 patterns. The fields select the pattern:
+**Upstream:** GitHub releases of nightly or prerelease builds, in 4 patterns. The fields select the pattern:
 
 - **Pattern A, fixed tag** (default): `nightly_tag` names one tag that moves, as in neovim, ghostty or yazi.
 - **Pattern B, dated tags**: `nightly_tag` is a prefix with a dash, such as `nightly-`. Of the first 20 releases the API lists, the first whose tag contains it wins (ruffle). With `nightly_tag_regex` in place of `nightly_tag`, the strategy reads up to 3 pages of 100 releases and takes the release published last among those whose tag matches the ERE (servo).
@@ -298,9 +298,9 @@ upstream:
 
 ### 3.4 github-asset
 
-**What it checks:** one GitHub release by tag (`/repos/{owner}/{repo}/releases/tags/{tag}`) and the `updated_at` of the assets listed in the package YAML.
+**Upstream:** one GitHub release by tag (`/repos/{owner}/{repo}/releases/tags/{tag}`) and the `updated_at` of the assets listed in the package YAML.
 
-**When to use:** releases whose tag never moves while the assets behind it are replaced, such as a model zoo or a rolling download tag. A PKGBUILD for such a release points at fixed URLs, so an update changes `pkgver` and the checksums and nothing else.
+**When to use:** releases whose tag never moves while the assets behind it are replaced, such as a model zoo or a rolling download tag. A PKGBUILD for such a release points at fixed URLs, so an update changes `pkgver` and the checksums and nothing else. Nightly binaries fit as well, such as the `nightly` tag of `wezterm/wezterm`. The PKGBUILD has no `pkgver()`, because the audit blocks one with this strategy, and `pkgver` holds the date, see [pkgver() with the wrong strategy](SUPPORTED-PACKAGES.md#pkgver-with-the-wrong-strategy-blocked).
 
 **YAML fields:**
 
@@ -310,7 +310,7 @@ upstream:
 | `upstream.tag`     | yes      | Release tag that carries the assets          |
 | `upstream.assets`  | yes      | List of exact asset file names, at least one |
 
-**How the version is extracted:** every listed asset must be present in the release, otherwise the strategy fails and names the missing one. The newest `updated_at` among them becomes the version, rendered as `YYYYMMDD` (for example `20251202`). A re-upload of any listed asset moves the date forward. The release object lists only assets in state `uploaded`, so one request covers every downloadable asset.
+**Version:** every listed asset must be present in the release, otherwise the strategy fails and names the missing one. The newest `updated_at` among them becomes the version, rendered as `YYYYMMDD` (for example `20251202`). A re-upload of any listed asset moves the date forward. The release object lists only assets in state `uploaded`, so one request covers every downloadable asset.
 
 **Authentication:** same as `github-release`.
 
@@ -329,7 +329,7 @@ upstream:
 
 ### 3.5 gitlab-tag
 
-**What it checks:** GitLab Tags API (`/api/v4/projects/{id}/repository/tags`).
+**Upstream:** GitLab Tags API (`/api/v4/projects/{id}/repository/tags`).
 
 **When to use:** any GitLab instance: gitlab.com, invent.kde.org, self-hosted.
 
@@ -342,7 +342,7 @@ upstream:
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
 | `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**How the version is extracted:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. There is no authentication, so private projects cannot be queried.
+**Version:** URL-encodes the project path (`/` becomes `%2F`) and fetches the first 100 tags; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`. There is no authentication, so private projects cannot be queried.
 
 **Example YAML:**
 
@@ -367,7 +367,7 @@ upstream:
 
 ### 3.6 gitea-tag
 
-**What it checks:** Gitea/Forgejo Tags API (`/api/v1/repos/{owner}/{repo}/tags`).
+**Upstream:** Gitea/Forgejo Tags API (`/api/v1/repos/{owner}/{repo}/tags`).
 
 **When to use:** Codeberg and self-hosted Gitea or Forgejo instances.
 
@@ -380,7 +380,7 @@ upstream:
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, replaces the default filter, see [3.1](#31-github-release) |
 | `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**How the version is extracted:** fetches up to 50 tags without pagination; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`.
+**Version:** fetches up to 50 tags without pagination; [git-tag](#315-git-tag) with the `.git` URL of the project reads every tag. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check). Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, and a project without such a tag fails the check with a message that names the field. It strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the highest version by `sort -V`.
 
 **Example YAML:**
 
@@ -394,7 +394,7 @@ upstream:
 
 ### 3.7 git-latest
 
-**What it checks:** any git repository with an HTTPS URL, through a bare clone.
+**Upstream:** any git repository with an HTTPS URL, through a bare clone.
 
 **When to use:** `-git` AUR packages that track the latest commit.
 
@@ -408,7 +408,7 @@ upstream:
 | `upstream.url`     | depends  | Required for the `git` type: full clone URL, `https://` only |
 | `upstream.branch`  | no       | The branch of a source pinned to `#branch=`. Default: the default branch of the repository |
 
-**How the version is extracted:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the hash of `HEAD` and prints the usual `-git` format `r<count>.<hash>`, for example `r431.66db9ce`. With `upstream.branch`, the clone takes `--branch`, and `HEAD` is that branch, as makepkg checks it out for `#branch=`: sharkdp/fd gives `r2061.9e90463` on `master` and `r1925.cf8a48a` with `branch: abort-on-panic`. A branch the repository does not have fails the clone. `validate-pkg.sh` refuses a name that `git check-ref-format --branch` refuses, such as one that starts with `-`. The hash has as many characters as the hash in `current`, and 7 when `current` is empty. `git rev-parse --short` in a `pkgver()` gives more characters as the repository grows: fabric-git is `r2173.ef2e985d` on the AUR, and `vercmp` reads `r2173.ef2e985` of the same commit as older.
+**Version:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the hash of `HEAD` and prints the usual `-git` format `r<count>.<hash>`, for example `r431.66db9ce`. With `upstream.branch`, the clone takes `--branch`, and `HEAD` is that branch, as makepkg checks it out for `#branch=`: sharkdp/fd gives `r2061.9e90463` on `master` and `r1925.cf8a48a` with `branch: abort-on-panic`. A branch the repository does not have fails the clone. `validate-pkg.sh` refuses a name that `git check-ref-format --branch` refuses, such as one that starts with `-`. The hash has as many characters as the hash in `current`, and 7 when `current` is empty. `git rev-parse --short` in a `pkgver()` gives more characters as the repository grows: fabric-git is `r2173.ef2e985d` on the AUR, and `vercmp` reads `r2173.ef2e985` of the same commit as older.
 
 `current` must be empty or of the form `r<count>.<hash>`, and `validate-pkg.sh` refuses any other. `vercmp` reads `1.4.0.r47.g0bbf5ad`, the form of `git describe`, as newer than every `r<count>.<hash>`, so each check would be a downgrade and the package would never update.
 
@@ -447,7 +447,7 @@ upstream:
 
 ### 3.8 pypi
 
-**What it checks:** PyPI JSON API (`https://pypi.org/pypi/{package}/json`).
+**Upstream:** PyPI JSON API (`https://pypi.org/pypi/{package}/json`).
 
 **When to use:** Python packages published on PyPI.
 
@@ -457,7 +457,7 @@ upstream:
 |---------------------|----------|----------------------------------------------|
 | `upstream.registry` | yes      | PyPI package name (e.g. `requests`, `flask`) |
 
-**How the version is extracted:** reads `.info.version`, the latest stable release on PyPI.
+**Version:** reads `.info.version`, the latest stable release on PyPI.
 
 **Example YAML:**
 
@@ -470,7 +470,7 @@ upstream:
 
 ### 3.9 npm
 
-**What it checks:** npm registry (`https://registry.npmjs.org/{package}/latest`).
+**Upstream:** npm registry (`https://registry.npmjs.org/{package}/latest`).
 
 **When to use:** Node.js packages published on npm.
 
@@ -480,7 +480,7 @@ upstream:
 |---------------------|----------|----------------------------------------------|
 | `upstream.registry` | yes      | npm package name (e.g. `express`, `webpack`) |
 
-**How the version is extracted:** reads `.version` of the `latest` tag.
+**Version:** reads `.version` of the `latest` tag.
 
 **Example YAML:**
 
@@ -493,7 +493,7 @@ upstream:
 
 ### 3.10 crates
 
-**What it checks:** crates.io API (`https://crates.io/api/v1/crates/{crate}`).
+**Upstream:** crates.io API (`https://crates.io/api/v1/crates/{crate}`).
 
 **When to use:** Rust crates published on crates.io.
 
@@ -504,7 +504,7 @@ upstream:
 | `upstream.registry` | yes      | Crate name (e.g. `serde`, `tokio`) |
 | `upstream.prerelease` | no     | `true` reads `max_version`, pre-releases included. Needs `pkgver_dash`. Default `false`. |
 
-**How the version is extracted:** reads `.crate.max_stable_version`, which excludes pre-releases, or `.crate.max_version` with `prerelease: true`. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as the crates.io API policy requires.
+**Version:** reads `.crate.max_stable_version`, which excludes pre-releases, or `.crate.max_version` with `prerelease: true`. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as the crates.io API policy requires.
 
 **Example YAML:**
 
@@ -530,7 +530,7 @@ pkgver_dash: .
 
 ### 3.11 repology
 
-**What it checks:** Repology API (`https://repology.org/api/v1/project/{name}`).
+**Upstream:** Repology API (`https://repology.org/api/v1/project/{name}`).
 
 **When to use:** as a fallback when no other strategy fits. Repology tracks versions across many distribution repositories.
 
@@ -540,7 +540,7 @@ pkgver_dash: .
 |---------------------|----------|--------------------------------------------------------------|
 | `upstream.repology` | no       | Repology project name. Defaults to the package `name`.       |
 
-**How the version is extracted:** returns the version of the first entry with `status == "newest"` outside the AUR. The AUR entries are left out, because for a package of ours they hold our own version. When only the AUR is newest, the strategy returns the highest `outdated` version outside the AUR by `sort -V`, and a `current` above it reads as a downgrade, see [4.3](#43-downgrade-behavior). The version is the normalized `version` field of Repology: the OpenBSD entry of qodem gives `1.0.1`, and its `origversion` is `1.0.1p1`. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as Repology asks.
+**Version:** returns the version of the first entry with `status == "newest"` outside the AUR. The AUR entries are left out, because for a package of ours they hold our own version. When only the AUR is newest, the strategy returns the highest `outdated` version outside the AUR by `sort -V`, and a `current` above it reads as a downgrade, see [4.3](#43-downgrade-behavior). The version is the normalized `version` field of Repology: the OpenBSD entry of qodem gives `1.0.1`, and its `origversion` is `1.0.1p1`. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as Repology asks.
 
 The version lags behind upstream until a distribution other than the AUR packages the new release. A project that Repology does not know, such as `wingide` in place of `wing-ide`, fails the check with `Project <name> not found on Repology`. A project with no `newest` or `outdated` entry outside the AUR fails with `No version found on Repology for <name> outside the AUR`.
 
@@ -571,7 +571,7 @@ strategy: repology
 
 ### 3.12 archpkg
 
-**What it checks:** Arch Linux package search API (`https://archlinux.org/packages/search/json/?name={name}`).
+**Upstream:** Arch Linux package search API (`https://archlinux.org/packages/search/json/?name={name}`).
 
 **When to use:** AUR packages that follow the `pkgver` of an official Arch package, for example an addon released together with it.
 
@@ -581,7 +581,7 @@ strategy: repology
 |--------------------|----------|----------------------------------------------------------------|
 | `upstream.archpkg` | no       | Package name in the official repos. Defaults to the package `name`. |
 
-**How the version is extracted:** reads `.results[0].pkgver`, the version without `epoch` and `pkgrel`: ffmpeg `2:9.0.2-2` gives `9.0.2`. A rebuild in the official repos raises only `pkgrel`, so it gives no new version, and aurtomator has no update that raises `pkgrel` alone, see [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md#packages-needing-a-pkgrel-bump).
+**Version:** reads `.results[0].pkgver`, the version without `epoch` and `pkgrel`: ffmpeg `2:9.0.2-2` gives `9.0.2`. A rebuild in the official repos raises only `pkgrel`, so it gives no new version, and aurtomator has no update that raises `pkgrel` alone, see [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md#packages-needing-a-pkgrel-bump).
 
 **Example YAML:**
 
@@ -594,7 +594,7 @@ upstream:
 
 ### 3.13 webpage-scrape
 
-**What it checks:** any HTTPS page, with a regex that matches the version.
+**Upstream:** any HTTPS page, with a regex that matches the version.
 
 **When to use:** upstreams without a structured API: download pages, directory listings, changelogs.
 
@@ -606,7 +606,7 @@ upstream:
 | `upstream.pattern` | yes      | ERE whose first capture group is the version         |
 | `upstream.user_agent` | no    | User-Agent in place of `aurtomator/1.0`, printable ASCII |
 
-**How the version is extracted:**
+**Version:**
 
 1. Fetches the page: HTTPS only, at most 5 redirects and 5 MB, with the User-Agent `aurtomator/1.0` or `upstream.user_agent`. SourceForge answers a bare `Mozilla/5.0` with HTTP 403. `validate-pkg.sh` refuses a `user_agent` with a character outside printable ASCII, because curl sends the text after a line break as a header of its own.
 2. Finds every match with `grep -oE`.
@@ -625,6 +625,16 @@ upstream:
   pattern: "my-scrape-pkg-([0-9.]+)\\.tar\\.gz"
 ```
 
+A version file that a project publishes as a release asset is read through its download URL, which redirects to the file. `jpenilla/ghostty-nightly-bin` publishes the version of each Ghostty nightly build as `ghostty-nightly-version.txt`:
+
+```yaml
+name: ghostty-nightly-bin
+strategy: webpage-scrape
+upstream:
+  url: https://github.com/jpenilla/ghostty-nightly-bin/releases/download/nightly/ghostty-nightly-version.txt
+  pattern: '^([0-9]{8}\.r[0-9]+\.g[0-9a-f]+)$'
+```
+
 **Common patterns:**
 
 ```text
@@ -640,7 +650,7 @@ upstream:
 
 ### 3.14 kde-tarball
 
-**What it checks:** the KDE download server listing (`https://download.kde.org/{path}/`).
+**Upstream:** the KDE download server listing (`https://download.kde.org/{path}/`).
 
 **When to use:** KDE projects that publish release tarballs in one directory on download.kde.org, such as `stable/kio-s3/kio-s3-1.0.2.tar.xz`. Projects with a directory per version, such as Plasma under `stable/plasma/6.6.3/` or krita under `stable/krita/6.0.4/`, do not fit: the strategy reads one listing.
 
@@ -651,7 +661,7 @@ upstream:
 | `upstream.project` | no       | Tarball name. Defaults to the package `name`.                |
 | `upstream.path`    | no       | Directory on download.kde.org. Defaults to `stable/{project}`. |
 
-**How the version is extracted:** matches `{project}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`), and returns the highest by `sort -Vu`. A dot or a plus in `project` matches itself. `validate-pkg.sh` refuses a `project` with a character outside `A-Za-z0-9@._+-`, and a `path` with an empty segment, a segment that starts with a dot, or a character outside `A-Za-z0-9._+-`.
+**Version:** matches `{project}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`), and returns the highest by `sort -Vu`. A dot or a plus in `project` matches itself. `validate-pkg.sh` refuses a `project` with a character outside `A-Za-z0-9@._+-`, and a `path` with an empty segment, a segment that starts with a dot, or a character outside `A-Za-z0-9._+-`.
 
 **Example YAML:**
 
@@ -672,7 +682,7 @@ upstream:
 
 ### 3.15 git-tag
 
-**What it checks:** the tags of any git repository, read with `git ls-remote --tags --refs {url}`.
+**Upstream:** the tags of any git repository, read with `git ls-remote --tags --refs {url}`.
 
 **When to use:** hosts without a tags API, such as sourcehut, kernel.org and Savannah, and a GitLab or Gitea project with more tags than `gitlab-tag` or `gitea-tag` read.
 
@@ -684,7 +694,7 @@ upstream:
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, replaces the default filter |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
 
-**How the version is extracted:** reads every tag in one request, as `github-tag` does, and picks the version the same way: without `tag_version_regex`, the tags of the form `v1.2.3` or `1.2.3`, without a leading `v`, the highest by `sort -V`. git allows only `https`, asks for no password on the terminal and sends no `GITHUB_TOKEN`, so only a public repository works. `validate-pkg.sh` refuses a `url` that does not start with `https://`. A repository behind the bot check of its site fails with the message of git, which names the page of the redirect.
+**Version:** reads every tag in one request, as `github-tag` does, and picks the version the same way: without `tag_version_regex`, the tags of the form `v1.2.3` or `1.2.3`, without a leading `v`, the highest by `sort -V`. git allows only `https`, asks for no password on the terminal and sends no `GITHUB_TOKEN`, so only a public repository works. `validate-pkg.sh` refuses a `url` that does not start with `https://`. A repository behind the bot check of its site fails with the message of git, which names the page of the redirect.
 
 **Example YAML:**
 
