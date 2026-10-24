@@ -95,8 +95,7 @@ table_row() {
 
 # Badge and table header are assembled after the loop (need counts)
 table_rows=""
-table_header="<table>
-<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>"
+table_header=$'<table>\n<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>'
 
 pkg_count=0
 pkg_ok=0
@@ -160,8 +159,8 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
     ((pkg_ok++)) || true
   fi
 
-  table_rows+=$(table_row "<a href=\"https://aur.archlinux.org/pkgbase/${name}\">${name}</a>" \
-    "$current" "$strategy" "$last_updated" "$status")
+  link="<a href=\"https://aur.archlinux.org/pkgbase/${name}\">${name}</a>"
+  table_rows+=$(table_row "$link" "$current" "$strategy" "$last_updated" "$status")
   ((pkg_count++)) || true
 done
 
@@ -195,8 +194,7 @@ if [[ "$pkg_count" -eq 0 ]]; then
 else
   table+="$table_rows"
 fi
-table+="
-</table>"
+table+=$'\n</table>'
 
 # Replace between markers
 {
