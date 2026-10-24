@@ -45,9 +45,11 @@ if grep -q "$BADGES_START" "$README"; then
     # CI badge, always available
     badges+="[![Lint & Test](https://github.com/${repo_url}/actions/workflows/ci.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/ci.yml)"
 
-    # Codecov badge: ask the GitHub API (unauthenticated) whether the repo is public
+    # Codecov badge: ask the GitHub API (unauthenticated) whether the repo is
+    # public. yq prints true only for "private": false, and false for a
+    # private repo, an error answer or no answer.
     is_public=$(curl -sfL --max-time 5 "https://api.github.com/repos/${repo_url}" 2>/dev/null |
-      yq -r 'select(.private == false) | "true"' 2>/dev/null || true)
+      yq -r '.private == false' 2>/dev/null || true)
 
     if [[ "$is_public" == "true" ]]; then
       # Public repo: tokenless Codecov badge for this repo

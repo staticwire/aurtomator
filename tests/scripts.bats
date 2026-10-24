@@ -1601,6 +1601,27 @@ EOF
   run ! grep -q 'old badges' "$TEST_TMPDIR/README.md"
 }
 
+# Codecov shows no tokenless badge for a private repository. mikefarah yq
+# prints the "true" of select(...) | "true" whatever the input.
+@test "update-readme: a private repo or a failed API call links the Codecov of aurtomator" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  git -C "$TEST_TMPDIR" init -q
+  git -C "$TEST_TMPDIR" remote add origin "https://github.com/someone/private.git"
+  local answer
+  for answer in "echo '{\"private\": true}'" "exit 22"; do
+    readme_with_badges
+    printf '#!/usr/bin/env bash\n%s\n' "$answer" >"$MOCK_DIR/curl"
+    chmod +x "$MOCK_DIR/curl"
+
+    run "$TEST_TMPDIR/scripts/update-readme.sh"
+    [ "$status" -eq 0 ]
+    grep -qF '(https://github.com/someone/private/actions/workflows/ci.yml)' "$TEST_TMPDIR/README.md"
+    grep -qF '[![codecov](https://codecov.io/github/staticwire/aurtomator/graph/badge.svg)](https://codecov.io/github/staticwire/aurtomator)' "$TEST_TMPDIR/README.md"
+  done
+}
+
 @test "update-readme: without a GitHub origin only the static badges remain" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
