@@ -148,6 +148,7 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
   elif [[ "$current" == "—" || "$current" == "null" ]]; then
     status="🆕 new"
     current="—"
+    ((pkg_ok++)) || true
   else
     status="✅ tracking"
     ((pkg_ok++)) || true

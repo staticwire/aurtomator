@@ -974,7 +974,7 @@ Steps 9 to 11 run as root with `GH_TOKEN` set to the workflow token, `github.tok
 https://img.shields.io/badge/packages-<ok>%2F<total>-<color>
 ```
 
-The color is `brightgreen` with no failures and `red` otherwise.
+`<ok>` counts every package without a `check_failed` or `update_failed` status, a new one without `current` included. The color is `brightgreen` with no failures and `red` otherwise.
 
 #### Status table
 

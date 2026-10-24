@@ -1663,6 +1663,25 @@ current: '1.0.0'"
   grep -qF '| [pkg-new](https://aur.archlinux.org/pkgbase/pkg-new) | — | github-release | — | 🆕 new |' "$TEST_TMPDIR/README.md"
 }
 
+# A package that has not been checked yet has failed nothing
+@test "update-readme: a new package counts as ok in the badge" {
+  create_test_package "pkg-new" "github-release" "upstream:
+  project: owner/repo"
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF 'packages-1%2F1-brightgreen' "$TEST_TMPDIR/README.md"
+
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF 'packages-2%2F2-brightgreen' "$TEST_TMPDIR/README.md"
+}
+
 # === update-readme.sh: last_updated column ===
 
 @test "update-readme: shows last_updated date in table" {
