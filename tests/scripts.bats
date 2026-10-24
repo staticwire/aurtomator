@@ -595,6 +595,35 @@ MOCKCURL
   grep -q "test-1.0.0-riscv64.tar.gz" "$TEST_TMPDIR/curl-urls.log"
 }
 
+# makepkg sets CARCH, and neovim-nightly-bin builds its URL from it in a
+# case statement. Without CARCH the URL is nvim-linux-.tar.gz, a 404.
+@test "lib.sh: validate_source_urls builds the URLs with CARCH" {
+  cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
+pkgname=test-carch
+pkgver=1.0.0
+pkgrel=1
+arch=('x86_64' 'aarch64')
+source=("https://example.com/test-1.0.0-${CARCH}.tar.gz")
+sha256sums=('SKIP')
+EOF
+
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+echo "\${@: -1}" >>"$TEST_TMPDIR/curl-urls.log"
+printf '200 application/octet-stream'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+
+  local lib='source "$0/scripts/lib.sh"; validate_source_urls "$1"'
+  run env -u CARCH bash -c "$lib" "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 0 ]
+  grep -qx "https://example.com/test-1.0.0-$(uname -m).tar.gz" "$TEST_TMPDIR/curl-urls.log"
+
+  run env CARCH=aarch64 bash -c "$lib" "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 0 ]
+  grep -qx "https://example.com/test-1.0.0-aarch64.tar.gz" "$TEST_TMPDIR/curl-urls.log"
+}
+
 # The server of a source chooses the headers. bash evaluates an operand of
 # -ge as arithmetic, and an array subscript there runs a command.
 @test "lib.sh: validate_source_urls runs nothing a source server sends" {
@@ -2222,9 +2251,75 @@ echo "pkgname = test-arch-skip"
 EOF
   chmod +x "$MOCK_DIR/makepkg"
 
+  # HEAD requests get a file and every URL asked for is logged
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+echo "\${@: -1}" >>"$TEST_TMPDIR/curl-urls.log"
+printf '200 application/octet-stream'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-arch-skip" "1.0.1"
   [[ "$output" == *"VCS package, skipping checksums"* ]]
   [[ "$output" != *"Updating checksums"* ]]
+  grep -q "nightly-x86_64.tar.gz" "$TEST_TMPDIR/curl-urls.log"
+  grep -q "nightly-aarch64.tar.gz" "$TEST_TMPDIR/curl-urls.log"
+}
+
+# A source with a SKIP checksum is not downloaded by any later step, so
+# without the HEAD request a URL that answers 404 would reach the AUR, as a
+# tag built from $pkgver does for a release whose tag never moves.
+@test "update-pkg: checks source URLs when every checksum is SKIP" {
+  create_test_package "test-skip-url" "github-asset" "upstream:
+  project: owner/repo
+  tag: continuous
+  assets:
+    - test.AppImage
+current: '20261022'"
+
+  aur_dir="$TEST_TMPDIR/aur-test-skip-url"
+  mkdir -p "$aur_dir"
+  git -C "$aur_dir" init -q
+  git -C "$aur_dir" config user.name "test"
+  git -C "$aur_dir" config user.email "test@test"
+  git -C "$aur_dir" config commit.gpgsign false
+  cat >"$aur_dir/PKGBUILD" <<'EOF'
+# Maintainer: test
+pkgname=test-skip-url
+pkgver=20261022
+pkgrel=1
+pkgdesc="test SKIP source URL"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("test.AppImage::https://example.com/releases/download/${pkgver}/test.AppImage")
+sha256sums=('SKIP')
+EOF
+  git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
+
+  cat >"$MOCK_DIR/git" <<MOCKGIT
+#!/usr/bin/env bash
+if [[ "\$1" == "clone" ]]; then
+  cp -r "$aur_dir" "\$3" 2>/dev/null || cp -r "$aur_dir/." "\$3" 2>/dev/null
+  exit 0
+fi
+exec /usr/bin/git "\$@"
+MOCKGIT
+  chmod +x "$MOCK_DIR/git"
+
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+echo "\${@: -1}" >>"$TEST_TMPDIR/curl-urls.log"
+printf '404 text/plain'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-skip-url" "20261023"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Source URL returned HTTP 404: https://example.com/releases/download/20261023/test.AppImage"* ]]
+  [[ "$output" == *"Source URL validation failed, aborting"* ]]
+  [[ "$output" != *"VCS package, skipping checksums"* ]]
+  [[ "$output" != *"Pushed"* ]]
 }
 
 # === downgrades ===

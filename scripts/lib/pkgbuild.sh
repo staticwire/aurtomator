@@ -130,8 +130,10 @@ validate_source_urls() {
   local pkgbuild="$1"
   local errors=0
 
+  # makepkg sets CARCH from makepkg.conf, which on x86_64 and aarch64 is what
+  # uname -m prints, and a PKGBUILD may build a URL from it
   local urls
-  urls=$(bash -c '
+  urls=$(CARCH="${CARCH:-$(uname -m)}" bash -c '
     source "$1" 2>/dev/null
     for arr in source $(compgen -A variable | grep "^source_"); do
       declare -n ref="$arr"

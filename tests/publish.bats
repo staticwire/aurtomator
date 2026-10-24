@@ -139,6 +139,7 @@ current: '1.0.0'"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
   mock_pkg_tools
+  mock_source_tools
 
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
@@ -176,6 +177,7 @@ current: '1.0.0'"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 SKIP SKIP
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
   mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
 
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0
   [ "$status" -eq 0 ]

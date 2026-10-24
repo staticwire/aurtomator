@@ -125,6 +125,14 @@ fi
 # UPDATE CHECKSUMS
 # =============================================================================
 
+# Validate source URLs before downloading. A download with a SKIP checksum
+# is checked too: no later step fetches it, so a URL that answers 404 or an
+# HTML page would reach the AUR.
+if ! validate_source_urls "${aur_dir}/PKGBUILD"; then
+  log_err "Source URL validation failed, aborting"
+  exit 1
+fi
+
 # updpkgsums would put a real hash in place of the SKIP of a download or of
 # a pinned VCS source, and the audit blocks such a SKIP next to a remote
 # hash. Next to the SKIP of a VCS source without a pin, updpkgsums runs only
@@ -132,14 +140,6 @@ fi
 if has_skip_checksums "${aur_dir}/PKGBUILD" && ! has_remote_hash "${aur_dir}/PKGBUILD"; then
   log_info "VCS package, skipping checksums"
 else
-  # Validate source URLs before downloading
-  url_rc=0
-  validate_source_urls "${aur_dir}/PKGBUILD" || url_rc=$?
-  if [[ "$url_rc" -gt 0 ]]; then
-    log_err "Source URL validation failed ($url_rc error(s)), aborting"
-    exit 1
-  fi
-
   require_cmd updpkgsums
   log_info "Updating checksums"
   (cd "$aur_dir" && updpkgsums) || {

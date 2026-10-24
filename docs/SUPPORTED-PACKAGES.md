@@ -17,7 +17,7 @@ For every update, aurtomator does exactly this:
 9. Run `makepkg --printsrcinfo` to regenerate `.SRCINFO`
 10. Commit and push to the AUR
 
-Steps 5 to 7 are skipped when a checksum array holds a `SKIP` other than that of a signature and no remote source has a real checksum, see [Packages with VCS checksums](#packages-with-vcs-checksums-skip) and [Sources with a signature](#sources-with-a-signature).
+Steps 6 and 7 are skipped when a checksum array holds a `SKIP` other than that of a signature and no remote source has a real checksum, see [Packages with VCS checksums](#packages-with-vcs-checksums-skip) and [Sources with a signature](#sources-with-a-signature).
 
 aurtomator does not build packages and does not check runtime dependencies. That needs `ldd` or `readelf` on built binaries and is out of scope. Dependency correctness is the maintainer's responsibility.
 
@@ -75,7 +75,7 @@ b2sums_x86_64=('SKIP')
 b2sums_aarch64=('SKIP')
 ```
 
-aurtomator reads every checksum array, with and without an arch suffix. A `SKIP` at any position makes it skip `updpkgsums`, which would otherwise replace the `SKIP` of a download with a real hash and clone the repository of every VCS source. The `SKIP` of a signature is the exception, see [Sources with a signature](#sources-with-a-signature). `updpkgsums` also runs next to the `SKIP` of a VCS source without a pin when a remote source has a real hash.
+aurtomator reads every checksum array, with and without an arch suffix. A `SKIP` at any position makes it skip `updpkgsums`, which would otherwise replace the `SKIP` of a download with a real hash and clone the repository of every VCS source. The `SKIP` of a signature is the exception, see [Sources with a signature](#sources-with-a-signature). `updpkgsums` also runs next to the `SKIP` of a VCS source without a pin when a remote source has a real hash. The source URLs are checked either way, see [Source URL returns HTML](#source-url-returns-html-blocked).
 
 A real hash for a remote source next to a `SKIP` other than that of a signature or of a VCS source without a pin is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
 
@@ -192,7 +192,7 @@ upstream:
     - wezterm-nightly.Ubuntu24.04.tar.xz
 ```
 
-A URL built from `$pkgver`, such as `releases/download/${pkgver}/` for the tag `continuous`, would point at a tag named after the date, which does not exist. With `SKIP` checksums no step downloads the source, so the bump reaches the AUR, see [Packages with changing source URLs](#packages-with-changing-source-urls). A version that a project publishes as a text asset is read with `webpage-scrape`, see [WORKFLOW.md section 3.13](WORKFLOW.md#313-webpage-scrape).
+A URL built from `$pkgver`, such as `releases/download/${pkgver}/` for the tag `continuous`, would point at a tag named after the date, which does not exist. The source URL check stops that bump on the 404, see [Source URL returns HTML](#source-url-returns-html-blocked). A version that a project publishes as a text asset is read with `webpage-scrape`, see [WORKFLOW.md section 3.13](WORKFLOW.md#313-webpage-scrape).
 
 ### Mixed SKIP and real checksums (BLOCKED)
 
@@ -241,7 +241,7 @@ The `.SRCINFO` check accepts a derived variable whose text is one of the forms o
 
 Upstream moves or renames a release, and the old URL now redirects to an HTML error or download page.
 
-**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text. The check runs only when no checksum array holds a `SKIP` other than that of a signature: one such `SKIP` turns it off for every URL of the package.
+**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text. The check covers every `http` and `https` URL, whatever its checksum, and leaves out VCS sources and local files. It reads the PKGBUILD with `CARCH` set, as makepkg does, so a URL built from `$CARCH` is the one makepkg downloads. A source with a `SKIP` checksum is checked too, because no later step downloads it.
 
 Without this check, `updpkgsums` would hash the HTML page. The checksums would match and the package would fail to install.
 
@@ -268,7 +268,7 @@ When upstream changes the download URL format:
 - Binary renamed: `app-linux-x86_64` to `app-linux-amd64`
 - Major version path change: `v1/app.tar.gz` to `v2/app.tar.gz`
 
-aurtomator does not modify `source=()`. After such a change, source URL validation or `updpkgsums` fails and aurtomator refuses to push. That failure is safe. In a package with a `SKIP` other than that of a signature, every remote source is `SKIP`, and no step downloads one, so a changed URL there is pushed unnoticed.
+aurtomator does not modify `source=()`. After such a change, source URL validation or `updpkgsums` fails and aurtomator refuses to push. That failure is safe. In a package whose remote sources are all `SKIP`, no step downloads one: a changed URL that answers 404 or an HTML page stops the update, and one that serves another file is pushed unnoticed.
 
 ### Packages with changing dependencies
 

@@ -76,7 +76,7 @@ aurtomator only sets `pkgver`, resets `pkgrel` to 1, and updates checksums and `
 - **`pkgver()` with the wrong strategy**: use `git-latest` for VCS packages
 - **A `SKIP` next to a real checksum of a remote source**: such a `SKIP` turns off `updpkgsums`, and the real checksum would go stale. The `SKIP` of a signature (`.sig`, `.sign`, `.asc`) and that of a VCS source without a `#commit=`, `#tag=` or `#revision=` pin do not count, because makepkg gives them `SKIP` itself
 - **Sources that do not follow `pkgver`**: when a download has a real checksum or a VCS source is pinned, a bump has to change a source URL or a checksum, or the new version would hold the old files. Make `pkgver` the literal and derive the other variable from it
-- **Source URLs returning HTML**: detected by the `Content-Type` check, which runs only before `updpkgsums`
+- **Source URLs returning HTML** or an error status: a HEAD request checks every `http` and `https` source, also one with a `SKIP` checksum
 
 Patches in `source=()` trigger a warning and are not blocked.
 
