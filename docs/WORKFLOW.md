@@ -650,9 +650,9 @@ upstream:
 
 ### 3.14 kde-tarball
 
-**Upstream:** the KDE download server listing (`https://download.kde.org/{path}/`).
+**Upstream:** the KDE download server listing (`https://download.kde.org/{path}/`), and the newest version directory in it.
 
-**When to use:** KDE projects that publish release tarballs in one directory on download.kde.org, such as `stable/kio-s3/kio-s3-1.0.2.tar.xz`. Projects with a directory per version, such as Plasma under `stable/plasma/6.6.3/` or krita under `stable/krita/6.0.4/`, do not fit: the strategy reads one listing.
+**When to use:** KDE projects that publish release tarballs on download.kde.org, in one directory, such as `stable/kio-s3/kio-s3-1.0.2.tar.xz`, or in a directory per version or per series: Plasma under `stable/plasma/6.8.1/`, Frameworks under `stable/frameworks/6.31/`, KDE Gear under `stable/release-service/26.08.2/src/`, krita under `stable/krita/6.0.4.1/`.
 
 **YAML fields:**
 
@@ -661,13 +661,23 @@ upstream:
 | `upstream.project` | no       | Tarball name. Defaults to the package `name`.                |
 | `upstream.path`    | no       | Directory on download.kde.org. Defaults to `stable/{project}`. |
 
-**Version:** matches `{project}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`), and returns the highest by `sort -Vu`. A dot or a plus in `project` matches itself. `validate-pkg.sh` refuses a `project` with a character outside `A-Za-z0-9@._+-`, and a `path` with an empty segment, a segment that starts with a dot, or a character outside `A-Za-z0-9._+-`.
+**Version:** matches `{project}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`). When the listing also holds directories named by digits and dots, it reads the newest of them by `sort -V`, and the `src/` in it when there is one, as for KDE Gear. The highest version of both listings wins by `sort -Vu`, so older tarballs beside the directories do not hide a newer release. A newest directory without a tarball of the project stops the strategy with that directory in the message, so a project dropped from Plasma is not followed into an older directory. A dot or a plus in `project` matches itself. `validate-pkg.sh` refuses a `project` with a character outside `A-Za-z0-9@._+-`, and a `path` with an empty segment, a segment that starts with a dot, or a character outside `A-Za-z0-9._+-`.
 
 **Example YAML:**
 
 ```yaml
 name: my-kde-app
 strategy: kde-tarball
+```
+
+The Oxygen theme comes with Plasma, so its tarball sits in the directory of each Plasma release:
+
+```yaml
+name: xcursor-oxygen
+strategy: kde-tarball
+upstream:
+  project: oxygen
+  path: stable/plasma
 ```
 
 The pre-releases of alkimia, `8.2.70` at the time of writing, live in `unstable/alkimia/`:

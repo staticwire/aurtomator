@@ -65,7 +65,7 @@ The setup script configures your identity (git author for AUR commits), SSH acce
 | `repology`         | Repology API        | Universal fallback (120+ repos)      |
 | `archpkg`          | Arch repos API      | The pkgver of an official package    |
 | `webpage-scrape`   | URL + regex         | Anything not covered above           |
-| `kde-tarball`      | download.kde.org    | KDE projects, one tarball directory  |
+| `kde-tarball`      | download.kde.org    | KDE projects, Plasma and Gear too    |
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for strategy details, YAML examples, and how to write custom strategies.
 

@@ -99,6 +99,68 @@ case "$url" in
     echo '<a href="kioXs3-9.9.9.tar.xz">kioXs3-9.9.9.tar.xz</a>'
     echo '<a href="kio.s3-1.0.0.tar.xz">kio.s3-1.0.0.tar.xz</a>'
     ;;
+  # KDE tarball: a directory per version, as Plasma. sort -V puts 6.10.0
+  # above 6.9.5, a string sort does not.
+  *download.kde.org/stable/plasma/)
+    echo '<a href="6.9.5/">6.9.5/</a>'
+    echo '<a href="6.10.0/">6.10.0/</a>'
+    ;;
+  *download.kde.org/stable/plasma/6.10.0/)
+    echo '<a href="oxygen-6.10.0.tar.xz">oxygen-6.10.0.tar.xz</a>'
+    echo '<a href="oxygen-6.10.0.tar.xz.sig">oxygen-6.10.0.tar.xz.sig</a>'
+    ;;
+  # KDE tarball: a directory per series, as Frameworks
+  *download.kde.org/stable/frameworks/)
+    echo '<a href="6.9/">6.9/</a>'
+    echo '<a href="6.10/">6.10/</a>'
+    ;;
+  *download.kde.org/stable/frameworks/6.10/)
+    echo '<a href="kio-6.10.0.tar.xz">kio-6.10.0.tar.xz</a>'
+    echo '<a href="kio-6.10.1.tar.xz">kio-6.10.1.tar.xz</a>'
+    ;;
+  # KDE tarball: the sources of a version under src/, as Gear
+  *download.kde.org/stable/release-service/)
+    echo '<a href="26.08.1/">26.08.1/</a>'
+    echo '<a href="26.08.2/">26.08.2/</a>'
+    ;;
+  *download.kde.org/stable/release-service/26.08.2/)
+    echo '<a href="macos/">macos/</a>'
+    echo '<a href="src/">src/</a>'
+    echo '<a href="windows/">windows/</a>'
+    ;;
+  *download.kde.org/stable/release-service/26.08.2/src/)
+    echo '<a href="okular-26.08.2.tar.xz">okular-26.08.2.tar.xz</a>'
+    ;;
+  # KDE tarball: version directories beside others, as krita
+  *download.kde.org/stable/krita/)
+    echo '<a href="6.0.4/">6.0.4/</a>'
+    echo '<a href="FastSketchPlugin-1.1.0/">FastSketchPlugin-1.1.0/</a>'
+    echo '<a href="updates/">updates/</a>'
+    ;;
+  *download.kde.org/stable/krita/6.0.4/)
+    echo '<a href="krita-6.0.4.tar.gz">krita-6.0.4.tar.gz</a>'
+    echo '<a href="krita-6.0.4.tar.xz">krita-6.0.4.tar.xz</a>'
+    ;;
+  # KDE tarball: old tarballs beside a newer version directory
+  *download.kde.org/stable/moved/)
+    echo '<a href="moved-1.9.0.tar.xz">moved-1.9.0.tar.xz</a>'
+    echo '<a href="2.0.0/">2.0.0/</a>'
+    ;;
+  *download.kde.org/stable/moved/2.0.0/)
+    echo '<a href="moved-2.0.0.tar.xz">moved-2.0.0.tar.xz</a>'
+    ;;
+  # KDE tarball: a newer tarball beside older version directories
+  *download.kde.org/stable/flat-again/)
+    echo '<a href="2.0.0/">2.0.0/</a>'
+    echo '<a href="flat-again-3.0.0.tar.xz">flat-again-3.0.0.tar.xz</a>'
+    ;;
+  *download.kde.org/stable/flat-again/2.0.0/)
+    echo '<a href="flat-again-2.0.0.tar.xz">flat-again-2.0.0.tar.xz</a>'
+    ;;
+  # KDE tarball: a version directory whose listing fails
+  *download.kde.org/unstable/broken/)
+    echo '<a href="2.0.0/">2.0.0/</a>'
+    ;;
   # Webpage scrape: no matching versions
   *example.com/empty-page*)
     echo '<html><body>No downloads here</body></html>'

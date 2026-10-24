@@ -216,9 +216,9 @@ upstream:
 #   archpkg: qt6-base                      # optional, defaults to `name` above
 
 # --- kde-tarball ------------------------------------------------------------
-# Reads one directory on https://download.kde.org/ for
-# <project>-<version>.tar.xz releases. A directory per version, as for
-# Plasma, does not fit.
+# Reads a directory on https://download.kde.org/ for
+# <project>-<version>.tar.xz releases, and the newest version directory in
+# it, as for Plasma (stable/plasma/6.8.1/) or Gear (release-service).
 #
 # strategy: kde-tarball
 # upstream:

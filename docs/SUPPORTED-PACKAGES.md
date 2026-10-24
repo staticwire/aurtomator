@@ -304,7 +304,7 @@ By where the upstream publishes releases:
 | `repology` | Repology API | Fallback across distro repositories, AUR left out | Varies |
 | `archpkg` | Arch package search | Track official repo versions | N/A |
 | `webpage-scrape` | Any HTTPS page + regex | No API available | None (depends on regex) |
-| `kde-tarball` | download.kde.org | KDE projects with one directory of tarballs | None |
+| `kde-tarball` | download.kde.org | KDE projects, in one directory or in a directory per version | None |
 
 ### Strategy limitations
 

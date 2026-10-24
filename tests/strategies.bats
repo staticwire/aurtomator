@@ -653,6 +653,83 @@ teardown() {
   [ "$output" = "1.0.0" ]
 }
 
+@test "kde-tarball: reads the newest version directory" {
+  record_curl
+  create_test_package "xcursor-oxygen" "kde-tarball" "upstream:
+  project: oxygen
+  path: stable/plasma"
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "xcursor-oxygen"
+  [ "$status" -eq 0 ]
+  [ "$output" = "6.10.0" ]
+  grep -qx 'https://download.kde.org/stable/plasma/6.10.0/' "$TEST_TMPDIR/curl.args"
+  ! grep -q '6\.9\.5' "$TEST_TMPDIR/curl.args"
+}
+
+@test "kde-tarball: a series directory holds the newest version" {
+  create_test_package "kio" "kde-tarball" "upstream:
+  path: stable/frameworks"
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "kio"
+  [ "$status" -eq 0 ]
+  [ "$output" = "6.10.1" ]
+}
+
+@test "kde-tarball: reads src/ of the newest version directory" {
+  record_curl
+  create_test_package "okular" "kde-tarball" "upstream:
+  path: stable/release-service"
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "okular"
+  [ "$status" -eq 0 ]
+  [ "$output" = "26.08.2" ]
+  grep -qx 'https://download.kde.org/stable/release-service/26.08.2/src/' "$TEST_TMPDIR/curl.args"
+}
+
+@test "kde-tarball: skips directories that are not versions" {
+  record_curl
+  create_test_package "krita" "kde-tarball" ""
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "krita"
+  [ "$status" -eq 0 ]
+  [ "$output" = "6.0.4" ]
+  ! grep -q -e 'updates/' -e 'FastSketchPlugin' "$TEST_TMPDIR/curl.args"
+}
+
+@test "kde-tarball: a version directory beats older tarballs beside it" {
+  create_test_package "moved" "kde-tarball" ""
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "moved"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.0.0" ]
+}
+
+@test "kde-tarball: a newer tarball beats older version directories beside it" {
+  create_test_package "flat-again" "kde-tarball" ""
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "flat-again"
+  [ "$status" -eq 0 ]
+  [ "$output" = "3.0.0" ]
+}
+
+@test "kde-tarball: names the newest version directory when the project is not in it" {
+  create_test_package "dropped" "kde-tarball" "upstream:
+  path: stable/plasma"
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "dropped"
+  [ "$status" -eq 1 ]
+  [ "$output" = "No dropped-<version>.tar.xz in the newest version directory https://download.kde.org/stable/plasma/6.10.0/" ]
+}
+
+@test "kde-tarball: fails when the newest version directory cannot be read" {
+  create_test_package "broken" "kde-tarball" "upstream:
+  path: unstable/broken"
+
+  run "$TEST_TMPDIR/strategies/kde-tarball.sh" "broken"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch https://download.kde.org/unstable/broken/2.0.0/"* ]]
+}
+
 # === webpage-scrape ===
 
 @test "webpage-scrape: returns version matched by pattern" {
