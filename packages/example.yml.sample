@@ -165,7 +165,8 @@ upstream:
 #   tag_version_replace: '\1'              # optional, \1 to \9 are the groups
 
 # --- git-latest -------------------------------------------------------------
-# For -git packages. Produces rCOUNT.HASH (e.g. r435.abc1234).
+# For -git packages. Produces rCOUNT.HASH (e.g. r435.abc1234), or with
+# describe the git describe form of the Arch guidelines (1.4.0.r47.g0bbf5ad).
 #
 # strategy: git-latest
 # upstream:
@@ -175,6 +176,8 @@ upstream:
 #   url: https://example.com/repo.git      # required for type=git, https only
 #   branch: develop                        # optional, as #branch= in source;
 #                                          # default: the default branch
+#   describe: tags                         # optional: tags|annotated
+#   tag_prefix: v                          # optional, cut from the tag
 
 # --- pypi / npm / crates ----------------------------------------------------
 # Language registries. PyPI returns stable releases only, and crates too

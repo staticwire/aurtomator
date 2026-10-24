@@ -111,6 +111,30 @@ validate_pkg() {
     fi
   fi
 
+  local describe=""
+  if [[ $(pkg_get "$file" '.upstream.describe | tag') != "!!null" ]]; then
+    describe=$(pkg_get "$file" '.upstream.describe')
+    if [[ "$strategy" != "git-latest" ]]; then
+      log_err "$file: upstream.describe applies to the git-latest strategy only"
+      ((errors++))
+    elif [[ "$describe" != tags && "$describe" != annotated ]]; then
+      log_err "$file: upstream.describe must be tags or annotated: $describe"
+      ((errors++))
+    fi
+  fi
+
+  local tag_prefix
+  if [[ $(pkg_get "$file" '.upstream.tag_prefix | tag') != "!!null" ]]; then
+    tag_prefix=$(pkg_get "$file" '.upstream.tag_prefix')
+    if [[ -z "$describe" ]]; then
+      log_err "$file: upstream.tag_prefix applies with upstream.describe only"
+      ((errors++))
+    elif [[ ! "$tag_prefix" =~ ^[A-Za-z0-9._+/-]+$ ]]; then
+      log_err "$file: upstream.tag_prefix may hold A-Za-z0-9._+/- only: $tag_prefix"
+      ((errors++))
+    fi
+  fi
+
   local nightly_tag_regex
   nightly_tag_regex=$(pkg_get "$file" '.upstream.nightly_tag_regex // ""')
   if [[ -n "$nightly_tag_regex" ]]; then
@@ -290,12 +314,18 @@ validate_pkg() {
             ;;
         esac
       fi
-      # The strategy prints r<count>.<hash>. vercmp reads 1.4.0.r47.g0bbf5ad
-      # of git describe as newer than any of those, so each check would be
-      # a downgrade.
+      # The strategy prints r<count>.<hash>, or with upstream.describe
+      # <tag>.r<count>.g<hash>. vercmp reads 1.4.0.r47.g0bbf5ad as newer
+      # than every r<count>.<hash>, so a current of the other form would
+      # make each check a downgrade, or each check an update.
       local current
       current=$(pkg_get "$file" '.current // ""')
-      if [[ -n "$current" && ! "$current" =~ ^r[0-9]+\.[0-9a-f]+$ ]]; then
+      if [[ -n "$describe" ]]; then
+        if [[ -n "$current" && ! "$current" =~ ^[A-Za-z0-9._+]+\.r[0-9]+\.g[0-9a-f]+$ ]]; then
+          log_err "$file: current must be <tag>.r<count>.g<hash> for git-latest with upstream.describe, the form the strategy prints: $current"
+          ((errors++))
+        fi
+      elif [[ -n "$current" && ! "$current" =~ ^r[0-9]+\.[0-9a-f]+$ ]]; then
         log_err "$file: current must be r<count>.<hash> for git-latest, the form the strategy prints: $current"
         ((errors++))
       fi

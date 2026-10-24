@@ -407,10 +407,14 @@ upstream:
 | `upstream.project` | depends  | Required for the `github` and `gitlab` types |
 | `upstream.url`     | depends  | Required for the `git` type: full clone URL, `https://` only |
 | `upstream.branch`  | no       | The branch of a source pinned to `#branch=`. Default: the default branch of the repository |
+| `upstream.describe` | no      | `tags` or `annotated`: print the form of `git describe` instead of `r<count>.<hash>` |
+| `upstream.tag_prefix` | no    | Text cut from the start of the tag with `upstream.describe`, such as `v` |
 
 **Version:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the hash of `HEAD` and prints the usual `-git` format `r<count>.<hash>`, for example `r431.66db9ce`. With `upstream.branch`, the clone takes `--branch`, and `HEAD` is that branch, as makepkg checks it out for `#branch=`: sharkdp/fd gives `r2061.9e90463` on `master` and `r1925.cf8a48a` with `branch: abort-on-panic`. A branch the repository does not have fails the clone. `validate-pkg.sh` refuses a name that `git check-ref-format --branch` refuses, such as one that starts with `-`. The hash has as many characters as the hash in `current`, and 7 when `current` is empty. `git rev-parse --short` in a `pkgver()` gives more characters as the repository grows: fabric-git is `r2173.ef2e985d` on the AUR, and `vercmp` reads `r2173.ef2e985` of the same commit as older.
 
-`current` must be empty or of the form `r<count>.<hash>`, and `validate-pkg.sh` refuses any other. `vercmp` reads `1.4.0.r47.g0bbf5ad`, the form of `git describe`, as newer than every `r<count>.<hash>`, so each check would be a downgrade and the package would never update.
+With `upstream.describe`, the strategy prints what the `git describe` recipes of the [Arch package guidelines for VCS packages](https://manual.archlinux.page/package-guidelines/vcs/) print: `git describe --long --abbrev=<n>`, with `--tags` for `describe: tags` and without it for `describe: annotated`, which takes annotated tags only. `upstream.tag_prefix` is cut from the start of the tag first, as `sed 's/^v//'` does, and then `sed 's/\([^-]*-g\)/r\1/;s/-/./g'` turns `v1.2.0-rc1-47-g0bbf5ad` into `1.2.0.rc1.r47.g0bbf5ad`. On a tagged commit, `--long` still gives `r0` and the hash. The hash takes as many characters as the hash after `.g` in `current`, and 7 when `current` is empty. A repository without a tag reachable from `HEAD` fails with `git describe finds no tag reachable from HEAD of <url>`. `validate-pkg.sh` refuses a `describe` other than `tags` or `annotated`, a `tag_prefix` without `describe`, and a `tag_prefix` with a character outside `A-Za-z0-9._+/-`.
+
+`current` must be empty or of the form the strategy prints: `r<count>.<hash>`, or `<tag>.r<count>.g<hash>` with `upstream.describe`. `validate-pkg.sh` refuses any other. `vercmp` reads `1.4.0.r47.g0bbf5ad` as newer than every `r<count>.<hash>`, so a `current` of the other form would make each check a downgrade, and the package would never update.
 
 The clone runs with `GIT_ALLOW_PROTOCOL=http:https`. A URL in a package YAML that comes with a pull request therefore cannot read a local repository or connect to an ssh host with the SSH key of the machine that runs the check.
 
@@ -433,6 +437,18 @@ upstream:
   type: gitlab
   host: invent.kde.org
   project: network/my-kde-app
+```
+
+**Example YAML (the form of `git describe`):** lightdm-git counts with `git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g'`, and git gives its hash 8 characters. The AUR version as `current` keeps that length:
+
+```yaml
+name: lightdm-git
+strategy: git-latest
+upstream:
+  type: github
+  project: CanonicalLtd/lightdm
+  describe: tags
+current: '1.30.0.r9.g03f21898'
 ```
 
 **Example YAML (any HTTPS git URL):**

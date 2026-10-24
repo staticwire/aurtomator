@@ -872,6 +872,103 @@ EOF
   [ ! -e "$TEST_TMPDIR/ssh.args" ]
 }
 
+# The git recipes of the Arch package guidelines for VCS packages:
+# git describe --long [--tags] --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g',
+# with a prefix of the tag cut first as 's/^v//'
+@test "git-latest: describe tags prints what the recipe prints" {
+  fake_git_upstream
+  git -C "$fake_repo" tag v1.2.0 HEAD~2
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+  describe: tags
+  tag_prefix: v"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.2.0.r2.g$(git -C "$fake_repo" rev-parse --short=7 HEAD)" ]
+  [ "$output" = "$(git -C "$fake_repo" describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g')" ]
+}
+
+@test "git-latest: describe annotated skips a lightweight tag" {
+  fake_git_upstream
+  git -C "$fake_repo" tag -a -m "release" 1.0.0 HEAD~2
+  git -C "$fake_repo" tag 1.1.0 HEAD~1
+  local hash
+  hash=$(git -C "$fake_repo" rev-parse --short=7 HEAD)
+
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+  describe: annotated"
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0.0.r2.g$hash" ]
+
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+  describe: tags"
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.1.0.r1.g$hash" ]
+}
+
+@test "git-latest: describe cuts the prefix and turns the dashes of the tag into dots" {
+  fake_git_upstream
+  git -C "$fake_repo" tag foo-6.1-rc1 HEAD~2
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+  describe: tags
+  tag_prefix: foo-"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ "$output" = "6.1.rc1.r2.g$(git -C "$fake_repo" rev-parse --short=7 HEAD)" ]
+}
+
+# --long keeps the count and the hash on a tagged commit, as android-udev-git
+# 20260922.r0.gf45ef6c on the AUR
+@test "git-latest: describe on a tagged commit prints r0" {
+  fake_git_upstream
+  git -C "$fake_repo" tag 20260922 HEAD
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+  describe: tags"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20260922.r0.g$(git -C "$fake_repo" rev-parse --short=7 HEAD)" ]
+}
+
+@test "git-latest: describe takes the length of the hash from current" {
+  fake_git_upstream
+  git -C "$fake_repo" tag 1.2.0 HEAD~2
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+  describe: tags
+current: '1.2.0.r1.g0000000000'"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.2.0.r2.g$(git -C "$fake_repo" rev-parse HEAD | cut -c1-10)" ]
+}
+
+@test "git-latest: describe fails when no tag is reachable" {
+  fake_git_upstream
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git
+  describe: tags"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"git describe finds no tag reachable from HEAD of https://git.example.com/repo.git"* ]]
+}
+
 # === github-nightly ===
 
 @test "github-nightly: pattern A, fixed tag, version from body" {

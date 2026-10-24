@@ -122,6 +122,78 @@ current: '$current'"
   done
 }
 
+@test "validate: git-latest describe passes" {
+  local describe
+  for describe in tags annotated; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+  describe: $describe
+  tag_prefix: release/
+current: '1.2.0.rc1.r47.g0bbf5ad'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "validate: git-latest describe of another value rejected" {
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+  describe: 'yes'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.describe must be tags or annotated: yes"* ]]
+}
+
+@test "validate: describe for another strategy rejected" {
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+  describe: tags"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.describe applies to the git-latest strategy only"* ]]
+}
+
+@test "validate: git-latest tag_prefix without describe rejected" {
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+  tag_prefix: v"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.tag_prefix applies with upstream.describe only"* ]]
+}
+
+@test "validate: git-latest tag_prefix outside the characters of a tag rejected" {
+  local prefix
+  for prefix in 'a b' 'v*' ''; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+  describe: tags
+  tag_prefix: '$prefix'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"upstream.tag_prefix may hold A-Za-z0-9._+/- only: $prefix"* ]]
+  done
+}
+
+# vercmp reads r504.42cd4ac as older than every 1.2.0.r47.g0bbf5ad
+@test "validate: git-latest describe fails on a current of another form" {
+  local current
+  for current in r504.42cd4ac 1.2.0 1.2.0.r47.0bbf5ad; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+  describe: tags
+current: '$current'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"current must be <tag>.r<count>.g<hash> for git-latest with upstream.describe, the form the strategy prints: $current"* ]]
+  done
+}
+
 @test "validate: branch for another strategy rejected" {
   create_test_package "mypkg" "github-tag" "upstream:
   project: owner/repo
