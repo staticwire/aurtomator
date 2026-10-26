@@ -991,7 +991,7 @@ Steps 9 to 11 run as root with `GH_TOKEN` set to the workflow token, `github.tok
 `update-readme.sh` rewrites two blocks of `README.md`:
 
 1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: CI, Codecov and static badges for the repository in `origin`. A public repository gets its own tokenless Codecov badge. A private one, or a failed API call, links the upstream aurtomator badge.
-2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`.
+2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
 
 #### .status/ directory format
 
@@ -1011,6 +1011,7 @@ Steps 9 to 11 run as root with `GH_TOKEN` set to the workflow token, `github.tok
 | `.status/<name>`       | `update_failed: <error>`         | The update failed                        |
 | `.status/_error_count` | `0`                              | Total error count of the run             |
 | `.status/_alerts`      | `<name>`, `hold` or `notice`, the note, split by tabs | One line for each alert that fired, see [4.5](#45-update-alerts) |
+| `.status/_upstream`    | `newer: 0.7.0` or `current: 0.6.0` | The latest aurtomator release against `VERSION`, see [5.8](#58-version-of-aurtomator) |
 
 #### Packages badge
 
@@ -1045,7 +1046,7 @@ The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the
 
 ### 5.6 Issues
 
-The step `Create issues` runs with `if: always()`. When a package failed, is held or has an alert in `.status/_alerts`, it first reads `has_issues` of the repository. `gh issue list` fails in a repository with Issues turned off, so when GitHub answers `false`, the step prints a notice and opens no issue. Any other answer goes on, and a failure to read the answer or to list the issues fails the step.
+The step `Create issues` runs with `if: always()`. When a package failed, is held or has an alert in `.status/_alerts`, or a newer aurtomator release is out, it first reads `has_issues` of the repository. `gh issue list` fails in a repository with Issues turned off, so when GitHub answers `false`, the step prints a notice and opens no issue. Any other answer goes on, and a failure to read the answer or to list the issues fails the step.
 
 For every `.status/` entry with `check_failed:` or `update_failed:`, the step:
 
@@ -1058,15 +1059,33 @@ An alert opens an issue as well, see [4.5](#45-update-alerts). Its notes come fr
 - A `held:` status opens an issue titled `⏸️ <package>: update held` with the label `update-held`, unless an open `update-held` issue has that title. The body holds the held version and the notes of every alert that fired, and asks the maintainer to publish the version by hand and set `current`.
 - An `updated:` or `downgrade:` status of a package with a line in `.status/_alerts` opens an issue titled `🔔 <package>: <version> notice` with the label `update-notice`, unless an open `update-notice` issue has that title. The body holds the published version and the notes. The maintainer closes it once the edit is done.
 
+A newer aurtomator release, `newer: <release>` in `.status/_upstream`, opens an issue titled `⬆️ aurtomator <release> available` with the label `aurtomator-update`, unless an open `aurtomator-update` issue has that title. `builder` writes the body with `upstream_issue_body`: the release, the version in `VERSION`, a link to the release notes and the run. See [5.8](#58-version-of-aurtomator).
+
 The step belongs to `publish`, which runs for a new version or a change in the status table. A package that keeps failing gets its issue in the run where it starts failing. An issue closed while the package still fails comes back in the next run that reaches `publish`.
 
-The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the new status and the run. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated` or `downgrade`, so the version is in the AUR. An open `⏸️ <package>: update held` closes when the status is anything but `held`. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It does not run after a failed step, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
+The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the new status and the run. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated` or `downgrade`, so the version is in the AUR. An open `⏸️ <package>: update held` closes when the status is anything but `held`. An open `⬆️ aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` holds the release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It does not run after a failed step, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
 
 ### 5.7 Failed runs
 
 The issue step of `publish` reports failed packages, and a run that fails in `image` or `check` never reaches it. `notify-failure.yml` runs on `workflow_run` when a run of `Check AUR Package Updates` completes, and its job runs only when the conclusion of that run is `failure` or `timed_out`. It opens one issue titled `❌ Check AUR Package Updates failed`, with a link to the run, its branch and the names of the failed jobs, and opens no second one while that issue is open. A repository with Issues turned off gets a notice instead, as in [5.6](#56-issues). The workflow has `actions: read` to list the jobs and `issues: write`, and checks out nothing.
 
 GitHub starts a `workflow_run` workflow only from its file on the default branch.
+
+### 5.8 Version of aurtomator
+
+`VERSION` in the root holds the version of aurtomator that a repository runs. It is the only record of the version that reaches a fork, which gets no tags of the upstream repository, and a template copy, which gets one commit. The release PR of aurtomator writes it, see `CONTRIBUTING.md`.
+
+`check-all.sh` logs the version first. In a check run and with `--update`, it reads the latest release of `staticwire/aurtomator` from the GitHub API, with `GITHUB_TOKEN` when it is set, and compares it with `VERSION` by `vercmp`. It writes `newer: <release>` or `current: <release>` to `.status/_upstream` and logs a line when the release is newer. A failed request, or a tag other than `vX.Y.Z`, logs a warning and writes nothing, and the run goes on. `--prepare` and `--publish` run no request and carry `.status/_upstream` of the check run. A repository without `VERSION` asks nothing.
+
+`update-readme.sh` writes the version under the package table, and with `newer:` a link to the release:
+
+```text
+aurtomator 0.6.0 · [0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0) <!-- x-release-please-version -->
+```
+
+The comment marks the line for the release PR of aurtomator, which writes the new version there in the README of the upstream repository. Its check run then finds the README as `update-readme.sh` writes it, and has nothing to commit to a `main` that only takes pull requests. A run that could not read the release writes the line without the link.
+
+A newer release also opens an issue, and the run closes it once `VERSION` holds the release, see [5.6](#56-issues). A fork updates by merging the release into its `main`.
 
 ## 6. CI Quality Gate: ci.yml
 

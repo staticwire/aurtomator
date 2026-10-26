@@ -263,7 +263,16 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 @test "release-please: writes VERSION, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
   run yq -o=json -I=0 '.packages["."]' "$RELEASE_CONFIG"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"release-type":"simple","version-file":"VERSION","changelog-type":"github","skip-changelog":true,"bump-minor-pre-major":true,"include-component-in-tag":false}' ]
+  [ "$output" = '{"release-type":"simple","version-file":"VERSION","changelog-type":"github","skip-changelog":true,"bump-minor-pre-major":true,"include-component-in-tag":false,"extra-files":[{"type":"generic","path":"README.md"}]}' ]
+}
+
+# The release PR writes the version line of README.md, so the check run of
+# the upstream repository finds nothing to commit to its protected main
+@test "release-please: the README holds the version line update-readme.sh writes" {
+  local version
+  version=$(<"$GITHUB_DIR/../VERSION")
+  run grep -cxF "aurtomator $version <!-- x-release-please-version -->" "$GITHUB_DIR/../README.md"
+  [ "$output" = "1" ]
 }
 
 # release-please updates VERSION in place and does not create it
@@ -602,6 +611,7 @@ while (($#)); do
         auto-update) emoji="❌" ;;
         update-held) emoji="⏸️" ;;
         update-notice) emoji="🔔" ;;
+        aurtomator-update) emoji="⬆️" ;;
       esac
       shift
       ;;
@@ -721,6 +731,34 @@ EOF
   [ "$output" = "0" ]
 }
 
+@test "check-updates: the issue step opens an issue for a newer aurtomator release" {
+  run_issue_step _upstream="newer: 0.7.0"
+  [ "$status" -eq 0 ]
+  grep -qx 'label create aurtomator-update --color 0e8a16 --description Newer aurtomator release' "$GH_LOG"
+  grep -qx 'issue create --title ⬆️ aurtomator 0.7.0 available --label aurtomator-update --body body' "$GH_LOG"
+}
+
+@test "check-updates: an open issue of the release holds back another one" {
+  GH_TITLES=$'⬆️ aurtomator 0.7.0 available' run_issue_step _upstream="newer: 0.7.0"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step opens nothing for aurtomator at its latest release" {
+  run_issue_step _upstream="current: 0.7.0"
+  [ "$status" -eq 0 ]
+  [ ! -s "$GH_LOG" ]
+}
+
+@test "check-updates: the issue step gives a notice for a newer aurtomator release when Issues are disabled" {
+  GH_HAS_ISSUES=false GH_FAIL=1 run_issue_step _upstream="newer: 0.7.0"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
+  run grep -c '^issue ' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "check-updates: the issue step gives a notice for a held update when Issues are disabled" {
   GH_HAS_ISSUES=false GH_FAIL=1 run_issue_step foo="held: 29+1"
   [ "$status" -eq 0 ]
@@ -758,6 +796,7 @@ case "$1 $2" in
         case "$2" in
           auto-update) emoji="❌" ;;
           update-held) emoji="⏸️" ;;
+          aurtomator-update) emoji="⬆️" ;;
         esac
       fi
       shift
@@ -953,6 +992,25 @@ no_commit() {
   grep -qx 'issue close 14 --comment The status of baz is `held: 3.0` in https://example.invalid/run.' "$GH_LOG"
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "2" ]
+}
+
+@test "check-updates: closes the issue of an aurtomator release once VERSION holds it or a newer one is out" {
+  GH_OPEN=$'21 ⬆️ aurtomator 0.7.0 available\n22 ⬆️ aurtomator 0.8.0 available' run_close_step _upstream="current: 0.8.0"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 21 --comment The aurtomator release status is `current: 0.8.0` in https://example.invalid/run.' "$GH_LOG"
+  grep -q '^issue close 22 ' "$GH_LOG"
+  GH_OPEN=$'21 ⬆️ aurtomator 0.7.0 available\n22 ⬆️ aurtomator 0.8.0 available' run_close_step _upstream="newer: 0.8.0"
+  [ "$status" -eq 0 ]
+  grep -q '^issue close 21 ' "$GH_LOG"
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "check-updates: keeps the issue of an aurtomator release when the run could not read the release" {
+  GH_OPEN=$'21 ⬆️ aurtomator 0.7.0 available' run_close_step foo=up_to_date
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "check-updates: the close step lists nothing when Issues are disabled" {

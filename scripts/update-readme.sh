@@ -21,7 +21,6 @@ require_cmd yq
 
 readonly README="${AURTOMATOR_DIR}/README.md"
 readonly STATUS_DIR="${AURTOMATOR_DIR}/.status"
-readonly UPSTREAM_REPO="staticwire/aurtomator"
 
 if [[ ! -f "$README" ]]; then
   log_err "README.md not found"
@@ -56,7 +55,7 @@ if grep -q "$BADGES_START" "$README"; then
       badges+=" [![codecov](https://codecov.io/github/${repo_url}/graph/badge.svg)](https://codecov.io/github/${repo_url})"
     else
       # Private repo or API failed: link to upstream aurtomator Codecov
-      badges+=" [![codecov](https://codecov.io/github/${UPSTREAM_REPO}/graph/badge.svg)](https://codecov.io/github/${UPSTREAM_REPO})"
+      badges+=" [![codecov](https://codecov.io/github/${AURTOMATOR_UPSTREAM}/graph/badge.svg)](https://codecov.io/github/${AURTOMATOR_UPSTREAM})"
     fi
   fi
 
@@ -199,6 +198,21 @@ else
   table+="$table_rows"
 fi
 table+=$'\n</table>'
+
+# The version of aurtomator, and the newer release the check run found. The
+# release PR of aurtomator rewrites the version on the line that carries
+# x-release-please-version, so the check run of the upstream repository
+# finds nothing to commit to its protected main.
+version=$(aurtomator_version)
+if [[ -n "$version" ]]; then
+  upstream=""
+  [[ ! -f "${STATUS_DIR}/_upstream" ]] || upstream=$(<"${STATUS_DIR}/_upstream")
+  table+=$'\n\n'"aurtomator ${version}"
+  if [[ "$upstream" =~ ^newer:\ ([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    table+=" · [${BASH_REMATCH[1]} available](https://github.com/${AURTOMATOR_UPSTREAM}/releases/tag/v${BASH_REMATCH[1]})"
+  fi
+  table+=" <!-- x-release-please-version -->"
+fi
 
 # Replace between markers
 {

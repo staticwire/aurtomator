@@ -1402,6 +1402,30 @@ current: '13'"
   [ "$(cat "$TEST_TMPDIR/.status/jumpy")" = "jump_skipped: 2026102100" ]
 }
 
+@test "check-all --prepare and --publish: carry the aurtomator release status of the check run" {
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  echo "newer: 0.7.0" >"$TEST_TMPDIR/.status/_upstream"
+  MOCK_UPSTREAM_TAG=fail run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_upstream")" = "newer: 0.7.0" ]
+  MOCK_UPSTREAM_TAG=fail run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_upstream")" = "newer: 0.7.0" ]
+}
+
+@test "check-all --publish: drops an aurtomator release status it does not know" {
+  local upstream
+  for upstream in "newer: 0.7" "later: 0.7.0" "newer: 0.7.0 x" "x newer: 0.7.0"; do
+    printf '%s\n' "$upstream" >"$TEST_TMPDIR/.status/_upstream"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_TMPDIR/.status/_upstream" ] || {
+      echo "kept: $upstream"
+      return 1
+    }
+  done
+}
+
 @test "check-all --publish: keeps a held update and publishes nothing" {
   create_test_package "held" "github-release" "upstream:
   project: owner/repo
@@ -1979,6 +2003,26 @@ Run: https://example.invalid/run
 - Create the package for the old major
 
 Auto-created by update workflow. Close it once the edit is done.
+EOF
+  )
+  [ "$output" = "$expected" ]
+}
+
+# === upstream_issue_body ===
+
+@test "upstream_issue_body: names the release, the version of the repository and the notes" {
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  echo "newer: 0.7.0" >"$TEST_TMPDIR/_upstream"
+  run upstream_issue_body "$TEST_TMPDIR/_upstream" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+aurtomator 0.7.0 is out, and this repository runs 0.6.0.
+
+Release notes: https://github.com/staticwire/aurtomator/releases/tag/v0.7.0
+Run: https://example.invalid/run
+
+Auto-created by update workflow. A run closes it once `VERSION` holds this release, or once a newer release is out.
 EOF
   )
   [ "$output" = "$expected" ]

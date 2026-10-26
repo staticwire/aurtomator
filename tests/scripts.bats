@@ -1087,6 +1087,139 @@ run_alert_fires() {
   done
 }
 
+# === version of aurtomator ===
+
+@test "lib.sh: aurtomator_version prints VERSION, or nothing without it" {
+  run bash -c 'source "$0/scripts/lib.sh"; aurtomator_version' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  run bash -c 'source "$0/scripts/lib.sh"; aurtomator_version' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.6.0" ]
+}
+
+@test "lib.sh: latest_aurtomator_release prints the version of the latest release tag" {
+  MOCK_UPSTREAM_TAG=v0.7.0 run bash -c 'source "$0/scripts/lib.sh"; latest_aurtomator_release' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.7.0" ]
+}
+
+@test "lib.sh: latest_aurtomator_release fails on another tag or a failed request" {
+  local tag
+  for tag in nightly 0.7.0 v0.7 'v0.7.0 x' xv0.7.0 fail; do
+    MOCK_UPSTREAM_TAG="$tag" run bash -c 'source "$0/scripts/lib.sh"; latest_aurtomator_release' "$TEST_TMPDIR"
+    [ "$status" -ne 0 ] || {
+      echo "passed: $tag"
+      return 1
+    }
+  done
+}
+
+@test "lib.sh: upstream_status says newer only for a release above VERSION" {
+  local pair
+  for pair in "0.6.0 v0.7.0 newer: 0.7.0" "0.6.0 v0.6.0 current: 0.6.0" "0.7.0 v0.6.0 current: 0.6.0" "0.9.0 v0.10.0 newer: 0.10.0"; do
+    echo "${pair%% *}" >"$TEST_TMPDIR/VERSION"
+    pair="${pair#* }"
+    MOCK_UPSTREAM_TAG="${pair%% *}" run bash -c 'source "$0/scripts/lib.sh"; upstream_status' "$TEST_TMPDIR"
+    [ "$status" -eq 0 ]
+    [ "$output" = "${pair#* }" ]
+  done
+}
+
+@test "lib.sh: upstream_status fails without VERSION" {
+  run bash -c 'source "$0/scripts/lib.sh"; upstream_status' "$TEST_TMPDIR"
+  [ "$status" -ne 0 ]
+}
+
+@test "check-all: logs the version and records a newer release of aurtomator" {
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  MOCK_UPSTREAM_TAG=v0.7.0 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *"aurtomator 0.6.0" ]]
+  [[ "$output" == *"aurtomator 0.7.0 is out, this repository runs 0.6.0"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/_upstream")" = "newer: 0.7.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all: records that aurtomator is at its latest release" {
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_upstream")" = "current: 0.6.0" ]
+}
+
+@test "check-all: warns and records nothing when the release cannot be read" {
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  MOCK_UPSTREAM_TAG=fail run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Could not read the latest aurtomator release"* ]]
+  [ ! -e "$TEST_TMPDIR/.status/_upstream" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all: asks for no release without VERSION" {
+  MOCK_UPSTREAM_TAG=fail run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"aurtomator"* ]]
+  [ ! -e "$TEST_TMPDIR/.status/_upstream" ]
+}
+
+@test "update-readme: writes the version under the package table" {
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  cat >"$TEST_TMPDIR/README.md" <<'EOF'
+<!-- PACKAGES:START -->
+<!-- PACKAGES:END -->
+EOF
+  git -C "$TEST_TMPDIR" init -q
+  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
+
+  grep -qx '</table>' "$TEST_TMPDIR/README.md"
+  run grep -A2 -x '</table>' "$TEST_TMPDIR/README.md"
+  [ "$output" = $'</table>\n\naurtomator 0.6.0 <!-- x-release-please-version -->' ]
+}
+
+@test "update-readme: links a newer release of aurtomator" {
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  echo "newer: 0.7.0" >"$TEST_TMPDIR/.status/_upstream"
+  cat >"$TEST_TMPDIR/README.md" <<'EOF'
+<!-- PACKAGES:START -->
+<!-- PACKAGES:END -->
+EOF
+  git -C "$TEST_TMPDIR" init -q
+  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
+
+  grep -qxF 'aurtomator 0.6.0 · [0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0) <!-- x-release-please-version -->' "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: links no release for aurtomator at its release or for another _upstream" {
+  local upstream
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  git -C "$TEST_TMPDIR" init -q
+  for upstream in "current: 0.7.0" "xnewer: 0.7.0" "newer: 0.7.0 x"; do
+    printf '%s\n' "$upstream" >"$TEST_TMPDIR/.status/_upstream"
+    printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+    "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
+    grep -qxF 'aurtomator 0.6.0 <!-- x-release-please-version -->' "$TEST_TMPDIR/README.md" || {
+      echo "linked for: $upstream"
+      return 1
+    }
+  done
+}
+
+@test "update-readme: writes no version line without VERSION" {
+  echo "current: 0.6.0" >"$TEST_TMPDIR/.status/_upstream"
+  cat >"$TEST_TMPDIR/README.md" <<'EOF'
+<!-- PACKAGES:START -->
+<!-- PACKAGES:END -->
+EOF
+  git -C "$TEST_TMPDIR" init -q
+  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
+
+  run grep -c 'aurtomator ' "$TEST_TMPDIR/README.md"
+  [ "$output" = "0" ]
+}
+
 # === tag_versions ===
 
 @test "lib.sh: tag_versions fills the groups and keeps every other character" {

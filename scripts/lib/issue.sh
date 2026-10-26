@@ -4,6 +4,18 @@
 #
 # Sourced by lib.sh.
 
+# Body of the issue opened for a newer release of aurtomator
+# Args: $1=_upstream in .status/, holding newer: and the release; $2=URL
+#       of the run
+# The backticks are Markdown code
+# shellcheck disable=SC2016
+upstream_issue_body() {
+  local release
+  release=$(<"$1")
+  release="${release#newer: }"
+  printf 'aurtomator %s is out, and this repository runs %s.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nRun: %s\n\nAuto-created by update workflow. A run closes it once `VERSION` holds this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$2"
+}
+
 # Body of the issue opened for an update an alert fired on: a held update,
 # or a published one with a notice. The notes come from _alerts, which
 # check-all.sh writes next to the status file, one line per fired alert:

@@ -158,6 +158,25 @@ fi
 rm -rf "$STATUS_DIR"
 mkdir -p "$STATUS_DIR"
 
+# The version of aurtomator, and in a mode that runs the strategies its
+# latest release, for the README line and its issue. A failed request
+# records nothing, so it closes no issue. --prepare and --publish carry the
+# record of the check run.
+AURTOMATOR_VERSION=$(aurtomator_version)
+[[ -z "$AURTOMATOR_VERSION" ]] || log_info "aurtomator $AURTOMATOR_VERSION"
+if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
+  if [[ "${CHECKED[_upstream]:-}" =~ ^(newer|current):\ [0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s\n' "${CHECKED[_upstream]}" >"${STATUS_DIR}/_upstream"
+  fi
+elif [[ -n "$AURTOMATOR_VERSION" ]]; then
+  if UPSTREAM_STATUS=$(upstream_status); then
+    printf '%s\n' "$UPSTREAM_STATUS" >"${STATUS_DIR}/_upstream"
+    [[ "$UPSTREAM_STATUS" != newer:* ]] || log_warn "aurtomator ${UPSTREAM_STATUS#newer: } is out, this repository runs $AURTOMATOR_VERSION"
+  else
+    log_warn "Could not read the latest aurtomator release"
+  fi
+fi
+
 # The update failure that the prepare or the verify run recorded for a
 # package the check run found outdated. Both runs share one user with code
 # from every PKGBUILD, so nothing else of theirs is taken, and a package

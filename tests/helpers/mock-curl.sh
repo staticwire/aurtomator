@@ -306,6 +306,13 @@ case "$url" in
     echo '[{"name": "latest"}, {"name": "nightly"}]'
     ;;
 
+  # The latest release of aurtomator itself: the tag in MOCK_UPSTREAM_TAG,
+  # v0.6.0 by default, or a failed request for "fail"
+  *api.github.com/repos/staticwire/aurtomator/releases/latest)
+    [[ "${MOCK_UPSTREAM_TAG:-v0.6.0}" != fail ]] || exit 22
+    printf '{"tag_name": "%s"}\n' "${MOCK_UPSTREAM_TAG:-v0.6.0}"
+    ;;
+
   # --- Normal success patterns (wildcards) ---
 
   # GitHub Release API

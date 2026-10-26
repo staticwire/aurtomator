@@ -467,6 +467,18 @@ jobs:
           done <<<"$open
           $held"
 
+          # The issue of an aurtomator release closes once VERSION holds it
+          # or a newer release is out. A run that could not read the latest
+          # release has no _upstream and closes nothing.
+          if [[ -f "$STATUS_DIR/_upstream" ]]; then
+            upstream=$(cat "$STATUS_DIR/_upstream")
+            releases=$(gh issue list --label "aurtomator-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            while read -r number title; do
+              [[ -n "$number" && "$title" != "⬆️ aurtomator ${upstream#newer: } available" ]] || continue
+              gh issue close "$number" --comment "The aurtomator release status is \`$upstream\` in $RUN_URL."
+            done <<<"$releases"
+          fi
+
       - name: Create issues
         if: always()
         env:
@@ -479,7 +491,7 @@ jobs:
           # gh issue list fails in a repository with Issues turned off. A
           # fork like that gets a notice, and any other failure of the
           # list still fails the step.
-          if grep -qsE '^(check_failed|update_failed|held):' "$STATUS_DIR"/* || [[ -s "$STATUS_DIR/_alerts" ]]; then
+          if grep -qsE '^(check_failed|update_failed|held|newer):' "$STATUS_DIR"/* || [[ -s "$STATUS_DIR/_alerts" ]]; then
             has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
             if [[ "$has_issues" == "false" ]]; then
               echo "::notice::Issues are disabled in $GITHUB_REPOSITORY, so the run opens no issue"
@@ -489,17 +501,17 @@ jobs:
 
           # Opens an issue with label $1, made with color $2 and description
           # $3 when it is missing, and title $4, unless an open issue of the
-          # label has that title. builder writes the body from status file
-          # $5, so root runs no code from the workspace while it holds the
-          # token.
-          alert_issue() {
+          # label has that title. builder writes the body with function $5
+          # of scripts/lib/issue.sh from status file $6, so root runs no
+          # code from the workspace while it holds the token.
+          open_issue() {
             gh label create "$1" --color "$2" --description "$3" 2>/dev/null || true
             titles=$(gh issue list --label "$1" --state open --limit 1000 --json title --jq '.[].title')
             if grep -qxF -e "$4" <<<"$titles"; then
               echo "Issue already open: $4"
               return 0
             fi
-            body=$(sudo -u builder bash -c 'source ./scripts/lib.sh && alert_issue_body "$@"' _ "$5" "$RUN_URL")
+            body=$(sudo -u builder bash -c 'source ./scripts/lib.sh && "$@"' _ "$5" "$6" "$RUN_URL")
             gh issue create --title "$4" --label "$1" --body "$body" || echo "Warning: could not create issue (issues may be disabled)"
           }
 
@@ -535,14 +547,20 @@ jobs:
                 echo "Created issue for $pkg_name"
                 ;;
               "held: "*)
-                alert_issue update-held fbca04 "Update waits for a hand edit" "⏸️ $pkg_name: update held" "$status_file"
+                open_issue update-held fbca04 "Update waits for a hand edit" "⏸️ $pkg_name: update held" alert_issue_body "$status_file"
                 ;;
               "updated: "* | "downgrade: "*)
                 # A published update gets an issue for the notices that
                 # fired; a hold would have kept it from being published
                 if awk -F'\t' -v p="$pkg_name" '$1 == p { found = 1 } END { exit !found }' "$STATUS_DIR/_alerts" 2>/dev/null; then
-                  alert_issue update-notice 1d76db "Published update needs a hand edit" "🔔 $pkg_name: ${status#*: } notice" "$status_file"
+                  open_issue update-notice 1d76db "Published update needs a hand edit" "🔔 $pkg_name: ${status#*: } notice" alert_issue_body "$status_file"
                 fi
                 ;;
             esac
           done
+
+          # A newer release of aurtomator gets an issue
+          upstream=$(cat "$STATUS_DIR/_upstream" 2>/dev/null || true)
+          if [[ "$upstream" == "newer: "* ]]; then
+            open_issue aurtomator-update 0e8a16 "Newer aurtomator release" "⬆️ aurtomator ${upstream#newer: } available" upstream_issue_body "$STATUS_DIR/_upstream"
+          fi

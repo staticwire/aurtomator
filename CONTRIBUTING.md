@@ -51,7 +51,7 @@ Keep PRs focused: one logical change per PR. Unrelated refactors go in a separat
 
 ## Releases
 
-aurtomator follows semantic versioning, and `VERSION` holds the version of the code. After a merge to `main`, release-please (`.github/workflows/release-please.yml`) opens or updates a release PR from the commit types since the last release: `fix` raises the patch number, `feat` the minor one, and before 1.0.0 a breaking change raises the minor one too. A `docs`, `ci`, `chore` or `test` commit opens no release PR and goes out with the next release. The release PR writes the new version to `VERSION`. Its merge tags `vX.Y.Z` and publishes the release with the notes GitHub generates from the merged PRs. A line `Release-As: X.Y.Z` in the body of a squash commit sets another number.
+aurtomator follows semantic versioning, and `VERSION` holds the version of the code. After a merge to `main`, release-please (`.github/workflows/release-please.yml`) opens or updates a release PR from the commit types since the last release: `fix` raises the patch number, `feat` the minor one, and before 1.0.0 a breaking change raises the minor one too. A `docs`, `ci`, `chore` or `test` commit opens no release PR and goes out with the next release. The release PR writes the new version to `VERSION` and to the version line of the package table in `README.md`. Its merge tags `vX.Y.Z` and publishes the release with the notes GitHub generates from the merged PRs. A line `Release-As: X.Y.Z` in the body of a squash commit sets another number.
 
 ## Adding a new strategy
 
