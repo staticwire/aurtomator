@@ -40,23 +40,7 @@ if [[ -z "$latest" ]]; then
   exit 1
 fi
 
-# pkgver holds no dash. The PKGBUILD turns pkgver_dash back into a dash
-# where a URL needs one, as in ${pkgver//_/-}. pkgver_dash: '' drops the
-# dash, so 2.5.0-rc1 gives 2.5.0rc1, which vercmp puts below 2.5.0, and the
-# PKGBUILD puts it back as in ${pkgver/rc/-rc}.
-if [[ "$dash" == drop ]]; then
-  latest=${latest//-/}
-elif [[ -n "$dash" ]]; then
-  latest=${latest//-/"$dash"}
-fi
-
-# pkgver is the upstream version with the text of pkgver_format around it,
-# as 4.4215 for build 4215. The PKGBUILD cuts that text off where a URL
-# needs the upstream version, as in ${pkgver#4.}.
-if [[ -n "$format" ]]; then
-  latest=${format/"%s"/"$latest"}
-fi
-
+latest=$(to_pkgver "$latest" "$dash" "$format")
 validate_pkgver "$latest" || exit 1
 
 if [[ "$latest" == "$current" ]]; then

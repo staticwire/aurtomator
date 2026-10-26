@@ -306,6 +306,48 @@ case "$url" in
     echo '[{"name": "latest"}, {"name": "nightly"}]'
     ;;
 
+  # Releases of savonet/liquidsoap. v2.4.6 has builds for two OCaml
+  # versions, v2.5.0-rc1 for one. MOCK_RELEASE_AGE gives the hours since
+  # v2.5.0-rc1 was published, 48 by default, MOCK_RELEASE_DATE the date
+  # itself, and MOCK_ASSETS its asset names. MOCK_RELEASE_STATUS=500 fails
+  # the request.
+  *api.github.com/repos/asset-owner/asset-repo/releases/tags/v2.4.6)
+    printf '{"tag_name": "v2.4.6", "published_at": "2026-10-09T13:47:40Z", "assets": [%s]}\n' \
+      '{"name": "liquidsoap_2.4.6-debian-forky-ocaml4.14.2-3_amd64.deb"}, {"name": "liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb"}'
+    ;;
+  *api.github.com/repos/asset-owner/asset-repo/releases/tags/v2.5.0-rc1)
+    if [[ "${MOCK_RELEASE_STATUS:-200}" != 200 ]]; then
+      printf '%s\tThe requested URL returned error: %s\t' "$url" "$MOCK_RELEASE_STATUS" >&2
+      exit 22
+    fi
+    sep=""
+    assets=""
+    for name in ${MOCK_ASSETS-liquidsoap_2.5.0-debian-forky-ocaml5.5.1-1_amd64.deb liquidsoap_2.5.0-debian-forky-ocaml5.5.1-1_arm64.deb liquidsoap-minimal_2.5.0-debian-forky-ocaml5.5.1-1_amd64.deb liquidsoap_2.5.0-debian-trixie-ocaml5.5.1-1_amd64.deb}; do
+      assets+="$sep{\"name\": \"$name\"}"
+      sep=", "
+    done
+    printf '{"tag_name": "v2.5.0-rc1", "published_at": "%s", "assets": [%s]}\n' \
+      "${MOCK_RELEASE_DATE:-$(date -u -d "-${MOCK_RELEASE_AGE:-48} hours" +%Y-%m-%dT%H:%M:%SZ)}" "$assets"
+    ;;
+  # GitHub answers 404 for a tag without a release, as for a draft
+  *api.github.com/repos/asset-owner/asset-repo/releases/tags/*)
+    printf '%s\tThe requested URL returned error: 404\t' "$url" >&2
+    exit 22
+    ;;
+  # The commit of a tag: MOCK_TAG_AGE gives the hours since its date, 48 by
+  # default, and MOCK_COMMIT_STATUS=500 fails the request
+  *api.github.com/repos/asset-owner/asset-repo/commits/*)
+    if [[ "${MOCK_COMMIT_STATUS:-200}" != 200 ]]; then
+      printf '%s\tThe requested URL returned error: %s\t' "$url" "$MOCK_COMMIT_STATUS" >&2
+      exit 22
+    fi
+    printf '{"commit": {"committer": {"date": "%s"}}}\n' "$(date -u -d "-${MOCK_TAG_AGE:-48} hours" +%Y-%m-%dT%H:%M:%SZ)"
+    ;;
+  # The release of a tag with a plus sign, only under the encoded name
+  *api.github.com/repos/asset-owner/plus-repo/releases/tags/v1.0%2B1)
+    echo '{"tag_name": "v1.0+1", "published_at": "2026-10-01T00:00:00Z", "assets": [{"name": "plus_1.0-build7.tar.gz"}]}'
+    ;;
+
   # The latest release of aurtomator itself: the tag in MOCK_UPSTREAM_TAG,
   # v0.6.0 by default, or a failed request for "fail"
   *api.github.com/repos/staticwire/aurtomator/releases/latest)

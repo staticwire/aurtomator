@@ -83,7 +83,7 @@ jobs:
           # prepare runs for an outdated package, publish also for a change
           # in the status table
           prepare=false
-          if grep -qsE '^(new_version|available_downgrade): ' .status/*; then
+          if grep -qsE '^(new_version|available_downgrade|new_build): ' .status/*; then
             prepare=true
           fi
           sudo -u builder ./scripts/update-readme.sh
@@ -457,7 +457,7 @@ jobs:
                 "❌ $pkg_name: check failed:check_failed:"*) continue ;;
                 "❌ $pkg_name: check failed:"*) ;;
                 "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
-                  "❌ $pkg_name: update failed:downgrade: "*) ;;
+                  "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "*) ;;
                 "⏸️ $pkg_name: update held:held: "*) continue ;;
                 "⏸️ $pkg_name: update held:"*) ;;
                 *) continue ;;

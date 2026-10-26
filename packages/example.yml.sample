@@ -26,6 +26,8 @@
 # Written by update-pkg.sh after every push, do not edit by hand:
 #   current      - last pushed version
 #   last_updated - date of the last push, YYYY-MM-DD
+#   current_asset - value from a release asset name of the last push, for a
+#                   package with upstream.asset_var
 #
 # Strategies:
 #   github-release   GitHub Releases API
@@ -73,6 +75,20 @@ upstream:
 #   - match: '^29\+'                       # ERE on the new version
 #     hold: true
 #     note: Raise makedepends java-environment to 28
+
+# =============================================================================
+# VALUES FROM RELEASE ASSET NAMES
+# =============================================================================
+# github-tag and github-release only. asset_regex matches the asset names of
+# the release of the new version. Exactly one has to match, and its capture
+# group goes to the asset_var line of the PKGBUILD, as
+# _deb=2.5.0-debian-forky-ocaml5.5.1-1. A new value of the version the AUR
+# has is pushed as a rebuild with the next pkgrel. See docs/WORKFLOW.md 4.6.
+#
+# upstream:
+#   project: savonet/liquidsoap
+#   asset_regex: '^liquidsoap_([0-9.]+-debian-forky-ocaml5\.[0-9.]+-[0-9]+)_amd64\.deb$'
+#   asset_var: _deb                        # a variable name that starts with _
 
 # =============================================================================
 # PER-STRATEGY EXAMPLES

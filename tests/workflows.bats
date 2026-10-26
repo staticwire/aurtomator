@@ -337,6 +337,14 @@ run_decide_step() {
   [ "$output" = $'prepare=true\nwork=true' ]
   run run_decide_step pkg="available_downgrade: 1.0.0"
   [ "$output" = $'prepare=true\nwork=true' ]
+  run run_decide_step pkg="new_build: 1.0.0" _assets=$'pkg\t1.0.0-b'
+  [ "$output" = $'prepare=true\nwork=true' ]
+}
+
+@test "check-updates: Decide prepares nothing while an asset is pending" {
+  README_CHANGED=1 run run_decide_step pkg="pending: 2.0.0"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=true' ]
 }
 
 @test "check-updates: Decide publishes only a change of the status table" {
@@ -953,11 +961,11 @@ no_commit() {
 }
 
 @test "check-updates: closes the update issue of a package that reached the AUR" {
-  GH_OPEN=$'12 ❌ foo: update failed\n13 ❌ bar: update failed\n14 ❌ baz: update failed' \
-    run_close_step foo=up_to_date bar="updated: 2.0.0" baz="downgrade: 1.0.0"
+  GH_OPEN=$'12 ❌ foo: update failed\n13 ❌ bar: update failed\n14 ❌ baz: update failed\n15 ❌ qux: update failed' \
+    run_close_step foo=up_to_date bar="updated: 2.0.0" baz="downgrade: 1.0.0" qux="rebuilt: 1.0.0"
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
-  [ "$output" = "3" ]
+  [ "$output" = "4" ]
 }
 
 @test "check-updates: keeps the update issue of a package that has not reached the AUR" {

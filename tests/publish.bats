@@ -1772,6 +1772,21 @@ EOF
   child_ended hang.sh
 }
 
+@test "check-all: an asset lookup that hangs fails after the budget of a check and gets no second pass" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+  asset_regex: '^pkg_(.+)\\.tar\\.gz\$'
+  asset_var: _pkg
+current: '1.0.0'"
+  hanging_script check-asset.sh
+  SECONDS=0
+  AURTOMATOR_CHECK_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$SECONDS" -lt 10 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: timed out after 1 s" ]
+  [[ "$output" != *"again"* ]]
+  child_ended check-asset.sh
+}
+
 @test "check-all --prepare: an update that hangs fails after its time budget" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
@@ -3373,6 +3388,107 @@ pkgver_dash: ''"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Unknown option: --force"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+# Helper: pkg with asset_regex at <current>, the status of the check run
+# for it and the asset value that run recorded, if any
+# Usage: checked_asset_package <current> <status> [asset value]
+checked_asset_package() {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+  asset_regex: '^pkg_(.+)\\.tar\\.gz\$'
+  asset_var: _pkg
+current: '$1'
+current_asset: '$1-a'"
+  checked_status pkg "$2"
+  if [[ -n "${3:-}" ]]; then
+    printf 'pkg\t%s\nother\t9.9-z\n' "$3" >"$TEST_TMPDIR/.status/_assets"
+  fi
+}
+
+@test "check-all --prepare: keeps an asset package up to date without a value" {
+  checked_asset_package 1.0.0 up_to_date
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "up_to_date" ]
+}
+
+@test "check-all --prepare: passes the asset value of the check run" {
+  checked_asset_package 1.0.0 "new_version: 2.0.0" 2.0.0-a
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.sh.args")" = "pkg 2.0.0 --asset 2.0.0-a --prepare $TEST_TMPDIR/out/prepared" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
+}
+
+@test "check-all --prepare: prepares a rebuild" {
+  checked_asset_package 1.0.0 "new_build: 1.0.0" 1.0.0-b
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.sh.args")" = "pkg 1.0.0 --asset 1.0.0-b --prepare $TEST_TMPDIR/out/prepared" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_build: 1.0.0" ]
+}
+
+@test "check-all --prepare: prepares nothing while the asset is pending" {
+  checked_asset_package 1.0.0 "pending: 2.0.0"
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "pending: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
+}
+
+@test "check-all --prepare: fails a package without an asset value from the check run" {
+  checked_asset_package 1.0.0 "new_version: 2.0.0"
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "check_failed: no asset value from the check run" ]
+}
+
+@test "check-all --publish: publishes with the asset value of the check run" {
+  checked_asset_package 1.0.0 "new_version: 2.0.0" 2.0.0-a
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg --asset 2.0.0-a" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
+}
+
+@test "check-all --publish: publishes a rebuild" {
+  checked_asset_package 1.0.0 "new_build: 1.0.0" 1.0.0-b
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 1.0.0 $TEST_TMPDIR/out/prepared/pkg --asset 1.0.0-b" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "rebuilt: 1.0.0" ]
+}
+
+@test "check-all --publish: keeps a pending asset and publishes nothing" {
+  checked_asset_package 1.0.0 "pending: 2.0.0"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all --publish: refuses an asset value of the check run that a PKGBUILD must not hold" {
+  checked_asset_package 1.0.0 "new_version: 2.0.0" '~root'
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: no asset value from the check run" ]
 }
 
 @test "verify-pkg: refuses a prepared PKGBUILD without the asset line" {

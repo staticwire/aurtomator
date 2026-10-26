@@ -136,6 +136,34 @@ pkgver_format: '4.%s'
 
 `check-update.sh` puts the output of the strategy in place of `%s`, whatever the strategy, and the PKGBUILD cuts the text off where a source URL needs the upstream version, as with `${pkgver#4.}`. The `.SRCINFO` check of verify and publish counts the upstream version inside the old and the new `pkgver` as the version. See [WORKFLOW.md section 2](WORKFLOW.md#2-package-yaml-format).
 
+### Release asset names with more than the version (asset_regex)
+
+Some upstreams name their release assets with more than the version and raise that part by hand. `savonet/liquidsoap` publishes `liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb`, where `ocaml5.4.0` follows the release line and the Debian revision `3` grows when upstream rebuilds a published release in place: v2.4.6 was published on 2026-10-09, and its assets all date from 2026-10-18 and end in `-3`. A bump of `pkgver` alone cannot build that name, and a rebuild leaves the version as it is. The PKGBUILD keeps the variable part on a line of its own, and the package YAML says where it comes from:
+
+```yaml
+name: liquidsoap-bin
+strategy: github-tag
+upstream:
+  project: savonet/liquidsoap
+  tag_version_regex: '^v([0-9.]+(-rc[0-9]+)?)$'
+  asset_regex: '^liquidsoap_([0-9.]+-debian-forky-ocaml5\.[0-9.]+-[0-9]+)_amd64\.deb$'
+  asset_var: _deb
+pkgver_dash: ''
+```
+
+```bash
+pkgver=2.5.0rc1
+_deb=2.5.0-debian-forky-ocaml5.5.1-1
+pkgrel=1
+...
+_tag="v${pkgver/rc/-rc}"
+_release="https://github.com/savonet/liquidsoap/releases/download/${_tag}"
+source_x86_64=("${_release}/liquidsoap_${_deb}_amd64.deb")
+source_aarch64=("${_release}/liquidsoap_${_deb}_arm64.deb")
+```
+
+The check finds the one asset of the release of the new version that `asset_regex` matches and writes its capture group to the `_deb=` line. The group takes the whole variable part, version included, so a release candidate whose asset name holds no `rc` needs nothing more, and it has to be long enough to occur only where the PKGBUILD uses it. A new value of the version the AUR has is published as a rebuild with the next `pkgrel`. The download keeps the upstream name, which holds the value: a name such as `${pkgname}-${pkgver}-amd64.deb::<url>` stays the same through a rebuild, and makepkg then takes the old file from the build directory and fails on its checksum. Only `github-tag` and `github-release` take `asset_regex`. See [WORKFLOW.md section 4.6](WORKFLOW.md#46-values-from-release-asset-names).
+
 ### Nightly and prerelease packages
 
 `github-nightly` tracks nightly builds in 4 patterns:

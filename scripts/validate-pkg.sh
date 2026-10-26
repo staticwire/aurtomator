@@ -278,6 +278,40 @@ validate_pkg() {
     fi
   fi
 
+  # A value from the name of a release asset, see section 4.6 of
+  # docs/WORKFLOW.md. $regex|^ matches the empty string and fills
+  # BASH_REMATCH with every group of the regex.
+  local asset_regex_tag asset_var_tag asset_regex current_asset groups=0
+  asset_regex_tag=$(pkg_get "$file" '.upstream.asset_regex | tag')
+  asset_var_tag=$(pkg_get "$file" '.upstream.asset_var | tag')
+  if [[ "$asset_regex_tag" != "!!null" || "$asset_var_tag" != "!!null" ]]; then
+    asset_regex=$(pkg_get "$file" '.upstream.asset_regex')
+    if [[ "$asset_regex_tag" == "!!str" ]] && ere_valid "$asset_regex" && [[ "" =~ $asset_regex|^ ]]; then
+      groups=$((${#BASH_REMATCH[@]} - 1))
+    fi
+    if [[ "$asset_regex_tag" == "!!null" || "$asset_var_tag" == "!!null" ]]; then
+      log_err "$file: upstream.asset_regex and upstream.asset_var go together"
+      ((errors++))
+    elif [[ "$strategy" != "github-tag" && "$strategy" != "github-release" ]]; then
+      log_err "$file: upstream.asset_regex applies to the github-tag and github-release strategies only"
+      ((errors++))
+    elif ((groups != 1)); then
+      log_err "$file: upstream.asset_regex must be an ERE that bash accepts, with exactly one capture group: $asset_regex"
+      ((errors++))
+    fi
+    pkg_asset_var "$file" >/dev/null || ((errors++))
+  fi
+  if [[ $(pkg_get "$file" '.current_asset | tag') != "!!null" ]]; then
+    current_asset=$(pkg_get "$file" '.current_asset')
+    if [[ "$asset_var_tag" == "!!null" ]]; then
+      log_err "$file: current_asset needs upstream.asset_var"
+      ((errors++))
+    elif ! validate_asset_value "$current_asset" 2>/dev/null; then
+      log_err "$file: current_asset must start with a letter or a digit and hold only A-Za-z0-9 . _ + ~ -: ${current_asset@Q}"
+      ((errors++))
+    fi
+  fi
+
   local date_format version_source sample
   date_format=$(pkg_get "$file" '.upstream.date_format')
   if [[ "$date_format" != "null" ]]; then

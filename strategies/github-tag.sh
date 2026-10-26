@@ -23,20 +23,6 @@ owner_repo=$(pkg_get "$pkg_file" .upstream.project)
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 
-# The tags API answers 100 tags at most per page. git takes the token from
-# the environment: as an argument, it is visible in ps to every local user.
-# Args: $1=owner/repo
-github_tags() {
-  (
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-      export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
-      GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
-      export GIT_CONFIG_VALUE_0
-    fi
-    remote_tags "https://github.com/$1.git"
-  )
-}
-
 tags=$(github_tags "$owner_repo") || {
   echo "Failed to fetch tags for ${owner_repo}" >&2
   exit 1

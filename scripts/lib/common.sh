@@ -59,6 +59,29 @@ pkgver_dash() {
   printf '%s\n' "${dash:-drop}"
 }
 
+# The pkgver of an upstream version, as check-update.sh makes it from the
+# version of a strategy. pkgver holds no dash. The PKGBUILD turns
+# pkgver_dash back into a dash where a URL needs one, as in ${pkgver//_/-}.
+# pkgver_dash: '' drops the dash, so 2.5.0-rc1 gives 2.5.0rc1, which vercmp
+# puts below 2.5.0, and the PKGBUILD puts it back as in ${pkgver/rc/-rc}.
+# pkgver is the upstream version with the text of pkgver_format around it,
+# as 4.4215 for build 4215. The PKGBUILD cuts that text off where a URL
+# needs the upstream version, as in ${pkgver#4.}.
+# Args: $1=upstream version, $2=pkgver_dash character or drop, if any,
+#       $3=pkgver_format, if any
+to_pkgver() {
+  local version="$1"
+  if [[ "$2" == drop ]]; then
+    version=${version//-/}
+  elif [[ -n "$2" ]]; then
+    version=${version//-/"$2"}
+  fi
+  if [[ -n "$3" ]]; then
+    version=${3/"%s"/"$version"}
+  fi
+  printf '%s\n' "$version"
+}
+
 # The asset_var of a package, the PKGBUILD variable that holds a value from
 # the name of a release asset, and nothing when the package does not set it.
 # The name reaches a sed command and an awk program, so it has to be a
@@ -69,7 +92,7 @@ pkg_asset_var() {
   local var
   var=$(pkg_get "$1" '.upstream.asset_var // ""')
   if [[ -n "$var" && ! "$var" =~ ^_[A-Za-z0-9_]+$ ]]; then
-    log_err "upstream.asset_var must be a name that starts with _: ${var@Q}"
+    log_err "$1: upstream.asset_var must be a name that starts with _: ${var@Q}"
     return 1
   fi
   printf '%s\n' "$var"
@@ -289,6 +312,22 @@ version_jump() {
 remote_tags() {
   GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 \
     git ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||'
+}
+
+# Print every tag name of a GitHub repository, with GITHUB_TOKEN when it is
+# set. The tags API answers 100 tags at most per page. git takes the token
+# from the environment: as an argument, it is visible in ps to every local
+# user.
+# Args: $1=owner/repo
+github_tags() {
+  (
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+      export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
+      GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+      export GIT_CONFIG_VALUE_0
+    fi
+    remote_tags "https://github.com/$1.git"
+  )
 }
 
 # The newest of the versions on stdin, one per line, in the order of

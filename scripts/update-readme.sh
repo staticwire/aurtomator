@@ -144,6 +144,18 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
         status="⏸️ ${run_status#held: } held"
         ((pkg_ok++)) || true
         ;;
+      new_build:*)
+        status="🔁 ${run_status#new_build: } rebuild available"
+        ((pkg_ok++)) || true
+        ;;
+      rebuilt:*)
+        status="🔁 ${run_status#rebuilt: } rebuilt"
+        ((pkg_ok++)) || true
+        ;;
+      pending:*)
+        status="⏳ ${run_status#pending: } pending"
+        ((pkg_ok++)) || true
+        ;;
       check_failed:* | update_failed:*)
         status="❌ failed"
         ((pkg_fail++)) || true

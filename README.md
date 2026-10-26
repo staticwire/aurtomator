@@ -74,7 +74,7 @@ See [docs/WORKFLOW.md](docs/WORKFLOW.md) for strategy details, YAML examples, an
 
 ## Limitations
 
-aurtomator only sets `pkgver`, resets `pkgrel` to 1, and updates checksums and `.SRCINFO`. It does not build packages or check dependencies. These cases are detected and blocked:
+aurtomator only sets `pkgver`, resets `pkgrel` to 1, updates checksums and `.SRCINFO`, and sets a value from a release asset name where the package YAML asks for one. It does not build packages or check dependencies. These cases are detected and blocked:
 
 - **`pkgver()` with the wrong strategy**: use `git-latest` for VCS packages
 - **A `SKIP` next to a real checksum of a remote source**: such a `SKIP` turns off `updpkgsums`, and the real checksum would go stale. The `SKIP` of a signature (`.sig`, `.sign`, `.asc`) and that of a VCS source without a `#commit=`, `#tag=` or `#revision=` pin do not count, because makepkg gives them `SKIP` itself
@@ -94,6 +94,10 @@ An update whose first number has at least two digits more than that of the track
 ## Update alerts
 
 A package YAML can name the versions that need a hand edit of the PKGBUILD, such as a new major that needs a newer build dependency. An alert with `hold: true` pauses the update at such a version, shown with a `⏸️` icon, and opens an issue with the note until the maintainer publishes the version by hand. Without `hold`, the update goes on, and an issue with the note opens after the push. Details are in [docs/WORKFLOW.md section 4.5](docs/WORKFLOW.md#45-update-alerts).
+
+## Values from release asset names
+
+Some upstreams name a release asset with more than the version and rebuild a release under a new name, as liquidsoap does with `liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb`. With `upstream.asset_regex` and `upstream.asset_var`, a run takes that value from the release of the new version and writes it to its line in the PKGBUILD. A new value of the current version is pushed as a rebuild with the next `pkgrel`, shown with a `🔁` icon. While the release or its asset is not out yet, the package shows `⏳` for up to a day. Details are in [docs/WORKFLOW.md section 4.6](docs/WORKFLOW.md#46-values-from-release-asset-names).
 
 ## Updates of aurtomator
 

@@ -1187,3 +1187,110 @@ pkgver_dash: _"
   [ "$status" -ne 0 ]
   [[ "$output" == *"upstream.date_format must give a valid version, it gives '2026-01-02'"* ]]
 }
+
+# === values from release asset names ===
+
+# Helper: a package of the given strategy with the given asset keys
+# Usage: asset_yaml <strategy> <lines under upstream:> [top-level lines]
+asset_yaml() {
+  create_test_package "mypkg" "$1" "upstream:
+  project: owner/repo
+$2
+${3:-}"
+}
+
+@test "validate: asset_regex and asset_var of github-tag pass" {
+  asset_yaml github-tag "  asset_regex: '^liquidsoap_([0-9.]+-debian-forky-ocaml5\\.[0-9.]+-[0-9]+)_amd64\\.deb\$'
+  asset_var: _deb" "current_asset: 2.5.0-debian-forky-ocaml5.5.1-1"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: asset_regex and asset_var of github-release pass" {
+  asset_yaml github-release "  asset_regex: '^app-(.+)-x86_64\\.tar\\.gz\$'
+  asset_var: _build"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: asset_regex without asset_var rejected" {
+  asset_yaml github-tag "  asset_regex: '^app-(.+)\\.tar\\.gz\$'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.asset_regex and upstream.asset_var go together"* ]]
+}
+
+@test "validate: asset_var without asset_regex rejected" {
+  asset_yaml github-tag "  asset_var: _build"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.asset_regex and upstream.asset_var go together"* ]]
+}
+
+@test "validate: asset_regex of another strategy rejected" {
+  asset_yaml github-nightly "  asset_regex: '^app-(.+)\\.tar\\.gz\$'
+  asset_var: _build"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.asset_regex applies to the github-tag and github-release strategies only"* ]]
+}
+
+@test "validate: asset_regex without exactly one capture group rejected" {
+  local regex
+  for regex in '^app-.+\.tar\.gz$' '^app-(.+)-(x86_64)\.tar\.gz$'; do
+    asset_yaml github-tag "  asset_regex: '$regex'
+  asset_var: _build"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"upstream.asset_regex must be an ERE that bash accepts, with exactly one capture group: $regex"* ]]
+  done
+}
+
+# bash refuses (?:x), which grep -E takes
+@test "validate: asset_regex that bash does not accept rejected" {
+  asset_yaml github-tag "  asset_regex: '(?:app)-(.+)'
+  asset_var: _build"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.asset_regex must be an ERE that bash accepts, with exactly one capture group: (?:app)-(.+)"* ]]
+  [[ "$output" != *"invalid regular expression"* ]]
+}
+
+# yq prints this map as x: (a), an ERE with one group
+@test "validate: asset_regex that is not a string rejected" {
+  asset_yaml github-tag "  asset_regex:
+    x: (a)
+  asset_var: _build"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"upstream.asset_regex must be an ERE that bash accepts, with exactly one capture group"* ]]
+}
+
+# sed and awk read the name as part of a pattern
+@test "validate: asset_var that is no name starting with _ rejected" {
+  local var
+  for var in build '_build;x' 'x;_build'; do
+    asset_yaml github-tag "  asset_regex: '^app-(.+)\\.tar\\.gz\$'
+  asset_var: '$var'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"upstream.asset_var must be a name that starts with _: '$var'"* ]]
+  done
+}
+
+@test "validate: current_asset that a PKGBUILD must not hold rejected" {
+  asset_yaml github-tag "  asset_regex: '^app-(.+)\\.tar\\.gz\$'
+  asset_var: _build" "current_asset: '~root'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"current_asset must start with a letter or a digit and hold only A-Za-z0-9 . _ + ~ -: '~root'"* ]]
+}
+
+@test "validate: current_asset without asset_var rejected" {
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+current_asset: 1.0-build7"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"current_asset needs upstream.asset_var"* ]]
+}

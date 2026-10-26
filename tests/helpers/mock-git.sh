@@ -44,6 +44,19 @@ case "${*: -1}" in
   https://github.com/rc-owner/dash-repo.git)
     tags=(v2.1.0 v2.1.0-rc1)
     ;;
+  # The tags of savonet/liquidsoap around 2.5.0-rc1, and a release
+  # candidate without a release
+  https://github.com/asset-owner/asset-repo.git)
+    tags=(v2.4.5 v2.4.6 v2.5.0-rc1 v2.5.0-rc2 rolling-release-v2.5.x)
+    ;;
+  # Two tags of one version
+  https://github.com/asset-owner/twin-repo.git)
+    tags=(v1.0.0 1.0.0)
+    ;;
+  # A tag with a plus sign, which a URL path has to encode
+  https://github.com/asset-owner/plus-repo.git)
+    tags=(v1.0+1)
+    ;;
   https://github.com/*)
     tags=(v2.0.0 v1.9.0 v1.0.0)
     ;;

@@ -76,6 +76,7 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 | `upstream`     | depends  | Strategy-specific settings. `archpkg`, `repology` and `kde-tarball` need none. |
 | `current`      | no       | Currently tracked version. Written after every push.                        |
 | `last_updated` | no       | Date of the last push, `YYYY-MM-DD`. Written after every push.              |
+| `current_asset` | no      | The value from a release asset name that the AUR has, for a package with `upstream.asset_var`. Written after every push, see [4.6](#46-values-from-release-asset-names) |
 | `allow_downgrade` | no    | `true` publishes an upstream version lower than `current`. Default `false`, see [4.3](#43-downgrade-behavior). |
 | `allow_version_jump` | no | `true` publishes a version whose first number has at least two digits more than the first number of `current`. Default `false`, see [4.3](#43-downgrade-behavior). |
 | `pkgver_dash`  | no       | `_`, `.` or `''`: the character that stands for each `-` of the upstream version, or none, see below |
@@ -127,6 +128,8 @@ aurtomator ships 15 strategies. A strategy is a bash script in `strategies/`. It
 | `upstream.project`           | yes      | `owner/repo` format                 |
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, see below |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex` (default: `\1`), see below |
+| `upstream.asset_regex`       | no       | ERE whose one capture group is a value from an asset name of the release, see [4.6](#46-values-from-release-asset-names) |
+| `upstream.asset_var`         | with `asset_regex` | The PKGBUILD variable that holds that value, see [4.6](#46-values-from-release-asset-names) |
 
 **Version:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases. When it answers 404, the strategy reads the release list to say why: a list of pre-releases only gets a message that names `github-nightly` with `nightly_tag_regex`, an empty list one that names `github-tag`.
 
@@ -187,6 +190,8 @@ upstream:
 | `upstream.project`           | yes      | `owner/repo` format                      |
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, replaces the default filter |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
+| `upstream.asset_regex`       | no       | ERE whose one capture group is a value from an asset name of the release of the tag, see [4.6](#46-values-from-release-asset-names) |
+| `upstream.asset_var`         | with `asset_regex` | The PKGBUILD variable that holds that value, see [4.6](#46-values-from-release-asset-names) |
 
 **Version:** reads every tag in one request, outside the API rate limit. Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names the field. `tag_version_regex` keeps the tags it matches instead. The strategy strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the newest version by `vercmp`, the order of pacman: `1.0.0rc1` is below `1.0.0`. The comparison drops a dash before a letter, as `pkgver_dash: ''` does, so `1.0.0-rc1` is below `1.0.0` too, and takes any other dash for a dot, so `2025-04-03` compares as `2025.04.03`. With `pkgver_dash` `_` or `.`, pacman puts `1.0.0_rc1` above `1.0.0`, so `1.0.0` then shows as a skipped downgrade, see [section 2](#2-package-yaml-format).
 
@@ -757,6 +762,7 @@ Without a mode and with `--update`, a package whose check failed within its budg
 update-pkg.sh <package-name> <new-version> [--asset <value>] [--dry-run] [--prepare <dir>]
 verify-pkg.sh <package-name> <prepared-dir>
 publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]
+check-asset.sh <package-name> <pkgver>
 check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--dry-run]
 ```
 
@@ -869,11 +875,11 @@ A PKGBUILD is a bash script, and every step that reads it executes it: the audit
 
 Step 5 accepts both forms of a line other than `pkgver`, `pkgrel`, `source` and the checksums, because only running the PKGBUILD shows which form it yields. Code that runs in prepare can therefore pick the form of each such line in the `.SRCINFO` of any package updated in the same run, and keep `depends = foo>=1.2` where the PKGBUILD derives `foo>=${pkgver}` for version `1.3`. makepkg reads only the PKGBUILD. The AUR stores the description, the URL, the dependencies, the relations and the licenses from `.SRCINFO` and serves them on the package page and through its RPC interface, and yay parses the `.SRCINFO` of every package it clones. That code comes from whoever can push to the AUR repo of a tracked package, as the first paragraph of this section says.
 
-`check-all.sh --prepare <dir>` runs no strategy and needs no `GITHUB_TOKEN`. It takes the versions from the statuses that a check run, `check-all.sh` without a mode, wrote to `.status/` before it, and reads them before the first PKGBUILD runs. It prepares every package with `new_version` or `available_downgrade` into `<dir>/prepared/` and copies the statuses to `<dir>/status/`. A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped` instead, and a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, see [4.3](#43-downgrade-behavior). An update that an alert with `hold: true` fires on gets `held`, see [4.5](#45-update-alerts). A failed preparation becomes `update_failed`, and a package without a status from the check run becomes `check_failed`. The other statuses stay as the check run wrote them.
+`check-all.sh --prepare <dir>` runs no strategy and needs no `GITHUB_TOKEN`. It takes the versions from the statuses that a check run, `check-all.sh` without a mode, wrote to `.status/` before it, and reads them before the first PKGBUILD runs. It prepares every package with `new_version`, `available_downgrade` or `new_build` into `<dir>/prepared/` and copies the statuses to `<dir>/status/`. A package with `upstream.asset_regex` takes its asset value from `.status/_assets`, keeps `pending`, and becomes `check_failed` without a value, see [4.6](#46-values-from-release-asset-names). A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped` instead, and a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, see [4.3](#43-downgrade-behavior). An update that an alert with `hold: true` fires on gets `held`, see [4.5](#45-update-alerts). A failed preparation becomes `update_failed`, and a package without a status from the check run becomes `check_failed`. The other statuses stay as the check run wrote them.
 
 `check-all.sh --verify <dir>` runs `verify-pkg.sh` for every package in `packages/` that has a directory in `<dir>/prepared/`, and runs no strategy. An update that fails is removed from `<dir>/prepared/`, its status in `<dir>/status/` becomes `update_failed`, and `<dir>/status/_error_count` grows by one. Exit code 3 counts as a failure as well: the prepare run writes `base` for every package, so a moved AUR repo looks the same as a wrong `base`. The next run prepares the package again.
 
-`check-all.sh --publish <dir>` takes the statuses of the check run from `.status/`, as `--prepare` does, and writes `.status/` anew. `up_to_date`, `check_failed`, `downgrade_skipped`, `jump_skipped` and `held` stay as they are, and the alerts of a held update are evaluated again to record their notes in `.status/_alerts`. A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped`, a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, an update that an alert with `hold: true` fires on gets `held`, and none of them is published. A missing status, and one the check run does not write, become `check_failed`. For a package with `new_version` or `available_downgrade` and a directory in `<dir>/prepared/`, it publishes the version in that status and runs no strategy, so nothing contacts an upstream host while the AUR and GPG keys are in place. Exit code 3, an AUR repo that moved, leaves the status at `new_version` or `available_downgrade` without an error, and the next run prepares the package again. A package with `new_version` or `available_downgrade` and no prepared directory gets the `update_failed` status that the prepare or the verify run wrote for it to `<dir>/status/`, or `update_failed: prepare and verify handed over no update`. Nothing else is taken from `<dir>/status/`, and only a regular file without a NUL byte: the prepare run executes PKGBUILDs, and code from one of them can write the files of every package. `_error_count` is the number of `check_failed` and `update_failed` statuses.
+`check-all.sh --publish <dir>` takes the statuses of the check run from `.status/`, as `--prepare` does, and writes `.status/` anew. `up_to_date`, `check_failed`, `downgrade_skipped`, `jump_skipped`, `held` and `pending` stay as they are, and the alerts of a held update are evaluated again to record their notes in `.status/_alerts`. A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped`, a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, an update that an alert with `hold: true` fires on gets `held`, and none of them is published. A missing status, and one the check run does not write, become `check_failed`. For a package with `new_version`, `available_downgrade` or `new_build` and a directory in `<dir>/prepared/`, it publishes the version in that status, with the asset value from `.status/_assets` for a package with `upstream.asset_regex`, and runs no strategy, so nothing contacts an upstream host while the AUR and GPG keys are in place. Exit code 3, an AUR repo that moved, leaves the status at `new_version`, `available_downgrade` or `new_build` without an error, and the next run prepares the package again. A package with one of these statuses and no prepared directory gets the `update_failed` status that the prepare or the verify run wrote for it to `<dir>/status/`, or `update_failed: prepare and verify handed over no update`. Nothing else is taken from `<dir>/status/`, and only a regular file without a NUL byte: the prepare run executes PKGBUILDs, and code from one of them can write the files of every package. `_error_count` is the number of `check_failed` and `update_failed` statuses.
 
 ### 4.5 Update alerts
 
@@ -926,7 +932,34 @@ pkgrel=1
 source_x86_64=("${_release}/liquidsoap_${_deb}_amd64.deb")
 ```
 
-`update-pkg.sh` and `publish-pkg.sh` take the value with `--asset <value>`. A package with `upstream.asset_var` needs it, and any other package refuses it. The value starts with a letter or a digit and holds only `A-Za-z0-9 . _ + ~ -`, because bash expands a tilde at the start of an assignment: `_deb=~root` gives the home directory of `root`. `update-pkg.sh` writes the value to the line of `upstream.asset_var`. `verify-pkg.sh` reads it from that line of the prepared `PKGBUILD`, as it reads `pkgver`, and `publish-pkg.sh` refuses a prepared line with another value than its `--asset`.
+`upstream.asset_regex` says where the value comes from. It is an ERE with exactly one capture group, and `github-tag` and `github-release` take it:
+
+```yaml
+name: liquidsoap-bin
+strategy: github-tag
+upstream:
+  project: savonet/liquidsoap
+  tag_version_regex: '^v([0-9.]+(-rc[0-9]+)?)$'
+  asset_regex: '^liquidsoap_([0-9.]+-debian-forky-ocaml5\.[0-9.]+-[0-9]+)_amd64\.deb$'
+  asset_var: _deb
+pkgver_dash: ''
+```
+
+`check-asset.sh <package-name> <pkgver>` finds the value. It reads the tags of `upstream.project` as `github-tag` does, and keeps the one tag that gives the version through `tag_version_regex`, `tag_version_replace`, `pkgver_dash` and `pkgver_format`. It reads the release of that tag from `/repos/{owner}/{repo}/releases/tags/{tag}`, with the tag percent-encoded, and matches `asset_regex` against the names of its assets. Exactly one name has to match, and its capture group is the value. The regex above names the OCaml 5 build, because v2.4.6 also has `liquidsoap_2.4.6-debian-forky-ocaml4.14.2-3_amd64.deb`, and `ocaml[0-9.]+` would match both. No tag or more than one tag for the version, more than one matching asset, and a value outside the characters below fail the check.
+
+A tag appears before its release. liquidsoap uploads the assets of a release to a draft and publishes the draft afterwards, 40 minutes after the tag for `v2.5.0-rc1`, and the API lists a draft only to users who can push. A release without a matching asset is therefore pending for 24 hours after its `published_at`, and a tag without a release for 24 hours after the date of its commit. After that the check fails, and for a release it names the assets.
+
+`check-all.sh` runs `check-asset.sh` within the budget of a check, after the downgrade, jump and alert checks, so a skipped or held update needs no value. A failure gets the second pass of a failed check. The value goes to `.status/_assets` as the package and the value, split by a tab, and `--prepare` and `--publish` take it from there, as they take the version from the status of the check run. A package that is up to date gets the value of `current` as well, and a value other than `current_asset` is a rebuild of that version. A YAML without `current_asset` gets one in its first run: when the AUR already has the value, publish only writes `current_asset`.
+
+| Status | README | Meaning |
+| --- | --- | --- |
+| `pending: 2.5.0rc1` | `⏳ 2.5.0rc1 pending` | The release or its asset is not out yet. Nothing is prepared, and no issue opens |
+| `new_build: 2.4.6` | `🔁 2.4.6 rebuild available` | A new value of the version the AUR has, not pushed yet |
+| `rebuilt: 2.4.6` | `🔁 2.4.6 rebuilt` | The rebuild was pushed to the AUR |
+
+All three count toward `pkg_ok`.
+
+`update-pkg.sh` and `publish-pkg.sh` take the value with `--asset <value>`, and `check-all.sh` passes it. A package with `upstream.asset_var` needs it, and any other package refuses it. The value starts with a letter or a digit and holds only `A-Za-z0-9 . _ + ~ -`, because bash expands a tilde at the start of an assignment: `_deb=~root` gives the home directory of `root`. `update-pkg.sh` writes the value to the line of `upstream.asset_var`. `verify-pkg.sh` reads it from that line of the prepared `PKGBUILD`, as it reads `pkgver`, and `publish-pkg.sh` refuses a prepared line with another value than its `--asset`.
 
 The AUR `PKGBUILD` must hold exactly one line of `upstream.asset_var`, and its value is the old value. `pkgrel` follows from the version and the value:
 
@@ -979,7 +1012,7 @@ The four steps use the composite action `.github/actions/run-as-builder`. It add
 
 1. **Install dependencies:** `sudo git go-yq`, and the `builder` user.
 2. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
-3. **Decide:** sets the output `prepare` when a status is `new_version` or `available_downgrade`. It runs `update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in the status table.
+3. **Decide:** sets the output `prepare` when a status is `new_version`, `available_downgrade` or `new_build`. It runs `update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in the status table.
 4. **Upload statuses:** with `work`, uploads `.status/` as the `checked` artifact with a retention of 1 day.
 
 `prepare`:
@@ -1035,10 +1068,14 @@ Steps 9 to 11 run as root with `GH_TOKEN` set to the workflow token, `github.tok
 | `.status/<name>`       | `downgrade_skipped: 1.2.0`       | Downgrade found, not allowed by the YAML |
 | `.status/<name>`       | `jump_skipped: 2026102100`       | Version jump found, not allowed by the YAML |
 | `.status/<name>`       | `held: 29+1`                     | Update paused by an alert with `hold: true` |
+| `.status/<name>`       | `pending: 2.5.0rc1`              | The release asset of the version is not out yet, see [4.6](#46-values-from-release-asset-names) |
+| `.status/<name>`       | `new_build: 2.4.6`               | Rebuild of the version the AUR has found, not pushed yet |
+| `.status/<name>`       | `rebuilt: 2.4.6`                 | Rebuild pushed to the AUR                |
 | `.status/<name>`       | `check_failed: <error>`          | The strategy failed                      |
 | `.status/<name>`       | `update_failed: <error>`         | The update failed                        |
 | `.status/_error_count` | `0`                              | Total error count of the run             |
 | `.status/_alerts`      | `<name>`, `hold` or `notice`, the note, split by tabs | One line for each alert that fired, see [4.5](#45-update-alerts) |
+| `.status/_assets`      | `<name>` and the asset value, split by a tab | One line for each value found, see [4.6](#46-values-from-release-asset-names) |
 | `.status/_upstream`    | `newer: 0.7.0` or `current: 0.6.0` | The latest aurtomator release against `VERSION`, see [5.8](#58-version-of-aurtomator) |
 
 #### Packages badge
@@ -1091,7 +1128,7 @@ A newer aurtomator release, `newer: <release>` in `.status/_upstream`, opens an 
 
 The step belongs to `publish`, which runs for a new version or a change in the status table. A package that keeps failing gets its issue in the run where it starts failing. An issue closed while the package still fails comes back in the next run that reaches `publish`.
 
-The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the new status and the run. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated` or `downgrade`, so the version is in the AUR. An open `⏸️ <package>: update held` closes when the status is anything but `held`. An open `⬆️ aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` holds the release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It does not run after a failed step, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
+The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the new status and the run. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade` or `rebuilt`, so the version is in the AUR. An open `⏸️ <package>: update held` closes when the status is anything but `held`. An open `⬆️ aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` holds the release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It does not run after a failed step, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
 
 ### 5.7 Failed runs
 

@@ -3237,3 +3237,323 @@ EOF
   [ -f "$TEST_TMPDIR/.status/pkg-up" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-up")" = "updated: 2.0.0" ]
 }
+
+# === check-asset.sh ===
+
+# Helper: the git of tests/helpers/mock-git.sh, which answers ls-remote
+mock_tags() {
+  cp "$TESTS_DIR/helpers/mock-git.sh" "$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/git"
+}
+
+# Helper: liquidsoap-bin on the mock of savonet/liquidsoap, with the given
+# asset_regex
+# Usage: liquidsoap_package [asset_regex]
+liquidsoap_package() {
+  mock_tags
+  create_test_package "liq" "github-tag" "upstream:
+  project: asset-owner/asset-repo
+  tag_version_regex: '^v([0-9.]+(-rc[0-9]+)?)\$'
+  asset_regex: '${1:-^liquidsoap_([0-9.]+-debian-forky-ocaml5\\.[0-9.]+-[0-9]+)_amd64\\.deb\$}'
+  asset_var: _deb
+pkgver_dash: ''"
+}
+
+@test "check-asset: prints the value of the one asset that matches" {
+  liquidsoap_package
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc1
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.5.0-debian-forky-ocaml5.5.1-1" ]
+}
+
+# The regex of the brief takes the OCaml 4 and the OCaml 5 build of 2.4.6
+@test "check-asset: fails when two assets match" {
+  liquidsoap_package '^liquidsoap_([0-9.]+-debian-forky-ocaml[0-9.]+-[0-9]+)_amd64\.deb$'
+  run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.4.6
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"2 assets of release v2.4.6 match upstream.asset_regex, expected one: liquidsoap_2.4.6-debian-forky-ocaml4.14.2-3_amd64.deb liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb"* ]]
+}
+
+@test "check-asset: waits for the asset of a release younger than a day" {
+  liquidsoap_package
+  MOCK_ASSETS="" MOCK_RELEASE_AGE=2 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc1
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"liq 2.5.0rc1: no asset of release v2.5.0-rc1 matches upstream.asset_regex"* ]]
+}
+
+@test "check-asset: fails for a release older than a day without the asset" {
+  liquidsoap_package
+  MOCK_ASSETS="liquidsoap_2.5.0-debian-forky-ocaml5.5.1-1_riscv64.deb other.txt" \
+    run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"liq 2.5.0rc1: no asset of release v2.5.0-rc1 matches upstream.asset_regex"* ]]
+  [[ "$output" == *"liquidsoap_2.5.0-debian-forky-ocaml5.5.1-1_riscv64.deb other.txt"* ]]
+}
+
+@test "check-asset: waits for the release of a tag younger than a day" {
+  liquidsoap_package
+  MOCK_TAG_AGE=1 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"liq 2.5.0rc2: tag v2.5.0-rc2 has no release"* ]]
+}
+
+@test "check-asset: fails for a tag that has no release after a day" {
+  liquidsoap_package
+  run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"liq 2.5.0rc2: tag v2.5.0-rc2 has no release"* ]]
+}
+
+@test "check-asset: fails when the tags cannot be read" {
+  mock_tags
+  create_test_package "gone" "github-tag" "upstream:
+  project: missing-owner/missing-repo
+  asset_regex: '^gone-(.+)\\.tar\\.gz\$'
+  asset_var: _gone"
+  run "$TEST_TMPDIR/scripts/check-asset.sh" gone 1.0.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch tags for missing-owner/missing-repo"* ]]
+}
+
+@test "check-asset: fails when no tag gives the version" {
+  liquidsoap_package
+  run "$TEST_TMPDIR/scripts/check-asset.sh" liq 9.9.9
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No tag of asset-owner/asset-repo gives version 9.9.9"* ]]
+}
+
+@test "check-asset: fails when two tags give the version" {
+  mock_tags
+  create_test_package "twin" "github-tag" "upstream:
+  project: asset-owner/twin-repo
+  asset_regex: '^twin-(.+)\\.tar\\.gz\$'
+  asset_var: _twin"
+  run "$TEST_TMPDIR/scripts/check-asset.sh" twin 1.0.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Tags v1.0.0 1.0.0 of asset-owner/twin-repo all give version 1.0.0"* ]]
+}
+
+@test "check-asset: fails when the release cannot be read" {
+  liquidsoap_package
+  MOCK_RELEASE_STATUS=500 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The requested URL returned error: 500"* ]]
+  [[ "$output" == *"Failed to read the release of tag v2.5.0-rc1 of asset-owner/asset-repo"* ]]
+}
+
+@test "check-asset: fails when the commit of a tag without a release cannot be read" {
+  liquidsoap_package
+  MOCK_COMMIT_STATUS=500 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to read the commit of tag v2.5.0-rc2 of asset-owner/asset-repo"* ]]
+}
+
+# bash expands a tilde at the start of an assignment
+@test "check-asset: refuses a value that starts with a tilde" {
+  liquidsoap_package '^liquidsoap_(.+)_amd64\.deb$'
+  MOCK_ASSETS="liquidsoap_~root_amd64.deb" run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Asset value rejected"* ]]
+}
+
+@test "check-asset: refuses a date of another form" {
+  liquidsoap_package
+  MOCK_ASSETS="" MOCK_RELEASE_DATE=soon run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unexpected date from the GitHub API: 'soon'"* ]]
+}
+
+@test "check-asset: percent-encodes the tag in the URL of its release" {
+  mock_tags
+  create_test_package "plus" "github-tag" "upstream:
+  project: asset-owner/plus-repo
+  asset_regex: '^plus_(.+)\\.tar\\.gz\$'
+  asset_var: _plus"
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-asset.sh" plus 1.0+1
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0-build7" ]
+}
+
+@test "check-asset: needs upstream.asset_regex" {
+  create_test_package "plain" "github-tag" "upstream:
+  project: asset-owner/asset-repo"
+  run "$TEST_TMPDIR/scripts/check-asset.sh" plain 2.4.6
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"plain has no upstream.asset_regex"* ]]
+}
+
+# === check-all.sh: values from release asset names ===
+
+# Helper: a check-asset.sh that logs its arguments to check-asset.args and
+# prints the given value, or exits with 3 for pending and 1 for fail
+# Usage: stand_in_asset <value|pending|fail>
+stand_in_asset() {
+  local body="echo $1"
+  case "$1" in
+    pending) body='echo "no asset yet" >&2; exit 3' ;;
+    fail) body='echo "release unreadable" >&2; exit 1' ;;
+  esac
+  rm -f "$TEST_TMPDIR/scripts/check-asset.sh"
+  printf '#!/usr/bin/env bash\necho "$*" >>%q\n%s\n' "$TEST_TMPDIR/check-asset.args" "$body" >"$TEST_TMPDIR/scripts/check-asset.sh"
+  chmod +x "$TEST_TMPDIR/scripts/check-asset.sh"
+}
+
+# Helper: pkg on the stand-in strategy step, with asset_regex, at
+# <current>, and with <current_asset> when it is given
+# Usage: asset_package <current> [current_asset]
+asset_package() {
+  create_test_package "pkg" "step" "upstream:
+  asset_regex: '^x_(.+)\$'
+  asset_var: _x
+current: '$1'${2:+
+current_asset: '$2'}"
+}
+
+@test "check-all: records the asset value of a new version" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset 2.0.0-a
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_assets")" = $'pkg\t2.0.0-a' ]
+  [ "$(cat "$TEST_TMPDIR/check-asset.args")" = "pkg 2.0.0" ]
+}
+
+@test "check-all: keeps a package up to date while its asset value stays" {
+  stand_in_strategy step 1.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset 1.0.0-a
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "up_to_date" ]
+  [ "$(cat "$TEST_TMPDIR/check-asset.args")" = "pkg 1.0.0" ]
+}
+
+@test "check-all: finds a rebuild in a new asset value of the current version" {
+  stand_in_strategy step 1.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset 1.0.0-b
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_build: 1.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_assets")" = $'pkg\t1.0.0-b' ]
+  [ "$(cat "$TEST_TMPDIR/check-asset.args")" = "pkg 1.0.0" ]
+}
+
+@test "check-all: takes a missing current_asset for another asset value" {
+  stand_in_strategy step 1.0.0
+  asset_package 1.0.0
+  stand_in_asset 1.0.0-a
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_build: 1.0.0" ]
+}
+
+@test "check-all: writes pending while the asset of a new version is not out" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset pending
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no asset yet"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ ! -e "$TEST_TMPDIR/.status/_assets" ]
+}
+
+@test "check-all: writes pending while the asset of the current version is not out" {
+  stand_in_strategy step 1.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset pending
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 1.0.0" ]
+}
+
+@test "check-all: fails the check when the asset value cannot be found, and checks again" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset fail
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: release unreadable" ]
+  [ "$(cat "$TEST_TMPDIR/check-asset.args")" = $'pkg 2.0.0\npkg 2.0.0' ]
+}
+
+@test "check-all: asks no asset value for a held update" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg" "step" "upstream:
+  asset_regex: '^x_(.+)\$'
+  asset_var: _x
+current: 28+25
+alerts:
+  - when: major
+    hold: true
+    note: Raise makedepends java-environment to 28"
+  stand_in_asset 29+1-a
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "held: 29+1" ]
+  [ ! -e "$TEST_TMPDIR/check-asset.args" ]
+}
+
+@test "check-all: asks no asset value for a package without asset_regex" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_asset 2.0.0-a
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+  [ ! -e "$TEST_TMPDIR/check-asset.args" ]
+  [ ! -e "$TEST_TMPDIR/.status/_assets" ]
+}
+
+# Helper: an update-pkg.sh that logs its arguments to update-pkg.args
+log_update_pkg() {
+  rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
+  printf '#!/usr/bin/env bash\necho "$*" >>%q\n' "$TEST_TMPDIR/update-pkg.args" >"$TEST_TMPDIR/scripts/update-pkg.sh"
+  chmod +x "$TEST_TMPDIR/scripts/update-pkg.sh"
+}
+
+@test "check-all --update: passes the asset value to update-pkg" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset 2.0.0-a
+  log_update_pkg
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.args")" = "pkg 2.0.0 --asset 2.0.0-a" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
+}
+
+@test "check-all --update: pushes a rebuild" {
+  stand_in_strategy step 1.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset 1.0.0-b
+  log_update_pkg
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.args")" = "pkg 1.0.0 --asset 1.0.0-b" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "rebuilt: 1.0.0" ]
+}
+
+@test "update-readme: renders a rebuild and a pending asset, and keeps the badge green" {
+  local name
+  for name in built rebuilt waiting; do
+    create_test_package "$name" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  done
+  echo "new_build: 1.0.0" >"$TEST_TMPDIR/.status/built"
+  echo "rebuilt: 1.0.0" >"$TEST_TMPDIR/.status/rebuilt"
+  echo "pending: 2.0.0" >"$TEST_TMPDIR/.status/waiting"
+  printf '%s\n' "<!-- PACKAGES:START -->" "<!-- PACKAGES:END -->" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '<td nowrap>🔁 1.0.0 rebuild available</td>' "$TEST_TMPDIR/README.md"
+  grep -qF '<td nowrap>🔁 1.0.0 rebuilt</td>' "$TEST_TMPDIR/README.md"
+  grep -qF '<td nowrap>⏳ 2.0.0 pending</td>' "$TEST_TMPDIR/README.md"
+  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
+}
