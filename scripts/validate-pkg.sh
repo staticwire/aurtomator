@@ -22,6 +22,67 @@ for strategy_file in "${AURTOMATOR_DIR}"/strategies/*.sh; do
 done
 readonly VALID_STRATEGIES
 
+# Validate one entry of alerts
+# Args: $1=package file, $2=index of the entry, $3=pkgver_format, if any
+# Returns 0 if valid, 1 if invalid (errors printed to stderr)
+validate_alert() {
+  local file="$1" i="$2" format="$3" rule="$1: alerts[$2]" errors=0 unknown tag value
+  if [[ $(pkg_get "$file" ".alerts[$i] | tag") != "!!map" ]]; then
+    log_err "$rule must be a map with note and one of when, from, match"
+    return 1
+  fi
+  unknown=$(pkg_get "$file" ".alerts[$i] | [keys[] | select(. != \"when\" and . != \"from\" and . != \"match\" and . != \"note\" and . != \"hold\")] | join(\", \")")
+  if [[ -n "$unknown" ]]; then
+    log_err "$rule has an unknown key: $unknown"
+    errors=1
+  fi
+  if [[ $(pkg_get "$file" ".alerts[$i] | [keys[] | select(. == \"when\" or . == \"from\" or . == \"match\")] | length") != 1 ]]; then
+    log_err "$rule must hold exactly one of when, from, match"
+    errors=1
+  fi
+
+  tag=$(pkg_get "$file" ".alerts[$i].when | tag")
+  value=$(pkg_get "$file" ".alerts[$i].when")
+  if [[ "$tag" != "!!null" && "$value" != major ]]; then
+    log_err "$rule.when must be major: $value"
+    errors=1
+  # The fixed text of a format such as 4.%s holds the first number
+  elif [[ "$tag" != "!!null" && -n "$format" ]]; then
+    log_err "$rule: when: major does not apply with pkgver_format"
+    errors=1
+  fi
+
+  tag=$(pkg_get "$file" ".alerts[$i].from | tag")
+  value=$(pkg_get "$file" ".alerts[$i].from")
+  if [[ "$tag" != "!!null" ]] && ! validate_pkgver "$value" 2>/dev/null; then
+    log_err "$rule.from must be a version of A-Za-z0-9 . _ + with a digit: $value"
+    errors=1
+  fi
+
+  tag=$(pkg_get "$file" ".alerts[$i].match | tag")
+  value=$(pkg_get "$file" ".alerts[$i].match")
+  if [[ "$tag" != "!!null" ]] && { [[ "$tag" != "!!str" || -z "$value" ]] || ! ere_valid "$value"; }; then
+    log_err "$rule.match must be a non-empty ERE that bash accepts: $value"
+    errors=1
+  fi
+
+  # The note goes into one log line
+  tag=$(pkg_get "$file" ".alerts[$i].note | tag")
+  value=$(pkg_get "$file" ".alerts[$i].note")
+  if [[ "$tag" != "!!str" || -z "$value" || "$value" == *[$'\n\r']* ]]; then
+    log_err "$rule.note must be one line of text"
+    errors=1
+  fi
+
+  tag=$(pkg_get "$file" ".alerts[$i].hold | tag")
+  if [[ "$tag" != "!!null" && "$tag" != "!!bool" ]]; then
+    log_err "$rule.hold must be true or false"
+    errors=1
+  fi
+
+  return "$errors"
+}
+
 # Validate a single package YAML file
 # Returns 0 if valid, 1 if invalid (errors printed to stderr)
 validate_pkg() {
@@ -87,7 +148,7 @@ validate_pkg() {
     fi
   fi
 
-  local pkgver_format formatted
+  local pkgver_format="" formatted
   if [[ $(pkg_get "$file" '.pkgver_format | tag') != "!!null" ]]; then
     pkgver_format=$(pkg_get "$file" '.pkgver_format')
     formatted=$(pkg_get "$file" '.current // ""')
@@ -98,6 +159,18 @@ validate_pkg() {
       log_err "$file: current $formatted does not fit pkgver_format $pkgver_format"
       ((errors++))
     fi
+  fi
+
+  local alerts_tag alert_count i
+  alerts_tag=$(pkg_get "$file" '.alerts | tag')
+  if [[ "$alerts_tag" == "!!seq" ]]; then
+    alert_count=$(pkg_get "$file" '.alerts | length')
+    for ((i = 0; i < alert_count; i++)); do
+      validate_alert "$file" "$i" "$pkgver_format" || ((errors++))
+    done
+  elif [[ "$alerts_tag" != "!!null" ]]; then
+    log_err "$file: alerts must be a list"
+    ((errors++))
   fi
 
   local branch

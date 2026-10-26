@@ -945,6 +945,148 @@ MOCKCURL
   done
 }
 
+# === alerts ===
+
+# Helper: the status of alert_fires for a rule on the step from current to latest
+# Usage: run_alert_fires <kind> <value> <current> <latest>
+run_alert_fires() {
+  run bash -c 'source "$0/scripts/lib.sh"; alert_fires "$@"' "$TEST_TMPDIR" "$@"
+}
+
+@test "lib.sh: alert_fires on a step to a greater first number for when: major" {
+  local pair
+  for pair in "28+25 29+1" "9 10" "1.9 2.0" "r9.abc1234 r10.def5678" "2025.12.13 2026.1.2"; do
+    run_alert_fires when major "${pair% *}" "${pair#* }"
+    [ "$status" -eq 0 ] || {
+      echo "did not fire: $pair"
+      return 1
+    }
+  done
+}
+
+@test "lib.sh: alert_fires leaves a step within the first number for when: major" {
+  local pair
+  for pair in "28+25 28+26" "1.9 1.10" "2.0 1.9" "beta 1.0" "1.0 beta"; do
+    run_alert_fires when major "${pair% *}" "${pair#* }"
+    [ "$status" -eq 1 ] || {
+      echo "fired: $pair"
+      return 1
+    }
+  done
+}
+
+@test "lib.sh: alert_fires on a step across the version of from" {
+  local pair
+  for pair in "0.3.0 0.4.0" "0.3.9 0.4.1" "0.3 1.0" "0.4.0rc1 0.4.0"; do
+    run_alert_fires from 0.4.0 "${pair% *}" "${pair#* }"
+    [ "$status" -eq 0 ] || {
+      echo "did not fire: $pair"
+      return 1
+    }
+  done
+}
+
+@test "lib.sh: alert_fires leaves a step that does not cross the version of from" {
+  local pair
+  for pair in "0.4.0 0.4.1" "0.4.1 0.5" "0.2 0.3" "0.4.0 0.3.9"; do
+    run_alert_fires from 0.4.0 "${pair% *}" "${pair#* }"
+    [ "$status" -eq 1 ] || {
+      echo "fired: $pair"
+      return 1
+    }
+  done
+}
+
+@test "lib.sh: alert_fires when the new version matches and current does not" {
+  run_alert_fires match '^29\+' 28+25 29+1
+  [ "$status" -eq 0 ]
+  local pair
+  for pair in "29+1 29+2" "28+25 28+26" "29+2 28+30"; do
+    run_alert_fires match '^29\+' "${pair% *}" "${pair#* }"
+    [ "$status" -eq 1 ] || {
+      echo "fired: $pair"
+      return 1
+    }
+  done
+}
+
+@test "lib.sh: alert_fires never fires without current" {
+  run_alert_fires when major "" 29+1
+  [ "$status" -eq 1 ]
+  run_alert_fires from 0.4.0 "" 0.4.0
+  [ "$status" -eq 1 ]
+  run_alert_fires match '^29' "" 29+1
+  [ "$status" -eq 1 ]
+}
+
+@test "lib.sh: alert_fires fails on a match bash does not accept or a condition it does not know" {
+  run_alert_fires match '(?:29)' 28+25 29+1
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  run_alert_fires until 30 28+25 29+1
+  [ "$status" -eq 2 ]
+  run_alert_fires match '(?:29)' "" 29+1
+  [ "$status" -eq 2 ]
+  run_alert_fires until 30 "" 29+1
+  [ "$status" -eq 2 ]
+}
+
+@test "lib.sh: fired_alerts prints hold or notice and the note of each fired rule in file order" {
+  create_test_package "pkg" "github-release" "alerts:
+  - when: major
+    note: Create the package for the old major
+  - from: '0.4.0'
+    note: Not reached
+  - match: '^29\\+'
+    hold: true
+    note: Raise makedepends java-environment to 28"
+  run bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 28+25 29+1' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\tCreate the package for the old major\nhold\tRaise makedepends java-environment to 28' ]
+}
+
+@test "lib.sh: fired_alerts prints nothing without alerts or without current" {
+  create_test_package "plain" "github-release" "current: '1.0'"
+  run bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.0 2.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/plain.yml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  create_test_package "new" "github-release" "alerts:
+  - from: '0.1'
+    hold: true
+    note: First release"
+  run bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 2.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/new.yml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "lib.sh: fired_alerts fails on a rule it cannot evaluate without current too" {
+  create_test_package "new" "github-release" "alerts:
+  - match: '(?:1)'
+    hold: true
+    note: First release"
+  run bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/new.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"alerts[0].match must be a non-empty ERE that bash accepts"* ]]
+}
+
+@test "lib.sh: fired_alerts fails on a rule it cannot evaluate" {
+  local rule message
+  for rule in "hold: true|alerts[0] must hold exactly one of when, from, match" \
+    "when: minor|alerts[0].when must be major" \
+    "match: '(?:29)'|alerts[0].match must be a non-empty ERE that bash accepts"; do
+    create_test_package "pkg" "github-release" "alerts:
+  - ${rule%%|*}
+    note: Something"
+    message="${rule#*|}"
+    run bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 28+25 29+1' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$message"* ]] || {
+      echo "rule: $rule"
+      return 1
+    }
+  done
+}
+
 # === tag_versions ===
 
 @test "lib.sh: tag_versions fills the groups and keeps every other character" {
@@ -2741,6 +2883,134 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
   grep -q "⬆️ 2026102100 skipped (version jump)" "$TEST_TMPDIR/README.md"
+  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
+}
+
+@test "check-all: holds an update an alert with hold: true fires on" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-hold" "step" "current: 28+25
+alerts:
+  - when: major
+    hold: true
+    note: Raise makedepends java-environment to 28"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg-hold: update 28+25 → 29+1 held: Raise makedepends java-environment to 28"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-hold")" = "held: 29+1" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all: logs the note of an alert without hold and keeps the update" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-note" "step" "current: 28+25
+alerts:
+  - when: major
+    note: Create the package for the old major"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg-note: update 28+25 → 29+1 notice: Create the package for the old major"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-note")" = "new_version: 29+1" ]
+}
+
+@test "check-all: logs every fired alert of a held update" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-both" "step" "current: 28+25
+alerts:
+  - when: major
+    note: Create the package for the old major
+  - match: '^29\\+'
+    hold: true
+    note: Raise makedepends java-environment to 28"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [[ "$output" == *"pkg-both: update 28+25 → 29+1 notice: Create the package for the old major"* ]]
+  [[ "$output" == *"pkg-both: update 28+25 → 29+1 held: Raise makedepends java-environment to 28"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-both")" = "held: 29+1" ]
+}
+
+@test "check-all: a skipped version jump or downgrade wins over a hold" {
+  stand_in_strategy jump 2026102100
+  create_test_package "pkg-jump" "jump" "current: '13'
+alerts:
+  - when: major
+    hold: true
+    note: New major"
+  stand_in_strategy older 1.0
+  create_test_package "pkg-down" "older" "current: '2.0'
+alerts:
+  - match: '^1'
+    hold: true
+    note: Old line"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "jump_skipped: 2026102100" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 1.0" ]
+  [[ "$output" != *"held:"* ]]
+}
+
+@test "check-all: holds nothing for a package without current" {
+  stand_in_strategy step 1.0
+  create_test_package "pkg-new" "step" "alerts:
+  - from: '0.1'
+    hold: true
+    note: First release"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-new")" = "new_version: 1.0" ]
+}
+
+@test "check-all: fails the check of a package with an alert it cannot evaluate" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-bad" "step" "current: 28+25
+alerts:
+  - match: '(?:29)'
+    hold: true
+    note: New major"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [[ "$(cat "$TEST_TMPDIR/.status/pkg-bad")" == "check_failed: "*"alerts[0].match must be a non-empty ERE that bash accepts: (?:29)" ]]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+}
+
+@test "check-all --update: runs no update of a held version" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-hold" "step" "current: 28+25
+alerts:
+  - when: major
+    hold: true
+    note: Raise makedepends java-environment to 28"
+  rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
+  cat >"$TEST_TMPDIR/scripts/update-pkg.sh" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$TEST_TMPDIR/update-pkg.args"
+EOF
+  chmod +x "$TEST_TMPDIR/scripts/update-pkg.sh"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-hold")" = "held: 29+1" ]
+}
+
+@test "update-readme: renders a held update and keeps the badge green" {
+  create_test_package "pkg-hold" "github-release" "upstream:
+  project: owner/repo
+current: 28+25"
+
+  echo "held: 29+1" >"$TEST_TMPDIR/.status/pkg-hold"
+
+  cat >"$TEST_TMPDIR/README.md" <<'EOF'
+<!-- PACKAGES:START -->
+<!-- PACKAGES:END -->
+EOF
+  git -C "$TEST_TMPDIR" init -q
+  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
+
+  grep -q "<td nowrap>⏸️ 29+1 held</td>" "$TEST_TMPDIR/README.md"
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 

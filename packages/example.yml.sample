@@ -20,6 +20,8 @@
 #                     in its place, as 4.%s for pkgver 4.4215 of build 4215;
 #                     the PKGBUILD cuts the text off where a URL needs the
 #                     build, as in ${pkgver#4.}
+#   alerts          - rules for steps of upstream that need a hand edit,
+#                     see the example below and docs/WORKFLOW.md 4.5
 #
 # Written by update-pkg.sh after every push, do not edit by hand:
 #   current      - last pushed version
@@ -53,6 +55,24 @@ name: my-package
 strategy: github-release
 upstream:
   project: owner/repo
+
+# =============================================================================
+# ALERTS
+# =============================================================================
+# A rule fires on the step from current to the new version, when the new
+# version meets its condition and current does not. hold: true pauses the
+# update until the maintainer publishes it by hand and sets current; without
+# it the update goes on and the run logs the note.
+#
+# alerts:
+#   - when: major                          # the first number grows
+#     note: Create the package for the old major
+#   - from: '0.4.0'                        # the version reaches 0.4.0
+#     hold: true
+#     note: License changes to Apache-2.0
+#   - match: '^29\+'                       # ERE on the new version
+#     hold: true
+#     note: Raise makedepends java-environment to 28
 
 # =============================================================================
 # PER-STRATEGY EXAMPLES

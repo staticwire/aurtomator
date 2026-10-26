@@ -729,6 +729,193 @@ allow_version_jump: $value"
   done
 }
 
+@test "validate: alerts with when, from and match pass" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    note: Raise makedepends java-environment to the new major minus one
+  - from: '0.4.0'
+    hold: true
+    note: License changes to Apache-2.0
+  - match: '^29\\+'
+    hold: false
+    note: Check the boot JDK"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: alerts that is not a list rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  when: major
+  note: New major"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"alerts must be a list"* ]]
+}
+
+@test "validate: an alert that is not a map rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - major"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"alerts[0] must be a map with note and one of when, from, match"* ]]
+}
+
+@test "validate: an alert with an unknown key rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    note: New major
+    notify: true"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"alerts[0] has an unknown key: notify"* ]]
+}
+
+@test "validate: an alert without one condition rejected" {
+  local conditions
+  for conditions in "" "when: major
+    from: '1.0'" "from: '1.0'
+    match: '^2'"; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - note: New major
+    $conditions"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"alerts[0] must hold exactly one of when, from, match"* ]]
+  done
+}
+
+@test "validate: an alert when other than major rejected" {
+  local value
+  for value in minor "''" true "[major]"; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: $value
+    note: New major"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"alerts[0].when must be major"* ]]
+  done
+}
+
+@test "validate: an alert from that is not a version rejected" {
+  local value
+  for value in "'1.0-rc1'" "''" "beta" "[1.0]"; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - from: $value
+    note: License change"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"alerts[0].from must be a version of A-Za-z0-9 . _ + with a digit"* ]]
+  done
+}
+
+@test "validate: an alert from as a YAML number passes" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - from: 2
+    note: New line"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: an alert match that is not an ERE bash accepts rejected" {
+  local value
+  for value in "'(?:29)'" "'*29'" "''" "[29]"; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - match: $value
+    note: New line"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"alerts[0].match must be a non-empty ERE that bash accepts"* ]]
+  done
+}
+
+@test "validate: an alert note that is not one line of text rejected" {
+  local note
+  for note in "" "note: ''" "note: |
+      First line
+      Second line" "note: [a, b]" "note: {text: x}" "note: 42"; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    $note"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"alerts[0].note must be one line of text"* ]]
+  done
+}
+
+@test "validate: an alert hold that is not a boolean rejected" {
+  local value
+  for value in yes '"true"' 1; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    hold: $value
+    note: New major"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"alerts[0].hold must be true or false"* ]]
+  done
+}
+
+@test "validate: names the alert at its index" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    note: New major
+  - from: '1.0'
+    hold: maybe
+    note: License change"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"alerts[1].hold must be true or false"* ]]
+  [[ "$output" != *"alerts[0]"* ]]
+}
+
+# The fixed text of 4.%s holds the first number of every version
+@test "validate: an alert when major with pkgver_format rejected" {
+  create_test_package "mypkg" "repology" "current: '4.4215'
+pkgver_format: '4.%s'
+alerts:
+  - when: major
+    note: New major"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"alerts[0]: when: major does not apply with pkgver_format"* ]]
+}
+
+@test "validate: an alert from or match with pkgver_format passes" {
+  create_test_package "mypkg" "repology" "current: '4.4215'
+pkgver_format: '4.%s'
+alerts:
+  - from: '4.5000'
+    note: New build line
+  - match: '^4\\.5'
+    note: New build line"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
 @test "validate: pkgver_dash _, . or '' passes" {
   local value
   for value in _ . ""; do

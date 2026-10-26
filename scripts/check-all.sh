@@ -182,12 +182,12 @@ checked=0
 
 # The version the check run found for a package, printed the way
 # check-update.sh prints it: nothing when up to date, an error on failure.
-# A skipped downgrade or version jump prints its version, and the check
-# below skips it again.
+# A skipped downgrade or version jump and a held update print their
+# version, and the checks below skip or hold it again.
 checked_version() {
   local status="${CHECKED[$1]:-}"
   case "$status" in
-    "new_version: "* | "available_downgrade: "* | "downgrade_skipped: "* | "jump_skipped: "*)
+    "new_version: "* | "available_downgrade: "* | "downgrade_skipped: "* | "jump_skipped: "* | "held: "*)
       echo "${status#*: }"
       ;;
     up_to_date) ;;
@@ -209,7 +209,7 @@ checked_version() {
 run_package() {
   local pkg_file="$1" pass="$2"
   local pkg_name found check_cmd err_file check_rc latest check_err current
-  local is_downgrade cmp available pushed cmd update_rc update_err
+  local is_downgrade cmp alerts fired line held action note available pushed cmd update_rc update_err
   pkg_name=$(pkg_get "$pkg_file" .name)
   # --publish keeps the status of the check run and publishes only a package
   # that run found outdated. Only package names from packages/ reach a path,
@@ -227,7 +227,7 @@ run_package() {
           return
         fi
         ;;
-      up_to_date | check_failed:* | "downgrade_skipped: "* | "jump_skipped: "*)
+      up_to_date | check_failed:* | "downgrade_skipped: "* | "jump_skipped: "* | "held: "*)
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         return
         ;;
@@ -300,6 +300,35 @@ run_package() {
     [[ "$(pkg_get "$pkg_file" '.allow_version_jump // false')" != "true" ]]; then
     log_warn "$pkg_name: version jump $current → $latest, skipped: allow_version_jump is not set"
     echo "jump_skipped: ${latest}" >"${STATUS_DIR}/${pkg_name}"
+    return
+  fi
+
+  # An alert names a step of upstream that needs a hand edit. One with
+  # hold: true keeps the update back until the maintainer publishes it.
+  err_file=$(mktemp)
+  check_rc=0
+  alerts=$(fired_alerts "$pkg_file" "$current" "$latest" 2>"$err_file") || check_rc=$?
+  check_err=$(<"$err_file")
+  rm -f "$err_file"
+  if ((check_rc != 0)); then
+    log_err "Failed to check $pkg_name: $check_err"
+    echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
+    return
+  fi
+  held=false
+  mapfile -t fired <<<"$alerts"
+  for line in "${fired[@]}"; do
+    IFS=$'\t' read -r action note <<<"$line"
+    case "$action" in
+      hold)
+        held=true
+        log_warn "$pkg_name: update $current → $latest held: $note"
+        ;;
+      notice) log_warn "$pkg_name: update $current → $latest notice: $note" ;;
+    esac
+  done
+  if [[ "$held" == true ]]; then
+    echo "held: ${latest}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
 

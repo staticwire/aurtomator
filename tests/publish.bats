@@ -1286,6 +1286,23 @@ current: '13'"
   [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
 }
 
+@test "check-all --prepare: prepares no update the check run held" {
+  create_test_package "held" "github-release" "upstream:
+  project: owner/repo
+current: 28+25
+alerts:
+  - when: major
+    hold: true
+    note: Raise makedepends java-environment to 28"
+  echo "held: 29+1" >"$TEST_TMPDIR/.status/held"
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/held")" = "held: 29+1" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
+}
+
 @test "check-all --prepare: records a failed preparation" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
@@ -1383,6 +1400,52 @@ current: '13'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/jumpy")" = "jump_skipped: 2026102100" ]
+}
+
+@test "check-all --publish: keeps a held update and publishes nothing" {
+  create_test_package "held" "github-release" "upstream:
+  project: owner/repo
+current: 28+25"
+  checked_status held "held: 29+1"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all --publish: publishes no update an alert with hold: true fires on" {
+  create_test_package "held" "github-release" "upstream:
+  project: owner/repo
+current: 28+25
+alerts:
+  - when: major
+    hold: true
+    note: Raise makedepends java-environment to 28"
+  checked_status held "new_version: 29+1"
+  mkdir -p "$TEST_TMPDIR/out/prepared/held"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
+}
+
+@test "check-all --publish: publishes an update an alert without hold fires on" {
+  create_test_package "noted" "github-release" "upstream:
+  project: owner/repo
+current: 28+25
+alerts:
+  - when: major
+    note: Create the package for the old major"
+  checked_status noted "new_version: 29+1"
+  mkdir -p "$TEST_TMPDIR/out/prepared/noted"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "noted 29+1 $TEST_TMPDIR/out/prepared/noted" ]
+  [ "$(cat "$TEST_TMPDIR/.status/noted")" = "updated: 29+1" ]
 }
 
 @test "check-all --publish: marks a package the check run left out" {

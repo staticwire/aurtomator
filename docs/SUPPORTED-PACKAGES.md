@@ -253,7 +253,7 @@ Packages with `.patch` or `.diff` files in `source=()`.
 
 ## Not supported (not detected)
 
-aurtomator cannot detect these cases. The maintainer has to watch for them.
+aurtomator cannot detect these cases. The maintainer has to watch for them. When the version that needs the change is known in advance, such as a new major of a JDK that needs a newer boot JDK in `makedepends`, an alert in the package YAML pauses the update at that version or reports it, see [WORKFLOW.md section 4.5](WORKFLOW.md#45-update-alerts).
 
 ### Packages needing a pkgrel bump
 
