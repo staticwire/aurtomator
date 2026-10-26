@@ -202,6 +202,13 @@ checked_version() {
   esac
 }
 
+# Appends the alerts that fired for a package to _alerts, where the issue
+# steps read their notes: the package, a tab and a line of fired_alerts
+# Args: $1=package name, $2=output of fired_alerts
+record_alerts() {
+  [[ -z "$2" ]] || awk -v p="$1" '{ print p "\t" $0 }' <<<"$2" >>"${STATUS_DIR}/_alerts"
+}
+
 # Checks one package, then updates, prepares or publishes it as the mode
 # says, and writes its status. A check that fails fast in a mode that runs
 # the strategies goes on the list for the second pass.
@@ -229,6 +236,8 @@ run_package() {
         ;;
       up_to_date | check_failed:* | "downgrade_skipped: "* | "jump_skipped: "* | "held: "*)
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
+        # The issue of a held update lists the notes of its alerts
+        [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(fired_alerts "$pkg_file" "$(pkg_get "$pkg_file" '.current // ""')" "${found#held: }" 2>/dev/null)"
         return
         ;;
       "")
@@ -315,6 +324,7 @@ run_package() {
     echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
+  record_alerts "$pkg_name" "$alerts"
   held=false
   mapfile -t fired <<<"$alerts"
   for line in "${fired[@]}"; do

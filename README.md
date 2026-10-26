@@ -91,7 +91,7 @@ An update whose first number has at least two digits more than that of the track
 
 ## Update alerts
 
-A package YAML can name the versions that need a hand edit of the PKGBUILD, such as a new major that needs a newer build dependency. An alert with `hold: true` pauses the update at such a version, shown with a `⏸️` icon, until the maintainer publishes it by hand. Without `hold`, the update goes on and the run logs the note. Details are in [docs/WORKFLOW.md section 4.5](docs/WORKFLOW.md#45-update-alerts).
+A package YAML can name the versions that need a hand edit of the PKGBUILD, such as a new major that needs a newer build dependency. An alert with `hold: true` pauses the update at such a version, shown with a `⏸️` icon, and opens an issue with the note until the maintainer publishes the version by hand. Without `hold`, the update goes on, and an issue with the note opens after the push. Details are in [docs/WORKFLOW.md section 4.5](docs/WORKFLOW.md#45-update-alerts).
 
 ## Resource usage
 

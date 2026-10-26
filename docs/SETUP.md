@@ -29,7 +29,7 @@ sudo pacman -S --needed git openssh go-yq curl pacman-contrib namcap github-cli 
 
 1. **Enable GitHub Actions**: open the Actions tab of your fork and enable workflows. GitHub disables Actions on forks by default.
 2. **Enable the "Check AUR Package Updates" workflow**: open it in the Actions tab and click "Enable workflow". A fork needs this for every scheduled workflow. GitHub also disables a scheduled workflow of a public repository after 60 days without activity in it. The workflow commits only when a status or a version changes, so a fork whose packages stay the same that long loses its schedule and has to enable the workflow again.
-3. **Enable Issues**: Settings > General > Features > Issues. Failures are reported as issues. With Issues off, a run prints a notice instead and opens none.
+3. **Enable Issues**: Settings > General > Features > Issues. Failures and update alerts are reported as issues. With Issues off, a run prints a notice instead and opens none.
 4. **Run setup**: `./scripts/setup.sh` configures identity, SSH, GPG and GitHub Secrets, as described below.
 
 ### Recommended

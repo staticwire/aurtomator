@@ -4,6 +4,27 @@
 #
 # Sourced by lib.sh.
 
+# Body of the issue opened for an update an alert fired on: a held update,
+# or a published one with a notice. The notes come from _alerts, which
+# check-all.sh writes next to the status file, one line per fired alert:
+# the package, hold or notice, and the note, split by tabs. The version is
+# a checked pkgver, so a code span holds it.
+# Args: $1=status file in .status/, named after the package, holding
+#       held:, updated: or downgrade: and the version; $2=URL of the run
+# The backticks are Markdown code
+# shellcheck disable=SC2016
+alert_issue_body() {
+  local status package notes state=Published footer="Close it once the edit is done."
+  status=$(<"$1")
+  package="${1##*/}"
+  notes=$(awk -F'\t' -v p="$package" '$1 == p { sub(/^[^\t]*\t[^\t]*\t/, ""); print "- " $0 }' "${1%/*}/_alerts" 2>/dev/null) || true
+  if [[ "$status" == held:* ]]; then
+    state=Held
+    footer='Publish the version by hand after the edit and set `current` in the package YAML to it. The next run closes this issue.'
+  fi
+  printf 'Package: `%s`\n%s version: `%s`\nRun: %s\n\n%s\n\nAuto-created by update workflow. %s\n' "$package" "$state" "${status#*: }" "$2" "$notes" "$footer"
+}
+
 # Body of the issue opened for a failed package. The error holds text from
 # upstream, such as a rejected tag name, so it goes into a code block,
 # where links, images and mentions do not render. The fence is longer than

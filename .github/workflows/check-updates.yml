@@ -430,7 +430,7 @@ jobs:
       # one, so the check issue of a package whose update now fails has to
       # be closed first. The step does not run after a failed step, so a
       # status that publish did not write closes nothing.
-      - name: Close issues of recovered packages
+      - name: Close resolved issues
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -441,6 +441,7 @@ jobs:
           has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
           [[ "$has_issues" != "false" ]] || exit 0
           open=$(gh issue list --label "auto-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+          held=$(gh issue list --label "update-held" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
 
           while read -r number title; do
             [[ -n "$number" ]] || continue
@@ -450,19 +451,23 @@ jobs:
               [[ "$pkg_name" == _* ]] && continue
               status=$(cat "$status_file")
               # A check issue closes once the check passes, an update issue
-              # once the version is in the AUR
+              # once the version is in the AUR, a held issue once the
+              # update is no longer held
               case "$title:$status" in
                 "❌ $pkg_name: check failed:check_failed:"*) continue ;;
                 "❌ $pkg_name: check failed:"*) ;;
                 "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
                   "❌ $pkg_name: update failed:downgrade: "*) ;;
+                "⏸️ $pkg_name: update held:held: "*) continue ;;
+                "⏸️ $pkg_name: update held:"*) ;;
                 *) continue ;;
               esac
               gh issue close "$number" --comment "The status of $pkg_name is \`$status\` in $RUN_URL."
             done
-          done <<<"$open"
+          done <<<"$open
+          $held"
 
-      - name: Create issues for failed packages
+      - name: Create issues
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -474,13 +479,29 @@ jobs:
           # gh issue list fails in a repository with Issues turned off. A
           # fork like that gets a notice, and any other failure of the
           # list still fails the step.
-          if grep -qsE '^(check|update)_failed:' "$STATUS_DIR"/*; then
+          if grep -qsE '^(check_failed|update_failed|held):' "$STATUS_DIR"/* || [[ -s "$STATUS_DIR/_alerts" ]]; then
             has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
             if [[ "$has_issues" == "false" ]]; then
-              echo "::notice::Issues are disabled in $GITHUB_REPOSITORY, so failed packages get no issue"
+              echo "::notice::Issues are disabled in $GITHUB_REPOSITORY, so the run opens no issue"
               exit 0
             fi
           fi
+
+          # Opens an issue with label $1, made with color $2 and description
+          # $3 when it is missing, and title $4, unless an open issue of the
+          # label has that title. builder writes the body from status file
+          # $5, so root runs no code from the workspace while it holds the
+          # token.
+          alert_issue() {
+            gh label create "$1" --color "$2" --description "$3" 2>/dev/null || true
+            titles=$(gh issue list --label "$1" --state open --limit 1000 --json title --jq '.[].title')
+            if grep -qxF -e "$4" <<<"$titles"; then
+              echo "Issue already open: $4"
+              return 0
+            fi
+            body=$(sudo -u builder bash -c 'source ./scripts/lib.sh && alert_issue_body "$@"' _ "$5" "$RUN_URL")
+            gh issue create --title "$4" --label "$1" --body "$body" || echo "Warning: could not create issue (issues may be disabled)"
+          }
 
           for status_file in "$STATUS_DIR"/*; do
             [[ -f "$status_file" ]] || continue
@@ -512,6 +533,16 @@ jobs:
                   --label "auto-update" \
                   --body "$ISSUE_BODY" || echo "Warning: could not create issue (issues may be disabled)"
                 echo "Created issue for $pkg_name"
+                ;;
+              "held: "*)
+                alert_issue update-held fbca04 "Update waits for a hand edit" "⏸️ $pkg_name: update held" "$status_file"
+                ;;
+              "updated: "* | "downgrade: "*)
+                # A published update gets an issue for the notices that
+                # fired; a hold would have kept it from being published
+                if awk -F'\t' -v p="$pkg_name" '$1 == p { found = 1 } END { exit !found }' "$STATUS_DIR/_alerts" 2>/dev/null; then
+                  alert_issue update-notice 1d76db "Published update needs a hand edit" "🔔 $pkg_name: ${status#*: } notice" "$status_file"
+                fi
                 ;;
             esac
           done

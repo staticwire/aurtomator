@@ -2930,6 +2930,38 @@ alerts:
   [ "$(cat "$TEST_TMPDIR/.status/pkg-both")" = "held: 29+1" ]
 }
 
+@test "check-all: records the fired alerts of a package in _alerts" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-both" "step" "current: 28+25
+alerts:
+  - when: major
+    note: Create the package for the old major
+  - match: '^29\\+'
+    hold: true
+    note: Raise makedepends java-environment to 28"
+  create_test_package "pkg-calm" "step" "current: 29+0
+alerts:
+  - when: major
+    note: Not fired"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'pkg-both\tnotice\tCreate the package for the old major\npkg-both\thold\tRaise makedepends java-environment to 28' ]
+  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+}
+
+@test "check-all: writes no _alerts when no alert fires" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-calm" "step" "current: 29+0
+alerts:
+  - when: major
+    note: Not fired"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/.status/_alerts" ]
+}
+
 @test "check-all: a skipped version jump or downgrade wins over a hold" {
   stand_in_strategy jump 2026102100
   create_test_package "pkg-jump" "jump" "current: '13'

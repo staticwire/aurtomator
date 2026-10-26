@@ -530,10 +530,11 @@ EOF
 }
 
 # Runs the issue step of publish in a workspace with the statuses given as
-# name=status pairs. gh lists the titles in $GH_TITLES, one per line, as
-# every open issue whatever --search asks for, the first 30 unless --limit
-# says otherwise, answers has_issues with $GH_HAS_ISSUES (true by default)
-# or fails it when $GH_API_FAIL is set, and logs every call to $GH_LOG.
+# name=status pairs. gh lists the titles in $GH_TITLES, one per line, that
+# start with the emoji of the --label it asks for, the first 30 unless
+# --limit says otherwise, answers has_issues with $GH_HAS_ISSUES (true by
+# default) or fails it when $GH_API_FAIL is set, and logs every call to
+# $GH_LOG.
 run_issue_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   mkdir -p "$ws/.status" "$bin"
@@ -550,15 +551,23 @@ if [[ "$*" == "api repos/$GITHUB_REPOSITORY --jq .has_issues" ]]; then
 fi
 [[ "$1 $2" == "issue list" ]] || exit 0
 [[ -z "${GH_FAIL:-}" ]] || exit 1
-limit=30 jq_expr=""
+limit=30 jq_expr="" emoji=""
 while (($#)); do
   case "$1" in
     --limit) limit=$2 && shift ;;
     --jq) jq_expr=$2 && shift ;;
+    --label)
+      case "$2" in
+        auto-update) emoji="❌" ;;
+        update-held) emoji="⏸️" ;;
+        update-notice) emoji="🔔" ;;
+      esac
+      shift
+      ;;
   esac
   shift
 done
-titles=$(grep -v '^$' <<<"${GH_TITLES:-}" | head -n "$limit") || true
+titles=$(grep "^$emoji" <<<"${GH_TITLES:-}" | head -n "$limit") || true
 case "$jq_expr" in
   length) grep -c . <<<"$titles" ;;
   ".[].title") [[ -z "$titles" ]] || printf '%s\n' "$titles" ;;
@@ -569,7 +578,7 @@ EOF
   chmod +x "$bin/gh" "$bin/sudo"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   : >"$GH_LOG"
-  step_run publish "Create issues for failed packages" >"$BATS_TEST_TMPDIR/step.sh"
+  step_run publish "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GITHUB_REPOSITORY=owner/fork \
@@ -632,11 +641,62 @@ EOF
   [ ! -s "$GH_LOG" ]
 }
 
+@test "check-updates: the issue step opens an issue for a held update" {
+  run_issue_step foo="held: 29+1" _alerts=$'foo\thold\tRaise makedepends'
+  [ "$status" -eq 0 ]
+  grep -qx 'label create update-held --color fbca04 --description Update waits for a hand edit' "$GH_LOG"
+  grep -qx 'issue create --title ⏸️ foo: update held --label update-held --body body' "$GH_LOG"
+}
+
+@test "check-updates: an open issue of a held update holds back another one" {
+  GH_TITLES=$'❌ bar: check failed\n⏸️ foo: update held' run_issue_step foo="held: 29+2"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step opens an issue for a notice of a published update" {
+  run_issue_step foo="updated: 29+1" bar="downgrade: 1.0" \
+    _alerts=$'foo\tnotice\tCreate the package for the old major\nbar\tnotice\tCheck the old line'
+  [ "$status" -eq 0 ]
+  grep -qx 'label create update-notice --color 1d76db --description Published update needs a hand edit' "$GH_LOG"
+  grep -qx 'issue create --title 🔔 foo: 29+1 notice --label update-notice --body body' "$GH_LOG"
+  grep -qx 'issue create --title 🔔 bar: 1.0 notice --label update-notice --body body' "$GH_LOG"
+}
+
+@test "check-updates: an open notice of the version holds back another one" {
+  GH_TITLES=$'🔔 foo: 29+1 notice\n⏸️ foo: update held' \
+    run_issue_step foo="updated: 29+1" _alerts=$'foo\tnotice\tCreate the package for the old major'
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step opens no notice for an update that was not published or has no notice" {
+  run_issue_step foo="new_version: 29+1" bar="updated: 2.0" baz="up_to_date" \
+    _alerts=$'foo\tnotice\tNot published\nbarfly\tnotice\tAnother package\nbaz\tnotice\tUp to date'
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step gives a notice for a held update when Issues are disabled" {
+  GH_HAS_ISSUES=false GH_FAIL=1 run_issue_step foo="held: 29+1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
+  run grep -c '^issue ' "$GH_LOG"
+  [ "$output" = "0" ]
+  GH_HAS_ISSUES=false GH_FAIL=1 run_issue_step foo="updated: 29+1" _alerts=$'foo\tnotice\tNote'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
+}
+
 # Runs the close step of publish in a workspace with the statuses given as
 # name=status pairs. gh lists the open issues in $GH_OPEN, one
-# "<number> <title>" per line, the first 30 unless --limit says otherwise,
-# answers has_issues with $GH_HAS_ISSUES (true by default), fails the list
-# when $GH_FAIL is set and logs every call to $GH_LOG.
+# "<number> <title>" per line, whose title starts with the emoji of the
+# --label it asks for, the first 30 unless --limit says otherwise, answers
+# has_issues with $GH_HAS_ISSUES (true by default), fails the list when
+# $GH_FAIL is set and logs every call to $GH_LOG.
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   mkdir -p "$ws/.status" "$bin"
@@ -650,19 +710,25 @@ case "$1 $2" in
   "api repos/owner/fork") echo "${GH_HAS_ISSUES:-true}" ;;
   "issue list")
     [[ -z "${GH_FAIL:-}" ]] || exit 1
-    limit=30
+    limit=30 emoji=""
     while (($#)); do
       [[ "$1" != --limit ]] || limit=$2
+      if [[ "$1" == --label ]]; then
+        case "$2" in
+          auto-update) emoji="❌" ;;
+          update-held) emoji="⏸️" ;;
+        esac
+      fi
       shift
     done
-    [[ -z "${GH_OPEN:-}" ]] || head -n "$limit" <<<"$GH_OPEN"
+    grep "^[0-9]* $emoji" <<<"${GH_OPEN:-}" | head -n "$limit" || true
     ;;
 esac
 EOF
   chmod +x "$bin/gh"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   : >"$GH_LOG"
-  step_run publish "Close issues of recovered packages" >"$BATS_TEST_TMPDIR/step.sh"
+  step_run publish "Close resolved issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -785,8 +851,8 @@ no_commit() {
 
 @test "check-updates: the close step runs before the issue step, and not after a failed step" {
   run yq '[.jobs.publish.steps[].name] | join(",")' "$CHECK_UPDATES"
-  [[ "$output" == *"Close issues of recovered packages,Create issues for failed packages" ]]
-  run yq '.jobs.publish.steps[] | select(.name == "Close issues of recovered packages") | has("if")' "$CHECK_UPDATES"
+  [[ "$output" == *"Close resolved issues,Create issues" ]]
+  run yq '.jobs.publish.steps[] | select(.name == "Close resolved issues") | has("if")' "$CHECK_UPDATES"
   [ "$output" = "false" ]
 }
 
@@ -836,6 +902,16 @@ no_commit() {
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+@test "check-updates: closes the issue of a package that is no longer held" {
+  GH_OPEN=$'12 ⏸️ foo: update held\n13 ⏸️ bar: update held\n14 ❌ baz: check failed' \
+    run_close_step foo=up_to_date bar="held: 29+2" baz="held: 3.0"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 12 --comment The status of foo is `up_to_date` in https://example.invalid/run.' "$GH_LOG"
+  grep -qx 'issue close 14 --comment The status of baz is `held: 3.0` in https://example.invalid/run.' "$GH_LOG"
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "2" ]
 }
 
 @test "check-updates: the close step lists nothing when Issues are disabled" {

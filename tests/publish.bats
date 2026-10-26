@@ -1415,6 +1415,26 @@ current: 28+25"
   [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
 }
 
+@test "check-all --publish: keeps a held update and records the notes of its alerts again" {
+  create_test_package "held" "github-release" "upstream:
+  project: owner/repo
+current: 28+25
+alerts:
+  - when: major
+    note: Create the package for the old major
+  - from: '29'
+    hold: true
+    note: Raise makedepends java-environment to 28"
+  checked_status held "held: 29+1"
+  printf 'held\thold\tstale note\n' >"$TEST_TMPDIR/.status/_alerts"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'held\tnotice\tCreate the package for the old major\nheld\thold\tRaise makedepends java-environment to 28' ]
+}
+
 @test "check-all --publish: publishes no update an alert with hold: true fires on" {
   create_test_package "held" "github-release" "upstream:
   project: owner/repo
@@ -1446,6 +1466,7 @@ alerts:
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "noted 29+1 $TEST_TMPDIR/out/prepared/noted" ]
   [ "$(cat "$TEST_TMPDIR/.status/noted")" = "updated: 29+1" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'noted\tnotice\tCreate the package for the old major' ]
 }
 
 @test "check-all --publish: marks a package the check run left out" {
@@ -1911,6 +1932,56 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg $TEST_TMPDIR/out/prepared/pkg" ]
+}
+
+# === alert_issue_body ===
+
+@test "alert_issue_body: lists every note of a held update" {
+  echo "held: 29+1" >"$TEST_TMPDIR/demo"
+  printf '%s\t%s\t%s\n' demo notice "Create the package for the old major" other hold "Not this one" \
+    demo hold "Raise makedepends java-environment to 28" >"$TEST_TMPDIR/_alerts"
+  run alert_issue_body "$TEST_TMPDIR/demo" https://github.com/owner/repo/actions/runs/1
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+Package: `demo`
+Held version: `29+1`
+Run: https://github.com/owner/repo/actions/runs/1
+
+- Create the package for the old major
+- Raise makedepends java-environment to 28
+
+Auto-created by update workflow. Publish the version by hand after the edit and set `current` in the package YAML to it. The next run closes this issue.
+EOF
+  )
+  [ "$output" = "$expected" ]
+}
+
+@test "alert_issue_body: writes the body without _alerts" {
+  echo "held: 29+1" >"$TEST_TMPDIR/demo"
+  run --keep-empty-lines alert_issue_body "$TEST_TMPDIR/demo" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = 'Held version: `29+1`' ]
+  [ "${lines[4]}" = "" ]
+}
+
+@test "alert_issue_body: lists the notes of a published update" {
+  echo "updated: 29+1" >"$TEST_TMPDIR/demo"
+  printf '%s\t%s\t%s\n' demo notice "Create the package for the old major" >"$TEST_TMPDIR/_alerts"
+  run alert_issue_body "$TEST_TMPDIR/demo" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+Package: `demo`
+Published version: `29+1`
+Run: https://example.invalid/run
+
+- Create the package for the old major
+
+Auto-created by update workflow. Close it once the edit is done.
+EOF
+  )
+  [ "$output" = "$expected" ]
 }
 
 # === failure_issue_body ===
