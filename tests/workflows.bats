@@ -248,16 +248,33 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 }
 
 @test "release-please: pins the action by SHA, reads the config in .github and has a time limit" {
-  run yq '.jobs[].steps[].uses' "$RELEASE"
+  run yq '.jobs[].steps[1].uses' "$RELEASE"
   [[ "$output" =~ ^googleapis/release-please-action@[0-9a-f]{40}$ ]]
   run grep -E '^ +- uses: googleapis/release-please-action@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' "$RELEASE"
   [ "$status" -eq 0 ]
-  run yq '.jobs[].steps[].with | .["config-file"] + " " + .["manifest-file"]' "$RELEASE"
+  run yq '.jobs[].steps[1].with | .["config-file"] + " " + .["manifest-file"]' "$RELEASE"
   [ "$output" = ".github/release-please-config.json .github/.release-please-manifest.json" ]
   run yq '.jobs[]["timeout-minutes"] > 0' "$RELEASE"
   [ "$output" = "true" ]
   run yq -o=json -I=0 '.permissions' "$RELEASE"
   [ "$output" = '{"contents":"read"}' ]
+}
+
+# GitHub runs the CI of a pull request opened with the workflow token only
+# after someone with write access approves it, and main requires that CI
+@test "release-please: opens the release PR with the token of the release App" {
+  run yq '.jobs[].steps | length' "$RELEASE"
+  [ "$output" = "2" ]
+  run yq '.jobs[].steps[0].uses' "$RELEASE"
+  [[ "$output" =~ ^actions/create-github-app-token@[0-9a-f]{40}$ ]]
+  run grep -E '^ +- uses: actions/create-github-app-token@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' "$RELEASE"
+  [ "$status" -eq 0 ]
+  run yq -o=json -I=0 '.jobs[].steps[0] | [.id, .with]' "$RELEASE"
+  [ "$output" = '["app-token",{"client-id":"${{ vars.RELEASE_APP_CLIENT_ID }}","private-key":"${{ secrets.RELEASE_APP_PRIVATE_KEY }}","permission-contents":"write","permission-issues":"write","permission-pull-requests":"write"}]' ]
+  run yq '.jobs[].steps[1].with.token' "$RELEASE"
+  [ "$output" = '${{ steps.app-token.outputs.token }}' ]
+  run yq '.jobs[] | has("permissions")' "$RELEASE"
+  [ "$output" = "false" ]
 }
 
 @test "release-please: writes VERSION, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
