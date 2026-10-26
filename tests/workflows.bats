@@ -617,9 +617,9 @@ while (($#)); do
     --label)
       case "$2" in
         auto-update) emoji="❌" ;;
-        update-held) emoji="⏸️" ;;
+        update-held) emoji="✋" ;;
         update-notice) emoji="🔔" ;;
-        aurtomator-update) emoji="⬆️" ;;
+        aurtomator-update) emoji="🚀" ;;
       esac
       shift
       ;;
@@ -704,11 +704,11 @@ EOF
   run_issue_step foo="held: 29+1" _alerts=$'foo\thold\tRaise makedepends'
   [ "$status" -eq 0 ]
   grep -qx 'label create update-held --color fbca04 --description Update waits for a hand edit' "$GH_LOG"
-  grep -qx 'issue create --title ⏸️ foo: update held --label update-held --body body' "$GH_LOG"
+  grep -qx 'issue create --title ✋ foo: update held --label update-held --body body' "$GH_LOG"
 }
 
 @test "check-updates: an open issue of a held update holds back another one" {
-  GH_TITLES=$'❌ bar: check failed\n⏸️ foo: update held' run_issue_step foo="held: 29+2"
+  GH_TITLES=$'❌ bar: check failed\n✋ foo: update held' run_issue_step foo="held: 29+2"
   [ "$status" -eq 0 ]
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
@@ -724,7 +724,7 @@ EOF
 }
 
 @test "check-updates: an open notice of the version holds back another one" {
-  GH_TITLES=$'🔔 foo: 29+1 notice\n⏸️ foo: update held' \
+  GH_TITLES=$'🔔 foo: 29+1 notice\n✋ foo: update held' \
     run_issue_step foo="updated: 29+1" _alerts=$'foo\tnotice\tCreate the package for the old major'
   [ "$status" -eq 0 ]
   run grep -c '^issue create' "$GH_LOG"
@@ -743,11 +743,11 @@ EOF
   run_issue_step _upstream="newer: 0.7.0"
   [ "$status" -eq 0 ]
   grep -qx 'label create aurtomator-update --color 0e8a16 --description Newer aurtomator release' "$GH_LOG"
-  grep -qx 'issue create --title ⬆️ aurtomator 0.7.0 available --label aurtomator-update --body body' "$GH_LOG"
+  grep -qx 'issue create --title 🚀 aurtomator 0.7.0 available --label aurtomator-update --body body' "$GH_LOG"
 }
 
 @test "check-updates: an open issue of the release holds back another one" {
-  GH_TITLES=$'⬆️ aurtomator 0.7.0 available' run_issue_step _upstream="newer: 0.7.0"
+  GH_TITLES=$'🚀 aurtomator 0.7.0 available' run_issue_step _upstream="newer: 0.7.0"
   [ "$status" -eq 0 ]
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
@@ -803,8 +803,8 @@ case "$1 $2" in
       if [[ "$1" == --label ]]; then
         case "$2" in
           auto-update) emoji="❌" ;;
-          update-held) emoji="⏸️" ;;
-          aurtomator-update) emoji="⬆️" ;;
+          update-held) emoji="✋" ;;
+          aurtomator-update) emoji="🚀" ;;
         esac
       fi
       shift
@@ -993,7 +993,7 @@ no_commit() {
 }
 
 @test "check-updates: closes the issue of a package that is no longer held" {
-  GH_OPEN=$'12 ⏸️ foo: update held\n13 ⏸️ bar: update held\n14 ❌ baz: check failed' \
+  GH_OPEN=$'12 ✋ foo: update held\n13 ✋ bar: update held\n14 ❌ baz: check failed' \
     run_close_step foo=up_to_date bar="held: 29+2" baz="held: 3.0"
   [ "$status" -eq 0 ]
   grep -qx 'issue close 12 --comment The status of foo is `up_to_date` in https://example.invalid/run.' "$GH_LOG"
@@ -1003,11 +1003,11 @@ no_commit() {
 }
 
 @test "check-updates: closes the issue of an aurtomator release once VERSION holds it or a newer one is out" {
-  GH_OPEN=$'21 ⬆️ aurtomator 0.7.0 available\n22 ⬆️ aurtomator 0.8.0 available' run_close_step _upstream="current: 0.8.0"
+  GH_OPEN=$'21 🚀 aurtomator 0.7.0 available\n22 🚀 aurtomator 0.8.0 available' run_close_step _upstream="current: 0.8.0"
   [ "$status" -eq 0 ]
   grep -qx 'issue close 21 --comment The aurtomator release status is `current: 0.8.0` in https://example.invalid/run.' "$GH_LOG"
   grep -q '^issue close 22 ' "$GH_LOG"
-  GH_OPEN=$'21 ⬆️ aurtomator 0.7.0 available\n22 ⬆️ aurtomator 0.8.0 available' run_close_step _upstream="newer: 0.8.0"
+  GH_OPEN=$'21 🚀 aurtomator 0.7.0 available\n22 🚀 aurtomator 0.8.0 available' run_close_step _upstream="newer: 0.8.0"
   [ "$status" -eq 0 ]
   grep -q '^issue close 21 ' "$GH_LOG"
   run grep -c '^issue close' "$GH_LOG"
@@ -1015,7 +1015,7 @@ no_commit() {
 }
 
 @test "check-updates: keeps the issue of an aurtomator release when the run could not read the release" {
-  GH_OPEN=$'21 ⬆️ aurtomator 0.7.0 available' run_close_step foo=up_to_date
+  GH_OPEN=$'21 🚀 aurtomator 0.7.0 available' run_close_step foo=up_to_date
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]

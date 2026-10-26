@@ -458,8 +458,8 @@ jobs:
                 "❌ $pkg_name: check failed:"*) ;;
                 "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
                   "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "*) ;;
-                "⏸️ $pkg_name: update held:held: "*) continue ;;
-                "⏸️ $pkg_name: update held:"*) ;;
+                "✋ $pkg_name: update held:held: "*) continue ;;
+                "✋ $pkg_name: update held:"*) ;;
                 *) continue ;;
               esac
               gh issue close "$number" --comment "The status of $pkg_name is \`$status\` in $RUN_URL."
@@ -474,7 +474,7 @@ jobs:
             upstream=$(cat "$STATUS_DIR/_upstream")
             releases=$(gh issue list --label "aurtomator-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
             while read -r number title; do
-              [[ -n "$number" && "$title" != "⬆️ aurtomator ${upstream#newer: } available" ]] || continue
+              [[ -n "$number" && "$title" != "🚀 aurtomator ${upstream#newer: } available" ]] || continue
               gh issue close "$number" --comment "The aurtomator release status is \`$upstream\` in $RUN_URL."
             done <<<"$releases"
           fi
@@ -547,7 +547,7 @@ jobs:
                 echo "Created issue for $pkg_name"
                 ;;
               "held: "*)
-                open_issue update-held fbca04 "Update waits for a hand edit" "⏸️ $pkg_name: update held" alert_issue_body "$status_file"
+                open_issue update-held fbca04 "Update waits for a hand edit" "✋ $pkg_name: update held" alert_issue_body "$status_file"
                 ;;
               "updated: "* | "downgrade: "*)
                 # A published update gets an issue for the notices that
@@ -562,5 +562,5 @@ jobs:
           # A newer release of aurtomator gets an issue
           upstream=$(cat "$STATUS_DIR/_upstream" 2>/dev/null || true)
           if [[ "$upstream" == "newer: "* ]]; then
-            open_issue aurtomator-update 0e8a16 "Newer aurtomator release" "⬆️ aurtomator ${upstream#newer: } available" upstream_issue_body "$STATUS_DIR/_upstream"
+            open_issue aurtomator-update 0e8a16 "Newer aurtomator release" "🚀 aurtomator ${upstream#newer: } available" upstream_issue_body "$STATUS_DIR/_upstream"
           fi

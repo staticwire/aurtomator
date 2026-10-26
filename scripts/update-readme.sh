@@ -117,39 +117,39 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
         ((pkg_ok++)) || true
         ;;
       updated:*)
-        status="🔄 updated to ${run_status#updated: }"
+        status="📦 updated to ${run_status#updated: }"
         ((pkg_ok++)) || true
         ;;
       new_version:*)
-        status="🆕 ${run_status#new_version: } available"
+        status="✨ ${run_status#new_version: } available"
         ((pkg_ok++)) || true
         ;;
       downgrade:*)
-        status="⬇️ downgraded to ${run_status#downgrade: }"
+        status="🔻 downgraded to ${run_status#downgrade: }"
         ((pkg_ok++)) || true
         ;;
       available_downgrade:*)
-        status="⬇️ ${run_status#available_downgrade: } available (downgrade)"
+        status="🔻 ${run_status#available_downgrade: } available (downgrade)"
         ((pkg_ok++)) || true
         ;;
       downgrade_skipped:*)
-        status="⬇️ ${run_status#downgrade_skipped: } skipped (downgrade)"
+        status="🔻 ${run_status#downgrade_skipped: } skipped (downgrade)"
         ((pkg_ok++)) || true
         ;;
       jump_skipped:*)
-        status="⬆️ ${run_status#jump_skipped: } skipped (version jump)"
+        status="🔺 ${run_status#jump_skipped: } skipped (version jump)"
         ((pkg_ok++)) || true
         ;;
       held:*)
-        status="⏸️ ${run_status#held: } held"
+        status="✋ ${run_status#held: } held"
         ((pkg_ok++)) || true
         ;;
       new_build:*)
-        status="🔁 ${run_status#new_build: } rebuild available"
+        status="🔨 ${run_status#new_build: } rebuild available"
         ((pkg_ok++)) || true
         ;;
       rebuilt:*)
-        status="🔁 ${run_status#rebuilt: } rebuilt"
+        status="🔨 ${run_status#rebuilt: } rebuilt"
         ((pkg_ok++)) || true
         ;;
       pending:*)
@@ -166,7 +166,7 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
         ;;
     esac
   elif [[ "$current" == "—" || "$current" == "null" ]]; then
-    status="🆕 new"
+    status="✨ new"
     current="—"
     ((pkg_ok++)) || true
   else

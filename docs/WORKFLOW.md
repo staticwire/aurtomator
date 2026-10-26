@@ -829,15 +829,15 @@ Every comparison that finds the current version newer than the latest one (`verc
 
 `update-readme.sh` renders them as:
 
-- `downgrade_skipped: 1.2.0` → `⬇️ 1.2.0 skipped (downgrade)`
-- `available_downgrade: 1.2.0` → `⬇️ 1.2.0 available (downgrade)`
-- `downgrade: 1.2.0` → `⬇️ downgraded to 1.2.0`
+- `downgrade_skipped: 1.2.0` → `🔻 1.2.0 skipped (downgrade)`
+- `available_downgrade: 1.2.0` → `🔻 1.2.0 available (downgrade)`
+- `downgrade: 1.2.0` → `🔻 downgraded to 1.2.0`
 
 All three count toward `pkg_ok`, so the packages badge stays `brightgreen`. Only `check_failed` and `update_failed` turn it red.
 
 #### Version jumps
 
-An update whose first number has at least two digits more than the first number of `current`, such as `13 → 2026102100` or `4.4215 → 4215`, reaches the AUR only when the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the same upstream than a release: GrapheneOS tags the standalone releases of `hardened_malloc` `1` to `14` and its GrapheneOS builds, such as `2026102100`, in the same repository, and the default tag filter keeps both. Without the flag, `check-all.sh` writes `jump_skipped: <version>`, logs the line below and pushes nothing. `--prepare` and `--publish` apply the same rule. A skipped jump opens no issue and counts toward `pkg_ok`, and `update-readme.sh` renders `jump_skipped: 2026102100` as `⬆️ 2026102100 skipped (version jump)`.
+An update whose first number has at least two digits more than the first number of `current`, such as `13 → 2026102100` or `4.4215 → 4215`, reaches the AUR only when the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the same upstream than a release: GrapheneOS tags the standalone releases of `hardened_malloc` `1` to `14` and its GrapheneOS builds, such as `2026102100`, in the same repository, and the default tag filter keeps both. Without the flag, `check-all.sh` writes `jump_skipped: <version>`, logs the line below and pushes nothing. `--prepare` and `--publish` apply the same rule. A skipped jump opens no issue and counts toward `pkg_ok`, and `update-readme.sh` renders `jump_skipped: 2026102100` as `🔺 2026102100 skipped (version jump)`.
 
 ```text
 ! hardened_malloc: version jump 13 → 2026102100, skipped: allow_version_jump is not set
@@ -914,9 +914,9 @@ With `hold: true`, `check-all.sh` writes `held: <version>`, logs the first line 
 ! myjdk-ea-bin: update 28+25 → 29+1 notice: Create the package for the old major
 ```
 
-A skipped downgrade or version jump comes first, see [4.3](#43-downgrade-behavior). `--prepare` and `--publish` apply the rules again to the version of the check run. A held update counts toward `pkg_ok`, and `update-readme.sh` renders `held: 29+1` as `⏸️ 29+1 held`.
+A skipped downgrade or version jump comes first, see [4.3](#43-downgrade-behavior). `--prepare` and `--publish` apply the rules again to the version of the check run. A held update counts toward `pkg_ok`, and `update-readme.sh` renders `held: 29+1` as `✋ 29+1 held`.
 
-Every rule that fires writes its note to `.status/_alerts`, and the run opens an issue from it, see [5.6](#56-issues). A held update gets the issue `⏸️ <package>: update held` with the notes of every rule that fired, because after the hand publish a rule without `hold` no longer fires. The run closes it once the update is no longer held. A published update gets the issue `🔔 <package>: <version> notice` with its notes, and the maintainer closes it once the edit is done.
+Every rule that fires writes its note to `.status/_alerts`, and the run opens an issue from it, see [5.6](#56-issues). A held update gets the issue `✋ <package>: update held` with the notes of every rule that fired, because after the hand publish a rule without `hold` no longer fires. The run closes it once the update is no longer held. A published update gets the issue `🔔 <package>: <version> notice` with its notes, and the maintainer closes it once the edit is done.
 
 `validate-pkg.sh` refuses an entry with any other key, without exactly one of `when`, `from` and `match`, with `when` other than `major`, with a `from` that is not a version, a `match` that bash does not accept as an ERE, a `note` that is not one line, or a `hold` that is not a boolean. It refuses `when: major` together with `pkgver_format`, because the fixed text of a format such as `4.%s` holds the first number of every version. `check-all.sh` reads the rules on every run, so a rule it cannot evaluate fails the check of the package and never lets a held update through.
 
@@ -954,8 +954,8 @@ A tag appears before its release. liquidsoap uploads the assets of a release to 
 | Status | README | Meaning |
 | --- | --- | --- |
 | `pending: 2.5.0rc1` | `⏳ 2.5.0rc1 pending` | The release or its asset is not out yet. Nothing is prepared, and no issue opens |
-| `new_build: 2.4.6` | `🔁 2.4.6 rebuild available` | A new value of the version the AUR has, not pushed yet |
-| `rebuilt: 2.4.6` | `🔁 2.4.6 rebuilt` | The rebuild was pushed to the AUR |
+| `new_build: 2.4.6` | `🔨 2.4.6 rebuild available` | A new value of the version the AUR has, not pushed yet |
+| `rebuilt: 2.4.6` | `🔨 2.4.6 rebuilt` | The rebuild was pushed to the AUR |
 
 All three count toward `pkg_ok`.
 
@@ -1094,7 +1094,7 @@ The table is HTML, since a Markdown table cell takes no attributes. GitHub keeps
 <table>
 <tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>
 <tr><td><a href="https://aur.archlinux.org/pkgbase/my-package">my-package</a></td><td>1.0.1</td><td nowrap>kde-tarball</td><td nowrap>2026-10-01</td><td nowrap>✅ up to date</td></tr>
-<tr><td><a href="https://aur.archlinux.org/pkgbase/other-pkg">other-pkg</a></td><td>2.0.0</td><td nowrap>github-release</td><td nowrap>2026-10-14</td><td nowrap>🔄 updated to 2.0.0</td></tr>
+<tr><td><a href="https://aur.archlinux.org/pkgbase/other-pkg">other-pkg</a></td><td>2.0.0</td><td nowrap>github-release</td><td nowrap>2026-10-14</td><td nowrap>📦 updated to 2.0.0</td></tr>
 </table>
 ```
 
@@ -1121,14 +1121,14 @@ For every `.status/` entry with `check_failed:` or `update_failed:`, the step:
 
 An alert opens an issue as well, see [4.5](#45-update-alerts). Its notes come from `.status/_alerts`, where `check-all.sh` writes one line for each alert that fired: the package, `hold` or `notice`, and the note, split by tabs. `builder` writes the body with `alert_issue_body` from `scripts/lib/issue.sh`, and the step creates each label the first time it needs it.
 
-- A `held:` status opens an issue titled `⏸️ <package>: update held` with the label `update-held`, unless an open `update-held` issue has that title. The body holds the held version and the notes of every alert that fired, and asks the maintainer to publish the version by hand and set `current`.
+- A `held:` status opens an issue titled `✋ <package>: update held` with the label `update-held`, unless an open `update-held` issue has that title. The body holds the held version and the notes of every alert that fired, and asks the maintainer to publish the version by hand and set `current`.
 - An `updated:` or `downgrade:` status of a package with a line in `.status/_alerts` opens an issue titled `🔔 <package>: <version> notice` with the label `update-notice`, unless an open `update-notice` issue has that title. The body holds the published version and the notes. The maintainer closes it once the edit is done.
 
-A newer aurtomator release, `newer: <release>` in `.status/_upstream`, opens an issue titled `⬆️ aurtomator <release> available` with the label `aurtomator-update`, unless an open `aurtomator-update` issue has that title. `builder` writes the body with `upstream_issue_body`: the release, the version in `VERSION`, a link to the release notes and the run. See [5.8](#58-version-of-aurtomator).
+A newer aurtomator release, `newer: <release>` in `.status/_upstream`, opens an issue titled `🚀 aurtomator <release> available` with the label `aurtomator-update`, unless an open `aurtomator-update` issue has that title. `builder` writes the body with `upstream_issue_body`: the release, the version in `VERSION`, a link to the release notes and the run. See [5.8](#58-version-of-aurtomator).
 
 The step belongs to `publish`, which runs for a new version or a change in the status table. A package that keeps failing gets its issue in the run where it starts failing. An issue closed while the package still fails comes back in the next run that reaches `publish`.
 
-The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the new status and the run. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade` or `rebuilt`, so the version is in the AUR. An open `⏸️ <package>: update held` closes when the status is anything but `held`. An open `⬆️ aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` holds the release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It does not run after a failed step, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
+The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the new status and the run. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade` or `rebuilt`, so the version is in the AUR. An open `✋ <package>: update held` closes when the status is anything but `held`. An open `🚀 aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` holds the release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It does not run after a failed step, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
 
 ### 5.7 Failed runs
 

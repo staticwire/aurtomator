@@ -1911,7 +1911,7 @@ current: '1.0.0'"
 EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  grep -q "updated to 2.0.0" "$TEST_TMPDIR/README.md"
+  grep -q "📦 updated to 2.0.0" "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: shows new_version status" {
@@ -1927,7 +1927,7 @@ current: '1.0.0'"
 EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  grep -q "3.0.0 available" "$TEST_TMPDIR/README.md"
+  grep -q "✨ 3.0.0 available" "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: shows workflow badge with github origin" {
@@ -2036,7 +2036,7 @@ current: '1.0.0'"
 
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/pkg-new">pkg-new</a></td><td>—</td><td nowrap>github-release</td><td nowrap>—</td><td nowrap>🆕 new</td></tr>' "$TEST_TMPDIR/README.md"
+  grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/pkg-new">pkg-new</a></td><td>—</td><td nowrap>github-release</td><td nowrap>—</td><td nowrap>✨ new</td></tr>' "$TEST_TMPDIR/README.md"
 }
 
 # A package that has not been checked yet has failed nothing
@@ -2918,7 +2918,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
-  grep -q "⬇️ downgraded to 1.0.0" "$TEST_TMPDIR/README.md"
+  grep -q "🔻 downgraded to 1.0.0" "$TEST_TMPDIR/README.md"
   # Downgrades count toward pkg_ok, so the badge stays green.
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
   run ! grep -q "packages-.*-red" "$TEST_TMPDIR/README.md"
@@ -2938,7 +2938,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
-  grep -q "⬇️ 1.0.0 available (downgrade)" "$TEST_TMPDIR/README.md"
+  grep -q "🔻 1.0.0 available (downgrade)" "$TEST_TMPDIR/README.md"
   # Available downgrades count toward pkg_ok too, so the badge stays green.
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
@@ -2957,7 +2957,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
-  grep -q "⬇️ 1.0.0 skipped (downgrade)" "$TEST_TMPDIR/README.md"
+  grep -q "🔻 1.0.0 skipped (downgrade)" "$TEST_TMPDIR/README.md"
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
@@ -3015,7 +3015,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
-  grep -q "⬆️ 2026102100 skipped (version jump)" "$TEST_TMPDIR/README.md"
+  grep -q "🔺 2026102100 skipped (version jump)" "$TEST_TMPDIR/README.md"
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
@@ -3175,7 +3175,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
-  grep -q "<td nowrap>⏸️ 29+1 held</td>" "$TEST_TMPDIR/README.md"
+  grep -q "<td nowrap>✋ 29+1 held</td>" "$TEST_TMPDIR/README.md"
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
@@ -3552,8 +3552,8 @@ current: '1.0.0'"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  grep -qF '<td nowrap>🔁 1.0.0 rebuild available</td>' "$TEST_TMPDIR/README.md"
-  grep -qF '<td nowrap>🔁 1.0.0 rebuilt</td>' "$TEST_TMPDIR/README.md"
+  grep -qF '<td nowrap>🔨 1.0.0 rebuild available</td>' "$TEST_TMPDIR/README.md"
+  grep -qF '<td nowrap>🔨 1.0.0 rebuilt</td>' "$TEST_TMPDIR/README.md"
   grep -qF '<td nowrap>⏳ 2.0.0 pending</td>' "$TEST_TMPDIR/README.md"
   grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }

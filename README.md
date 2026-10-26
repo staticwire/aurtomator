@@ -87,17 +87,17 @@ Patches in `source=()` trigger a warning and are not blocked.
 
 ## Downgrades
 
-aurtomator publishes a version older than the tracked one only when the package YAML sets `allow_downgrade: true`. Without it, the downgrade is skipped: the latest release of a GitHub project can be a maintenance release of an older line. A downgrade is logged with the literal keyword `DOWNGRADE` and shown in the package table with a `⬇️` icon. It counts as a successful run, so the badge stays green. Details are in [docs/WORKFLOW.md section 4.3](docs/WORKFLOW.md#43-downgrade-behavior).
+aurtomator publishes a version older than the tracked one only when the package YAML sets `allow_downgrade: true`. Without it, the downgrade is skipped: the latest release of a GitHub project can be a maintenance release of an older line. A downgrade is logged with the literal keyword `DOWNGRADE` and shown in the package table with a `🔻` icon. It counts as a successful run, so the badge stays green. Details are in [docs/WORKFLOW.md section 4.3](docs/WORKFLOW.md#43-downgrade-behavior).
 
-An update whose first number has at least two digits more than that of the tracked version, such as `13 → 2026102100`, is skipped the same way unless the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the upstream, as build tags next to release tags, than a release. It is shown with a `⬆️` icon.
+An update whose first number has at least two digits more than that of the tracked version, such as `13 → 2026102100`, is skipped the same way unless the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the upstream, as build tags next to release tags, than a release. It is shown with a `🔺` icon.
 
 ## Update alerts
 
-A package YAML can name the versions that need a hand edit of the PKGBUILD, such as a new major that needs a newer build dependency. An alert with `hold: true` pauses the update at such a version, shown with a `⏸️` icon, and opens an issue with the note until the maintainer publishes the version by hand. Without `hold`, the update goes on, and an issue with the note opens after the push. Details are in [docs/WORKFLOW.md section 4.5](docs/WORKFLOW.md#45-update-alerts).
+A package YAML can name the versions that need a hand edit of the PKGBUILD, such as a new major that needs a newer build dependency. An alert with `hold: true` pauses the update at such a version, shown with a `✋` icon, and opens an issue with the note until the maintainer publishes the version by hand. Without `hold`, the update goes on, and an issue with the note opens after the push. Details are in [docs/WORKFLOW.md section 4.5](docs/WORKFLOW.md#45-update-alerts).
 
 ## Values from release asset names
 
-Some upstreams name a release asset with more than the version and rebuild a release under a new name, as liquidsoap does with `liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb`. With `upstream.asset_regex` and `upstream.asset_var`, a run takes that value from the release of the new version and writes it to its line in the PKGBUILD. A new value of the current version is pushed as a rebuild with the next `pkgrel`, shown with a `🔁` icon. While the release or its asset is not out yet, the package shows `⏳` for up to a day. Details are in [docs/WORKFLOW.md section 4.6](docs/WORKFLOW.md#46-values-from-release-asset-names).
+Some upstreams name a release asset with more than the version and rebuild a release under a new name, as liquidsoap does with `liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb`. With `upstream.asset_regex` and `upstream.asset_var`, a run takes that value from the release of the new version and writes it to its line in the PKGBUILD. A new value of the current version is pushed as a rebuild with the next `pkgrel`, shown with a `🔨` icon. While the release or its asset is not out yet, the package shows `⏳` for up to a day. Details are in [docs/WORKFLOW.md section 4.6](docs/WORKFLOW.md#46-values-from-release-asset-names).
 
 ## Updates of aurtomator
 
