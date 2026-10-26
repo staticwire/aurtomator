@@ -49,6 +49,10 @@ PRs are squash-merged. The squash commit subject on `main` must follow Conventio
 
 Keep PRs focused: one logical change per PR. Unrelated refactors go in a separate PR.
 
+## Releases
+
+aurtomator follows semantic versioning, and `VERSION` holds the version of the code. After a merge to `main`, release-please (`.github/workflows/release-please.yml`) opens or updates a release PR from the commit types since the last release: `fix` raises the patch number, `feat` the minor one, and before 1.0.0 a breaking change raises the minor one too. A `docs`, `ci`, `chore` or `test` commit opens no release PR and goes out with the next release. The release PR writes the new version to `VERSION`. Its merge tags `vX.Y.Z` and publishes the release with the notes GitHub generates from the merged PRs. A line `Release-As: X.Y.Z` in the body of a squash commit sets another number.
+
 ## Adding a new strategy
 
 1. Create `strategies/<name>.sh`. It takes the package name as its only argument, reads the package config with `pkg_get`, prints one version string to stdout and exits non-zero on failure. Start from the closest existing strategy.

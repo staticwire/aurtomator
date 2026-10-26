@@ -10,14 +10,15 @@ run_blocks() {
 # The runner pastes an expression into a run script before bash parses it,
 # so a step reads GitHub context through env: instead.
 @test "workflows: no run block expands an expression" {
-  local workflow
+  local workflow count=0
   for workflow in "$GITHUB_DIR"/workflows/*.yml; do
     echo "$workflow"
     run run_blocks "$workflow"
     [ "$status" -eq 0 ]
-    [ -n "$output" ]
     [[ "$output" != *'${{'* ]]
+    [ -z "$output" ] || count=$((count + 1))
   done
+  [ "$count" -gt 2 ]
 }
 
 @test "actions: no run block expands an expression" {
@@ -232,6 +233,46 @@ EOF
   [ "$status" -ne 0 ]
   run grep -c '^pr merge' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# === release-please.yml ===
+
+RELEASE="$GITHUB_DIR/workflows/release-please.yml"
+RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
+
+# A fork or a template copy carries the workflow and must not open release PRs
+@test "release-please: runs only in the upstream repository" {
+  run yq '.jobs[] | .if' "$RELEASE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "github.repository == 'staticwire/aurtomator'" ]
+}
+
+@test "release-please: pins the action by SHA, reads the config in .github and has a time limit" {
+  run yq '.jobs[].steps[].uses' "$RELEASE"
+  [[ "$output" =~ ^googleapis/release-please-action@[0-9a-f]{40}$ ]]
+  run grep -E '^ +- uses: googleapis/release-please-action@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' "$RELEASE"
+  [ "$status" -eq 0 ]
+  run yq '.jobs[].steps[].with | .["config-file"] + " " + .["manifest-file"]' "$RELEASE"
+  [ "$output" = ".github/release-please-config.json .github/.release-please-manifest.json" ]
+  run yq '.jobs[]["timeout-minutes"] > 0' "$RELEASE"
+  [ "$output" = "true" ]
+  run yq -o=json -I=0 '.permissions' "$RELEASE"
+  [ "$output" = '{"contents":"read"}' ]
+}
+
+@test "release-please: writes VERSION, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
+  run yq -o=json -I=0 '.packages["."]' "$RELEASE_CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"release-type":"simple","version-file":"VERSION","changelog-type":"github","skip-changelog":true,"bump-minor-pre-major":true,"include-component-in-tag":false}' ]
+}
+
+# release-please updates VERSION in place and does not create it
+@test "release-please: the manifest holds the version of VERSION" {
+  local version
+  version=$(<"$GITHUB_DIR/../VERSION")
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  run yq -r '.["."]' "$GITHUB_DIR/.release-please-manifest.json"
+  [ "$output" = "$version" ]
 }
 
 # === check-updates.yml: who decides what ===
