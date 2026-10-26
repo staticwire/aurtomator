@@ -74,15 +74,18 @@ aur_export() {
 
 # Commit what the index holds, sign when GPG_KEY_ID is set, push with 3
 # attempts, AURTOMATOR_RETRY_DELAY seconds apart. The caller stages
-# PKGBUILD and .SRCINFO.
-# Args: $1=clone directory, $2=version, $3=strategy (for the commit message)
+# PKGBUILD and .SRCINFO. The message names the pkgrel of a rebuild, as in
+# "2.4.6-2 release from github-tag".
+# Args: $1=clone directory, $2=version, $3=strategy (for the commit message),
+#       $4=pkgrel, 1 by default
 aur_commit_push() {
-  local dir="$1" attempt delay="${AURTOMATOR_RETRY_DELAY:-5}"
+  local dir="$1" version="$2" attempt delay="${AURTOMATOR_RETRY_DELAY:-5}"
+  [[ "${4:-1}" == 1 ]] || version+="-$4"
   log_info "Pushing to AUR"
   git -C "$dir" config user.name "${GIT_AUTHOR_NAME:-aurtomator}"
   git -C "$dir" config user.email "${GIT_AUTHOR_EMAIL:-aurtomator@users.noreply.github.com}"
   git -C "$dir" config commit.gpgsign false
-  git -C "$dir" commit -m "$2 release from $3" || {
+  git -C "$dir" commit -m "$version release from $3" || {
     log_err "git commit failed in $dir"
     return 1
   }

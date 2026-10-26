@@ -42,6 +42,13 @@ pkg_set() {
   yq -i "${query} = ${value}" "$file"
 }
 
+# Write current and, when an asset value is given, current_asset
+# Usage: pkg_set_current packages/my-package.yml 2.5.0 [asset value]
+pkg_set_current() {
+  pkg_set "$1" .current "\"$2\""
+  [[ -z "${3:-}" ]] || pkg_set "$1" .current_asset "\"$3\""
+}
+
 # The pkgver_dash of a package: _ or ., drop for '', which drops the dash,
 # and nothing when the package does not set it
 # Usage: pkgver_dash packages/my-package.yml
@@ -50,6 +57,22 @@ pkgver_dash() {
   [[ $(pkg_get "$file" '.pkgver_dash | tag') != "!!null" ]] || return 0
   dash=$(pkg_get "$file" '.pkgver_dash')
   printf '%s\n' "${dash:-drop}"
+}
+
+# The asset_var of a package, the PKGBUILD variable that holds a value from
+# the name of a release asset, and nothing when the package does not set it.
+# The name reaches a sed command and an awk program, so it has to be a
+# variable name that starts with _.
+# Usage: pkg_asset_var packages/my-package.yml
+# Returns: 1 when the name is of another form (reason on stderr)
+pkg_asset_var() {
+  local var
+  var=$(pkg_get "$1" '.upstream.asset_var // ""')
+  if [[ -n "$var" && ! "$var" =~ ^_[A-Za-z0-9_]+$ ]]; then
+    log_err "upstream.asset_var must be a name that starts with _: ${var@Q}"
+    return 1
+  fi
+  printf '%s\n' "$var"
 }
 
 # =============================================================================
@@ -216,6 +239,35 @@ validate_pkgver() {
     log_err "Version string rejected, it holds no digit: ${ver@Q}"
     return 1
   fi
+}
+
+# Reject a value from the name of a release asset before it is written into
+# a PKGBUILD, as validate_pkgver does for a version. bash expands a tilde at
+# the start of an assignment, so the value starts with a letter or a digit.
+# Args: $1=value
+# Returns: 0=ok, 1=rejected (reason on stderr)
+validate_asset_value() {
+  local LC_ALL=C
+  if [[ ! "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]*$ ]]; then
+    log_err "Asset value rejected, it must start with a letter or a digit and hold only A-Za-z0-9 . _ + ~ -: ${1@Q}"
+    return 1
+  fi
+}
+
+# The --asset option of update-pkg.sh and publish-pkg.sh: a package with
+# asset_var needs it, any other package must not get it
+# Args: $1=asset_var of the package, $2=value of --asset
+# Returns: 1 when one is set without the other or the value is rejected
+check_asset_option() {
+  if [[ -n "$1" && -z "$2" ]]; then
+    log_err "upstream.asset_var is set, so --asset is needed"
+    return 1
+  fi
+  if [[ -z "$1" && -n "$2" ]]; then
+    log_err "--asset needs upstream.asset_var"
+    return 1
+  fi
+  [[ -z "$2" ]] || validate_asset_value "$2"
 }
 
 # Args: $1=current version, $2=new version

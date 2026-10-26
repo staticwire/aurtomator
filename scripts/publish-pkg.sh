@@ -6,7 +6,10 @@
 # against it, then commits, signs and pushes them. Never sources the
 # PKGBUILD and never runs makepkg: the prepared files are untrusted.
 #
-# Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--dry-run]
+# With --asset <value>: the value from the name of a release asset that the
+# check run found, which the line of upstream.asset_var must hold
+#
+# Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]
 #
 # Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version,
 #             3 the AUR moved since the update was prepared
@@ -16,13 +19,39 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 
-readonly PKG_NAME="${1:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--dry-run]}"
-readonly VERSION="${2:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--dry-run]}"
-readonly PREPARED="${3:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--dry-run]}"
-readonly DRY_RUN="${4:-}"
+readonly PKG_NAME="${1:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]}"
+readonly VERSION="${2:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]}"
+readonly PREPARED="${3:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]}"
+shift 3
+DRY_RUN=""
+ASSET=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN="--dry-run"
+      shift
+      ;;
+    --asset)
+      if [[ -z "${2:-}" ]]; then
+        log_err "--asset needs a value"
+        exit 1
+      fi
+      ASSET="$2"
+      shift 2
+      ;;
+    *)
+      log_err "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
+readonly DRY_RUN ASSET
 validate_pkgver "$VERSION" || exit 1
 PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
+ASSET_VAR=$(pkg_asset_var "$PKG_FILE") || exit 1
+readonly ASSET_VAR
+check_asset_option "$ASSET_VAR" "$ASSET" || exit 1
 
 load_config
 
@@ -61,7 +90,7 @@ fi
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
 check_prepared_files "$aur_files" "$PREPARED" "$VERSION" "$(pkgver_dash "$PKG_FILE")" \
-  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" || exit 1
+  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" || exit 1
 
 # The clone has no checkout: the index takes the tree of HEAD, and the two
 # prepared files enter it byte for byte. git add would pass them through
@@ -75,7 +104,7 @@ done
 
 if git -C "$aur_dir" diff --cached --quiet; then
   log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
-  pkg_set "$PKG_FILE" .current "\"${VERSION}\""
+  pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
   exit 2
 fi
 
@@ -86,9 +115,11 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   exit 0
 fi
 
-aur_commit_push "$aur_dir" "$VERSION" "$strategy" || exit 1
+# The checks above hold pkgrel to 1, or to the AUR pkgrel plus one for a
+# rebuild
+aur_commit_push "$aur_dir" "$VERSION" "$strategy" "$(sed -n 's/^pkgrel=//p' "${PREPARED}/PKGBUILD" | head -1)" || exit 1
 log_ok "Pushed $PKG_NAME $VERSION to AUR"
 
-pkg_set "$PKG_FILE" .current "\"${VERSION}\""
+pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
 pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
 log_ok "Updated $PKG_FILE with current: $VERSION"

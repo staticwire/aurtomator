@@ -257,7 +257,7 @@ aurtomator cannot detect these cases. The maintainer has to watch for them. When
 
 ### Packages needing a pkgrel bump
 
-When `pkgver` stays the same and the PKGBUILD changes (dependency fix, build flag, patch update), `pkgrel` has to be incremented. aurtomator always sets `pkgrel=1`. A pkgrel-only bump needs a human decision.
+When `pkgver` stays the same and the PKGBUILD changes (dependency fix, build flag, patch update), `pkgrel` has to be incremented. aurtomator sets `pkgrel=1` for a new version, and raises `pkgrel` alone only for a rebuild that changes a value from a release asset name, see [WORKFLOW.md section 4.6](WORKFLOW.md#46-values-from-release-asset-names). Any other pkgrel-only bump needs a human decision.
 
 ### Packages with changing source URLs
 

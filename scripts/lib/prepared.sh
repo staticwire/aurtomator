@@ -4,8 +4,8 @@
 #
 # The job that executes a PKGBUILD holds no secrets, so the files it hands
 # over are untrusted. The job that pushes accepts them only when they differ
-# from the AUR copy in pkgver, pkgrel and checksum values. None of these
-# checks sources the file.
+# from the AUR copy in pkgver, pkgrel, checksum values and the value of the
+# asset_var line. None of these checks sources the file.
 #
 # Sourced by lib.sh, after common.sh.
 
@@ -18,16 +18,18 @@ _has_nul() {
 }
 
 # Split a PKGBUILD into lines of five kinds, without executing it:
-#   SKEL<TAB>line          every line, with pkgver=, pkgrel= and each
-#                          top-level checksum array replaced by a placeholder
-#   PKGVER|PKGREL<TAB>val  the value of a pkgver= or pkgrel= line
+#   SKEL<TAB>line          every line, with pkgver=, pkgrel=, the asset_var
+#                          line and each top-level checksum array replaced
+#                          by a placeholder
+#   PKGVER|PKGREL|ASSET<TAB>val  the value of a pkgver=, pkgrel= or
+#                          asset_var line
 #   SUM<TAB>array<TAB>index<TAB>HASH|SKIP  one line per checksum
 #   SUMVAL<TAB>array<TAB>value  the same checksum with its value
 #   BAD<TAB>text           anything in a checksum array but a quoted
 #                          checksum, a comment or a line continuation
-# Args: $1=pkgbuild path
+# Args: $1=pkgbuild path, $2=asset_var of the package, if any
 _pkgbuild_parts() {
-  awk '
+  awk -v asset="${2:-}" '
     function tokens(text,   n, i, t, parts) {
       n = split(text, parts, /[ \t]+/)
       for (i = 1; i <= n; i++) {
@@ -69,18 +71,27 @@ _pkgbuild_parts() {
     }
     /^pkgver=/ { print "SKEL\tPKGVER"; print "PKGVER\t" substr($0, 8); next }
     /^pkgrel=/ { print "SKEL\tPKGREL"; print "PKGREL\t" substr($0, 8); next }
+    asset != "" && index($0, asset "=") == 1 {
+      print "SKEL\tASSET"
+      print "ASSET\t" substr($0, length(asset) + 2)
+      next
+    }
     { print "SKEL\t" $0 }
     END { if (in_sums) print "BAD\tunterminated " name }
   ' "$1"
 }
 
-# Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=expected version
+# Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=expected version,
+#       $4=expected pkgrel (default 1), $5=asset_var of the package, if
+#       any, $6=expected asset value
 # Returns: 0 when the prepared file changes only pkgver (to $3), pkgrel
-#          (to 1) and checksum values, 1 otherwise (reason on stderr)
+#          (to $4), checksum values and the value of its one asset_var line
+#          (to $6), 1 otherwise (reason on stderr)
 check_prepared_pkgbuild() {
-  local version="$3"
+  local version="$3" rel="${4:-1}" asset_var="${5:-}" asset="${6:-}"
   local old_parts new_parts value
-  if ! old_parts=$(_pkgbuild_parts "$1") || ! new_parts=$(_pkgbuild_parts "$2"); then
+  local -a assets
+  if ! old_parts=$(_pkgbuild_parts "$1" "$asset_var") || ! new_parts=$(_pkgbuild_parts "$2" "$asset_var"); then
     log_err "Could not read the PKGBUILD to compare"
     return 1
   fi
@@ -109,12 +120,62 @@ check_prepared_pkgbuild() {
     fi
   done < <(grep $'^PKGVER\t' <<<"$new_parts")
   while IFS=$'\t' read -r _ value; do
-    if [[ "$value" != "1" ]]; then
-      log_err "Prepared PKGBUILD has pkgrel=${value}, expected 1"
+    if [[ "$value" != "$rel" ]]; then
+      log_err "Prepared PKGBUILD has pkgrel=${value}, expected ${rel}"
       return 1
     fi
   done < <(grep $'^PKGREL\t' <<<"$new_parts")
-  return 0
+  [[ -n "$asset_var" ]] || return 0
+  mapfile -t assets < <(grep $'^ASSET\t' <<<"$new_parts" | cut -f2-)
+  if ((${#assets[@]} != 1)); then
+    log_err "Prepared PKGBUILD needs one ${asset_var}= line, it has ${#assets[@]}"
+    return 1
+  fi
+  if [[ "${assets[0]}" != "$asset" ]]; then
+    log_err "Prepared PKGBUILD has ${asset_var}=${assets[0]}, expected ${asset}"
+    return 1
+  fi
+}
+
+# Print the value of the one asset_var line of a PKGBUILD
+# Args: $1=PKGBUILD, $2=asset_var, $3=name of the file in messages
+# Returns: 1 when the file has no such line or more than one, or when the
+#          value is rejected (reason on stderr)
+_asset_line_value() {
+  local -a values
+  mapfile -t values < <(sed -n "s/^$2=//p" "$1")
+  if ((${#values[@]} != 1)); then
+    log_err "$3 needs one $2= line, it has ${#values[@]}"
+    return 1
+  fi
+  validate_asset_value "${values[0]}" || return 1
+  printf '%s\n' "${values[0]}"
+}
+
+# Print the pkgrel of an update of a package with asset_var: 1 for a new
+# version, the AUR pkgrel plus one for a rebuild, which is a new asset
+# value of the same version, and the AUR pkgrel when the AUR already has
+# the value
+# Args: $1=AUR PKGBUILD, $2=asset_var, $3=version, $4=asset value
+# Returns: 1 when the asset_var line of the AUR PKGBUILD is refused, or a
+#          rebuild meets a pkgrel that is not an integer (reason on stderr)
+_asset_pkgrel() {
+  local old_asset old_rel
+  old_asset=$(_asset_line_value "$1" "$2" "AUR PKGBUILD") || return 1
+  if [[ "$3" != "$(sed -n 's/^pkgver=//p' "$1" | head -1)" ]]; then
+    echo 1
+    return 0
+  fi
+  old_rel=$(sed -n 's/^pkgrel=//p' "$1" | head -1)
+  if [[ "$4" == "$old_asset" ]]; then
+    printf '%s\n' "$old_rel"
+    return 0
+  fi
+  if [[ ! "$old_rel" =~ ^[0-9]+$ ]]; then
+    log_err "A rebuild needs an integer pkgrel in the AUR PKGBUILD, it has ${old_rel}"
+    return 1
+  fi
+  echo "$((10#$old_rel + 1))"
 }
 
 # Replace the old version in a line with the new one, and also the forms a
@@ -221,6 +282,29 @@ _bumped_with_dash() {
   [[ "$(_undash_version "$2" "$4" "$5")" == "$(_bump_version "$(_undash_version "$1" "$3" "$5")" "$3" "$4")" ]]
 }
 
+# Args: $1=AUR line, $2=prepared line, $3=old version, $4=new version,
+#       $5=old upstream version, $6=new upstream version, $7=pkgver_dash
+#       character or drop, $8=old asset value, $9=new asset value
+# Returns: 0 when the prepared line is the AUR line with the version
+#          replaced, by _bump_version or by _bumped_with_dash. For a
+#          package with asset_var, each old asset value of the AUR line
+#          stands for the new one in the prepared line, and the parts
+#          between them are compared one by one, so a dash inside a value
+#          is never taken for one of the version.
+_bumped_line() {
+  local old="$1" new="$2"
+  if [[ -n "${8:-}" ]]; then
+    while [[ "$old" == *"$8"* ]]; do
+      if [[ "$new" != *"$9"* ]] || ! _bumped_line "${old%%"$8"*}" "${new%%"$9"*}" "${@:3:5}"; then
+        return 1
+      fi
+      old="${old#*"$8"}"
+      new="${new#*"$9"}"
+    done
+  fi
+  [[ "$new" == "$(_bump_version "$old" "$3" "$4" "$5" "$6")" ]] || _bumped_with_dash "$old" "$new" "$3" "$4" "$7"
+}
+
 # Print "SKIP <arch suffix>:<index>" for every source entry of a .SRCINFO
 # that is SKIP in each checksum array with the same arch suffix, and
 # "HASH <arch suffix>:<index>" for every other one
@@ -292,13 +376,17 @@ _drop_trailing_blank() {
 # pkgver_dash, a version with a dash in place of that character, as
 # ${pkgver//_/-} writes it, counts as the version, and with pkgver_dash: ''
 # a version with a dash between two characters. With pkgver_format, so
-# does the upstream version inside it, as ${pkgver#4.} writes 4215.
+# does the upstream version inside it, as ${pkgver#4.} writes 4215. For a
+# package with asset_var, the old asset value is replaced by the new one
+# as well, and pkgrel is the one check_prepared_files works out. A new
+# asset value has to change some source URL or checksum.
 # Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version,
 #       $4=pkgver_dash character of the package or drop, if any,
-#       $5=pkgver_format of the package, if any
+#       $5=pkgver_format of the package, if any, $6=expected pkgrel
+#       (default 1), $7=old asset value, $8=new asset value
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
-  local version="$3" dash="${4:-}" format="${5:-}"
+  local version="$3" dash="${4:-}" format="${5:-}" rel="${6:-1}" old_asset="${7:-}" new_asset="${8:-}"
   if [[ ! -r "$1" || ! -r "$2" ]]; then
     log_err "Could not read the .SRCINFO to compare"
     return 1
@@ -363,8 +451,8 @@ check_prepared_srcinfo() {
         }
         ;;
       pkgrel)
-        [[ "$new_val" == "1" ]] || {
-          log_err "Prepared .SRCINFO has pkgrel = ${new_val}, expected 1"
+        [[ "$new_val" == "$rel" ]] || {
+          log_err "Prepared .SRCINFO has pkgrel = ${new_val}, expected ${rel}"
           return 1
         }
         ;;
@@ -381,8 +469,7 @@ check_prepared_srcinfo() {
         n="${source_counts[$key]:-0}"
         source_counts[$key]=$((n + 1))
         expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
-        if [[ "$new" != "$expected" ]] &&
-          ! _bumped_with_dash "$old" "$new" "$old_ver" "$version" "$dash" &&
+        if ! _bumped_line "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" &&
           ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
             _name_differs_in_digits "$expected" "$new"; }; then
           log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $new"
@@ -395,8 +482,8 @@ check_prepared_srcinfo() {
         fi
         ;;
       *)
-        if [[ "$new" != "$old" && "$new" != "$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")" ]] &&
-          ! _bumped_with_dash "$old" "$new" "$old_ver" "$version" "$dash"; then
+        if [[ "$new" != "$old" ]] &&
+          ! _bumped_line "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset"; then
           log_err "Prepared .SRCINFO line $((i + 1)) changes more than the version: $new"
           return 1
         fi
@@ -405,6 +492,10 @@ check_prepared_srcinfo() {
   done
   if [[ "$pinned" == true && "$changed" == false && "$version" != "$old_ver" ]]; then
     log_err "Prepared .SRCINFO changes no source URL and no checksum, so the new version would hold the files of the old one"
+    return 1
+  fi
+  if [[ "$changed" == false && "$new_asset" != "$old_asset" ]]; then
+    log_err "Prepared .SRCINFO changes no source URL and no checksum, so the new asset value reaches no source"
     return 1
   fi
   return 0
@@ -434,13 +525,16 @@ prepared_base() {
   echo "$base"
 }
 
-# Check a prepared PKGBUILD and .SRCINFO against the AUR repo at their base
+# Check a prepared PKGBUILD and .SRCINFO against the AUR repo at their base.
+# For a package with asset_var, the old asset value and the pkgrel come
+# from the AUR PKGBUILD, see _asset_pkgrel.
 # Args: $1=AUR repo, $2=prepared dir, $3=expected version,
 #       $4=pkgver_dash character of the package or drop, if any,
-#       $5=pkgver_format of the package, if any
+#       $5=pkgver_format of the package, if any, $6=asset_var of the
+#       package, if any, $7=expected asset value
 # Returns: 0 when both files pass, 1 otherwise (reason on stderr)
 check_prepared_files() {
-  local f
+  local f rel=1 old_asset=""
   # git keeps symlinks, and cp writes through one
   for f in PKGBUILD .SRCINFO; do
     if [[ -L "$1/$f" || ! -f "$1/$f" ]]; then
@@ -448,6 +542,10 @@ check_prepared_files() {
       return 1
     fi
   done
-  check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" &&
-    check_prepared_srcinfo "$1/.SRCINFO" "$2/.SRCINFO" "$3" "${4:-}" "${5:-}"
+  if [[ -n "${6:-}" ]]; then
+    rel=$(_asset_pkgrel "$1/PKGBUILD" "$6" "$3" "$7") || return 1
+    old_asset=$(_asset_line_value "$1/PKGBUILD" "$6" "AUR PKGBUILD")
+  fi
+  check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" "$rel" "${6:-}" "${7:-}" &&
+    check_prepared_srcinfo "$1/.SRCINFO" "$2/.SRCINFO" "$3" "${4:-}" "${5:-}" "$rel" "$old_asset" "${7:-}"
 }

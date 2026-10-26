@@ -10,18 +10,23 @@
 # to <dir>/<package-name>/ for publish-pkg.sh. Exit code 2 still means the
 # AUR already has the version.
 #
-# Usage: ./scripts/update-pkg.sh <package-name> <new-version> [--dry-run] [--prepare <dir>]
+# With --asset <value>: writes the value from the name of a release asset
+# to the line of upstream.asset_var. A new value of the version the AUR
+# has is a rebuild, with the AUR pkgrel plus one.
+#
+# Usage: ./scripts/update-pkg.sh <package-name> <new-version> [--asset <value>] [--dry-run] [--prepare <dir>]
 
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 
-readonly PKG_NAME="${1:?Usage: update-pkg.sh <package-name> <new-version> [--dry-run] [--prepare <dir>]}"
-readonly NEW_VERSION="${2:?Usage: update-pkg.sh <package-name> <new-version> [--dry-run] [--prepare <dir>]}"
+readonly PKG_NAME="${1:?Usage: update-pkg.sh <package-name> <new-version> [--asset <value>] [--dry-run] [--prepare <dir>]}"
+readonly NEW_VERSION="${2:?Usage: update-pkg.sh <package-name> <new-version> [--asset <value>] [--dry-run] [--prepare <dir>]}"
 shift 2
 DRY_RUN=""
 PREPARE_DIR=""
+ASSET=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)
@@ -36,16 +41,27 @@ while [[ $# -gt 0 ]]; do
       PREPARE_DIR="$2"
       shift 2
       ;;
+    --asset)
+      if [[ -z "${2:-}" ]]; then
+        log_err "--asset needs a value"
+        exit 1
+      fi
+      ASSET="$2"
+      shift 2
+      ;;
     *)
       log_err "Unknown option: $1"
       exit 1
       ;;
   esac
 done
-readonly DRY_RUN PREPARE_DIR
+readonly DRY_RUN PREPARE_DIR ASSET
 validate_pkgver "$NEW_VERSION" || exit 1
 PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
+ASSET_VAR=$(pkg_asset_var "$PKG_FILE") || exit 1
+readonly ASSET_VAR
+check_asset_option "$ASSET_VAR" "$ASSET" || exit 1
 
 load_config
 
@@ -107,8 +123,13 @@ fi
 # =============================================================================
 
 log_info "Updating pkgver to $NEW_VERSION"
+pkgrel=1
+if [[ -n "$ASSET_VAR" ]]; then
+  pkgrel=$(_asset_pkgrel "${aur_dir}/PKGBUILD" "$ASSET_VAR" "$NEW_VERSION" "$ASSET") || exit 1
+  sed -i "s/^${ASSET_VAR}=.*/${ASSET_VAR}=${ASSET}/" "${aur_dir}/PKGBUILD"
+fi
 sed -i "s/^pkgver=.*/pkgver=${NEW_VERSION}/" "${aur_dir}/PKGBUILD"
-sed -i "s/^pkgrel=.*/pkgrel=1/" "${aur_dir}/PKGBUILD"
+sed -i "s/^pkgrel=.*/pkgrel=${pkgrel}/" "${aur_dir}/PKGBUILD"
 
 # An unchanged PKGBUILD means the AUR already has this version
 if git -C "$aur_dir" diff --quiet PKGBUILD; then
@@ -116,7 +137,7 @@ if git -C "$aur_dir" diff --quiet PKGBUILD; then
   if [[ -n "$PREPARE_DIR" ]]; then
     hand_over
   else
-    pkg_set "$PKG_FILE" .current "\"${NEW_VERSION}\""
+    pkg_set_current "$PKG_FILE" "$NEW_VERSION" "$ASSET"
   fi
   exit 2
 fi
@@ -193,7 +214,7 @@ fi
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
 check_prepared_files "$aur_files" "$aur_dir" "$NEW_VERSION" "$(pkgver_dash "$PKG_FILE")" \
-  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" || exit 1
+  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" || exit 1
 
 # =============================================================================
 # DRY RUN CHECK
@@ -211,7 +232,7 @@ fi
 # =============================================================================
 
 git -C "$aur_dir" add PKGBUILD .SRCINFO || exit 1
-aur_commit_push "$aur_dir" "$NEW_VERSION" "$strategy" || exit 1
+aur_commit_push "$aur_dir" "$NEW_VERSION" "$strategy" "$pkgrel" || exit 1
 log_ok "Pushed $PKG_NAME $NEW_VERSION to AUR"
 
 # =============================================================================
@@ -219,6 +240,6 @@ log_ok "Pushed $PKG_NAME $NEW_VERSION to AUR"
 # =============================================================================
 
 log_info "Updating package YAML"
-pkg_set "$PKG_FILE" .current "\"${NEW_VERSION}\""
+pkg_set_current "$PKG_FILE" "$NEW_VERSION" "$ASSET"
 pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
 log_ok "Updated $PKG_FILE with current: $NEW_VERSION"
