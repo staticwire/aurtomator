@@ -31,8 +31,9 @@ graph LR
     B --> V[verify job, no secrets<br/>download the sources<br/>check the checksums]
     V --> C[publish job<br/>check the prepared files<br/>git push to AUR]
     K -->|status change only| C
-    C -->|check or update failed| D[create GitHub Issue<br/>with error details]
-    C -->|done| E[update-readme.sh<br/>commit badges + status table]
+    C --> E[update-readme.sh<br/>commit badges + status table]
+    K -->|every run| D[issues job<br/>open and close GitHub Issues]
+    C --> D
 ```
 
 Each package has a YAML config pointing to an upstream source. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow.
@@ -105,7 +106,7 @@ Some upstreams name a release asset with more than the version and rebuild a rel
 
 ## Resource usage
 
-All packages run in one workflow run. `check` runs every time, `prepare` and `verify` only for a new version, and `publish` for a new version or a change in the status table. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`. A version check is a few API requests per package, or a bare clone for `git-latest`.
+All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version, and `publish` for a new version or a change in the status table. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`. A version check is a few API requests per package, or a bare clone for `git-latest`.
 
 ## Documentation
 

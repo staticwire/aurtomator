@@ -604,15 +604,21 @@ EOF
   [[ "$output" == *"::error::"* ]]
 }
 
-# Runs the issue step of publish in a workspace with the statuses given as
-# name=status pairs. gh lists the titles in $GH_TITLES, one per line, that
-# start with the emoji of the --label it asks for, the first 30 unless
-# --limit says otherwise, answers has_issues with $GH_HAS_ISSUES (true by
-# default) or fails it when $GH_API_FAIL is set, and logs every call to
-# $GH_LOG.
+# Runs the issue step of the issues job in a workspace with the statuses
+# given as name=status pairs. gh lists the titles in $GH_TITLES, one per
+# line, that start with the emoji of the --label it asks for, the first 30
+# unless --limit says otherwise, answers has_issues with $GH_HAS_ISSUES (true
+# by default) or fails it when $GH_API_FAIL is set, and logs every call to
+# $GH_LOG. scripts/lib.sh of the workspace writes the body "body" and logs
+# the function and its arguments to $BODY_LOG. sudo fails.
 run_issue_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
-  mkdir -p "$ws/.status" "$bin"
+  mkdir -p "$ws/.status" "$ws/scripts" "$bin"
+  cat >"$ws/scripts/lib.sh" <<'EOF'
+failure_issue_body() { echo "failure_issue_body $*" >>"$BODY_LOG" && echo body; }
+alert_issue_body() { echo "alert_issue_body $*" >>"$BODY_LOG" && echo body; }
+upstream_issue_body() { echo "upstream_issue_body $*" >>"$BODY_LOG" && echo body; }
+EOF
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
   done
@@ -650,12 +656,14 @@ case "$jq_expr" in
   *) exit 2 ;;
 esac
 EOF
-  printf '#!/bin/sh\necho body\n' >"$bin/sudo"
+  printf '#!/bin/sh\nexit 97\n' >"$bin/sudo"
   chmod +x "$bin/gh" "$bin/sudo"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  BODY_LOG="$BATS_TEST_TMPDIR/body.log"
   : >"$GH_LOG"
-  step_run publish "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_TITLES="${GH_TITLES:-}" \
+  : >"$BODY_LOG"
+  step_run issues "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GITHUB_REPOSITORY=owner/fork \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -795,7 +803,7 @@ EOF
   [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
 }
 
-# Runs the close step of publish in a workspace with the statuses given as
+# Runs the close step of the issues job in a workspace with the statuses given as
 # name=status pairs. gh lists the open issues in $GH_OPEN, one
 # "<number> <title>" per line, whose title starts with the emoji of the
 # --label it asks for, the first 30 unless --limit says otherwise, answers
@@ -833,7 +841,7 @@ EOF
   chmod +x "$bin/gh"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   : >"$GH_LOG"
-  step_run publish "Close resolved issues" >"$BATS_TEST_TMPDIR/step.sh"
+  step_run issues "Close resolved issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -954,11 +962,91 @@ no_commit() {
   no_commit
 }
 
-@test "check-updates: the close step runs before the issue step, and not after a failed step" {
-  run yq '[.jobs.publish.steps[].name] | join(",")' "$CHECK_UPDATES"
+@test "check-updates: the close step runs before the issue step, and not after a failed step or publish" {
+  run yq '[.jobs.issues.steps[].name] | join(",")' "$CHECK_UPDATES"
   [[ "$output" == *"Close resolved issues,Create issues" ]]
-  run yq '.jobs.publish.steps[] | select(.name == "Close resolved issues") | has("if")' "$CHECK_UPDATES"
+  run yq '.jobs.issues.steps[] | select(.name == "Close resolved issues") | .if' "$CHECK_UPDATES"
+  [ "$output" = "needs.publish.result == 'success' || needs.publish.result == 'skipped'" ]
+  run yq '.jobs.issues.steps[] | select(.name == "Create issues") | .if' "$CHECK_UPDATES"
+  [ "$output" = "always()" ]
+}
+
+# A change that leaves the status table alone skips publish and still opens
+# or closes an issue
+@test "check-updates: the issues job runs in every run that checked, after publish" {
+  run yq '.jobs.issues.needs | join(" ")' "$CHECK_UPDATES"
+  [ "$output" = "image check publish" ]
+  run yq '.jobs.issues.if' "$CHECK_UPDATES"
+  [ "$output" = "!cancelled() && needs.check.result == 'success'" ]
+  run yq '.jobs.check.steps[] | select(.name == "Upload statuses") | has("if")' "$CHECK_UPDATES"
   [ "$output" = "false" ]
+}
+
+# The image has no git, so gh cannot read the repository from the checkout
+@test "check-updates: the issues job names the repository for gh" {
+  run yq '.jobs.issues.env.GH_REPO' "$CHECK_UPDATES"
+  [ "$output" = '${{ github.repository }}' ]
+  run yq '.jobs.issues.steps[] | select(.name == "Install dependencies") | .run' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  grep -qx 'pacman -Su --noconfirm --needed github-cli' <<<"$output"
+}
+
+@test "check-updates: only the issues job writes issues, and it holds no secret" {
+  run yq -o=json -I=0 '.jobs.publish.permissions' "$CHECK_UPDATES"
+  [ "$output" = '{"contents":"write"}' ]
+  run yq -o=json -I=0 '.jobs.issues.permissions' "$CHECK_UPDATES"
+  [ "$output" = '{"contents":"read","issues":"write"}' ]
+  run yq '.jobs.issues' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"secrets."* && "$output" != *"sudo"* ]]
+}
+
+@test "check-updates: the issues job reads the statuses of publish when it ran, else those of check" {
+  run yq -o=json -I=0 '[.jobs.issues.steps[] | select(.uses | test("^actions/download-artifact@")) | [.with.name, .with.path, .if]]' "$CHECK_UPDATES"
+  [ "$output" = "[[\"checked\",\".status\",\"needs.publish.result == 'skipped'\"],[\"published\",\".status\",\"needs.publish.result != 'skipped'\"]]" ]
+  run yq -o=json -I=0 '.jobs.publish.steps[] | select(.with.name == "published") | [.with.path, .if, .with["if-no-files-found"]]' "$CHECK_UPDATES"
+  [ "$output" = '["statuses/","always()","error"]' ]
+  run yq '.jobs.publish.steps[] | select(.name == "Hand over statuses") | .if' "$CHECK_UPDATES"
+  [ "$output" = "always()" ]
+}
+
+# Runs the Hand over statuses step of publish in a workspace whose .status
+# holds the statuses given as name=status pairs
+run_status_hand_over() {
+  local ws="$BATS_TEST_TMPDIR/ws" pair
+  mkdir -p "$ws/.status"
+  for pair in "$@"; do
+    printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
+  done
+  step_run publish "Hand over statuses" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "check-updates: publish hands over the regular status files with a package name" {
+  mkdir -p "$BATS_TEST_TMPDIR/ws/.status/dir"
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$BATS_TEST_TMPDIR/ws/.status/link"
+  run_status_hand_over foo="updated: 2.0" _alerts=$'foo\tnotice\tNote' _upstream="newer: 0.7.0" .hidden=x -dash=x
+  [ "$status" -eq 0 ]
+  run env LC_ALL=C ls -A "$BATS_TEST_TMPDIR/ws/statuses"
+  [ "$output" = $'_alerts\n_upstream\nfoo' ]
+  [ "$(<"$BATS_TEST_TMPDIR/ws/statuses/foo")" = "updated: 2.0" ]
+}
+
+@test "check-updates: publish hands over nothing when it has no statuses" {
+  mkdir -p "$BATS_TEST_TMPDIR/ws"
+  step_run publish "Hand over statuses" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$BATS_TEST_TMPDIR/ws" bash -e "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  run ls -A "$BATS_TEST_TMPDIR/ws/statuses"
+  [ -z "$output" ]
+}
+
+@test "check-updates: the issue step writes each body with its function of scripts/lib/issue.sh" {
+  run_issue_step foo="update_failed: boom" bar="held: 2.0" _alerts=$'bar\thold\tNote' _upstream="newer: 0.7.0"
+  [ "$status" -eq 0 ]
+  run cat "$BODY_LOG"
+  [ "$output" = $'alert_issue_body .status/bar https://example.invalid/run\nfailure_issue_body .status/foo https://example.invalid/run\nupstream_issue_body .status/_upstream https://example.invalid/run' ]
 }
 
 @test "check-updates: the close step finds an open issue behind 30 others" {
