@@ -1043,7 +1043,7 @@ The four steps use the composite action `.github/actions/run-as-builder`. It add
 7. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
 8. **Update README status table:** runs `update-readme.sh` as `builder`.
 9. **Commit changes via API:** see [5.5](#55-verified-commit).
-10. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact.
+10. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
 11. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
 
 Step 9 runs as root with `GH_TOKEN` set to the workflow token, `github.token`. Steps 10 and 11 run as root without it.

@@ -1011,15 +1011,26 @@ no_commit() {
 }
 
 # Runs the Hand over statuses step of publish in a workspace whose .status
-# holds the statuses given as name=status pairs
+# holds the statuses given as name=status pairs. sudo logs its arguments to
+# $SUDO_LOG and runs the command of -u builder as the test user.
 run_status_hand_over() {
-  local ws="$BATS_TEST_TMPDIR/ws" pair
-  mkdir -p "$ws/.status"
+  local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
+  mkdir -p "$ws/.status" "$bin"
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
   done
+  cat >"$bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$SUDO_LOG"
+[[ "$1 $2" == "-u builder" ]] || exit 97
+shift 2
+exec "$@"
+EOF
+  chmod +x "$bin/sudo"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  : >"$SUDO_LOG"
   step_run publish "Hand over statuses" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" bash -e "$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" PATH="$bin:$PATH" SUDO_LOG="$SUDO_LOG" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: publish hands over the regular status files with a package name" {
@@ -1031,6 +1042,15 @@ run_status_hand_over() {
   run env LC_ALL=C ls -A "$BATS_TEST_TMPDIR/ws/statuses"
   [ "$output" = $'_alerts\n_upstream\nfoo' ]
   [ "$(<"$BATS_TEST_TMPDIR/ws/statuses/foo")" = "updated: 2.0" ]
+}
+
+# builder wrote .status, so builder reads it: a link swapped in after the
+# test of the name reaches nothing that builder cannot read
+@test "check-updates: builder reads every status file that publish hands over" {
+  run_status_hand_over foo="updated: 2.0" _alerts=$'foo\tnotice\tNote' _upstream="newer: 0.7.0"
+  [ "$status" -eq 0 ]
+  run env LC_ALL=C sort "$SUDO_LOG"
+  [ "$output" = $'-u builder cat -- .status/_alerts\n-u builder cat -- .status/_upstream\n-u builder cat -- .status/foo' ]
 }
 
 @test "check-updates: publish hands over nothing when it has no statuses" {

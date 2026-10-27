@@ -426,7 +426,10 @@ jobs:
 
       # The issues job reads the statuses of this job, also after a failed
       # step. Only the regular files of .status with a package name reach
-      # it, _alerts and _upstream included.
+      # it, _alerts and _upstream included. builder wrote them and reads
+      # them, so a link swapped in after the test reaches nothing that
+      # builder cannot read, and root writes the copies into its own
+      # directory.
       - name: Hand over statuses
         if: always()
         run: |
@@ -434,7 +437,9 @@ jobs:
           for file in .status/*; do
             name=${file##*/}
             [[ "$name" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ && -f "$file" && ! -L "$file" ]] || continue
-            install -m 0644 "$file" "statuses/$name"
+            # The redirect is root's on purpose
+            # shellcheck disable=SC2024
+            sudo -u builder cat -- "$file" >"statuses/$name"
           done
 
       - name: Upload statuses
