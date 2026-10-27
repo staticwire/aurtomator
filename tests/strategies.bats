@@ -795,13 +795,17 @@ teardown() {
 # === git-latest ===
 
 # Helper: a repo with 3 commits in $fake_repo, and a git that clones it in
-# place of any URL and logs the protocols the strategy allows
+# place of any URL and logs the protocols the strategy allows and the options
+# of the clone. The clone goes over file://, where a filter applies, and any
+# other git command fails on an object the clone left out instead of fetching
+# it.
 fake_git_upstream() {
   fake_repo="$TEST_TMPDIR/fake-upstream"
   mkdir -p "$fake_repo"
   git -C "$fake_repo" init -q
   git -C "$fake_repo" config user.email "test@test"
   git -C "$fake_repo" config user.name "test"
+  git -C "$fake_repo" config uploadpack.allowFilter true
   for i in 1 2 3; do
     echo "$i" >"$fake_repo/file.txt"
     git -C "$fake_repo" add file.txt
@@ -812,9 +816,10 @@ fake_git_upstream() {
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" ]]; then
   echo "\${GIT_ALLOW_PROTOCOL:-unset} \${@: -2:1}" >>"$TEST_TMPDIR/git-clone"
-  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git clone "\${@:2:\$#-3}" "$fake_repo" "\${@: -1}"
+  echo "\${*:2:\$#-3}" >>"$TEST_TMPDIR/git-clone-options"
+  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git clone "\${@:2:\$#-3}" "file://$fake_repo" "\${@: -1}"
 fi
-exec /usr/bin/git "\$@"
+exec env GIT_NO_LAZY_FETCH=1 /usr/bin/git "\$@"
 EOF
   chmod +x "$MOCK_DIR/git"
 }
@@ -843,6 +848,20 @@ EOF
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/git-clone")" = "http:https https://github.com/owner/repo.git" ]
+}
+
+# A bare clone of googleapis/mcp-toolbox, 1.4 GB, does not fit in the time of
+# a check. The strategy reads commits and tags only.
+@test "git-latest: clones without trees" {
+  fake_git_upstream
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^r3\.[0-9a-f]{7}$ ]]
+  [ "$(cat "$TEST_TMPDIR/git-clone-options")" = "--bare --quiet --filter=tree:0" ]
 }
 
 @test "git-latest: fails on a repository without commits" {
@@ -891,6 +910,7 @@ current: 'r2.$(printf '%0*d' "$len" 0)'"
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
   [ "$status" -eq 0 ]
   [ "$output" = "r4.$(git -C "$fake_repo" rev-parse feature | cut -c1-7)" ]
+  [ "$(cat "$TEST_TMPDIR/git-clone-options")" = "--bare --quiet --filter=tree:0 --branch=feature" ]
 }
 
 @test "git-latest: fails on a branch the repository lacks" {

@@ -53,9 +53,12 @@ esac
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
-# With --branch, HEAD of the bare clone is that branch, as makepkg checks it
-# out for #branch=.
-clone_args=(--bare --quiet)
+# Commits and tags only: the strategy reads no files, and the trees and blobs
+# of a large repository do not fit in the time of a check. A server without
+# partial clone ignores the filter with a warning and sends everything. With
+# --branch, HEAD of the bare clone is that branch, as makepkg checks it out
+# for #branch=.
+clone_args=(--bare --quiet --filter=tree:0)
 if [[ -n "$branch" ]]; then
   clone_args+=("--branch=$branch")
 fi
