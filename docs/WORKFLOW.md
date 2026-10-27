@@ -969,7 +969,28 @@ The AUR `PKGBUILD` must hold exactly one line of `upstream.asset_var`, and its v
 | the same version | another value, a rebuild | the AUR `pkgrel` plus one, for an integer AUR `pkgrel` only |
 | the same version | the same value | as in the AUR, so publish finds nothing to push |
 
-In `.SRCINFO`, each old value in a line stands for the new one, and the parts of the line between the values follow the rules of the version in step 5 of [4.4](#44-prepare-and-publish). A new value has to change a source URL or a checksum. When the old value also occurs in other text of a line, as a lone revision `3` would, the line splits in the wrong places and the publish stops, so the value has to be long enough to occur only where the PKGBUILD uses it.
+In `.SRCINFO`, each old value in a line stands for the new one, and the parts of the line between the values follow the rules of the version in step 5 of [4.4](#44-prepare-and-publish). A new value has to change a source URL or a checksum.
+
+The check finds the value by its text. Only the PKGBUILD shows which occurrence of that text is the value, and verify and publish never run it. The text of the value therefore has to occur in a line only where the PKGBUILD writes the value. When it is also the version or other text of the line, as a lone revision `3` would be, the line splits in the wrong places and publish refuses correct updates. The capture group takes enough of the asset name to rule that out. Release v4.0.1 of `kyutai-labs/pocket-tts` names its Linux binary `pocket-tts-3.3.0-x86_64-unknown-linux-gnu.tar.gz`, by the version of its Rust crate. A value of `3.3.0` alone would be the same text as `pkgver` in a release where the two versions are equal, so the group takes the name of the binary with it:
+
+```yaml
+name: pocket-tts-bin
+strategy: github-release
+upstream:
+  project: kyutai-labs/pocket-tts
+  asset_regex: '^(pocket-tts-[0-9.]+)-x86_64-unknown-linux-gnu\.tar\.gz$'
+  asset_var: _bin
+```
+
+```bash
+pkgver=4.0.1
+_bin=pocket-tts-3.3.0
+...
+_release="${url}/releases/download/v${pkgver}"
+source_x86_64=("${pkgname}-${pkgver}-${_bin}-x86_64.tar.gz::${_release}/${_bin}-x86_64-unknown-linux-gnu.tar.gz")
+```
+
+The saved name holds `pkgver` because v4.0.0 and v4.0.1 publish different files under this asset name. It starts with `${pkgname}`, since `pocket-tts-${pkgver}` would write the text of the value in a release where both versions are `4.1.0`.
 
 A rebuild commits to the AUR as `<version>-<pkgrel> release from <strategy>`, as in `2.4.6-2 release from github-tag`. `current_asset` in the package YAML gets the value together with `current`, also when the AUR already has it.
 
