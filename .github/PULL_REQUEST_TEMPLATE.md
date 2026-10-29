@@ -18,7 +18,7 @@ Fixes #<!-- issue number --> <!-- or "N/A" if this PR does not track an issue --
 ## Checklist
 
 - [ ] Commit messages follow Conventional Commits format
-- [ ] `shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh` passes locally
+- [ ] `shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh` passes locally
 - [ ] `shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh` produces no diff
 - [ ] `actionlint` passes locally
 - [ ] `bats tests/ --recursive` passes

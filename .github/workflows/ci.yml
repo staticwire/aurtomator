@@ -52,7 +52,7 @@ jobs:
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: shellcheck
-        run: shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
+        run: shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
 
       - name: shfmt
         run: shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh

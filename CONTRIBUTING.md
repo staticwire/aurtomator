@@ -34,7 +34,7 @@ bats tests/ --recursive
 CI runs these commands:
 
 ```sh
-shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
+shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 actionlint
 for action in .github/actions/*/action.yml; do yq '.runs.steps[] | select(has("run")) | .run' "$action" | shellcheck -s bash -; done

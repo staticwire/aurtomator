@@ -150,6 +150,17 @@ run_blocks() {
   [ "$output" = "$expected" ]
 }
 
+@test "ci: shellcheck checks every test helper" {
+  local root="$GITHUB_DIR/.." expected
+  expected=$(cd "$root" && find tests/helpers -name '*.sh' | sort)
+  [ -n "$expected" ]
+  run yq '.jobs.lint.steps[] | select(.name == "shellcheck") | .run' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && for word in $2; do if [[ "$word" == tests/* ]]; then printf "%s\n" "$word"; fi; done | sort' _ "$root" "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$expected" ]
+}
+
 # Without .shellcheckrc, shellcheck reads a source directive relative to
 # the current directory, and -S warning hides the SC1091 it gives for a
 # file it cannot follow

@@ -1195,7 +1195,7 @@ A newer release also opens an issue, and the run closes it once `VERSION` holds 
 `ubuntu-latest`, 5-minute timeout. It installs `shellcheck` from apt, and `shfmt` v3.14.1 and `actionlint` v1.7.12 with `go install`, then runs:
 
 ```bash
-shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
+shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 actionlint
 ```
@@ -1314,7 +1314,7 @@ bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 
 ```bash
 # shellcheck
-shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh
+shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
 
 # shfmt (check mode)
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
