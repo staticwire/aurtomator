@@ -83,6 +83,8 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 | `pkgver_format` | no      | The upstream version with a fixed text around it, `%s` in its place, as `4.%s`, see below |
 | `alerts`       | no       | Rules for steps of upstream that need a hand edit: each pauses the update or reports a note, see [4.5](#45-update-alerts) |
 
+`validate-pkg.sh` refuses a key that is not in this table, and an `upstream` key that the strategy does not read, so a misspelled key does not go unread. A misspelled `allow_downgrade` gives `has an unknown key: allow_downgrades`. The `upstream` keys of each strategy are its line of `UPSTREAM_KEYS` in `scripts/validate-pkg.sh`, and the error names the strategies that read the key, as in `upstream.branch applies to the git-latest strategy only`. A key that no strategy reads gives `upstream.projet is not a field of any strategy`. A file that is not a map of fields, and an `upstream` that is not a map, are refused before these checks.
+
 Example:
 
 ```yaml
@@ -1385,7 +1387,7 @@ echo "$version"
 3. **HTTP:** `http_get <url> [curl option]...` from `common.sh`. It runs `curl -sfL --max-time 30` and tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. `-f` fails on HTTP errors and `-L` follows redirects. Every request sends the User-Agent in `USER_AGENT`, `aurtomator/1.0` by default. A failed request prints the URL of the last answer and the error of curl to stderr, and names a Cloudflare challenge, which only a browser passes. `http_get_json` fails also on an answer that is not a JSON object or array, such as the HTML page of a bot check after a redirect, and names the URL of that answer. A test in `tests/strategies.bats` fails when a strategy calls `curl` itself.
 4. **Result:** check for an empty string and for `null` from `yq`.
 5. **Prefix:** strip a leading `v` with `${version#v}` when upstream tags look like `v1.0.0`.
-6. **Validation:** add the checks of its required fields to `scripts/validate-pkg.sh`. The name needs no entry: every script in `strategies/` is a valid strategy.
+6. **Validation:** in `scripts/validate-pkg.sh`, add a line to `UPSTREAM_KEYS` with the `upstream` keys the strategy reads, at its place in the strategy table of `README.md`, and the checks of its required fields. Without the line, `validate-pkg.sh` refuses every YAML of the strategy that has an `upstream` key, and `tests/validate-pkg.bats` fails. The name of the strategy needs no entry: every script in `strategies/` is a valid strategy.
 7. **Tests:** add the API fixture to `tests/helpers/mock-curl.sh` and tests to `tests/strategies.bats`.
 8. **Linters:**
 

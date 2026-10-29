@@ -22,6 +22,65 @@ for strategy_file in "${AURTOMATOR_DIR}"/strategies/*.sh; do
 done
 readonly VALID_STRATEGIES
 
+# The top-level keys that the scripts read
+readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump alerts upstream"
+
+# The upstream keys that each strategy reads, in the order of the strategy
+# table of README.md. A test compares them with the keys the scripts name.
+readonly UPSTREAM_KEYS=(
+  "github-release: project tag_version_regex tag_version_replace asset_regex asset_var"
+  "github-tag: project tag_version_regex tag_version_replace asset_regex asset_var"
+  "github-nightly: project nightly_tag nightly_tag_regex channel version_source version_pattern date_format tag_version_regex tag_version_replace"
+  "github-asset: project tag assets"
+  "gitlab-tag: host project tag_version_regex tag_version_replace"
+  "gitea-tag: host project tag_version_regex tag_version_replace"
+  "git-tag: url tag_version_regex tag_version_replace"
+  "git-latest: type url host project branch describe tag_prefix"
+  "pypi: registry"
+  "npm: registry"
+  "crates: registry prerelease"
+  "repology: repology"
+  "archpkg: archpkg testing"
+  "webpage-scrape: url pattern user_agent"
+  "kde-tarball: project path"
+)
+
+# Prints the upstream keys of a strategy, or fails when UPSTREAM_KEYS has
+# no line for it
+# Args: $1=strategy
+upstream_keys() {
+  local line
+  for line in "${UPSTREAM_KEYS[@]}"; do
+    if [[ "${line%%:*}" == "$1" ]]; then
+      printf '%s\n' "${line#*: }"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Prints the strategies that read an upstream key, as "the git-latest
+# strategy" or "the github-release and github-tag strategies", or fails
+# when no strategy reads it
+# Args: $1=key
+key_strategies() {
+  local line names=() list i
+  for line in "${UPSTREAM_KEYS[@]}"; do
+    [[ " ${line#*: } " != *" $1 "* ]] || names+=("${line%%:*}")
+  done
+  case ${#names[@]} in
+    0) return 1 ;;
+    1) printf 'the %s strategy\n' "${names[0]}" ;;
+    *)
+      list="${names[0]}"
+      for ((i = 1; i < ${#names[@]} - 1; i++)); do
+        list+=", ${names[i]}"
+      done
+      printf 'the %s and %s strategies\n' "$list" "${names[-1]}"
+      ;;
+  esac
+}
+
 # Validate one entry of alerts
 # Args: $1=package file, $2=index of the entry, $3=pkgver_format, if any
 # Returns 0 if valid, 1 if invalid (errors printed to stderr)
@@ -91,6 +150,10 @@ validate_pkg() {
     log_err "Invalid YAML syntax: $file"
     return 1
   fi
+  if [[ $(pkg_get "$file" 'tag') != "!!map" ]]; then
+    log_err "$file must be a map of fields"
+    return 1
+  fi
 
   local name strategy
   name=$(pkg_get "$file" '.name // ""')
@@ -121,6 +184,40 @@ validate_pkg() {
     log_err "$file: unknown strategy '$strategy' (valid: ${VALID_STRATEGIES[*]})"
     ((errors++))
     return 1
+  fi
+
+  # --- Keys that no script reads ---
+
+  local keys key unknown=() list strategy_keys where
+  mapfile -t keys < <(pkg_get "$file" 'keys | .[]')
+  for key in "${keys[@]}"; do
+    [[ " $PACKAGE_KEYS " == *" $key "* ]] || unknown+=("$key")
+  done
+  if ((${#unknown[@]} > 0)); then
+    printf -v list '%s, ' "${unknown[@]}"
+    log_err "$file has an unknown key: ${list%, }"
+    ((errors++))
+  fi
+
+  if [[ $(pkg_get "$file" '.upstream | tag') =~ ^!!(null|map)$ ]]; then
+    mapfile -t keys < <(pkg_get "$file" '.upstream // {} | keys | .[]')
+  else
+    log_err "$file: upstream must be a map"
+    return 1
+  fi
+  if ((${#keys[@]} > 0)) && ! strategy_keys=$(upstream_keys "$strategy"); then
+    log_err "$file: validate-pkg.sh lists no upstream keys for the strategy $strategy"
+    ((errors++))
+  elif ((${#keys[@]} > 0)); then
+    for key in "${keys[@]}"; do
+      [[ " $strategy_keys " != *" $key "* ]] || continue
+      if where=$(key_strategies "$key"); then
+        log_err "$file: upstream.$key applies to $where only"
+      else
+        log_err "$file: upstream.$key is not a field of any strategy"
+      fi
+      ((errors++))
+    done
   fi
 
   # --- Optional fields ---
@@ -173,11 +270,8 @@ validate_pkg() {
   local branch
   if [[ $(pkg_get "$file" '.upstream.branch | tag') != "!!null" ]]; then
     branch=$(pkg_get "$file" '.upstream.branch')
-    if [[ "$strategy" != "git-latest" ]]; then
-      log_err "$file: upstream.branch applies to the git-latest strategy only"
-      ((errors++))
     # git clone would read a name that starts with - as an option
-    elif ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+    if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
       log_err "$file: upstream.branch is not a valid branch name: $branch"
       ((errors++))
     fi
@@ -186,10 +280,7 @@ validate_pkg() {
   local describe=""
   if [[ $(pkg_get "$file" '.upstream.describe | tag') != "!!null" ]]; then
     describe=$(pkg_get "$file" '.upstream.describe')
-    if [[ "$strategy" != "git-latest" ]]; then
-      log_err "$file: upstream.describe applies to the git-latest strategy only"
-      ((errors++))
-    elif [[ "$describe" != tags && "$describe" != annotated ]]; then
+    if [[ "$describe" != tags && "$describe" != annotated ]]; then
       log_err "$file: upstream.describe must be tags or annotated: $describe"
       ((errors++))
     fi
@@ -210,10 +301,7 @@ validate_pkg() {
   local nightly_tag_regex
   nightly_tag_regex=$(pkg_get "$file" '.upstream.nightly_tag_regex // ""')
   if [[ -n "$nightly_tag_regex" ]]; then
-    if [[ "$strategy" != "github-nightly" ]]; then
-      log_err "$file: upstream.nightly_tag_regex applies to the github-nightly strategy only"
-      ((errors++))
-    elif [[ $(pkg_get "$file" '.upstream | (has("nightly_tag") or has("channel"))') == true ]]; then
+    if [[ $(pkg_get "$file" '.upstream | (has("nightly_tag") or has("channel"))') == true ]]; then
       log_err "$file: upstream.nightly_tag_regex takes the place of nightly_tag and channel"
       ((errors++))
     elif ! ere_valid "$nightly_tag_regex"; then
@@ -228,9 +316,6 @@ validate_pkg() {
     if [[ "$prerelease" != "!!bool" ]]; then
       log_err "$file: upstream.prerelease must be true or false"
       ((errors++))
-    elif [[ "$strategy" != "crates" ]]; then
-      log_err "$file: upstream.prerelease applies to the crates strategy only"
-      ((errors++))
     # A semver pre-release always holds a dash
     elif [[ $(pkg_get "$file" '.upstream.prerelease') == true && "$dash_set" == false ]]; then
       log_err "$file: upstream.prerelease needs pkgver_dash"
@@ -240,14 +325,9 @@ validate_pkg() {
 
   local testing
   testing=$(pkg_get "$file" '.upstream.testing | tag')
-  if [[ "$testing" != "!!null" ]]; then
-    if [[ "$testing" != "!!bool" ]]; then
-      log_err "$file: upstream.testing must be true or false"
-      ((errors++))
-    elif [[ "$strategy" != "archpkg" ]]; then
-      log_err "$file: upstream.testing applies to the archpkg strategy only"
-      ((errors++))
-    fi
+  if [[ "$testing" != "!!null" && "$testing" != "!!bool" ]]; then
+    log_err "$file: upstream.testing must be true or false"
+    ((errors++))
   fi
 
   # --- Strategy-specific fields ---
@@ -256,10 +336,7 @@ validate_pkg() {
   local tag_version_regex
   tag_version_regex=$(pkg_get "$file" '.upstream.tag_version_regex // ""')
   if [[ -n "$tag_version_regex" && "$tag_version_regex" != "null" ]]; then
-    if [[ ! "$strategy" =~ ^(github-release|github-tag|github-nightly|gitlab-tag|gitea-tag|git-tag)$ ]]; then
-      log_err "$file: upstream.tag_version_regex applies to the github-release, github-tag, github-nightly, gitlab-tag, gitea-tag and git-tag strategies only"
-      ((errors++))
-    elif [[ "$strategy" == "github-nightly" && $(pkg_get "$file" '.upstream.version_source // "tag"') != "tag" ]]; then
+    if [[ "$strategy" == "github-nightly" && $(pkg_get "$file" '.upstream.version_source // "tag"') != "tag" ]]; then
       log_err "$file: upstream.tag_version_regex applies to version_source tag only"
       ((errors++))
     # Then check the capture group (must have parentheses)
@@ -305,9 +382,6 @@ validate_pkg() {
     fi
     if [[ "$asset_regex_tag" == "!!null" || "$asset_var_tag" == "!!null" ]]; then
       log_err "$file: upstream.asset_regex and upstream.asset_var go together"
-      ((errors++))
-    elif [[ "$strategy" != "github-tag" && "$strategy" != "github-release" ]]; then
-      log_err "$file: upstream.asset_regex applies to the github-tag and github-release strategies only"
       ((errors++))
     elif ((groups != 1)); then
       log_err "$file: upstream.asset_regex must be an ERE that bash accepts, with exactly one capture group: $asset_regex"
