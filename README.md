@@ -43,9 +43,10 @@ Each package has a YAML config pointing to an upstream source. A first job runs 
 1. Fork this repo (or use as template)
 2. Enable Actions and Issues in your fork's Settings ([why?](docs/SETUP.md#after-forking))
 3. Run `./scripts/setup.sh` ([detailed guide](docs/SETUP.md))
-4. Add a package: `cp packages/example.yml.sample packages/<name>.yml`
-5. Validate: `./scripts/validate-pkg.sh <name>`
-6. Push and let CI handle the rest
+4. Add a package: `cp packages/example.yml.sample packages/<name>.yml`, where `<name>` is the pkgbase on the AUR
+5. Edit the copy: set `name: <name>`, a `strategy` and its `upstream` fields, see [Strategies](#strategies)
+6. Validate: `./scripts/validate-pkg.sh <name>`
+7. Push and let CI handle the rest
 
 The setup script configures your identity (git author for AUR commits), SSH access, and GitHub Secrets. With [gh CLI](https://cli.github.com/) it sets the secrets itself. Without it, the script prints manual instructions. GPG commit signing is optional.
 
@@ -53,23 +54,23 @@ The setup script configures your identity (git author for AUR commits), SSH acce
 
 15 built-in version detection strategies:
 
-| Strategy           | Source              | Use for                              |
-|--------------------|---------------------|--------------------------------------|
-| `github-release`   | GitHub Releases API | GitHub-hosted projects with releases |
-| `github-tag`       | `git ls-remote`     | GitHub projects without releases     |
+| Strategy           | Source              | Use for                                |
+|--------------------|---------------------|----------------------------------------|
+| `github-release`   | GitHub Releases API | GitHub-hosted projects with releases   |
+| `github-tag`       | `git ls-remote`     | GitHub projects without releases       |
 | `github-nightly`   | GitHub Releases API | Nightly/prerelease builds (4 patterns) |
-| `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag    |
-| `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                  |
-| `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea          |
-| `git-tag`          | `git ls-remote`     | Any HTTPS git host, such as sourcehut |
-| `git-latest`       | `git clone --bare`  | `-git` packages, any HTTPS git repo  |
-| `pypi`             | PyPI JSON API       | Python packages                      |
-| `npm`              | npm registry        | Node.js packages                     |
-| `crates`           | crates.io API       | Rust crates                          |
-| `repology`         | Repology API        | Universal fallback (120+ repos)      |
-| `archpkg`          | Arch repos API      | The pkgver of an official package    |
-| `webpage-scrape`   | URL + regex         | Anything not covered above           |
-| `kde-tarball`      | download.kde.org    | KDE projects, Plasma and Gear too    |
+| `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag      |
+| `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                    |
+| `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea            |
+| `git-tag`          | `git ls-remote`     | Any HTTPS git host, such as sourcehut  |
+| `git-latest`       | `git clone --bare`  | `-git` packages, any HTTPS git repo    |
+| `pypi`             | PyPI JSON API       | Python packages                        |
+| `npm`              | npm registry        | Node.js packages                       |
+| `crates`           | crates.io API       | Rust crates                            |
+| `repology`         | Repology API        | Universal fallback (120+ repos)        |
+| `archpkg`          | Arch repos API      | The pkgver of an official package      |
+| `webpage-scrape`   | URL + regex         | Anything not covered above             |
+| `kde-tarball`      | download.kde.org    | KDE projects, Plasma and Gear too      |
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for strategy details, YAML examples, and how to write custom strategies.
 

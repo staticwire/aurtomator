@@ -38,6 +38,7 @@ shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/hel
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 actionlint
 for action in .github/actions/*/action.yml; do yq '.runs.steps[] | select(has("run")) | .run' "$action" | shellcheck -s bash -; done
+./scripts/validate-pkg.sh --all
 bats tests/ --recursive
 ```
 

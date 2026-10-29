@@ -149,6 +149,7 @@ upstream:
 # upstream:
 #   project: owner/repo                    # required
 #   nightly_tag: nightly                   # optional, default "nightly"
+#   nightly_tag_regex: '^nightly-'         # optional, pattern B, in place of nightly_tag and channel
 #   version_source: tag                    # optional: tag|release_body|tag_date|published_date
 #   version_pattern: 'NVIM v\K\S+'         # required if version_source=release_body
 #   channel: Nightly                       # optional, filter by release name
@@ -278,3 +279,4 @@ upstream:
 # upstream:
 #   url: https://example.com/downloads/    # required, HTTPS only
 #   pattern: 'app-([0-9]+\.[0-9]+)\.tar\.gz'  # required, ERE, the first capture group is the version
+#   user_agent: 'Example/2.0 (+https://example.com/bot)'  # optional, default aurtomator/1.0, printable ASCII
