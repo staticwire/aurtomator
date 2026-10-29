@@ -1420,7 +1420,7 @@ echo "$version"
 | `log_err <msg>`                 | Prints a red cross and the message to stderr        |
 | `log_info <msg>`                | Prints a bold arrow and the message to stderr       |
 
-The logging functions omit ANSI colors when stdout is not a terminal.
+The logging functions write to stderr and omit ANSI colors when stderr is not a terminal.
 
 ### 8.5 YAML conventions for custom strategies
 

@@ -450,7 +450,8 @@ ere_valid() {
 # LOGGING
 # =============================================================================
 
-if [[ -t 1 ]]; then
+# The log functions write to stderr, so stderr decides the colors
+if [[ -t 2 ]]; then
   _GREEN='\033[0;32m'
   _YELLOW='\033[0;33m'
   _RED='\033[0;31m'

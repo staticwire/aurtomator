@@ -879,6 +879,18 @@ MOCKCURL
   [ "$output" = "✓ done" ]
 }
 
+# The log goes to stderr, so check-all.sh 2>run.log on a terminal writes a
+# log without color codes, and check-all.sh | less keeps them on the terminal
+@test "lib.sh: the colors of the log follow stderr, not stdout" {
+  printf 'source "$1/scripts/lib.sh"\nlog_ok done\n' >"$TEST_TMPDIR/color.sh"
+  run script -qec "bash $TEST_TMPDIR/color.sh $TEST_TMPDIR 2>$TEST_TMPDIR/err" /dev/null
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/err")" = "✓ done" ]
+  run script -qec "bash $TEST_TMPDIR/color.sh $TEST_TMPDIR >/dev/null" /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\e[0;32m✓\e[0m done'* ]]
+}
+
 # === validate_pkgver ===
 
 @test "lib.sh: validate_pkgver accepts versions the strategies produce" {
