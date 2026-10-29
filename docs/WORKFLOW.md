@@ -637,7 +637,7 @@ upstream:
 3. Takes the first capture group of each match with bash `[[ =~ ]]`, so the pattern may hold any character, `/` included.
 4. Returns the newest version by `vercmp`, as [github-tag](#32-github-tag) does.
 
-`validate-pkg.sh` compiles the pattern with bash, which refuses some patterns that `grep -E` takes, `(?:...)` among them.
+`validate-pkg.sh` compiles the pattern with bash, which refuses some patterns that `grep -E` takes, `(?:...)` among them. It also refuses a pattern without a capture group.
 
 **Example YAML:**
 

@@ -672,6 +672,20 @@ EOF
   done
 }
 
+# The strategy prints the first group of each match, and a pattern without
+# one stopped it with BASH_REMATCH[1]: unbound variable
+@test "validate: webpage-scrape rejects a pattern without a capture group" {
+  local pattern
+  for pattern in 'app-[0-9.]+\.tar\.gz' 'app-\(x\)[0-9.]+'; do
+    create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: '$pattern'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"upstream.pattern must contain a capture group: $pattern"* ]]
+  done
+}
+
 @test "validate: webpage-scrape accepts a pattern with a slash" {
   create_test_package "mypkg" "webpage-scrape" "upstream:
   url: https://example.com/releases

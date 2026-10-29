@@ -462,9 +462,14 @@ validate_pkg() {
         log_err "$file: strategy 'webpage-scrape' requires 'upstream.pattern'"
         ((errors++))
       else
-        # The strategy runs the pattern through grep and bash
+        # The strategy runs the pattern through grep and bash, and prints the
+        # first group of each match. |^ makes the empty text match, so
+        # BASH_REMATCH holds one entry per group.
         if ! ere_valid "$pattern"; then
           log_err "$file: upstream.pattern is not valid ERE regex: $pattern"
+          ((errors++))
+        elif [[ "" =~ $pattern|^ ]] && ((${#BASH_REMATCH[@]} < 2)); then
+          log_err "$file: upstream.pattern must contain a capture group: $pattern"
           ((errors++))
         fi
       fi
