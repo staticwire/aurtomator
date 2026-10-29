@@ -27,15 +27,31 @@ if [[ ! -f "$README" ]]; then
   exit 1
 fi
 
+readonly BADGES_START="<!-- BADGES:START -->"
+readonly BADGES_END="<!-- BADGES:END -->"
+readonly PKG_START="<!-- PACKAGES:START -->"
+readonly PKG_END="<!-- PACKAGES:END -->"
+
+# Each section is written up to its start marker and from its end marker,
+# so a missing end marker would drop the rest of the README. The badges are
+# optional, the table is not.
+for marker in "$PKG_START" "$PKG_END"; do
+  if ! grep -q "$marker" "$README"; then
+    log_err "No $marker marker found in README.md"
+    exit 1
+  fi
+done
+if grep -q "$BADGES_START" "$README" && ! grep -q "$BADGES_END" "$README"; then
+  log_err "No $BADGES_END marker found in README.md"
+  exit 1
+fi
+
 # Detect repo from git origin
 repo_url=$(git -C "$AURTOMATOR_DIR" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||; s|\.git$||' || true)
 
 # =============================================================================
 # BADGES SECTION
 # =============================================================================
-
-readonly BADGES_START="<!-- BADGES:START -->"
-readonly BADGES_END="<!-- BADGES:END -->"
 
 if grep -q "$BADGES_START" "$README"; then
   badges=""
@@ -77,14 +93,6 @@ fi
 # =============================================================================
 # PACKAGES SECTION
 # =============================================================================
-
-readonly PKG_START="<!-- PACKAGES:START -->"
-readonly PKG_END="<!-- PACKAGES:END -->"
-
-if ! grep -q "$PKG_START" "$README"; then
-  log_err "No $PKG_START marker found in README.md"
-  exit 1
-fi
 
 # The table is HTML, since a Markdown table cell takes no attributes. nowrap
 # keeps Strategy, Updated and Status on one line, and the package name wraps.

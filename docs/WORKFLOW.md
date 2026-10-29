@@ -1086,6 +1086,8 @@ Steps 4 and 5 run as root with `GH_TOKEN` set to the workflow token. No other us
 1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: CI, Codecov and static badges for the repository in `origin`. A public repository gets its own tokenless Codecov badge. A private one, or a failed API call, links the upstream aurtomator badge.
 2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
 
+The badges are optional. The script stops before it writes anything when a table marker is missing, or when the badges have a start marker and no end marker.
+
 #### .status/ directory format
 
 `check-all.sh` writes one file per package:

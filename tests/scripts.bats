@@ -1828,6 +1828,30 @@ EOF
   [[ "$output" == *"PACKAGES:START"* ]]
 }
 
+# sed prints nothing from a marker that is missing, so the text after the
+# start marker would be lost
+@test "update-readme: fails and keeps the README without the end marker of the table" {
+  printf '%s\n' '# test' '<!-- BADGES:START -->' '<!-- BADGES:END -->' '<!-- PACKAGES:START -->' \
+    'old table' '## License' >"$TEST_TMPDIR/README.md"
+  cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No <!-- PACKAGES:END --> marker found in README.md"* ]]
+  cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: fails and keeps the README without the end marker of the badges" {
+  printf '%s\n' '# test' '<!-- BADGES:START -->' 'old badges' '## Intro' \
+    '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No <!-- BADGES:END --> marker found in README.md"* ]]
+  cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+}
+
 @test "update-readme: badge is green when all packages ok" {
   create_test_package "pkg-ok" "github-release" "upstream:
   project: owner/repo
