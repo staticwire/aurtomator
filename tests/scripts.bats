@@ -1099,6 +1099,25 @@ run_alert_fires() {
   done
 }
 
+# Each line of the note would become a line of _alerts
+@test "lib.sh: fired_alerts fails on a note that is not one line of text" {
+  local note
+  for note in "" "note: ''" "note: |
+      Rename the binary
+      hold" "note: \"Rename\\rthe binary\"" "note: 42"; do
+    echo "$note"
+    create_test_package "pkg" "github-release" "alerts:
+  - from: '0.4.0'
+    $note"
+    run bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 0.3 29+1 2>/dev/null' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    run bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 29+1' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"alerts[0].note must be one line of text"* ]]
+  done
+}
+
 # === version of aurtomator ===
 
 @test "lib.sh: aurtomator_version prints VERSION, or nothing without it" {
@@ -3217,6 +3236,20 @@ alerts:
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [[ "$(cat "$TEST_TMPDIR/.status/pkg-bad")" == "check_failed: "*"alerts[0].match must be a non-empty ERE that bash accepts: (?:29)" ]]
   [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+}
+
+@test "check-all: fails the check of a package with an alert note of several lines" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-note" "step" "current: 28+25
+alerts:
+  - when: major
+    note: |
+      Rename the binary
+      hold"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [[ "$(cat "$TEST_TMPDIR/.status/pkg-note")" == "check_failed: "*"alerts[0].note must be one line of text" ]]
+  [ ! -e "$TEST_TMPDIR/.status/_alerts" ]
 }
 
 @test "check-all --update: runs no update of a held version" {

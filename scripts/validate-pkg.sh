@@ -66,10 +66,7 @@ validate_alert() {
     errors=1
   fi
 
-  # The note goes into one log line
-  tag=$(pkg_get "$file" ".alerts[$i].note | tag")
-  value=$(pkg_get "$file" ".alerts[$i].note")
-  if [[ "$tag" != "!!str" || -z "$value" || "$value" == *[$'\n\r']* ]]; then
+  if ! alert_note "$file" "$i" >/dev/null; then
     log_err "$rule.note must be one line of text"
     errors=1
   fi
