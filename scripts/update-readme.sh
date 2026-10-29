@@ -61,16 +61,22 @@ if grep -q "$BADGES_START" "$README"; then
     badges+="[![Lint & Test](https://github.com/${repo_url}/actions/workflows/ci.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/ci.yml)"
 
     # Codecov badge: ask the GitHub API (unauthenticated) whether the repo is
-    # public. yq prints true only for "private": false, and false for a
-    # private repo, an error answer or no answer.
-    is_public=$(curl -sfL --max-time 5 "https://api.github.com/repos/${repo_url}" 2>/dev/null |
-      yq -r '.private == false' 2>/dev/null || true)
+    # public. Without a definite answer, a rate limit for example, the badge
+    # in the README stays, so a public fork does not switch to the badge of
+    # aurtomator for one run.
+    private=$(curl -sfL --max-time 5 "https://api.github.com/repos/${repo_url}" 2>/dev/null |
+      yq -r '.private' 2>/dev/null || true)
+    current_codecov=$(sed -n "/${BADGES_START}/,/${BADGES_END}/p" "$README" |
+      grep -o '\[!\[codecov\]([^)]*)\]([^)]*)' | head -1 || true)
 
-    if [[ "$is_public" == "true" ]]; then
+    if [[ "$private" == "false" ]]; then
       # Public repo: tokenless Codecov badge for this repo
       badges+=" [![codecov](https://codecov.io/github/${repo_url}/graph/badge.svg)](https://codecov.io/github/${repo_url})"
+    elif [[ "$private" != "true" && -n "$current_codecov" ]]; then
+      badges+=" ${current_codecov}"
     else
-      # Private repo or API failed: link to upstream aurtomator Codecov
+      # Private repo, or no answer and no badge yet: link to upstream
+      # aurtomator Codecov
       badges+=" [![codecov](https://codecov.io/github/${AURTOMATOR_UPSTREAM}/graph/badge.svg)](https://codecov.io/github/${AURTOMATOR_UPSTREAM})"
     fi
   fi

@@ -2003,7 +2003,7 @@ EOF
 
 # Codecov shows no tokenless badge for a private repository. mikefarah yq
 # prints the "true" of select(...) | "true" whatever the input.
-@test "update-readme: a private repo or a failed API call links the Codecov of aurtomator" {
+@test "update-readme: a private repo, or a failed API call on a README without a Codecov badge, links the Codecov of aurtomator" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
@@ -2019,6 +2019,46 @@ current: '1.0.0'"
     [ "$status" -eq 0 ]
     grep -qF '(https://github.com/someone/private/actions/workflows/ci.yml)' "$TEST_TMPDIR/README.md"
     grep -qF '[![codecov](https://codecov.io/github/staticwire/aurtomator/graph/badge.svg)](https://codecov.io/github/staticwire/aurtomator)' "$TEST_TMPDIR/README.md"
+  done
+}
+
+@test "update-readme: a repo made private gets the Codecov badge of aurtomator in place of its own" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  git -C "$TEST_TMPDIR" init -q
+  git -C "$TEST_TMPDIR" remote add origin "https://github.com/someone/fork.git"
+  printf '%s\n' '# test' '<!-- BADGES:START -->' \
+    '[![codecov](https://codecov.io/github/someone/fork/graph/badge.svg)](https://codecov.io/github/someone/fork)' \
+    '<!-- BADGES:END -->' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  printf '#!/usr/bin/env bash\n%s\n' "echo '{\"private\": true}'" >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
+
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '[![codecov](https://codecov.io/github/staticwire/aurtomator/graph/badge.svg)](https://codecov.io/github/staticwire/aurtomator)' "$TEST_TMPDIR/README.md"
+  run ! grep -q 'codecov.io/github/someone' "$TEST_TMPDIR/README.md"
+}
+
+# A rate limit of the anonymous API call switched the badge of a public fork
+# to aurtomator and back in the next run
+@test "update-readme: keeps the Codecov badge of the README without a definite answer from the API" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  git -C "$TEST_TMPDIR" init -q
+  git -C "$TEST_TMPDIR" remote add origin "https://github.com/someone/fork.git"
+  local answer own='[![codecov](https://codecov.io/github/someone/fork/graph/badge.svg)](https://codecov.io/github/someone/fork)'
+  for answer in "exit 22" "echo 'rate limited'" "echo '{}'"; do
+    printf '%s\n' '# test' '<!-- BADGES:START -->' "[![Lint & Test](x)](y) $own [![Bash](z)](w)" '<!-- BADGES:END -->' \
+      '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+    printf '#!/usr/bin/env bash\n%s\n' "$answer" >"$MOCK_DIR/curl"
+    chmod +x "$MOCK_DIR/curl"
+
+    run "$TEST_TMPDIR/scripts/update-readme.sh"
+    [ "$status" -eq 0 ]
+    grep -qF "(https://github.com/someone/fork/actions/workflows/ci.yml) $own [![Bash]" "$TEST_TMPDIR/README.md"
+    run ! grep -q 'codecov.io/github/staticwire' "$TEST_TMPDIR/README.md"
   done
 }
 

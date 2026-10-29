@@ -1083,7 +1083,7 @@ Steps 4 and 5 run as root with `GH_TOKEN` set to the workflow token. No other us
 
 `update-readme.sh` rewrites two blocks of `README.md`:
 
-1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: CI, Codecov and static badges for the repository in `origin`. A public repository gets its own tokenless Codecov badge. A private one, or a failed API call, links the upstream aurtomator badge.
+1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: CI, Codecov and static badges for the repository in `origin`. A public repository gets its own tokenless Codecov badge, and a private one links the upstream aurtomator badge. When the API gives no clear answer, a rate limit for example, the Codecov badge already in the README stays. A README without one then gets the upstream badge.
 2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
 
 The badges are optional. The script stops before it writes anything when a table marker is missing, or when the badges have a start marker and no end marker.
