@@ -270,6 +270,11 @@ case "$url" in
   *"api.github.com/repos/multi-product/repo/releases?per_page=100&page=1")
     echo '[{"tag_name": "app-desktop-release-361.0", "published_at": "2026-10-12T08:34:32Z", "prerelease": false}, {"tag_name": "app-web-release-362.0", "published_at": "2026-10-21T08:32:50Z", "prerelease": false}, {"tag_name": "app-desktop-release-363.0", "published_at": "2026-10-22T00:00:00Z", "prerelease": true}, {"tag_name": "app-desktop-release-362.0", "published_at": "2026-10-21T08:33:13Z", "prerelease": false}, {"tag_name": "app-desktop-release-364.0", "published_at": null, "prerelease": false}]'
     ;;
+  # A maintenance release of the old line, published after the new line,
+  # and a tag that gives an empty version
+  *"api.github.com/repos/maint-line/repo/releases?per_page=100&page=1")
+    echo '[{"tag_name": "v", "published_at": "2026-10-26T00:00:00Z", "prerelease": false}, {"tag_name": "v2.1.0-rc1", "published_at": "2026-10-25T00:00:00Z", "prerelease": true}, {"tag_name": "v1.9.5", "published_at": "2026-10-20T00:00:00Z", "prerelease": false}, {"tag_name": "v2.0.1", "published_at": "2026-10-01T00:00:00Z", "prerelease": false}, {"tag_name": "v2.0.0", "published_at": "2026-09-20T00:00:00Z", "prerelease": false}]'
+    ;;
   # /releases/latest answers 404 when every release is a pre-release, as
   # for FreeTubeApp/FreeTube, and when there is no release at all
   *api.github.com/repos/prerelease-only/repo/releases/latest | \

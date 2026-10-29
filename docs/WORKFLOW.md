@@ -133,7 +133,7 @@ aurtomator ships 15 strategies. A strategy is a bash script in `strategies/`. It
 
 **Version:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases. When it answers 404, the strategy reads the release list to say why: a list of pre-releases only gets a message that names `github-nightly` with `nightly_tag_regex`, an empty list one that names `github-tag`.
 
-With `tag_version_regex`, the strategy reads the release list instead, 100 releases a page, until a page has a release whose tag the regex matches or the list ends, at most 10 pages. It takes the match published last and leaves out drafts and pre-releases. A repository that releases several products then gives the release of the product the regex names, whatever `/releases/latest` returns. tutao/tutanota publishes its web, desktop and mobile apps as separate releases:
+With `tag_version_regex`, the strategy reads the release list instead, 100 releases a page, until a page has a release whose tag the regex matches or the list ends, at most 10 pages. It takes the highest version among the matches by `vercmp`, as [github-tag](#32-github-tag) does, and leaves out drafts and pre-releases, so a fix release of an older line published after the newest one is no downgrade. A repository that releases several products then gives the release of the product the regex names, whatever `/releases/latest` returns. tutao/tutanota publishes its web, desktop and mobile apps as separate releases:
 
 ```yaml
 name: tutanota-desktop-bin

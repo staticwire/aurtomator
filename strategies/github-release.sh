@@ -29,8 +29,9 @@ api="https://api.github.com/repos/${owner_repo}"
 
 if [[ -n "$tag_version_regex" ]]; then
   # /releases/latest can be a release of another product of the same
-  # repository, so the regex picks among the releases
-  release=$(github_release_matching "$api" "$tag_version_regex" 10 stable) || {
+  # repository, so the regex picks among the releases, by version as the
+  # tag strategies do
+  release=$(github_release_matching "$api" "$tag_version_regex" 10 stable version "$tag_version_replace") || {
     echo "Failed to fetch releases for ${owner_repo}" >&2
     exit 1
   }

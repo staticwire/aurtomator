@@ -92,6 +92,18 @@ teardown() {
   [ "$(grep -c 'releases/latest' "$TEST_TMPDIR/curl.args")" = "0" ]
 }
 
+# The tag strategies pick by vercmp too, so a maintenance release of an old
+# line is no downgrade
+@test "github-release: tag_version_regex takes the highest version, not the one published last" {
+  create_test_package "test-maint" "github-release" "upstream:
+  project: maint-line/repo
+  tag_version_regex: '^v(.*)$'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-maint"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.0.1" ]
+}
+
 @test "github-release: tag_version_regex reads the next page" {
   record_curl
   create_test_package "test-pages" "github-release" "upstream:
