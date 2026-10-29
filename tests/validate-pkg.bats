@@ -645,6 +645,98 @@ pkgver_dashes: _"
   [[ "$output" == *"unknown type 'bitbucket'"* ]]
 }
 
+@test "validate: git-latest fields that the type does not read rejected" {
+  local entry type field message base
+  for entry in "github|host: invent.kde.org|upstream.host applies to type gitlab only" \
+    "github|url: https://git.example.com/repo.git|upstream.url applies to type git only" \
+    "gitlab|url: https://git.example.com/repo.git|upstream.url applies to type git only" \
+    "git|host: invent.kde.org|upstream.host applies to type gitlab only" \
+    "git|project: owner/repo|upstream.project applies to types github and gitlab only"; do
+    IFS='|' read -r type field message <<<"$entry"
+    case "$type" in
+      github) base="project: owner/repo" ;;
+      gitlab) base="host: invent.kde.org
+  project: group/project" ;;
+      git) base="url: https://git.example.com/repo.git" ;;
+    esac
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: $type
+  $base
+  $field"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    echo "$entry: $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"mypkg.yml: $message"* ]]
+  done
+}
+
+# === github-nightly fields by version_source and pattern ===
+
+@test "validate: the github-nightly patterns of the sample pass" {
+  local pattern
+  for pattern in "nightly_tag: nightly
+  version_source: release_body
+  version_pattern: 'NVIM v\\K\\S+'" "nightly_tag: nightly-
+  version_source: tag_date" "nightly_tag_regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}\$'
+  version_source: tag_date" "nightly_tag: latest" "channel: Nightly
+  version_source: tag"; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  $pattern"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    echo "$pattern: $output"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "validate: github-nightly version_source it does not know rejected" {
+  create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: release_date"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mypkg.yml: upstream.version_source must be tag, release_body, tag_date or published_date: release_date"* ]]
+}
+
+@test "validate: github-nightly release_body without version_pattern rejected" {
+  create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: release_body"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mypkg.yml: upstream.version_source release_body needs upstream.version_pattern"* ]]
+}
+
+# Without version_source the strategy reads the tag
+@test "validate: version_pattern with another version_source rejected" {
+  local source
+  for source in 'version_source: tag' 'version_source: tag_date' 'version_source: published_date' ''; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  $source
+  version_pattern: 'v\\K\\S+'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    echo "$source: $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"mypkg.yml: upstream.version_pattern applies to version_source release_body only"* ]]
+  done
+}
+
+# nightly_tag: latest wins over channel, and channel over any other tag
+@test "validate: nightly_tag next to channel rejected" {
+  local tag
+  for tag in latest nightly; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  nightly_tag: $tag
+  channel: Nightly"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    echo "$tag: $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"mypkg.yml: upstream.channel takes the place of nightly_tag"* ]]
+  done
+}
+
 @test "validate: pypi fails without upstream.registry" {
   create_test_package "mypkg" "pypi" ""
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"

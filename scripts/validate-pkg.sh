@@ -422,6 +422,27 @@ validate_pkg() {
         log_err "$file: strategy '$strategy' requires 'upstream.project'"
         ((errors++))
       fi
+      if [[ "$strategy" == github-nightly ]]; then
+        local nightly_source nightly_pattern
+        nightly_source=$(pkg_get "$file" '.upstream.version_source // "tag"')
+        nightly_pattern=$(pkg_get "$file" '.upstream.version_pattern // ""')
+        if [[ ! "$nightly_source" =~ ^(tag|release_body|tag_date|published_date)$ ]]; then
+          log_err "$file: upstream.version_source must be tag, release_body, tag_date or published_date: $nightly_source"
+          ((errors++))
+        elif [[ "$nightly_source" == release_body && -z "$nightly_pattern" ]]; then
+          log_err "$file: upstream.version_source release_body needs upstream.version_pattern"
+          ((errors++))
+        fi
+        if [[ "$nightly_source" != release_body && -n "$nightly_pattern" ]]; then
+          log_err "$file: upstream.version_pattern applies to version_source release_body only"
+          ((errors++))
+        fi
+        # nightly_tag: latest wins over channel, and channel over any other tag
+        if [[ $(pkg_get "$file" '.upstream | (has("nightly_tag") and has("channel"))') == true ]]; then
+          log_err "$file: upstream.channel takes the place of nightly_tag"
+          ((errors++))
+        fi
+      fi
       ;;
     github-asset)
       local project tag assets_type
@@ -510,6 +531,19 @@ validate_pkg() {
             ((errors++))
             ;;
         esac
+        # Each type reads its own of host, project and url
+        if [[ "$upstream_type" =~ ^(github|git)$ && $(pkg_get "$file" '.upstream | has("host")') == true ]]; then
+          log_err "$file: upstream.host applies to type gitlab only"
+          ((errors++))
+        fi
+        if [[ "$upstream_type" == git && $(pkg_get "$file" '.upstream | has("project")') == true ]]; then
+          log_err "$file: upstream.project applies to types github and gitlab only"
+          ((errors++))
+        fi
+        if [[ "$upstream_type" =~ ^(github|gitlab)$ && $(pkg_get "$file" '.upstream | has("url")') == true ]]; then
+          log_err "$file: upstream.url applies to type git only"
+          ((errors++))
+        fi
       fi
       # The strategy prints r<count>.<hash>, or with upstream.describe
       # <tag>.r<count>.g<hash>. vercmp reads 1.4.0.r47.g0bbf5ad as newer

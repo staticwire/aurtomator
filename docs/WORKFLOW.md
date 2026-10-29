@@ -302,7 +302,7 @@ upstream:
   date_format: '%Y%m%d'
 ```
 
-`validate-pkg.sh` refuses `date_format` with another `version_source` and a format whose output is not a valid version, such as `%Y-%m-%d`. It refuses `nightly_tag_regex` next to `nightly_tag` or `channel`, and one that bash cannot compile. It refuses `tag_version_regex` with a `version_source` other than `tag`.
+`validate-pkg.sh` refuses `date_format` with another `version_source` and a format whose output is not a valid version, such as `%Y-%m-%d`. It refuses `nightly_tag_regex` next to `nightly_tag` or `channel`, and one that bash cannot compile. It refuses `tag_version_regex` with a `version_source` other than `tag`. It refuses a `version_source` other than `tag`, `release_body`, `tag_date` or `published_date`, `release_body` without `version_pattern`, and `version_pattern` with another `version_source`. It refuses `nightly_tag` next to `channel`: `nightly_tag: latest` leaves `channel` unread, and `channel` leaves any other `nightly_tag` unread.
 
 **Authentication:** same as `github-release`.
 
@@ -419,6 +419,8 @@ upstream:
 | `upstream.branch`  | no       | The branch of a source pinned to `#branch=`. Default: the default branch of the repository |
 | `upstream.describe` | no      | `tags` or `annotated`: print the form of `git describe` instead of `r<count>.<hash>` |
 | `upstream.tag_prefix` | no    | Text cut from the start of the tag with `upstream.describe`, such as `v` |
+
+Each type reads only its own of `host`, `project` and `url`, and `validate-pkg.sh` refuses the others: `host` with `github` or `git`, `project` with `git`, and `url` with `github` or `gitlab`.
 
 **Version:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the hash of `HEAD` and prints the usual `-git` format `r<count>.<hash>`, for example `r431.66db9ce`. The clone takes `--filter=tree:0` and holds commits and tags only, because the strategy reads no files: a full bare clone of `googleapis/mcp-toolbox`, 1.4 GB by the GitHub API, timed out after the 120 s of a check. A server without partial clone ignores the filter with a warning and sends the whole repository. With `upstream.branch`, the clone takes `--branch`, and `HEAD` is that branch, as makepkg checks it out for `#branch=`: sharkdp/fd gives `r2061.9e90463` on `master` and `r1925.cf8a48a` with `branch: abort-on-panic`. A branch the repository does not have fails the clone. `validate-pkg.sh` refuses a name that `git check-ref-format --branch` refuses, such as one that starts with `-`. The hash has as many characters as the hash in `current`, and 7 when `current` is empty. `git rev-parse --short` in a `pkgver()` gives more characters as the repository grows: fabric-git is `r2173.ef2e985d` on the AUR, and `vercmp` reads `r2173.ef2e985` of the same commit as older.
 
