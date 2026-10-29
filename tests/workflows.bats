@@ -808,10 +808,15 @@ EOF
 # "<number> <title>" per line, whose title starts with the emoji of the
 # --label it asks for, the first 30 unless --limit says otherwise, answers
 # has_issues with $GH_HAS_ISSUES (true by default), fails the list when
-# $GH_FAIL is set and logs every call to $GH_LOG.
+# $GH_FAIL is set and logs every call to $GH_LOG. scripts/lib.sh of the
+# workspace writes the comment "comment" and logs the function and its
+# arguments to $BODY_LOG.
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
-  mkdir -p "$ws/.status" "$bin"
+  mkdir -p "$ws/.status" "$ws/scripts" "$bin"
+  cat >"$ws/scripts/lib.sh" <<'EOF'
+close_comment() { echo "close_comment $*" >>"$BODY_LOG" && echo comment; }
+EOF
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
   done
@@ -840,9 +845,11 @@ esac
 EOF
   chmod +x "$bin/gh"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  BODY_LOG="$BATS_TEST_TMPDIR/body.log"
   : >"$GH_LOG"
+  : >"$BODY_LOG"
   step_run issues "Close resolved issues" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
@@ -1081,8 +1088,10 @@ EOF
   GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' \
     run_close_step foo=up_to_date bar="new_version: 2.0.0" _error_count=0
   [ "$status" -eq 0 ]
-  grep -qx 'issue close 12 --comment The status of foo is `up_to_date` in https://example.invalid/run.' "$GH_LOG"
-  grep -qx 'issue close 13 --comment The status of bar is `new_version: 2.0.0` in https://example.invalid/run.' "$GH_LOG"
+  grep -qx 'issue close 12 --comment comment' "$GH_LOG"
+  grep -qx 'issue close 13 --comment comment' "$GH_LOG"
+  run cat "$BODY_LOG"
+  [ "$output" = $'close_comment .status/foo https://example.invalid/run\nclose_comment .status/bar https://example.invalid/run' ]
 }
 
 @test "check-updates: closes the update issue of a package that reached the AUR" {
@@ -1121,10 +1130,12 @@ EOF
   GH_OPEN=$'12 ✋ foo: update held\n13 ✋ bar: update held\n14 ❌ baz: check failed' \
     run_close_step foo=up_to_date bar="held: 29+2" baz="held: 3.0"
   [ "$status" -eq 0 ]
-  grep -qx 'issue close 12 --comment The status of foo is `up_to_date` in https://example.invalid/run.' "$GH_LOG"
-  grep -qx 'issue close 14 --comment The status of baz is `held: 3.0` in https://example.invalid/run.' "$GH_LOG"
+  grep -qx 'issue close 12 --comment comment' "$GH_LOG"
+  grep -qx 'issue close 14 --comment comment' "$GH_LOG"
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "2" ]
+  run cat "$BODY_LOG"
+  [ "$output" = $'close_comment .status/baz https://example.invalid/run\nclose_comment .status/foo https://example.invalid/run' ]
 }
 
 @test "check-updates: closes the issue of an aurtomator release once VERSION holds it or a newer one is out" {

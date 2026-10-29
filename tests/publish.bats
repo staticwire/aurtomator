@@ -2100,6 +2100,35 @@ EOF
   [ "$LC_ALL" = C ]
 }
 
+# === close_comment ===
+
+@test "close_comment: puts the status in a code block" {
+  printf '%s\n' 'update_failed: a ``` b `@octocat` https://evil.example' 'c' >"$TEST_TMPDIR/demo"
+  run close_comment "$TEST_TMPDIR/demo" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+The status of `demo` in https://example.invalid/run:
+
+````
+update_failed: a ``` b `@octocat` https://evil.example
+c
+````
+EOF
+  )
+  [ "$output" = "$expected" ]
+}
+
+@test "close_comment: keeps the last 4000 characters of a long status" {
+  local tail
+  tail=$(printf 'x%.0s' {1..4000})
+  echo "update_failed: ${tail}" >"$TEST_TMPDIR/demo"
+  run --keep-empty-lines close_comment "$TEST_TMPDIR/demo" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  [ "${lines[3]}" = "[first 15 characters cut]" ]
+  [ "${lines[4]}" = "$tail" ]
+}
+
 # === aur_export and aur_reanchor ===
 
 # Helper: a repo with a file, an executable, a symlink out of the repo and a

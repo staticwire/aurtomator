@@ -37,29 +37,46 @@ alert_issue_body() {
   printf 'Package: `%s`\n%s version: `%s`\nRun: %s\n\n%s\n\nAuto-created by update workflow. %s\n' "$package" "$state" "${status#*: }" "$2" "$notes" "$footer"
 }
 
+# Print a text as a code block, where links, images and mentions do not
+# render. The fence is longer than any run of backticks in the text, so the
+# text cannot close it. A text over 4000 characters keeps its last 4000,
+# where the cause of an error usually is. The job containers run in the C
+# locale, where bash counts bytes, so the cut could split a character.
+# Args: $1=text
+_code_block() {
+  local text="$1" fence='```' limit=4000
+  local LC_ALL=C.UTF-8
+  if ((${#text} > limit)); then
+    text="[first $((${#text} - limit)) characters cut]"$'\n'"${text:${#text}-limit}"
+  fi
+  while [[ "$text" == *"$fence"* ]]; do
+    fence+='`'
+  done
+  printf '%s\n%s\n%s\n' "$fence" "$text" "$fence"
+}
+
 # Body of the issue opened for a failed package. The error holds text from
-# upstream, such as a rejected tag name, so it goes into a code block,
-# where links, images and mentions do not render. The fence is longer than
-# any run of backticks in the error, so the error cannot close it. The
-# error is cut to its last 4000 characters, where the cause usually is.
-# The job containers run in the C locale, where bash counts bytes, so the
-# cut could split a character.
+# upstream, such as a rejected tag name, so it goes into a code block.
 # Args: $1=status file in .status/, named after the package, holding
 #       check_failed: ... or update_failed: ...; $2=URL of the run
 failure_issue_body() {
-  local status kind error fence='```' limit=4000
-  local LC_ALL=C.UTF-8
+  local status kind
   status=$(<"$1")
   kind="${status%%:*}"
-  error="${status#*: }"
-  if ((${#error} > limit)); then
-    error="[first $((${#error} - limit)) characters cut]"$'\n'"${error:${#error}-limit}"
-  fi
-  while [[ "$error" == *"$fence"* ]]; do
-    fence+='`'
-  done
   # The backticks are Markdown code around the package name
   # shellcheck disable=SC2016
-  printf 'Package: `%s`\nStatus: %s\nRun: %s\n\n%s\n%s\n%s\n\nAuto-created by update workflow. A run closes it when the package recovers.\n' \
-    "${1##*/}" "${kind//_/ }" "$2" "$fence" "$error" "$fence"
+  printf 'Package: `%s`\nStatus: %s\nRun: %s\n\n%s\n\nAuto-created by update workflow. A run closes it when the package recovers.\n' \
+    "${1##*/}" "${kind//_/ }" "$2" "$(_code_block "${status#*: }")"
+}
+
+# Comment of an issue that a run closes. The status can hold the error of a
+# failure, so it goes into a code block as that error does.
+# Args: $1=status file in .status/, named after the package; $2=URL of the
+#       run
+close_comment() {
+  local status
+  status=$(<"$1")
+  # The backticks are Markdown code around the package name
+  # shellcheck disable=SC2016
+  printf 'The status of `%s` in %s:\n\n%s\n' "${1##*/}" "$2" "$(_code_block "$status")"
 }

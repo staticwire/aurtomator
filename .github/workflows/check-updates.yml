@@ -533,7 +533,8 @@ jobs:
                 "✋ $pkg_name: update held:"*) ;;
                 *) continue ;;
               esac
-              gh issue close "$number" --comment "The status of $pkg_name is \`$status\` in $RUN_URL."
+              comment=$(bash -c 'source ./scripts/lib.sh && "$@"' _ close_comment "$status_file" "$RUN_URL")
+              gh issue close "$number" --comment "$comment"
             done
           done <<<"$open
           $held"
