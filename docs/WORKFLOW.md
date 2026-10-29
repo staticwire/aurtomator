@@ -1400,18 +1400,26 @@ echo "$version"
 | `pkg_file <name>`               | Resolves `packages/<name>.yml`, returns 1 if missing |
 | `pkg_get <file> <yq-query>`     | Reads a field from a YAML file with yq              |
 | `pkg_set <file> <query> <val>`  | Writes a field to a YAML file with yq               |
+| `pkg_set_current <file> <version> [asset value]` | Writes `current` and, with an asset value, `current_asset` |
+| `pkgver_dash <file>`            | Prints the `pkgver_dash` of a package: `_`, `.`, `drop` for `''`, or nothing |
+| `to_pkgver <version> [dash] [format]` | Prints the pkgver of an upstream version, with `pkgver_dash` and `pkgver_format` applied |
+| `pkg_asset_var <file>`          | Prints the `upstream.asset_var` of a package or nothing, returns 1 for a name that is not a variable name starting with `_` |
 | `require_cmd <cmd>`             | Exits 1 if the command is not in `PATH`             |
 | `load_config`                   | Sources `.aurtomator.conf` if present               |
 | `http_get <url> [curl option]...` | Fetches a URL with `curl`, see 8.3                |
 | `http_get_json <url> [curl option]...` | `http_get` for an API that answers JSON, see 8.3 |
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
-| `github_release_matching <api> <ere> <pages> [stable]` | Prints the release published last whose tag matches the ERE, as JSON, from up to `<pages>` pages of 100 releases; `stable` leaves out pre-releases |
+| `github_release_matching <api> <ere> <pages> [stable] [version <template>]` | Prints a release whose tag matches the ERE, as JSON, from the first page of 100 releases with a match, at most `<pages>` pages: the one published last, or with `version` the one with the newest version that the template gives. `stable` leaves out pre-releases |
+| `github_tags <owner/repo>`      | `remote_tags` of a GitHub repository, with `GITHUB_TOKEN` when it is set |
 | `validate_pkgver <version>`     | Returns 1 for an empty version, one with a character outside `A-Za-z0-9._+` or one without a digit |
+| `validate_asset_value <value>`  | Returns 1 for a value that does not start with a letter or a digit, or holds a character outside `A-Za-z0-9._+~-` |
+| `check_asset_option <asset_var> <value>` | Returns 1 when a package with `asset_var` gets no `--asset`, another package gets one, or `validate_asset_value` refuses the value |
 | `version_jump <current> <new>`  | Returns 0 when the first number of the new version has at least two digits more than the first number of the current one |
 | `remote_tags <url>`             | Prints every tag name of a git repository from `git ls-remote`, over `https` only and without a terminal prompt |
 | `release_tags <tags>`           | Prints the tags of the form `v1.2.3` or `1.2.3`, one per line |
 | `tag_version_fill <template>`   | Prints the template with `\1` to `\9` replaced by the groups in `BASH_REMATCH`, returns 1 for a group the last match does not have |
 | `tag_versions <ere> [template]` | Prints the version in each tag of stdin: the template filled from the groups of the ERE (default: `\1`), or the tag without a leading `v` when the ERE is empty |
+| `newest_version`                | Prints the newest of the versions on stdin by `vercmp`, with a dash before a letter dropped and any other dash read as a dot |
 | `latest_tag_version <tags> <ere> [template]` | Prints the highest version among the tags, filtered as the tag strategies filter them |
 | `capture_matches <ere>`         | Prints the first capture group of every match of the ERE in stdin |
 | `ere_valid <ere>`               | Succeeds when bash can compile the ERE              |

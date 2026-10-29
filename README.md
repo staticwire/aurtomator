@@ -75,7 +75,7 @@ See [docs/WORKFLOW.md](docs/WORKFLOW.md) for strategy details, YAML examples, an
 
 ## Limitations
 
-aurtomator only sets `pkgver`, resets `pkgrel` to 1, updates checksums and `.SRCINFO`, and sets a value from a release asset name where the package YAML asks for one. It does not build packages or check dependencies. These cases are detected and blocked:
+aurtomator only sets `pkgver` and `pkgrel`, updates checksums and `.SRCINFO`, and sets a value from a release asset name where the package YAML asks for one. `pkgrel` goes back to 1 for a new version, and a rebuild with a new asset value raises it by one. It does not build packages or check dependencies. These cases are detected and blocked:
 
 - **`pkgver()` with the wrong strategy**: use `git-latest` for VCS packages
 - **A `SKIP` next to a real checksum of a remote source**: such a `SKIP` turns off `updpkgsums`, and the real checksum would go stale. The `SKIP` of a signature (`.sig`, `.sign`, `.asc`) and that of a VCS source without a `#commit=`, `#tag=` or `#revision=` pin do not count, because makepkg gives them `SKIP` itself

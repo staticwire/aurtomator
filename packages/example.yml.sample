@@ -23,7 +23,9 @@
 #   alerts          - rules for steps of upstream that need a hand edit,
 #                     see the example below and docs/WORKFLOW.md 4.5
 #
-# Written by update-pkg.sh after every push, do not edit by hand:
+# Written by update-pkg.sh after every push. Set current by hand only to the
+# version the AUR has: for a new package, as the git-latest example of
+# docs/WORKFLOW.md 3.7 does, and after a hand publish of a held update (4.5).
 #   current      - last pushed version
 #   last_updated - date of the last push, YYYY-MM-DD
 #   current_asset - value from a release asset name of the last push, for a
