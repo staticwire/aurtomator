@@ -87,6 +87,27 @@ case "$url" in
   *archlinux.org/packages/search/json*name=ffmpeg*)
     echo '{"results": [{"repo": "extra", "epoch": 2, "pkgver": "9.0.2", "pkgrel": "2"}]}'
     ;;
+  # Arch repos: a testing build listed before the stable one, as amd-ucode
+  *archlinux.org/packages/search/json*name=arch-split*)
+    echo '{"results": [{"repo": "core-testing", "epoch": 0, "pkgver": "2.0", "pkgrel": "1"}, {"repo": "core", "epoch": 0, "pkgver": "1.0", "pkgrel": "1"}]}'
+    ;;
+  # Arch repos: a testing build older than the stable one, and a newer
+  # build in kde-unstable
+  *archlinux.org/packages/search/json*name=arch-stale*)
+    echo '{"results": [{"repo": "extra", "epoch": 0, "pkgver": "3.0", "pkgrel": "1"}, {"repo": "extra-testing", "epoch": 0, "pkgver": "2.9", "pkgrel": "1"}, {"repo": "kde-unstable", "epoch": 0, "pkgver": "9.0", "pkgrel": "1"}]}'
+    ;;
+  # Arch repos: a package in a testing repository only
+  *archlinux.org/packages/search/json*name=arch-testing-only*)
+    echo '{"results": [{"repo": "multilib-testing", "epoch": 0, "pkgver": "5.0", "pkgrel": "1"}]}'
+    ;;
+  # Arch repos: the epoch of the testing build makes it the newer one
+  *archlinux.org/packages/search/json*name=arch-epoch*)
+    echo '{"results": [{"repo": "extra", "epoch": 1, "pkgver": "2.0", "pkgrel": "1"}, {"repo": "extra-testing", "epoch": 2, "pkgver": "1.0", "pkgrel": "1"}]}'
+    ;;
+  # Arch repos: a package of multilib
+  *archlinux.org/packages/search/json*name=arch-multilib*)
+    echo '{"results": [{"repo": "multilib", "epoch": 0, "pkgver": "4.0", "pkgrel": "1"}]}'
+    ;;
   # KDE tarball: no versions in listing
   *download.kde.org/stable/no-versions-here/*)
     echo '<html><body>Parent Directory</body></html>'
@@ -396,7 +417,7 @@ case "$url" in
     ;;
   # Arch repos API
   *archlinux.org/packages/search/json*)
-    echo '{"results": [{"pkgver": "6.10.2", "pkgrel": "1"}]}'
+    echo '{"results": [{"repo": "extra", "epoch": 0, "pkgver": "6.10.2", "pkgrel": "1"}]}'
     ;;
   # KDE tarball directory listing
   *download.kde.org/stable/*)

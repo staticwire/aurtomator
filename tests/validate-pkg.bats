@@ -248,6 +248,35 @@ current: '$current'"
   [ "$status" -eq 0 ]
 }
 
+@test "validate: archpkg with testing passes" {
+  local value
+  for value in true false; do
+    create_test_package "mypkg" "archpkg" "upstream:
+  testing: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "validate: testing for another strategy rejected" {
+  create_test_package "mypkg" "repology" "upstream:
+  testing: true"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.testing applies to the archpkg strategy only"* ]]
+}
+
+@test "validate: testing that is not a boolean rejected" {
+  local value
+  for value in yes '"true"' 1; do
+    create_test_package "mypkg" "archpkg" "upstream:
+  testing: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"upstream.testing must be true or false"* ]]
+  done
+}
+
 @test "validate: repology passes (no extra fields)" {
   create_test_package "mypkg" "repology" ""
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"

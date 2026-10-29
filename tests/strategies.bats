@@ -654,6 +654,46 @@ teardown() {
   [ "$output" = "9.0.2" ]
 }
 
+@test "archpkg: reads core, extra and multilib only without testing: true" {
+  local entry
+  for entry in arch-split:1.0 arch-stale:3.0 arch-multilib:4.0; do
+    create_test_package "test-archpkg" "archpkg" "upstream:
+  archpkg: ${entry%%:*}"
+    run "$TEST_TMPDIR/strategies/archpkg.sh" "test-archpkg"
+    echo "$entry: $output"
+    [ "$status" -eq 0 ]
+    [ "$output" = "${entry#*:}" ]
+  done
+}
+
+@test "archpkg: takes the newer of the testing and the stable build with testing: true" {
+  local entry
+  for entry in arch-split:2.0 arch-stale:3.0 arch-testing-only:5.0 arch-epoch:1.0 ffmpeg:9.0.2; do
+    create_test_package "test-archpkg" "archpkg" "upstream:
+  archpkg: ${entry%%:*}
+  testing: true"
+    run "$TEST_TMPDIR/strategies/archpkg.sh" "test-archpkg"
+    echo "$entry: $output"
+    [ "$status" -eq 0 ]
+    [ "$output" = "${entry#*:}" ]
+  done
+}
+
+@test "archpkg: names the repositories it read when the package is in none of them" {
+  create_test_package "test-archpkg" "archpkg" "upstream:
+  archpkg: arch-testing-only"
+  run "$TEST_TMPDIR/strategies/archpkg.sh" "test-archpkg"
+  [ "$status" -eq 1 ]
+  [ "$output" = "Package not found in core, extra, multilib: arch-testing-only" ]
+
+  create_test_package "test-archpkg" "archpkg" "upstream:
+  archpkg: no-such-pkg
+  testing: true"
+  run "$TEST_TMPDIR/strategies/archpkg.sh" "test-archpkg"
+  [ "$status" -eq 1 ]
+  [ "$output" = "Package not found in core, extra, multilib, core-testing, extra-testing, multilib-testing: no-such-pkg" ]
+}
+
 # === kde-tarball ===
 
 @test "kde-tarball: returns latest version from download.kde.org" {

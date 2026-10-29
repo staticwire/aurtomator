@@ -250,13 +250,15 @@ upstream:
 #                                          # as ruby:rmagick
 
 # --- archpkg ----------------------------------------------------------------
-# Follows the pkgver of a package in the Arch official repos, without
-# epoch and pkgrel. A rebuild there raises only pkgrel and gives no new
-# version.
+# Follows the pkgver of a package in core, extra or multilib, without
+# epoch and pkgrel. testing: true also reads their testing repositories
+# and takes the newer build. A rebuild there raises only pkgrel and gives
+# no new version.
 #
 # strategy: archpkg
 # upstream:
 #   archpkg: qt6-base                      # optional, defaults to `name` above
+#   testing: true                          # optional, default false
 
 # --- kde-tarball ------------------------------------------------------------
 # Reads a directory on https://download.kde.org/ for

@@ -238,6 +238,18 @@ validate_pkg() {
     fi
   fi
 
+  local testing
+  testing=$(pkg_get "$file" '.upstream.testing | tag')
+  if [[ "$testing" != "!!null" ]]; then
+    if [[ "$testing" != "!!bool" ]]; then
+      log_err "$file: upstream.testing must be true or false"
+      ((errors++))
+    elif [[ "$strategy" != "archpkg" ]]; then
+      log_err "$file: upstream.testing applies to the archpkg strategy only"
+      ((errors++))
+    fi
+  fi
+
   # --- Strategy-specific fields ---
 
   # Validate optional tag_version_regex

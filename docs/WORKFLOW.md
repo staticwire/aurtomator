@@ -604,8 +604,11 @@ strategy: repology
 | Field              | Required | Description                                                    |
 |--------------------|----------|----------------------------------------------------------------|
 | `upstream.archpkg` | no       | Package name in the official repos. Defaults to the package `name`. |
+| `upstream.testing` | no       | `true` also reads `core-testing`, `extra-testing` and `multilib-testing`. Default `false`. |
 
-**Version:** reads `.results[0].pkgver`, the version without `epoch` and `pkgrel`: ffmpeg `2:9.0.2-2` gives `9.0.2`. A rebuild in the official repos raises only `pkgrel`, so it gives no new version, and an update of this strategy never raises `pkgrel` alone, see [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md#packages-needing-a-pkgrel-bump).
+**Version:** reads the entries of `core`, `extra` and `multilib` and takes the newest by `vercmp`, the epoch included. It prints its `pkgver`, the version without `epoch` and `pkgrel`: ffmpeg `2:9.0.2-2` gives `9.0.2`. A package without an entry in these repositories fails with `Package not found in core, extra, multilib: <name>`. A rebuild in the official repos raises only `pkgrel`, so it gives no new version, and an update of this strategy never raises `pkgrel` alone, see [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md#packages-needing-a-pkgrel-bump).
+
+With `testing: true` the strategy also reads `core-testing`, `extra-testing` and `multilib-testing`. It takes the build in testing while that build is newer than the stable one, and the stable build otherwise. A build that moves from testing to the stable repository keeps its version and gives no new update. `gnome-unstable` and `kde-unstable` stay out. `validate-pkg.sh` refuses a `testing` that is not `true` or `false`, and `testing` with another strategy.
 
 **Example YAML:**
 
