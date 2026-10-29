@@ -1138,6 +1138,24 @@ EOF
   [ "$output" = $'close_comment .status/baz https://example.invalid/run\nclose_comment .status/foo https://example.invalid/run' ]
 }
 
+@test "check-updates: closes the held issue of a package whose version reached the AUR" {
+  GH_OPEN=$'12 ✋ foo: update held\n13 ✋ bar: update held\n14 ✋ baz: update held\n15 ✋ qux: update held' \
+    run_close_step foo=up_to_date bar="updated: 2.0.0" baz="downgrade: 1.0.0" qux="rebuilt: 1.0.0"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "4" ]
+}
+
+# An outage of upstream or a rate limit must not close the issue, or the next
+# held run opens it again under a new number
+@test "check-updates: keeps the held issue of a package whose version has not reached the AUR" {
+  GH_OPEN=$'12 ✋ foo: update held\n13 ✋ bar: update held\n14 ✋ baz: update held' \
+    run_close_step foo="check_failed: API down" bar="update_failed: boom" baz="new_version: 2.0.0"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "check-updates: closes the issue of an aurtomator release once VERSION holds it or a newer one is out" {
   GH_OPEN=$'21 🚀 aurtomator 0.7.0 available\n22 🚀 aurtomator 0.8.0 available' run_close_step _upstream="current: 0.8.0"
   [ "$status" -eq 0 ]

@@ -522,15 +522,15 @@ jobs:
               [[ "$pkg_name" == _* ]] && continue
               status=$(cat "$status_file")
               # A check issue closes once the check passes, an update issue
-              # once the version is in the AUR, a held issue once the
-              # update is no longer held
+              # and a held issue once the version is in the AUR, so a failed
+              # check keeps a held issue open
               case "$title:$status" in
                 "❌ $pkg_name: check failed:check_failed:"*) continue ;;
                 "❌ $pkg_name: check failed:"*) ;;
                 "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
                   "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "*) ;;
-                "✋ $pkg_name: update held:held: "*) continue ;;
-                "✋ $pkg_name: update held:"*) ;;
+                "✋ $pkg_name: update held:up_to_date" | "✋ $pkg_name: update held:updated: "* | \
+                  "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "*) ;;
                 *) continue ;;
               esac
               comment=$(bash -c 'source ./scripts/lib.sh && "$@"' _ close_comment "$status_file" "$RUN_URL")
