@@ -140,16 +140,20 @@ teardown() {
   echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$NOPASS_SUBKEY_ID" >/dev/null 2>&1
 }
 
+# gpg asks for the passphrase and gets no pinentry, as opposed to a key it
+# does not find
 @test "gpg-real: pinentry-mode error fails for passphrase key" {
   gpgconf --kill gpg-agent 2>/dev/null || true
-  run bash -c "echo test | gpg --batch --pinentry-mode error --sign --local-user '$WITHPASS_SUBKEY_ID' >/dev/null 2>&1"
+  run bash -c "echo test | gpg --batch --pinentry-mode error --sign --local-user '$WITHPASS_SUBKEY_ID' 2>&1 >/dev/null"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"signing failed: No pinentry"* ]]
 }
 
 @test "gpg-real: pinentry-mode error fails for master key with passphrase" {
   gpgconf --kill gpg-agent 2>/dev/null || true
-  run bash -c "echo test | gpg --batch --pinentry-mode error --sign --local-user '$WITHPASS_MASTER_ID' >/dev/null 2>&1"
+  run bash -c "echo test | gpg --batch --pinentry-mode error --sign --local-user '$WITHPASS_MASTER_ID' 2>&1 >/dev/null"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"signing failed: No pinentry"* ]]
 }
 
 # =============================================================================
@@ -355,6 +359,7 @@ stage_aur_update() {
 @test "gpg-real: signing with nonexistent key fails" {
   run bash -c "echo test | gpg --batch --sign --armor --local-user 'NONEXISTENT999' 2>&1"
   [ "$status" -ne 0 ]
+  [[ "$output" == *'skipped "NONEXISTENT999": No secret key'* ]]
 }
 
 # =============================================================================

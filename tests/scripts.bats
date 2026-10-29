@@ -1139,9 +1139,11 @@ run_alert_fires() {
   done
 }
 
+# It returns before it asks the API, and says nothing
 @test "lib.sh: upstream_status fails without VERSION" {
   run bash -c 'source "$0/scripts/lib.sh"; upstream_status' "$TEST_TMPDIR"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
 }
 
 @test "check-all: logs the version and records a newer release of aurtomator" {
