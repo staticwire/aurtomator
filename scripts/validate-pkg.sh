@@ -243,13 +243,18 @@ validate_pkg() {
 
   # --- Strategy-specific fields ---
 
-  # Validate optional tag_version_regex (used by github-release, github-tag,
-  # github-nightly, gitlab-tag, gitea-tag and git-tag)
+  # Validate optional tag_version_regex
   local tag_version_regex
   tag_version_regex=$(pkg_get "$file" '.upstream.tag_version_regex // ""')
   if [[ -n "$tag_version_regex" && "$tag_version_regex" != "null" ]]; then
-    # Check capture group first (must have parentheses)
-    if ! echo "$tag_version_regex" | grep -qE '\([^)]*\)'; then
+    if [[ ! "$strategy" =~ ^(github-release|github-tag|github-nightly|gitlab-tag|gitea-tag|git-tag)$ ]]; then
+      log_err "$file: upstream.tag_version_regex applies to the github-release, github-tag, github-nightly, gitlab-tag, gitea-tag and git-tag strategies only"
+      ((errors++))
+    elif [[ "$strategy" == "github-nightly" && $(pkg_get "$file" '.upstream.version_source // "tag"') != "tag" ]]; then
+      log_err "$file: upstream.tag_version_regex applies to version_source tag only"
+      ((errors++))
+    # Then check the capture group (must have parentheses)
+    elif ! echo "$tag_version_regex" | grep -qE '\([^)]*\)'; then
       log_err "$file: upstream.tag_version_regex must contain a capture group (): $tag_version_regex"
       ((errors++))
     # Then check that bash compiles it, as tag_versions needs

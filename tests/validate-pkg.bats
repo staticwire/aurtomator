@@ -1081,6 +1081,61 @@ pkgver_dash: _"
   [[ "$output" == *"capture group"* ]]
 }
 
+# A strategy reads the field when its script names it
+@test "validate: tag_version_regex for a strategy that does not read it rejected" {
+  local file strategy
+  for file in "$PROJECT_DIR"/strategies/*.sh; do
+    strategy=$(basename "$file" .sh)
+    create_test_package "mypkg" "$strategy" "upstream:
+  tag_version_regex: '^v(.+)$'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    echo "$strategy: $output"
+    if grep -q 'tag_version_regex' "$file"; then
+      [[ "$output" != *"upstream.tag_version_regex applies to"* ]]
+    else
+      [ "$status" -eq 1 ]
+      [[ "$output" == *"upstream.tag_version_regex applies to the github-release, github-tag, github-nightly, gitlab-tag, gitea-tag and git-tag strategies only"* ]]
+    fi
+  done
+}
+
+# Without version_source github-nightly reads the tag
+@test "validate: tag_version_regex for github-nightly with version_source tag passes" {
+  local source
+  for source in 'version_source: tag' ''; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  $source
+  tag_version_regex: '^v(.+)$'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
+}
+
+# Only github-nightly reads version_source
+@test "validate: tag_version_regex for github-release with a version_source passes" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  version_source: release_body
+  tag_version_regex: '^v(.+)$'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: tag_version_regex for github-nightly with another version_source rejected" {
+  local source
+  for source in release_body tag_date published_date; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: $source
+  version_pattern: 'v\\K\\S+'
+  tag_version_regex: '^v(.+)$'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"upstream.tag_version_regex applies to version_source tag only"* ]]
+  done
+}
+
 # === tag_version_replace validation ===
 
 @test "validate: tag_version_replace with the groups of the regex passes" {
