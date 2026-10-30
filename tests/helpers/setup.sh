@@ -28,8 +28,10 @@ setup_test_env() {
   chmod +x "$MOCK_DIR/curl"
   export PATH="$MOCK_DIR:$PATH"
 
-  # Override AURTOMATOR_DIR so all scripts use our temp workspace
+  # Override AURTOMATOR_DIR and AURTOMATOR_DATA_DIR so all scripts use our
+  # temp workspace
   export AURTOMATOR_DIR="$TEST_TMPDIR"
+  export AURTOMATOR_DATA_DIR="$TEST_TMPDIR"
 
   # No pause before an AUR clone, between attempts or before a second check
   export AURTOMATOR_CLONE_DELAY=0 AURTOMATOR_RETRY_DELAY=0 AURTOMATOR_RECHECK_DELAY=0

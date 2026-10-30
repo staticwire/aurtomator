@@ -38,6 +38,43 @@ teardown() {
   [[ "$output" == *"Package not found: "*"/packages/nonexistent.yml"* ]]
 }
 
+# setup_test_env exports AURTOMATOR_DATA_DIR, so env -u removes it
+@test "lib.sh: AURTOMATOR_DATA_DIR defaults to the working directory" {
+  mkdir -p "$BATS_TEST_TMPDIR/data/packages"
+  touch "$BATS_TEST_TMPDIR/data/packages/foo.yml"
+
+  run env -u AURTOMATOR_DATA_DIR bash -c 'cd "$1" && source "$0/scripts/lib.sh" && pkg_file foo' "$TEST_TMPDIR" "$BATS_TEST_TMPDIR/data"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$BATS_TEST_TMPDIR/data/packages/foo.yml" ]
+}
+
+@test "lib.sh: pkg_file and load_config read AURTOMATOR_DATA_DIR" {
+  mkdir -p "$BATS_TEST_TMPDIR/data/packages"
+  touch "$BATS_TEST_TMPDIR/data/packages/foo.yml"
+  echo "GIT_AUTHOR_NAME='x'" >"$BATS_TEST_TMPDIR/data/.aurtomator.conf"
+
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run bash -c 'source "$0/scripts/lib.sh" && load_config && pkg_file foo && echo "$GIT_AUTHOR_NAME"' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$BATS_TEST_TMPDIR/data/packages/foo.yml" ]
+  [ "${lines[1]}" = x ]
+}
+
+@test "lib.sh: a wrong AURTOMATOR_DATA_DIR stops the script" {
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/none" run bash -c 'source "$0/scripts/lib.sh"; echo reached' "$TEST_TMPDIR"
+  [ "$status" -eq 1 ]
+  [ "$output" = "AURTOMATOR_DATA_DIR is not a directory: $BATS_TEST_TMPDIR/none" ]
+}
+
+# Without -- cd takes -P as its option and goes to $HOME
+@test "lib.sh: AURTOMATOR_DATA_DIR may start with a dash" {
+  mkdir -p "$BATS_TEST_TMPDIR/-P/packages"
+  touch "$BATS_TEST_TMPDIR/-P/packages/foo.yml"
+
+  run env AURTOMATOR_DATA_DIR=-P bash -c 'cd "$1" && source "$0/scripts/lib.sh" && pkg_file foo' "$TEST_TMPDIR" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$BATS_TEST_TMPDIR/-P/packages/foo.yml" ]
+}
+
 @test "lib.sh: pkg_get reads YAML field" {
   create_test_package "mypkg" "github-release" "upstream:
   type: github
@@ -1550,7 +1587,7 @@ make_spaced_project() {
 
 @test "check-all: finds the packages of a project whose path has a space" {
   make_spaced_project
-  run "$SPACED/scripts/check-all.sh"
+  AURTOMATOR_DATA_DIR="$SPACED" run "$SPACED/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Checked: 1, Updated: 0, Errors: 0"* ]]
   [ "$(cat "$SPACED/.status/pkg")" = "up_to_date" ]
