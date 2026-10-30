@@ -37,9 +37,11 @@ _source_file() {
     return 1
   else
     file="${3}/$(printf '%s' "$url" | sha256sum | cut -d' ' -f1)"
-    # Retried as makepkg does. Redirects may only lead to the protocols above.
+    # Retried and with the cookie engine on, as makepkg does, so a cookie set
+    # on a redirect goes with the next request. Redirects may only lead to
+    # the protocols above.
     if [[ ! -f "$file" ]] &&
-      ! curl -qgfsSL --retry 3 --retry-delay 3 --proto '=http,https,ftp' \
+      ! curl -qgfsSL -b '' --retry 3 --retry-delay 3 --proto '=http,https,ftp' \
         --proto-redir '=http,https,ftp' -o "$file" "$url"; then
       rm -f "$file"
       log_err "Could not download $url"

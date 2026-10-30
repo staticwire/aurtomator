@@ -875,6 +875,15 @@ commit_aur_state() {
   grep -q -- '--proto =http,https,ftp --proto-redir =http,https,ftp .* https://example.com/demo-1.1.0.tar.gz$' "$TEST_TMPDIR/curl.args"
 }
 
+# makepkg runs curl with -b "", so a cookie set on a redirect goes with the
+# next request
+@test "verify-pkg: downloads with the cookie engine on, as makepkg does" {
+  setup_verify
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 0 ]
+  grep -qF -- ' -b  --retry 3 ' "$TEST_TMPDIR/curl.args"
+}
+
 @test "verify-pkg: refuses a checksum that does not match the download" {
   setup_verify
   write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$H3' '$SUM_LOCAL')"
