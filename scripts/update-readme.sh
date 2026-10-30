@@ -64,8 +64,13 @@ if grep -qxF -- "$BADGES_START" "$README"; then
   has_badges=true
 fi
 
-# Detect repo from git origin
-repo_url=$(git -C "$AURTOMATOR_DIR" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||; s|\.git$||' || true)
+# Only a GitHub origin names the repo, so the URL of another remote, or a
+# local path, never reaches the README
+repo_url=""
+origin_url=$(git -C "$AURTOMATOR_DIR" remote get-url origin 2>/dev/null || true)
+if [[ "$origin_url" =~ [/@]github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+) ]]; then
+  repo_url="${BASH_REMATCH[1]%.git}"
+fi
 
 # =============================================================================
 # BADGES SECTION

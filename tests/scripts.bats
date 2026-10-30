@@ -2271,6 +2271,25 @@ current: '1.0.0'"
   [[ "$badges" != *"Lint & Test"* && "$badges" != *"codecov"* ]]
 }
 
+@test "update-readme: an origin outside GitHub, or a local path, gives only the static badges" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  git -C "$TEST_TMPDIR" init -q
+  git -C "$TEST_TMPDIR" remote add origin "https://gitlab.com/someone/fork.git"
+  local origin
+  for origin in "https://gitlab.com/someone/fork.git" "https://notgithub.com/someone/fork.git" "$TEST_TMPDIR/clone"; do
+    git -C "$TEST_TMPDIR" remote set-url origin "$origin"
+    readme_with_badges
+    run "$TEST_TMPDIR/scripts/update-readme.sh"
+    echo "$origin: $output"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Badges updated (repo: unknown)"* ]]
+    ! grep -qF -e 'someone/fork' -e "$TEST_TMPDIR" "$TEST_TMPDIR/README.md"
+    [[ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" != *"Lint & Test"* ]]
+  done
+}
+
 @test "update-readme: an unknown status reads as tracking" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
