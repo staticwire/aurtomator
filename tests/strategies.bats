@@ -2126,7 +2126,7 @@ EOF
   # The mock returns v2.0.0, v1.9.0 and v1.0.0, and none matches ^release-
   run "$TEST_TMPDIR/strategies/github-tag.sh" "test-filter"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No matching tags found"* ]]
+  [[ "$output" == *"No tag gives a version with upstream.tag_version_regex '^release-(.+)\$', tags read: 3"* ]]
 }
 
 @test "gitlab-tag: tag_version_regex filters out all tags" {
@@ -2137,7 +2137,7 @@ EOF
 
   run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-filter"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No matching tags found"* ]]
+  [[ "$output" == *"No tag gives a version with upstream.tag_version_regex '^release-(.+)\$', tags read: 3"* ]]
 }
 
 @test "gitea-tag: tag_version_regex filters out all tags" {
@@ -2148,7 +2148,7 @@ EOF
 
   run "$TEST_TMPDIR/strategies/gitea-tag.sh" "test-filter"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No matching tags found"* ]]
+  [[ "$output" == *"No tag gives a version with upstream.tag_version_regex '^release-(.+)\$', tags read: 2"* ]]
 }
 
 # A pin to one release line leaves out v2.0.0 and the v2.1.0 rc tags

@@ -459,7 +459,7 @@ latest_tag_version() {
   fi
   version=$(tag_versions "$regex" "$replace" <<<"$tags" | newest_version)
   if [[ -z "$version" ]]; then
-    echo "No matching tags found" >&2
+    echo "No tag gives a version with upstream.tag_version_regex '$regex', tags read: $(grep -c . <<<"$1")" >&2
     return 1
   fi
   echo "$version"
