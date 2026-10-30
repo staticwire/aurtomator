@@ -365,7 +365,10 @@ validate_pkg() {
   local tag_version_replace
   tag_version_replace=$(pkg_get "$file" '.upstream.tag_version_replace // ""')
   if [[ -n "$tag_version_replace" ]]; then
-    if [[ -z "$tag_version_regex" ]]; then
+    if [[ "$strategy" == "github-nightly" && $(pkg_get "$file" '.upstream.version_source // "tag"') != "tag" ]]; then
+      log_err "$file: upstream.tag_version_replace applies to version_source tag only"
+      ((errors++))
+    elif [[ -z "$tag_version_regex" ]]; then
       log_err "$file: upstream.tag_version_replace needs upstream.tag_version_regex"
       ((errors++))
     elif [[ ! "$tag_version_replace" =~ ^([A-Za-z0-9._+]|\\[1-9])+$ ]]; then
@@ -463,7 +466,11 @@ validate_pkg() {
         fi
         # nightly_tag: latest wins over channel, and channel over any other tag
         if [[ $(pkg_get "$file" '.upstream | (has("nightly_tag") and has("channel"))') == true ]]; then
-          log_err "$file: upstream.channel takes the place of nightly_tag"
+          if [[ "$nightly_tag" == latest ]]; then
+            log_err "$file: upstream.nightly_tag latest takes the place of channel"
+          else
+            log_err "$file: upstream.channel takes the place of nightly_tag"
+          fi
           ((errors++))
         fi
       fi

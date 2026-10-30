@@ -302,7 +302,7 @@ upstream:
   date_format: '%Y%m%d'
 ```
 
-`validate-pkg.sh` refuses `date_format` with another `version_source` and a format whose output is not a valid version, such as `%Y-%m-%d`. It refuses `nightly_tag_regex` next to `nightly_tag` or `channel`, and one that bash cannot compile. It refuses `tag_version_regex` with a `version_source` other than `tag`. It refuses a `version_source` other than `tag`, `release_body`, `tag_date` or `published_date`, `release_body` without `version_pattern`, a `version_pattern` that `grep -P` cannot compile, and `version_pattern` with another `version_source`. It refuses `tag_date` with the fixed tag of pattern A: such a tag has no dash and so no `YYYY-MM-DD` date. It refuses `nightly_tag` next to `channel`: `nightly_tag: latest` leaves `channel` unread, and `channel` leaves any other `nightly_tag` unread.
+`validate-pkg.sh` refuses `date_format` with another `version_source` and a format whose output is not a valid version, such as `%Y-%m-%d`. It refuses `nightly_tag_regex` next to `nightly_tag` or `channel`, and one that bash cannot compile. It refuses `tag_version_regex` and `tag_version_replace` with a `version_source` other than `tag`. It refuses a `version_source` other than `tag`, `release_body`, `tag_date` or `published_date`, `release_body` without `version_pattern`, a `version_pattern` that `grep -P` cannot compile, and `version_pattern` with another `version_source`. It refuses `tag_date` with the fixed tag of pattern A: such a tag has no dash and so no `YYYY-MM-DD` date. It refuses `nightly_tag` next to `channel`: `nightly_tag: latest` leaves `channel` unread, and `channel` leaves any other `nightly_tag` unread.
 
 **Authentication:** same as `github-release`.
 
