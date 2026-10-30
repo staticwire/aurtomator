@@ -451,10 +451,12 @@ builder_steps() {
 # leaves two processes behind that print $LATE_OUT after it exits, one
 # holding only stdout and one only stderr, and exits with $SUDO_RC. chown
 # and git log their arguments to chown.log and git.log in the test
-# directory.
+# directory. The action sits in aurtomator/ of the workspace, and
+# GITHUB_ACTION_PATH names its directory, or $ACTION_PATH when it is set.
 run_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep
-  mkdir -p "$bin"
+  local action_dir="$BATS_TEST_TMPDIR/aurtomator/.github/actions/run-as-builder"
+  mkdir -p "$bin" "$action_dir"
   printf '#!/bin/sh\necho "$*" >>"$GITHUB_WORKSPACE/chown.log"\n' >"$bin/chown"
   printf '#!/bin/sh\necho "$*" >>"$GITHUB_WORKSPACE/git.log"\n' >"$bin/git"
   rm -f "$BATS_TEST_TMPDIR/chown.log" "$BATS_TEST_TMPDIR/git.log"
@@ -476,18 +478,19 @@ EOF
   args=$(yq "$step | .with.args // \"\"" "$CHECK_UPDATES")
   keep=$(yq "$step | .with[\"keep-env\"] // \"\"" "$CHECK_UPDATES")
   rm -f "$SUDO_LOG"
-  run env PATH="$bin:$PATH" GITHUB_WORKSPACE="$BATS_TEST_TMPDIR" SUDO_LOG="$SUDO_LOG" \
+  run env PATH="$bin:$PATH" GITHUB_WORKSPACE="$BATS_TEST_TMPDIR" \
+    GITHUB_ACTION_PATH="${ACTION_PATH:-$action_dir}" SUDO_LOG="$SUDO_LOG" \
     ARGS="$args" KEEP_ENV="$keep" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: each builder step runs check-all.sh in its mode, with only the variables it needs" {
-  local expected entry job name
+  local expected entry job name script="$BATS_TEST_TMPDIR/aurtomator/scripts/check-all.sh" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    $'check\tCheck updates\t--preserve-env=GITHUB_TOKEN -u builder ./scripts/check-all.sh'
-    $'prepare\tPrepare updates\t-u builder ./scripts/check-all.sh --prepare handoff'
-    $'verify\tVerify checksums\t-u builder ./scripts/check-all.sh --verify handoff'
-    $'publish\tPublish updates\t--preserve-env=GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder ./scripts/check-all.sh --publish handoff'
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_TOKEN -u builder $script"
+    "prepare${tab}Prepare updates${tab}-u builder $script --prepare handoff"
+    "verify${tab}Verify checksums${tab}-u builder $script --verify handoff"
+    "publish${tab}Publish updates${tab}--preserve-env=GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $script --publish handoff"
   )
   for entry in "${expected[@]}"; do
     IFS=$'\t' read -r job name want <<<"$entry"
@@ -506,6 +509,17 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/chown.log")" = "-R builder:builder ." ]
   [ "$(cat "$BATS_TEST_TMPDIR/git.log")" = "config --global --add safe.directory $BATS_TEST_TMPDIR" ]
+}
+
+# A wrong GITHUB_ACTION_PATH fails the step before it stops the workflow
+# commands and before builder runs anything
+@test "run-as-builder: fails at once when its checkout is missing" {
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  ACTION_PATH="$BATS_TEST_TMPDIR/missing/.github/actions/run-as-builder" SUDO_OUT=ok \
+    run_builder_step check "Check updates"
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"::stop-commands::"* ]]
+  [ ! -e "$SUDO_LOG" ]
 }
 
 @test "check-updates: no line of builder reaches the runner as a command" {
