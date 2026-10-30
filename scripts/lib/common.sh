@@ -5,11 +5,29 @@
 #
 # Usage: source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 # Requires: yq (https://github.com/mikefarah/yq)
+#
+# AURTOMATOR_DIR is the root of the checkout that holds this file.
+# AURTOMATOR_DATA_DIR is the directory with the packages, .status/,
+# .aurtomator.conf, README.md and the origin remote the badges read. It comes
+# from the environment and defaults to the working directory.
 
 set -euo pipefail
 
-# Resolve project root
+# Resolve project root. The scripts and lib/version.sh read it.
+# shellcheck disable=SC2034
 AURTOMATOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Resolve the data root. The variable is set last, so the message names the
+# value as the caller gave it.
+resolve_data_dir() {
+  local dir
+  if ! dir="$(cd -- "${AURTOMATOR_DATA_DIR:-.}" 2>/dev/null && pwd)"; then
+    echo "AURTOMATOR_DATA_DIR is not a directory: ${AURTOMATOR_DATA_DIR}" >&2
+    exit 1
+  fi
+  AURTOMATOR_DATA_DIR="$dir"
+}
+resolve_data_dir
 
 # =============================================================================
 # DEPENDENCY CHECK
@@ -103,7 +121,7 @@ pkg_asset_var() {
 # =============================================================================
 
 load_config() {
-  local config="${AURTOMATOR_DIR}/.aurtomator.conf"
+  local config="${AURTOMATOR_DATA_DIR}/.aurtomator.conf"
   if [[ -f "$config" ]]; then
     # shellcheck source=/dev/null
     source "$config"
@@ -118,7 +136,7 @@ load_config() {
 # Usage: pkg_file my-package
 pkg_file() {
   local name="$1"
-  local file="${AURTOMATOR_DIR}/packages/${name}.yml"
+  local file="${AURTOMATOR_DATA_DIR}/packages/${name}.yml"
   if [[ ! -f "$file" ]]; then
     log_err "Package not found: $file"
     return 1

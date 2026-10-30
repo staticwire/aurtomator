@@ -38,6 +38,43 @@ teardown() {
   [[ "$output" == *"Package not found: "*"/packages/nonexistent.yml"* ]]
 }
 
+# setup_test_env exports AURTOMATOR_DATA_DIR, so env -u removes it
+@test "lib.sh: AURTOMATOR_DATA_DIR defaults to the working directory" {
+  mkdir -p "$BATS_TEST_TMPDIR/data/packages"
+  touch "$BATS_TEST_TMPDIR/data/packages/foo.yml"
+
+  run env -u AURTOMATOR_DATA_DIR bash -c 'cd "$1" && source "$0/scripts/lib.sh" && pkg_file foo' "$TEST_TMPDIR" "$BATS_TEST_TMPDIR/data"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$BATS_TEST_TMPDIR/data/packages/foo.yml" ]
+}
+
+@test "lib.sh: pkg_file and load_config read AURTOMATOR_DATA_DIR" {
+  mkdir -p "$BATS_TEST_TMPDIR/data/packages"
+  touch "$BATS_TEST_TMPDIR/data/packages/foo.yml"
+  echo "GIT_AUTHOR_NAME='x'" >"$BATS_TEST_TMPDIR/data/.aurtomator.conf"
+
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run bash -c 'source "$0/scripts/lib.sh" && load_config && pkg_file foo && echo "$GIT_AUTHOR_NAME"' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$BATS_TEST_TMPDIR/data/packages/foo.yml" ]
+  [ "${lines[1]}" = x ]
+}
+
+@test "lib.sh: a wrong AURTOMATOR_DATA_DIR stops the script" {
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/none" run bash -c 'source "$0/scripts/lib.sh"; echo reached' "$TEST_TMPDIR"
+  [ "$status" -eq 1 ]
+  [ "$output" = "AURTOMATOR_DATA_DIR is not a directory: $BATS_TEST_TMPDIR/none" ]
+}
+
+# Without -- cd takes -P as its option and goes to $HOME
+@test "lib.sh: AURTOMATOR_DATA_DIR may start with a dash" {
+  mkdir -p "$BATS_TEST_TMPDIR/-P/packages"
+  touch "$BATS_TEST_TMPDIR/-P/packages/foo.yml"
+
+  run env AURTOMATOR_DATA_DIR=-P bash -c 'cd "$1" && source "$0/scripts/lib.sh" && pkg_file foo' "$TEST_TMPDIR" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$BATS_TEST_TMPDIR/-P/packages/foo.yml" ]
+}
+
 @test "lib.sh: pkg_get reads YAML field" {
   create_test_package "mypkg" "github-release" "upstream:
   type: github
@@ -1535,6 +1572,25 @@ EOF
   [[ "$output" == *"Checked: 0"* ]]
 }
 
+# A skipped downgrade is logged with the name of its package
+@test "check-all: reads the packages of AURTOMATOR_DATA_DIR and runs the strategies of the checkout" {
+  mkdir -p "$BATS_TEST_TMPDIR/data/packages"
+  cat >"$BATS_TEST_TMPDIR/data/packages/foo.yml" <<EOF
+name: foo
+strategy: github-release
+upstream:
+  type: github
+  project: owner/repo
+current: '3.0.0'
+EOF
+
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"foo: DOWNGRADE detected"* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/data/.status/foo")" = "downgrade_skipped: 2.0.0" ]
+  [ ! -e "$TEST_TMPDIR/.status/foo" ]
+}
+
 # === project path with a space ===
 
 # Helper: a project at "$TEST_TMPDIR/my project" with the scripts and
@@ -1550,7 +1606,7 @@ make_spaced_project() {
 
 @test "check-all: finds the packages of a project whose path has a space" {
   make_spaced_project
-  run "$SPACED/scripts/check-all.sh"
+  AURTOMATOR_DATA_DIR="$SPACED" run "$SPACED/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Checked: 1, Updated: 0, Errors: 0"* ]]
   [ "$(cat "$SPACED/.status/pkg")" = "up_to_date" ]
@@ -1560,7 +1616,7 @@ make_spaced_project() {
   make_spaced_project
   printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$SPACED/README.md"
   git -C "$SPACED" init -q
-  run "$SPACED/scripts/update-readme.sh"
+  AURTOMATOR_DATA_DIR="$SPACED" run "$SPACED/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   grep -qF '>pkg</a>' "$SPACED/README.md"
 }
@@ -1642,6 +1698,31 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
   grep -q "failed" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: writes the README of AURTOMATOR_DATA_DIR from its packages and origin" {
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$data/packages" "$data/.status"
+  git -C "$data" init -q
+  git -C "$data" remote add origin "https://github.com/owner/data.git"
+  cat >"$data/packages/foo.yml" <<EOF
+name: foo
+strategy: github-release
+upstream:
+  project: owner/repo
+current: '1.0.0'
+EOF
+  # Without this file the package reads as tracking
+  echo "new_version: 3.0.0" >"$data/.status/foo"
+  printf '%s\n' '# test' '<!-- BADGES:START -->' '<!-- BADGES:END -->' \
+    '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$data/README.md"
+
+  AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Badges updated (repo: owner/data)"* ]]
+  grep -qF 'https://github.com/owner/data/actions/workflows/ci.yml/badge.svg' "$data/README.md"
+  grep -q '>foo</a></td><td>1.0.0</td><td nowrap>github-release</td><td nowrap>-</td><td nowrap>.* 3.0.0 available</td></tr>' "$data/README.md"
+  [ ! -e "$TEST_TMPDIR/README.md" ]
 }
 
 # === lib.sh: warn_maintainer_line ===

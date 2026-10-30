@@ -240,6 +240,12 @@ EOF
   [[ "$output" == *"setup.sh"* ]]
 }
 
+@test "setup: --help shows how to run it from the packages repository" {
+  run "$TEST_TMPDIR/scripts/setup.sh" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cd <your packages repository> && <clone of aurtomator>/scripts/setup.sh"* ]]
+}
+
 @test "setup: unknown flag exits 1" {
   run "$TEST_TMPDIR/scripts/setup.sh" --bogus-flag
   [ "$status" -eq 1 ]
@@ -488,6 +494,17 @@ EOF
   [[ "$output" == *"✓ GPG: signing works with VALIDKEY123"* ]]
   [[ "$output" == *"✓ Secrets: 4/4 configured"* ]]
   [[ "$output" == *"1 issue(s) found."* ]]
+  [[ "$output" == *"$TEST_TMPDIR/scripts/setup.sh verify"* ]]
+}
+
+@test "setup verify: names the sample of the clone and the packages of AURTOMATOR_DATA_DIR" {
+  write_full_config ""
+  mkdir -p "$BATS_TEST_TMPDIR/data"
+  cp "$TEST_TMPDIR/.aurtomator.conf" "$BATS_TEST_TMPDIR/data/"
+
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cp $TEST_TMPDIR/packages/example.yml.sample $BATS_TEST_TMPDIR/data/packages/<name>.yml"* ]]
 }
 
 @test "setup verify: counts every failed check" {
@@ -570,7 +587,7 @@ EOF
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"has a passphrase"* ]]
-  [[ "$output" == *"./scripts/setup.sh gpg secrets"* ]]
+  [[ "$output" == *"Run $TEST_TMPDIR/scripts/setup.sh gpg secrets"* ]]
   [[ "$output" != *"Set Actions secret GPG_SIGNING_KEY"* ]]
 }
 
@@ -785,7 +802,7 @@ EOF
 @test "setup: unknown option suggests --help" {
   run "$TEST_TMPDIR/scripts/setup.sh" --bogus-flag
   [ "$status" -eq 1 ]
-  [[ "$output" == *"--help"* ]]
+  [[ "$output" == *"(see $TEST_TMPDIR/scripts/setup.sh --help)"* ]]
 }
 
 # === Verify secret counts ===
@@ -829,6 +846,7 @@ EOF
   [[ "$output" == *"✗ SSH key has a passphrase: $TEST_TMPDIR/ssh-pass/key"* ]]
   [[ "$output" == *"cp $TEST_TMPDIR/ssh-pass/key $TEST_TMPDIR/ssh-pass/key-ci"* ]]
   [[ "$output" == *"ssh-keygen -p -N '' -f $TEST_TMPDIR/ssh-pass/key-ci"* ]]
+  [[ "$output" == *"$TEST_TMPDIR/scripts/setup.sh ssh --ssh-key $TEST_TMPDIR/ssh-pass/key-ci"* ]]
   [ ! -e "$TEST_TMPDIR/.aurtomator.conf" ]
 }
 
@@ -1076,4 +1094,88 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"! Secrets: cannot verify (gh not available)"* ]]
   [[ "$output" == *"Ready."* ]]
+}
+
+# === Data directory ===
+
+@test "setup: saves .aurtomator.conf in AURTOMATOR_DATA_DIR" {
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$data"
+
+  AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/setup.sh" identity \
+    --git-name "Jane Doe" --git-email "jane@example.com" \
+    --non-interactive
+  [ "$status" -eq 0 ]
+  grep -qx "GIT_AUTHOR_NAME='Jane Doe'" "$data/.aurtomator.conf"
+  [ ! -e "$TEST_TMPDIR/.aurtomator.conf" ]
+  [[ "$output" == *"Who you are on AUR"$'\n\n'"  Data directory: $data"$'\n'* ]]
+  [[ "$output" == *"Config saved to .aurtomator.conf in $data"* ]]
+}
+
+@test "setup: reads the repository from the origin of AURTOMATOR_DATA_DIR" {
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$data"
+  git -C "$data" init -q
+  git -C "$data" remote add origin "git@github.com:owner/data.git"
+  log_gh_calls
+
+  AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/setup.sh" secrets \
+    --git-name "Jane Doe" --git-email "jane@example.com" \
+    --ssh-key "$TEST_TMPDIR/ssh/aur.pem" --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Target repo: owner/data"* ]]
+  grep -qx 'secret set AUR_SSH_KEY -R owner/data' "$TEST_TMPDIR/gh.args"
+  [[ "$(<"$TEST_TMPDIR/gh.args")" != *"test/repo"* ]]
+}
+
+@test "setup verify: reads the secrets of the repository of AURTOMATOR_DATA_DIR" {
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$data"
+  git -C "$data" init -q
+  git -C "$data" remote add origin "git@github.com:owner/data.git"
+  # Lists the three secrets of owner/data and none of any other repository
+  cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == "secret list -R owner/data" ]]; then
+  printf '%s\n' "AUR_SSH_KEY    Updated 2026-03-26" "AUR_GIT_NAME   Updated 2026-03-26" "AUR_GIT_EMAIL  Updated 2026-03-26"
+fi
+exit 0
+EOF
+
+  AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/setup.sh" verify \
+    --git-name "Jane Doe" --git-email "jane@example.com" \
+    --ssh-key "$TEST_TMPDIR/ssh/aur.pem" --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Secrets: 3/3 configured"* ]]
+}
+
+# setup_test_env exports AURTOMATOR_DATA_DIR, so env -u removes it
+@test "setup: AURTOMATOR_DATA_DIR defaults to the working directory" {
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$data"
+
+  run env -u AURTOMATOR_DATA_DIR bash -c 'cd "$1" && "$0/scripts/setup.sh" identity --git-name "Jane Doe" --git-email "jane@example.com" --non-interactive' "$TEST_TMPDIR" "$data"
+  [ "$status" -eq 0 ]
+  [ -f "$data/.aurtomator.conf" ]
+  [ ! -e "$TEST_TMPDIR/.aurtomator.conf" ]
+  [[ "$output" == *"  Data directory: $data"$'\n'* ]]
+}
+
+@test "setup: a wrong AURTOMATOR_DATA_DIR stops the script" {
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/none" run --separate-stderr "$TEST_TMPDIR/scripts/setup.sh" identity \
+    --git-name "Jane Doe" --git-email "jane@example.com" \
+    --non-interactive
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "AURTOMATOR_DATA_DIR is not a directory: $BATS_TEST_TMPDIR/none" ]
+  [ -z "$output" ]
+}
+
+# Without -- cd takes -P as its option and goes to $HOME, a scratch directory here
+@test "setup: AURTOMATOR_DATA_DIR may start with a dash" {
+  mkdir -p "$BATS_TEST_TMPDIR/-P" "$BATS_TEST_TMPDIR/home"
+
+  run env AURTOMATOR_DATA_DIR=-P HOME="$BATS_TEST_TMPDIR/home" bash -c 'cd "$1" && "$0/scripts/setup.sh" identity --git-name "Jane Doe" --git-email "jane@example.com" --non-interactive' "$TEST_TMPDIR" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ -f "$BATS_TEST_TMPDIR/-P/.aurtomator.conf" ]
+  [[ "$output" == *"  Data directory: $BATS_TEST_TMPDIR/-P"$'\n'* ]]
 }
