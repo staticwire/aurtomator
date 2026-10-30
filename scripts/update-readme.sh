@@ -33,17 +33,35 @@ readonly PKG_START="<!-- PACKAGES:START -->"
 readonly PKG_END="<!-- PACKAGES:END -->"
 
 # Each section is written up to its start marker and from its end marker,
-# so a missing end marker would drop the rest of the README. The badges are
-# optional, the table is not.
-for marker in "$PKG_START" "$PKG_END"; do
-  if ! grep -q "$marker" "$README"; then
-    log_err "No $marker marker found in README.md"
-    exit 1
+# each a line of its own. A missing end marker would drop the rest of the
+# README, and a second marker or an end marker above the start would copy
+# the README into itself on every run. The badges are optional, the table
+# is not.
+# Args: $1=start marker, $2=end marker
+# Returns: 1 when the README does not hold each marker once, start first
+check_markers() {
+  local marker count
+  for marker in "$1" "$2"; do
+    count=$(grep -cxF -- "$marker" "$README" || true)
+    if ((count == 0)); then
+      log_err "No $marker marker found in README.md"
+      return 1
+    elif ((count > 1)); then
+      log_err "README.md has the $marker line $count times, it needs it once"
+      return 1
+    fi
+  done
+  if (($(grep -nxF -- "$2" "$README" | cut -d: -f1) < $(grep -nxF -- "$1" "$README" | cut -d: -f1))); then
+    log_err "README.md has $2 above $1"
+    return 1
   fi
-done
-if grep -q "$BADGES_START" "$README" && ! grep -q "$BADGES_END" "$README"; then
-  log_err "No $BADGES_END marker found in README.md"
-  exit 1
+}
+
+check_markers "$PKG_START" "$PKG_END" || exit 1
+has_badges=false
+if grep -qxF -- "$BADGES_START" "$README"; then
+  check_markers "$BADGES_START" "$BADGES_END" || exit 1
+  has_badges=true
 fi
 
 # Detect repo from git origin
@@ -53,7 +71,7 @@ repo_url=$(git -C "$AURTOMATOR_DIR" remote get-url origin 2>/dev/null | sed 's|.
 # BADGES SECTION
 # =============================================================================
 
-if grep -q "$BADGES_START" "$README"; then
+if [[ "$has_badges" == true ]]; then
   badges=""
 
   if [[ -n "$repo_url" ]]; then
@@ -88,9 +106,9 @@ if grep -q "$BADGES_START" "$README"; then
 
   # Replace between badge markers
   {
-    sed -n "1,/${BADGES_START}/p" "$README"
+    sed -n "0,/^${BADGES_START}\$/p" "$README"
     echo "$badges"
-    sed -n "/${BADGES_END}/,\$p" "$README"
+    sed -n "/^${BADGES_END}\$/,\$p" "$README"
   } >"${README}.tmp"
   mv "${README}.tmp" "$README"
   log_ok "Badges updated (repo: ${repo_url:-unknown})"
@@ -242,9 +260,9 @@ fi
 
 # Replace between markers
 {
-  sed -n "1,/${PKG_START}/p" "$README"
+  sed -n "0,/^${PKG_START}\$/p" "$README"
   echo "$table"
-  sed -n "/${PKG_END}/,\$p" "$README"
+  sed -n "/^${PKG_END}\$/,\$p" "$README"
 } >"${README}.tmp"
 
 mv "${README}.tmp" "$README"

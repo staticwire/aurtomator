@@ -1954,6 +1954,83 @@ EOF
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
 
+# A section is written up to its start marker and from its end marker, so a
+# swapped or second marker would copy the README into itself on every run
+@test "update-readme: fails and keeps the README with the table markers swapped" {
+  printf '%s\n' '# test' '<!-- PACKAGES:END -->' 'text' '<!-- PACKAGES:START -->' 'old table' >"$TEST_TMPDIR/README.md"
+  cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"README.md has <!-- PACKAGES:END --> above <!-- PACKAGES:START -->"* ]]
+  cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: fails and keeps the README with a second start marker" {
+  printf '%s\n' '# test' '<!-- PACKAGES:START -->' 'text' '<!-- PACKAGES:START -->' 'old table' \
+    '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"README.md has the <!-- PACKAGES:START --> line 2 times, it needs it once"* ]]
+  cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: fails and keeps the README with the badge markers swapped" {
+  printf '%s\n' '# test' '<!-- BADGES:END -->' '<!-- BADGES:START -->' '<!-- PACKAGES:START -->' \
+    '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"README.md has <!-- BADGES:END --> above <!-- BADGES:START -->"* ]]
+  cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: leaves a line that quotes the markers in its text" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  local prose='Keep <!-- BADGES:START -->, <!-- BADGES:END -->, <!-- PACKAGES:START --> and <!-- PACKAGES:END --> on lines of their own.'
+  printf '%s\n' '# test' "$prose" '<!-- BADGES:START -->' 'old badges' '<!-- BADGES:END -->' \
+    '<!-- PACKAGES:START -->' 'old table' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n 2p "$TEST_TMPDIR/README.md")" = "$prose" ]
+  [ "$(grep -cxF '<!-- BADGES:START -->' "$TEST_TMPDIR/README.md")" -eq 1 ]
+  [ "$(grep -cxF '<!-- PACKAGES:START -->' "$TEST_TMPDIR/README.md")" -eq 1 ]
+  ! grep -q 'old badges' "$TEST_TMPDIR/README.md"
+  ! grep -q 'old table' "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: writes the table when its start marker is the first line" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  printf '%s\n' '<!-- PACKAGES:START -->' 'old table' '<!-- PACKAGES:END -->' '# test' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ "$(grep -cxF '<!-- PACKAGES:START -->' "$TEST_TMPDIR/README.md")" -eq 1 ]
+  ! grep -q 'old table' "$TEST_TMPDIR/README.md"
+}
+
+# sed takes 1,/re/ from line 2 for the end of the range
+@test "update-readme: writes the badges when their start marker is the first line" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  printf '%s\n' '<!-- BADGES:START -->' 'old badges' '<!-- BADGES:END -->' '# test' '<!-- PACKAGES:START -->' \
+    '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ "$(grep -cxF '<!-- BADGES:START -->' "$TEST_TMPDIR/README.md")" -eq 1 ]
+  ! grep -q 'old badges' "$TEST_TMPDIR/README.md"
+}
+
 @test "update-readme: badge is green when all packages ok" {
   create_test_package "pkg-ok" "github-release" "upstream:
   project: owner/repo
