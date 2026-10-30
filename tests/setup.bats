@@ -352,6 +352,15 @@ EOF
   [[ "$output" == *"SSH key:"* ]]
 }
 
+# The home directory of another user is not $HOME
+@test "setup ssh: leaves a tilde with a user name as it is" {
+  HOME="$TEST_TMPDIR/fakehome" run "$TEST_TMPDIR/scripts/setup.sh" ssh \
+    --ssh-key "~nobody/keys/aur.pem" \
+    --non-interactive
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SSH key not found: ~nobody/keys/aur.pem"* ]]
+}
+
 @test "setup ssh: nonexistent key rejected" {
   run "$TEST_TMPDIR/scripts/setup.sh" ssh \
     --ssh-key "/nonexistent/path/key.pem" \

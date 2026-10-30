@@ -165,8 +165,8 @@ setup_ssh() {
   if [[ -z "$AUR_SSH_KEY" ]]; then
     AUR_SSH_KEY=$(ask "Path to SSH private key for AUR" "$HOME/.ssh/aur_ed25519")
   fi
-  # Expand ~ to home dir
-  AUR_SSH_KEY="${AUR_SSH_KEY/#\~/$HOME}"
+  # Expand ~/ to the home dir. ~user/ stays as it is.
+  AUR_SSH_KEY="${AUR_SSH_KEY/#\~\//$HOME/}"
 
   check_ssh_key || return 1
   ok "SSH key: $AUR_SSH_KEY"
