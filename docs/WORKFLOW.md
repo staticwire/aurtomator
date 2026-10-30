@@ -1173,7 +1173,7 @@ The step before it, `Close resolved issues`, closes the issue of a package that 
 
 ### 5.7 Failed runs
 
-The job `issues` reports failed packages, and a run that fails in `image` or `check` never reaches it. `notify-failure.yml` runs on `workflow_run` when a run of `Check AUR Package Updates` completes, and its job runs only when the conclusion of that run is `failure` or `timed_out`. It opens one issue titled `❌ Check AUR Package Updates failed`, with a link to the run, its branch and the names of the failed jobs, and opens no second one while that issue is open. A repository with Issues turned off gets a notice instead, as in [5.6](#56-issues). The workflow has `actions: read` to list the jobs and `issues: write`, and checks out nothing.
+The job `issues` reports failed packages, and a run that fails in `image` or `check` never reaches it. `notify-failure.yml` runs on `workflow_run` when a run of `Check AUR Package Updates` completes, and its job runs only when the conclusion of that run is `failure` or `timed_out`. It opens one issue titled `❌ Check AUR Package Updates failed`, with a link to the run, its branch and the names of the failed jobs, and opens no second one while that issue is open. The branch stands in a code span whose fence is longer than any run of backticks in its name, so a backtick in the name cannot end the span and turn the text after it into a mention. A repository with Issues turned off gets a notice instead, as in [5.6](#56-issues). The workflow has `actions: read` to list the jobs and `issues: write`, and checks out nothing.
 
 GitHub starts a `workflow_run` workflow only from its file on the default branch.
 

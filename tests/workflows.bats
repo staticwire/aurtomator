@@ -1282,7 +1282,15 @@ EOF
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_TITLES="${GH_TITLES:-}" GH_FAIL="${GH_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_JOBS="${GH_JOBS:-}" GH_JOBS_FAIL="${GH_JOBS_FAIL:-}" \
     GH_REPO=owner/fork RUN_ID=7 \
-    RUN_URL=https://example.invalid/runs/7 RUN_BRANCH=main bash -e "$BATS_TEST_TMPDIR/step.sh"
+    RUN_URL=https://example.invalid/runs/7 RUN_BRANCH="${RUN_BRANCH:-main}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+# git takes backticks in a branch name, and a mention after a backtick that
+# closes the code span would render in the issue
+@test "notify-failure: keeps a branch name with backticks inside its code span" {
+  RUN_BRANCH='fix`@owner``' GH_JOBS=check run_notify_step
+  [ "$status" -eq 0 ]
+  grep -qF 'on ``` fix`@owner`` ``` failed in check' "$GH_LOG"
 }
 
 @test "notify-failure: opens an issue that names the run and its failed jobs" {

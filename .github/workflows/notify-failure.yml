@@ -51,8 +51,16 @@ jobs:
           failed=$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID/jobs" \
             --jq '[.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name] | join(", ")') || failed=""
 
+          # A code span ends at a run of as many backticks as it opens with, so
+          # its fence is longer than any run in the branch name, and the
+          # spaces, which Markdown drops, let the name end in a backtick
+          fence='`'
+          while [[ "$RUN_BRANCH" == *"$fence"* ]]; do
+            fence+='`'
+          done
+
           gh label create auto-update --color d73a4a --description "Automated update failure" 2>/dev/null || true
           gh issue create --title "$title" --label auto-update --body "$(printf '%s\n' \
-            "Run $RUN_URL on \`$RUN_BRANCH\` failed in ${failed:-jobs that could not be listed}." \
+            "Run $RUN_URL on $fence $RUN_BRANCH $fence failed in ${failed:-jobs that could not be listed}." \
             "" \
             "Packages may be left unchecked or unpublished until a run succeeds.")"
