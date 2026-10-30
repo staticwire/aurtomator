@@ -59,7 +59,7 @@ The workflow runs release-please with the token of a GitHub App installed on the
 ## Adding a new strategy
 
 1. Create `strategies/<name>.sh`. It takes the package name as its only argument, reads the package config with `pkg_get`, prints one version string to stdout and exits non-zero on failure. Start from the closest existing strategy.
-2. Add the checks of its required fields to `scripts/validate-pkg.sh`. The name needs no entry: every script in `strategies/` is a valid strategy.
+2. In `scripts/validate-pkg.sh`, add a line to `UPSTREAM_KEYS` with the `upstream` keys the strategy reads, at its place in the strategy table of `README.md`, and the checks of its required fields. Without the line, `validate-pkg.sh` refuses every YAML of the strategy that has an `upstream` key. The name of the strategy needs no entry: every script in `strategies/` is a valid strategy.
 3. Add tests to `tests/strategies.bats`, grouped by strategy, and the API fixtures they need to `tests/helpers/mock-curl.sh`.
 4. Document the strategy in the strategies table in `README.md` and in `docs/WORKFLOW.md`.
 5. Add a usage example to `packages/example.yml.sample`.
