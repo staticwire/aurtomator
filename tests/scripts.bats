@@ -1201,6 +1201,15 @@ run_alert_fires() {
   done
 }
 
+@test "lib.sh: fired_alerts asks for quotes around a note that YAML reads as a number" {
+  create_test_package "pkg" "github-release" "alerts:
+  - from: '0.4.0'
+    note: 2024"
+  run bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 0.3 29+1' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"alerts[0].note must be one line of text: put 2024 in quotes"* ]]
+}
+
 # === version of aurtomator ===
 
 @test "lib.sh: aurtomator_version prints VERSION, or nothing without it" {

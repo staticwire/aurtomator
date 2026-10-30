@@ -1132,7 +1132,7 @@ alerts:
   local note
   for note in "" "note: ''" "note: |
       First line
-      Second line" "note: [a, b]" "note: {text: x}" "note: 42"; do
+      Second line" "note: [a, b]" "note: {text: x}"; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 alerts:
@@ -1141,6 +1141,21 @@ alerts:
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -ne 0 ]
     [[ "$output" == *"alerts[0].note must be one line of text"* ]]
+    [[ "$output" != *"in quotes"* ]]
+  done
+}
+
+@test "validate: an alert note that YAML reads as a number, a boolean or a date asks for quotes" {
+  local value
+  for value in 2024 1.5 true 2024-10-30; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    note: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"alerts[0].note must be one line of text: put $value in quotes"* ]]
   done
 }
 

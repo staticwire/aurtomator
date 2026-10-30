@@ -138,7 +138,7 @@ validate_alert() {
   fi
 
   if ! alert_note "$file" "$i" >/dev/null; then
-    log_err "$rule.note must be one line of text"
+    log_err "$rule.$(alert_note_error "$file" "$i")"
     errors=1
   fi
 

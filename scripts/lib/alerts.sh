@@ -40,6 +40,15 @@ alert_note() {
   printf '%s\n' "$note"
 }
 
+# Prints the error for a note that alert_note refuses. YAML reads a bare
+# number, boolean or date as another type than text.
+# Args: $1=package file, $2=index of the alert
+alert_note_error() {
+  local value
+  value=$(pkg_get "$1" ".alerts[$2].note | select(tag == \"!!int\" or tag == \"!!float\" or tag == \"!!bool\" or tag == \"!!timestamp\")")
+  printf 'note must be one line of text%s\n' "${value:+: put $value in quotes}"
+}
+
 # The alerts of a package that fire on the step from current to the new
 # version, one per line in file order: hold or notice, a tab and the note.
 # Fails on a rule it cannot evaluate and on a note that is not one line
@@ -60,7 +69,7 @@ fired_alerts() {
       return 1
     fi
     if ! note=$(alert_note "$file" "$i"); then
-      log_err "alerts[$i].note must be one line of text"
+      log_err "alerts[$i].$(alert_note_error "$file" "$i")"
       return 1
     fi
     rc=0
