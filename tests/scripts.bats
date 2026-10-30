@@ -1748,6 +1748,22 @@ EOF
   done
 }
 
+# aurtomator_version reads VERSION from AURTOMATOR_DIR, which is $TEST_TMPDIR here
+@test "update-readme: the README of aurtomator is what the script writes for it" {
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$data/packages"
+  git -C "$data" init -q
+  git -C "$data" remote add origin "https://github.com/staticwire/aurtomator.git"
+  cp "$PROJECT_DIR/README.md" "$data/README.md"
+  cp "$PROJECT_DIR/VERSION" "$TEST_TMPDIR/VERSION"
+
+  AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  run diff -u "$PROJECT_DIR/README.md" "$data/README.md"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 # === lib.sh: warn_maintainer_line ===
 
 @test "lib.sh: warn_maintainer_line warns when missing" {
