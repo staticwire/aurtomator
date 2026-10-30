@@ -720,6 +720,41 @@ pkgver_dashes: _"
   [[ "$output" != *"grep:"* ]]
 }
 
+# Pattern A reads one fixed tag, which has no dash and so no YYYY-MM-DD
+@test "validate: tag_date with a fixed nightly tag rejected" {
+  local tag
+  for tag in nightly continuous; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  nightly_tag: $tag
+  version_source: tag_date"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    echo "$tag: $output"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"mypkg.yml: upstream.version_source tag_date reads the date in the tag name, and the fixed tag $tag has none"* ]]
+  done
+  create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: tag_date"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"the fixed tag nightly has none"* ]]
+}
+
+# The tag of a separate nightly repo and that of a channel release move
+@test "validate: tag_date with nightly_tag latest or a channel passes" {
+  local pattern
+  for pattern in "nightly_tag: latest" "channel: Nightly"; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  $pattern
+  version_source: tag_date"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    echo "$pattern: $output"
+    [ "$status" -eq 0 ]
+  done
+}
+
 # Without version_source the strategy reads the tag
 @test "validate: version_pattern with another version_source rejected" {
   local source
@@ -1449,6 +1484,7 @@ pkgver_dash: _"
   for source in tag_date published_date; do
     create_test_package "mypkg" "github-nightly" "upstream:
   project: owner/repo
+  nightly_tag: nightly-
   version_source: $source
   date_format: '%Y%m%d'"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"

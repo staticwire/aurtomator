@@ -440,6 +440,15 @@ validate_pkg() {
           log_err "$file: upstream.version_pattern applies to version_source release_body only"
           ((errors++))
         fi
+        # Pattern A reads one fixed tag, which has no dash and so no
+        # YYYY-MM-DD date
+        local nightly_tag nightly_channel
+        nightly_tag=$(pkg_get "$file" '.upstream.nightly_tag // "nightly"')
+        nightly_channel=$(pkg_get "$file" '.upstream.channel // ""')
+        if [[ "$nightly_source" == tag_date && -z "$nightly_tag_regex" && -z "$nightly_channel" && "$nightly_tag" != latest && "$nightly_tag" != *-* ]]; then
+          log_err "$file: upstream.version_source tag_date reads the date in the tag name, and the fixed tag $nightly_tag has none; use published_date, or a nightly_tag prefix with a dash for dated tags"
+          ((errors++))
+        fi
         # nightly_tag: latest wins over channel, and channel over any other tag
         if [[ $(pkg_get "$file" '.upstream | (has("nightly_tag") and has("channel"))') == true ]]; then
           log_err "$file: upstream.channel takes the place of nightly_tag"
