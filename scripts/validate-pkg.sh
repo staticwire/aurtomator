@@ -667,7 +667,7 @@ validate_pkg() {
 if [[ "${1:-}" == "--all" ]]; then
   total=0
   failed=0
-  for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
+  for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     [[ -f "$pkg_file" ]] || continue
     ((total++)) || true
     if ! validate_pkg "$pkg_file"; then

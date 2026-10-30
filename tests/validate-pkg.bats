@@ -906,6 +906,18 @@ pkgver_dashes: _"
   [[ "$output" == *"No packages found"* ]]
 }
 
+# The data root holds the packages and no strategies/, so the strategy names
+# have to come from the checkout
+@test "validate-pkg: --all validates the packages of AURTOMATOR_DATA_DIR" {
+  mkdir -p "$BATS_TEST_TMPDIR/data/packages"
+  printf '%s\n' 'name: pkg-a' 'strategy: github-release' 'upstream:' '  project: owner/repo' >"$BATS_TEST_TMPDIR/data/packages/pkg-a.yml"
+  printf '%s\n' 'name: pkg-b' 'strategy: pypi' 'upstream:' '  registry: requests' >"$BATS_TEST_TMPDIR/data/packages/pkg-b.yml"
+
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"All 2 packages valid"* ]]
+}
+
 @test "validate: fails on nonexistent package" {
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "nonexistent"
   [ "$status" -ne 0 ]
