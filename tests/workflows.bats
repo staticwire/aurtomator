@@ -1369,14 +1369,22 @@ EOF
 
 NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 
-@test "notify-failure: runs on a failed run of the update workflow" {
-  run yq '.name' "$CHECK_UPDATES"
-  local name="$output"
+@test "notify-failure: runs when called, after the caller's condition" {
   run yq -o=json -I=0 '.on' "$NOTIFY"
   [ "$status" -eq 0 ]
-  [ "$output" = "{\"workflow_run\":{\"workflows\":[\"$name\"],\"types\":[\"completed\"]}}" ]
+  [ "$output" = '{"workflow_call":null}' ]
   run yq '.jobs.notify.if' "$NOTIFY"
-  [ "$output" = "github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out'" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+  run yq '.concurrency' "$NOTIFY"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+}
+
+@test "notify-failure: names the run it is called from" {
+  run yq -o=json -I=0 '.jobs.notify.steps[0].env' "$NOTIFY"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"GH_TOKEN":"${{ github.token }}","GH_REPO":"${{ github.repository }}","RUN_ID":"${{ github.run_id }}","RUN_URL":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","RUN_BRANCH":"${{ github.ref_name }}"}' ]
 }
 
 @test "notify-failure: reads the jobs of the run and writes issues, nothing else" {
@@ -1389,8 +1397,9 @@ NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 # Runs the step of notify-failure for run 7 of owner/fork. gh lists the
 # titles in $GH_TITLES as the open issues, answers has_issues with
 # $GH_HAS_ISSUES (true by default), lists the jobs in $GH_JOBS as the failed
-# ones or fails that when $GH_JOBS_FAIL is set, fails the list of issues
-# when $GH_FAIL is set and logs every call to $GH_LOG.
+# ones (an empty $GH_JOBS lists no failed job) or fails that when
+# $GH_JOBS_FAIL is set, fails the list of issues when $GH_FAIL is set and
+# logs every call to $GH_LOG.
 run_notify_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
@@ -1440,6 +1449,14 @@ EOF
   [ "$status" -eq 0 ]
   grep -q '^issue create --title ❌ Check AUR Package Updates failed ' "$GH_LOG"
   grep -q 'failed in jobs that could not be listed' "$GH_LOG"
+}
+
+@test "notify-failure: opens nothing when no job failed" {
+  GH_JOBS="" run_notify_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::No job of the run failed, so the canceled run gets no issue"* ]]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "notify-failure: opens no second issue while one is open" {
