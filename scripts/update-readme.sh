@@ -140,9 +140,9 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
   [[ -f "$pkg_file" ]] || continue
 
   name=$(pkg_get "$pkg_file" .name)
-  current=$(pkg_get "$pkg_file" '.current // "—"')
+  current=$(pkg_get "$pkg_file" '.current // "-"')
   strategy=$(pkg_get "$pkg_file" .strategy)
-  last_updated=$(pkg_get "$pkg_file" '.last_updated // "—"')
+  last_updated=$(pkg_get "$pkg_file" '.last_updated // "-"')
 
   # Determine status from .status/ dir or YAML
   status_file="${STATUS_DIR}/${name}"
@@ -202,9 +202,9 @@ for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
         ((pkg_ok++)) || true
         ;;
     esac
-  elif [[ "$current" == "—" || "$current" == "null" ]]; then
+  elif [[ "$current" == "-" || "$current" == "null" ]]; then
     status="✨ new"
-    current="—"
+    current="-"
     ((pkg_ok++)) || true
   else
     status="✅ tracking"
@@ -242,7 +242,7 @@ table+="
 ${table_header}"
 
 if [[ "$pkg_count" -eq 0 ]]; then
-  table+=$(table_row "<em>No packages configured</em>" — — — —)
+  table+=$(table_row "<em>No packages configured</em>" - - - -)
 else
   table+="$table_rows"
 fi
@@ -258,7 +258,7 @@ if [[ -n "$version" ]]; then
   [[ ! -f "${STATUS_DIR}/_upstream" ]] || upstream=$(<"${STATUS_DIR}/_upstream")
   table+=$'\n\n'"aurtomator ${version}"
   if [[ "$upstream" =~ ^newer:\ ([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-    table+=" · [${BASH_REMATCH[1]} available](https://github.com/${AURTOMATOR_UPSTREAM}/releases/tag/v${BASH_REMATCH[1]})"
+    table+=" ([${BASH_REMATCH[1]} available](https://github.com/${AURTOMATOR_UPSTREAM}/releases/tag/v${BASH_REMATCH[1]}))"
   fi
   table+=" <!-- x-release-please-version -->"
 fi

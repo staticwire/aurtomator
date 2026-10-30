@@ -1314,7 +1314,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
-  grep -qxF 'aurtomator 0.6.0 · [0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0) <!-- x-release-please-version -->' "$TEST_TMPDIR/README.md"
+  grep -qxF 'aurtomator 0.6.0 ([0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0)) <!-- x-release-please-version -->' "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: links no release for aurtomator at its release or for another _upstream" {
@@ -2097,7 +2097,7 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
   [ "$(sed -n '/<table>/,$p' "$TEST_TMPDIR/README.md")" = '<table>
 <tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>
-<tr><td><em>No packages configured</em></td><td>—</td><td nowrap>—</td><td nowrap>—</td><td nowrap>—</td></tr>
+<tr><td><em>No packages configured</em></td><td>-</td><td nowrap>-</td><td nowrap>-</td><td nowrap>-</td></tr>
 </table>
 <!-- PACKAGES:END -->' ]
 }
@@ -2309,7 +2309,7 @@ current: '1.0.0'"
 
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  grep -qF '<td>1.0.0</td><td nowrap>github-release</td><td nowrap>—</td><td nowrap>✅ tracking</td>' "$TEST_TMPDIR/README.md"
+  grep -qF '<td>1.0.0</td><td nowrap>github-release</td><td nowrap>-</td><td nowrap>✅ tracking</td>' "$TEST_TMPDIR/README.md"
   grep -qF 'packages-1%2F1-brightgreen' "$TEST_TMPDIR/README.md"
 }
 
@@ -2321,7 +2321,7 @@ current: '1.0.0'"
 
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/pkg-new">pkg-new</a></td><td>—</td><td nowrap>github-release</td><td nowrap>—</td><td nowrap>✨ new</td></tr>' "$TEST_TMPDIR/README.md"
+  grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/pkg-new">pkg-new</a></td><td>-</td><td nowrap>github-release</td><td nowrap>-</td><td nowrap>✨ new</td></tr>' "$TEST_TMPDIR/README.md"
 }
 
 # A package that has not been checked yet has failed nothing
@@ -2371,7 +2371,7 @@ current: '1.0.0'"
 EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  grep -qF '<td nowrap>github-release</td><td nowrap>—</td>' "$TEST_TMPDIR/README.md"
+  grep -qF '<td nowrap>github-release</td><td nowrap>-</td>' "$TEST_TMPDIR/README.md"
 }
 
 # === update-pkg.sh: argument validation ===

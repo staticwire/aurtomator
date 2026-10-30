@@ -1186,7 +1186,7 @@ GitHub starts a `workflow_run` workflow only from its file on the default branch
 `update-readme.sh` writes the version under the package table, and with `newer:` a link to the release:
 
 ```text
-aurtomator 0.6.0 · [0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0) <!-- x-release-please-version -->
+aurtomator 0.6.0 ([0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0)) <!-- x-release-please-version -->
 ```
 
 The comment marks the line for the release PR of aurtomator, which writes the new version there in the README of the upstream repository. Its check run then finds the README as `update-readme.sh` writes it, and has nothing to commit to a `main` that only takes pull requests. A run that could not read the release writes the line without the link.

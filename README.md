@@ -14,7 +14,7 @@ Automated AUR package updates from a single GitHub repo.
 
 <table>
 <tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>
-<tr><td><em>No packages configured</em></td><td>—</td><td nowrap>—</td><td nowrap>—</td><td nowrap>—</td></tr>
+<tr><td><em>No packages configured</em></td><td>-</td><td nowrap>-</td><td nowrap>-</td><td nowrap>-</td></tr>
 </table>
 
 aurtomator 0.7.0 <!-- x-release-please-version -->
