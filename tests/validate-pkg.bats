@@ -398,6 +398,17 @@ pkgver_dashes: _"
   [[ "$output" == *"mypkg.yml has an unknown key: allow_downgrades, pkgver_dashes"* ]]
 }
 
+@test "validate: a key made of two known names rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  \"project tag_version_regex\": x
+\"name strategy\": x"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mypkg.yml has an unknown key: name strategy"* ]]
+  [[ "$output" == *"mypkg.yml: upstream.project tag_version_regex is not a field of any strategy"* ]]
+}
+
 # The keys come from the reads of the scripts, so a key that a script
 # starts to read cannot be refused
 @test "validate: every top-level key a script reads passes" {
