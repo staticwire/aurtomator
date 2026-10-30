@@ -1480,3 +1480,48 @@ EOF
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
 }
+
+VALIDATE="$GITHUB_DIR/workflows/validate.yml"
+
+@test "validate: runs validate-pkg.sh --all of the pinned checkout without a secret" {
+  run yq -o=json -I=0 '.on' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"workflow_call":null}' ]
+  run yq -o=json -I=0 '.permissions' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"contents":"read"}' ]
+  run grep -c secrets "$VALIDATE"
+  [ "$output" = "0" ]
+  run yq -o=json -I=0 '[.jobs.validate.steps[] | select(.uses | test("^actions/checkout@")) | .with]' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[{"persist-credentials":false},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
+  run yq '.jobs.validate.steps[] | select(has("run")) | .run' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  grep -qxF './aurtomator/scripts/validate-pkg.sh --all' <<<"$output"
+}
+
+# The loop test of the image job leaves out the pin check and the
+# repository and ref of the checkout, so this test compares the whole job
+# with the one of check-updates.yml
+@test "validate: the image job is the one of check-updates" {
+  local expected
+  run yq '.jobs.image' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" != "null" ]
+  expected="$output"
+  run yq '.jobs.image' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$expected" ]
+}
+
+@test "validate: the validate job runs in the image, after it" {
+  run yq '.jobs.validate.needs' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "image" ]
+  run yq '.jobs.validate.container' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ needs.image.outputs.ref }}' ]
+  run yq '.jobs.validate["timeout-minutes"]' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "10" ]
+}

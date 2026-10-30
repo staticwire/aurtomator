@@ -1,0 +1,79 @@
+name: Validate packages
+
+# Validates the packages of the calling repository with validate-pkg.sh
+# from aurtomator at job.workflow_sha. It runs on any trigger the calling
+# workflow picks.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # Reads the pinned Arch image from .github/ci-image/Dockerfile, where
+  # Dependabot updates its digest
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.read.outputs.ref }}
+
+    steps:
+      # With an empty ref, actions/checkout takes the default branch of a
+      # repository other than the one that triggered the run. The run would
+      # then use the code of main, and no step would fail.
+      - name: Check the pin
+        env:
+          SHA: ${{ job.workflow_sha }}
+        run: |
+          if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::job.workflow_sha is not a commit SHA: '$SHA'"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/ci-image
+
+      - name: Read image
+        id: read
+        run: |
+          ref=$(sed -n 's/^FROM //p' .github/ci-image/Dockerfile)
+          if [[ ! "$ref" =~ ^archlinux:base-devel@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::.github/ci-image/Dockerfile must pin archlinux:base-devel by digest"
+            exit 1
+          fi
+          echo "ref=$ref" >>"$GITHUB_OUTPUT"
+
+  validate:
+    needs: image
+    runs-on: ubuntu-latest
+    container: ${{ needs.image.outputs.ref }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman-key --init
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm --needed git go-yq
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout aurtomator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
+          persist-credentials: false
+
+      - name: Validate packages
+        run: ./aurtomator/scripts/validate-pkg.sh --all
