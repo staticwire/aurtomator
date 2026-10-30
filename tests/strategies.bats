@@ -679,6 +679,14 @@ teardown() {
   done
 }
 
+@test "archpkg: finds a package with a plus sign in its name" {
+  create_test_package "test-archpkg" "archpkg" "upstream:
+  archpkg: libsigc++"
+  run "$TEST_TMPDIR/strategies/archpkg.sh" "test-archpkg"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.12.2" ]
+}
+
 @test "archpkg: names the repositories it read when the package is in none of them" {
   create_test_package "test-archpkg" "archpkg" "upstream:
   archpkg: arch-testing-only"

@@ -108,6 +108,14 @@ case "$url" in
   *archlinux.org/packages/search/json*name=arch-multilib*)
     echo '{"results": [{"repo": "multilib", "epoch": 0, "pkgver": "4.0", "pkgrel": "1"}]}'
     ;;
+  # Arch repos: the server reads a + in the query as a space, so only %2B
+  # finds libsigc++
+  *archlinux.org/packages/search/json*name=libsigc%2B%2B*)
+    echo '{"results": [{"repo": "extra", "epoch": 0, "pkgver": "2.12.2", "pkgrel": "1"}]}'
+    ;;
+  *archlinux.org/packages/search/json*name=libsigc++*)
+    echo '{"results": []}'
+    ;;
   # KDE tarball: no versions in listing
   *download.kde.org/stable/no-versions-here/*)
     echo '<html><body>Parent Directory</body></html>'
