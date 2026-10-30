@@ -234,7 +234,9 @@ sha256sums=('SKIP'
 
 **Detection:** `audit_pkgbuild()` sources the PKGBUILD and pairs every entry of every checksum array (`ck`, `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `b2`, with and without an arch suffix) with the entry at the same index of `source` or `source_<arch>`. A real hash for a URL with `://` next to any other `SKIP` blocks the update. A real hash for a local file is allowed, because that file lives in the AUR repo and does not change between versions.
 
-`updpkgsums` would replace such a `SKIP` with a real hash. Without `updpkgsums`, the real hash of the remote source would be stale after the version bump.
+`update-pkg.sh` runs `updpkgsums` for the real hash, which would turn such a `SKIP` into a hash, and the check of the prepared files refuses a `SKIP` that changes.
+
+**Correct approach:** run `updpkgsums` once and push the PKGBUILD with the hashes it writes, so the AUR copy holds them, as for a source pinned to a tag or a commit. A download whose file changes under the same URL has to keep its `SKIP`, and such a package needs a manual update.
 
 ### Sources that do not follow pkgver (BLOCKED)
 

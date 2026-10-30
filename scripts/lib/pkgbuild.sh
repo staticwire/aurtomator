@@ -37,14 +37,13 @@ has_skip_checksums() {
     END { exit !found }'
 }
 
+# Print, one a line, each source whose checksum is SKIP where makepkg would
+# give a real hash. makepkg 7.1 gives SKIP itself to a signature, to every
+# svn source, and to a git, hg or bzr source without the pin it hashes: git
+# #commit= or #tag=, hg #tag= or #revision=, bzr #revision=. A fossil clone
+# is one file, which it hashes as a download.
 # Args: $1=pkgbuild path
-# Returns: 0 when a checksum is SKIP for a source makepkg would give a real
-#          hash, 1 otherwise. makepkg 7.1 gives SKIP itself to a signature,
-#          to every svn source, and to a git, hg or bzr source without the
-#          pin it hashes: git #commit= or #tag=, hg #tag= or #revision=, bzr
-#          #revision=. A fossil clone is one file, which it hashes as a
-#          download.
-has_fixed_skip() {
+fixed_skip_sources() {
   pkgbuild_checksums "$1" | awk -F'\t' '
     BEGIN { pin["git"] = "^(commit|tag)$"; pin["hg"] = "^(tag|revision)$"; pin["bzr"] = "^revision$" }
     $1 != "SKIP" { next }
@@ -54,15 +53,14 @@ has_fixed_skip() {
       url = $2
       sub(/^[^:]*::/, "", url)
       proto = url
-      if (!sub(/:\/\/.*/, "", proto)) { found = 1; next }
+      if (!sub(/:\/\/.*/, "", proto)) { print $2; next }
       sub(/\+.*/, "", proto)
-      if (proto !~ /^(bzr|git|hg|svn)$/) { found = 1; next }
+      if (proto !~ /^(bzr|git|hg|svn)$/) { print $2; next }
       key = url
       if (!sub(/^[^#]*#/, "", key)) next
       sub(/=.*/, "", key)
-      if ((proto in pin) && key ~ pin[proto]) found = 1
-    }
-    END { exit !found }'
+      if ((proto in pin) && key ~ pin[proto]) print $2
+    }'
 }
 
 # Args: $1=pkgbuild path
@@ -119,14 +117,18 @@ audit_pkgbuild() {
   fi
 
   # FATAL: SKIP mixed with real hashes for REMOTE sources.
-  # A SKIP that makepkg would replace with a hash makes update-pkg.sh skip
-  # updpkgsums, so a real hash for a remote source would go stale on the
-  # version bump. Real hashes for local files (no ://) are fine: they live
-  # in the AUR repo and do not change between versions.
-  if has_fixed_skip "$pkgbuild" && has_remote_hash "$pkgbuild"; then
+  # update-pkg.sh runs updpkgsums when a remote source has a real hash, and
+  # updpkgsums turns a SKIP that makepkg does not write itself into a hash,
+  # which check_prepared_pkgbuild refuses. Real hashes for local files (no
+  # ://) are fine: they live in the AUR repo and do not change between
+  # versions.
+  local -a fixed
+  mapfile -t fixed < <(fixed_skip_sources "$pkgbuild")
+  if ((${#fixed[@]} > 0)) && has_remote_hash "$pkgbuild"; then
     log_err "BLOCKED: SKIP checksums mixed with real hashes for remote sources."
-    log_err "  A SKIP that makepkg does not write itself turns off updpkgsums, see \"Mixed SKIP and real checksums\" in docs/SUPPORTED-PACKAGES.md."
-    log_err "  Remote source hashes would become stale on version bump."
+    log_err "  updpkgsums runs for the real hashes and would turn the SKIP of these sources into a hash, which the check of the prepared files refuses:"
+    printf '    %s\n' "${fixed[@]}" >&2
+    log_err "  Run updpkgsums once and push the PKGBUILD with these hashes to the AUR, see \"Mixed SKIP and real checksums\" in docs/SUPPORTED-PACKAGES.md."
     fatals=$((fatals + 1))
   fi
 

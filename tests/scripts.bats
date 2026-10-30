@@ -567,6 +567,20 @@ sha256sums=('SKIP'
 EOF
 }
 
+# update-pkg.sh runs updpkgsums next to a real remote hash, so the fix is the
+# hash that updpkgsums writes
+@test "audit_pkgbuild: names the source whose SKIP updpkgsums would turn into a hash" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  # shellcheck disable=SC2016
+  write_vcs_data_pkgbuild 'git+https://example.org/foo.git#tag=v${pkgver}'
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"updpkgsums runs for the real hashes and would turn the SKIP of these sources into a hash, which the check of the prepared files refuses:"* ]]
+  [[ "$output" == *"    git+https://example.org/foo.git#tag=v1.0.0"* ]]
+  [[ "$output" == *"Run updpkgsums once and push the PKGBUILD with these hashes to the AUR"* ]]
+  [[ "$output" != *"data-1.0.0.tar.gz"* ]]
+}
+
 # makepkg 7.1 has no checksum for svn and writes SKIP at any pin
 @test "audit_pkgbuild: allows the SKIP of an svn source pinned by revision next to a real hash" {
   source "$TEST_TMPDIR/scripts/lib.sh"
