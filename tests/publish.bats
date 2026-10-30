@@ -2056,7 +2056,7 @@ aurtomator 0.7.0 is out, and this repository runs 0.6.0.
 Release notes: https://github.com/staticwire/aurtomator/releases/tag/v0.7.0
 Run: https://example.invalid/run
 
-Auto-created by update workflow. A run closes it once `VERSION` holds this release, or once a newer release is out.
+Auto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.
 EOF
   )
   [ "$output" = "$expected" ]
