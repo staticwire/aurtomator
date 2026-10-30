@@ -2,13 +2,13 @@
 #
 # setup.sh - First-time aurtomator configuration
 #
-# Usage:
-#   ./scripts/setup.sh              # full setup (all steps)
-#   ./scripts/setup.sh identity     # git author name/email only
-#   ./scripts/setup.sh ssh          # SSH key for AUR only
-#   ./scripts/setup.sh gpg          # GPG signing key only
-#   ./scripts/setup.sh secrets      # GitHub Secrets only
-#   ./scripts/setup.sh verify       # verify everything works
+# Usage, from inside your packages repository:
+#   cd <your packages repository> && <clone of aurtomator>/scripts/setup.sh   # full setup (all steps)
+#   setup.sh identity     # git author name/email only
+#   setup.sh ssh          # SSH key for AUR only
+#   setup.sh gpg          # GPG signing key only
+#   setup.sh secrets      # GitHub Secrets only
+#   setup.sh verify       # verify everything works
 #
 # Options:
 #   --git-name <name>         Git author name for AUR commits
@@ -21,7 +21,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AURTOMATOR_DIR="${AURTOMATOR_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-CONFIG_FILE="${AURTOMATOR_DIR}/.aurtomator.conf"
+
+# The data root, resolved as in lib/common.sh, which this script does not
+# source. The variable is set last, so the message names the value as the
+# caller gave it.
+resolve_data_dir() {
+  local dir
+  if ! dir="$(cd -- "${AURTOMATOR_DATA_DIR:-.}" 2>/dev/null && pwd)"; then
+    echo "AURTOMATOR_DATA_DIR is not a directory: ${AURTOMATOR_DATA_DIR}" >&2
+    exit 1
+  fi
+  AURTOMATOR_DATA_DIR="$dir"
+}
+resolve_data_dir
+CONFIG_FILE="${AURTOMATOR_DATA_DIR}/.aurtomator.conf"
 
 # Defaults
 GIT_AUTHOR_NAME=""
@@ -101,6 +114,7 @@ save_config() {
 
 setup_identity() {
   header "identity" "Who you are on AUR"
+  printf "  Data directory: %s\n" "$AURTOMATOR_DATA_DIR"
 
   # Detect defaults from git config
   local default_name default_email
@@ -151,7 +165,7 @@ check_ssh_key() {
     printf "\n  CI uses the key without a prompt. Remove the passphrase from a copy:\n"
     printf "    cp %s %s-ci\n" "$AUR_SSH_KEY" "$AUR_SSH_KEY"
     printf "    ssh-keygen -p -N '' -f %s-ci\n" "$AUR_SSH_KEY"
-    printf "    ./scripts/setup.sh ssh --ssh-key %s-ci\n\n" "$AUR_SSH_KEY"
+    printf "    %s ssh --ssh-key %s-ci\n\n" "$0" "$AUR_SSH_KEY"
     return 1
   else
     fail "Not a valid private key: $AUR_SSH_KEY"
@@ -362,7 +376,7 @@ setup_secrets() {
       gpg_source="copy"
     elif gpg_key_has_passphrase "$GPG_KEY_ID"; then
       warn "GPG key $GPG_KEY_ID has a passphrase, GPG_SIGNING_KEY not set"
-      warn "Run ./scripts/setup.sh gpg secrets to make a passphrase-free copy"
+      warn "Run $0 gpg secrets to make a passphrase-free copy"
     else
       gpg_source="key"
     fi
@@ -371,7 +385,7 @@ setup_secrets() {
   if [[ "$has_gh" == "true" ]]; then
     # Detect repo from origin remote (not upstream)
     local gh_repo
-    gh_repo=$(git -C "$AURTOMATOR_DIR" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||; s|\.git$||' || true)
+    gh_repo=$(git -C "$AURTOMATOR_DATA_DIR" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||; s|\.git$||' || true)
     if [[ -z "$gh_repo" ]]; then
       gh_repo=$(ask "GitHub repo (owner/name)")
     fi
@@ -479,7 +493,7 @@ verify_all() {
   # Secrets
   if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
     local gh_repo
-    gh_repo=$(git -C "$AURTOMATOR_DIR" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||; s|\.git$||' || true)
+    gh_repo=$(git -C "$AURTOMATOR_DATA_DIR" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||; s|\.git$||' || true)
     local secret_list
     secret_list=$(gh secret list -R "$gh_repo" 2>/dev/null || true)
     local secret_count=0
@@ -503,10 +517,10 @@ verify_all() {
 
   if [[ "$errors" -eq 0 ]]; then
     printf "\n  %s%sReady.%s Add your first package:\n" "$GREEN" "$BOLD" "$RESET"
-    printf "    cp packages/example.yml.sample packages/<name>.yml\n\n"
+    printf "    cp %s/packages/example.yml.sample %s/packages/<name>.yml\n\n" "$AURTOMATOR_DIR" "$AURTOMATOR_DATA_DIR"
   else
     printf "\n  %s%s%d issue(s) found.%s Fix and re-run:\n" "$YELLOW" "$BOLD" "$errors" "$RESET"
-    printf "    ./scripts/setup.sh verify\n\n"
+    printf "    %s verify\n\n" "$0"
     return 1
   fi
 }
@@ -549,7 +563,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "Unknown option: $1 (see ./scripts/setup.sh --help)" >&2
+      echo "Unknown option: $1 (see $0 --help)" >&2
       exit 1
       ;;
   esac
@@ -580,5 +594,5 @@ for step in "${STEPS[@]}"; do
   esac
   save_config
 done
-ok "Config saved to .aurtomator.conf"
+ok "Config saved to .aurtomator.conf in $AURTOMATOR_DATA_DIR"
 exit "$EXIT_STATUS"
