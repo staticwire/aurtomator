@@ -1572,6 +1572,25 @@ EOF
   [[ "$output" == *"Checked: 0"* ]]
 }
 
+# A skipped downgrade is logged with the name of its package
+@test "check-all: reads the packages of AURTOMATOR_DATA_DIR and runs the strategies of the checkout" {
+  mkdir -p "$BATS_TEST_TMPDIR/data/packages"
+  cat >"$BATS_TEST_TMPDIR/data/packages/foo.yml" <<EOF
+name: foo
+strategy: github-release
+upstream:
+  type: github
+  project: owner/repo
+current: '3.0.0'
+EOF
+
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"foo: DOWNGRADE detected"* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/data/.status/foo")" = "downgrade_skipped: 2.0.0" ]
+  [ ! -e "$TEST_TMPDIR/.status/foo" ]
+}
+
 # === project path with a space ===
 
 # Helper: a project at "$TEST_TMPDIR/my project" with the scripts and

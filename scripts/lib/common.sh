@@ -7,8 +7,9 @@
 # Requires: yq (https://github.com/mikefarah/yq)
 #
 # AURTOMATOR_DIR is the root of the checkout that holds this file.
-# AURTOMATOR_DATA_DIR is the directory with the packages and .aurtomator.conf.
-# It comes from the environment and defaults to the working directory.
+# AURTOMATOR_DATA_DIR is the directory with the packages, .status/ and
+# .aurtomator.conf. It comes from the environment and defaults to the working
+# directory.
 
 set -euo pipefail
 

@@ -1983,6 +1983,15 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg $TEST_TMPDIR/out/prepared/pkg" ]
 }
 
+@test "check-all --verify: verifies the packages of AURTOMATOR_DATA_DIR" {
+  mkdir -p "$BATS_TEST_TMPDIR/data/packages" "$TEST_TMPDIR/out/prepared/pkg"
+  printf '%s\n' 'name: pkg' 'strategy: github-release' 'upstream:' '  project: owner/repo' "current: '1.0.0'" >"$BATS_TEST_TMPDIR/data/packages/pkg.yml"
+  stub_script verify-pkg.sh 0
+  AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg $TEST_TMPDIR/out/prepared/pkg" ]
+}
+
 # === alert_issue_body ===
 
 @test "alert_issue_body: lists every note of a held update" {

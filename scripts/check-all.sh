@@ -16,8 +16,8 @@
 #   version that run found and without running the strategies
 # With --dry-run: runs update-pkg.sh or publish-pkg.sh in dry-run mode
 #
-# Writes per-package status to .status/ directory for README generation
-# and auto-issue creation.
+# Writes per-package status to .status/ of the data root (AURTOMATOR_DATA_DIR)
+# for README generation and auto-issue creation.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -99,7 +99,7 @@ done
 # path.
 if [[ "$MODE" == "verify" ]]; then
   failed=0
-  for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
+  for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     [[ -f "$pkg_file" ]] || continue
     pkg_name=$(pkg_get "$pkg_file" .name)
     prepared="${WORK_DIR}/prepared/${pkg_name}"
@@ -141,7 +141,7 @@ if [[ "$MODE" == "verify" ]]; then
 fi
 
 # Status directory for per-package results
-STATUS_DIR="${AURTOMATOR_DIR}/.status"
+STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
 
 # --prepare and --publish take the statuses of the check run before them,
 # read here before anything else runs, and run no strategy: --prepare runs
@@ -481,7 +481,7 @@ run_package() {
 }
 
 RECHECK=()
-for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
+for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   [[ -f "$pkg_file" ]] || continue
   run_package "$pkg_file" 1
 done
