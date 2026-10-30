@@ -369,10 +369,14 @@ _drop_trailing_blank() {
 # download by the date: verify_prepared_sums never fetches it, and makepkg
 # takes the sources from the PKGBUILD. When pkgver changes and a download
 # has a real checksum, or a VCS source is pinned to a commit, a tag or a
-# revision, some source URL or checksum has to change too: a pkgver built
-# from another variable, a source URL without the version, a pin that
-# stays, or a version only in the name a download is saved under, the part
-# before ::, would otherwise label the old files with the new version. With
+# revision, some source URL or checksum has to change too, for each
+# architecture, the common sources and checksums counting for all of them:
+# a pkgver built from another variable, a source URL without the version,
+# a pin that stays, or a version only in the name a download is saved
+# under, the part before ::, would otherwise label the old files with the
+# new version. A download with a real checksum that gets a new name and
+# keeps its URL and its checksum is refused on its own, whatever another
+# source does. With
 # pkgver_dash, a version with a dash in place of that character, as
 # ${pkgver//_/-} writes it, counts as the version, and with pkgver_dash: ''
 # a version with a dash between two characters. With pkgver_format, so
@@ -422,7 +426,10 @@ check_prepared_srcinfo() {
     fi
   done < <(_source_checksums "$1")
 
-  local i old new key kind old_val new_val n expected pinned=false changed=false
+  # A group is the common sources and checksums, _, or those of one
+  # architecture, _x86_64
+  local -A arch_groups=() arches=() pinned_in=() changed_in=() sum_counts=() sum_moved=() renamed=()
+  local i old new key kind old_val new_val n expected group arch has_arch=false changed=false
   for i in "${!new_lines[@]}"; do
     old="${old_lines[$i]}"
     new="${new_lines[$i]}"
@@ -463,7 +470,16 @@ check_prepared_srcinfo() {
           log_err "Prepared .SRCINFO line $((i + 1)) is not a checksum matching the AUR copy: $new"
           return 1
         fi
-        [[ "$new" == "$old" ]] || changed=true
+        group="${key#*sums}"
+        group="${group:-_}"
+        arch_groups["$group"]=1
+        n="${sum_counts[$key]:-0}"
+        sum_counts[$key]=$((n + 1))
+        if [[ "$new" != "$old" ]]; then
+          changed=true
+          changed_in["$group"]=1
+          sum_moved["${key#*sums}:$n"]=1
+        fi
         ;;
       source)
         n="${source_counts[$key]:-0}"
@@ -475,13 +491,23 @@ check_prepared_srcinfo() {
           log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $new"
           return 1
         fi
-        [[ "${new_val#*::}" == "${old_val#*::}" ]] || changed=true
+        group="${key#source}"
+        group="${group:-_}"
+        arch_groups["$group"]=1
+        if [[ "${new_val#*::}" != "${old_val#*::}" ]]; then
+          changed=true
+          changed_in["$group"]=1
+        elif [[ "${new_val%%::*}" != "${old_val%%::*}" && -n "${hashed_sources["${key#source}:$n"]:-}" ]] &&
+          _is_download "$old_val"; then
+          renamed["${key#source}:$n"]="line $((i + 1)) saves the download of the old version under a new name: $new_val"
+        fi
         if { [[ -n "${hashed_sources["${key#source}:$n"]:-}" ]] && _is_download "$old_val"; } ||
           _is_vcs_pin "$old_val"; then
-          pinned=true
+          pinned_in["$group"]=1
         fi
         ;;
       *)
+        [[ "$key" != arch ]] || arches["$new_val"]=1
         if [[ "$new" != "$old" ]] &&
           ! _bumped_line "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset"; then
           log_err "Prepared .SRCINFO line $((i + 1)) changes more than the version: $new"
@@ -490,14 +516,34 @@ check_prepared_srcinfo() {
         ;;
     esac
   done
-  if [[ "$pinned" == true && "$changed" == false && "$version" != "$old_ver" ]]; then
-    log_err "Prepared .SRCINFO changes no source URL and no checksum, so the new version would hold the files of the old one"
-    return 1
+  for group in "${!arch_groups[@]}"; do
+    [[ "$group" == _ ]] || has_arch=true
+  done
+  if [[ "$version" != "$old_ver" && "$has_arch" == false ]]; then
+    if [[ -n "${pinned_in[_]:-}" && -z "${changed_in[_]:-}" ]]; then
+      log_err "Prepared .SRCINFO changes no source URL and no checksum, so the new version would hold the files of the old one"
+      return 1
+    fi
+  elif [[ "$version" != "$old_ver" ]]; then
+    # The arch lines name every architecture, one that builds from the
+    # common sources alone too
+    for arch in "${!arches[@]}"; do
+      if [[ -n "${pinned_in[_]:-}${pinned_in[_$arch]:-}" && -z "${changed_in[_]:-}${changed_in[_$arch]:-}" ]]; then
+        log_err "Prepared .SRCINFO changes no source URL and no checksum for $arch, so the new version would hold the files of the old one"
+        return 1
+      fi
+    done
   fi
   if [[ "$changed" == false && "$new_asset" != "$old_asset" ]]; then
     log_err "Prepared .SRCINFO changes no source URL and no checksum, so the new asset value reaches no source"
     return 1
   fi
+  for key in "${!renamed[@]}"; do
+    if [[ -z "${sum_moved[$key]:-}" ]]; then
+      log_err "Prepared .SRCINFO ${renamed[$key]}"
+      return 1
+    fi
+  done
   return 0
 }
 

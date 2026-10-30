@@ -2667,6 +2667,123 @@ write_srcinfo_sources() {
   [ "$status" -eq 0 ]
 }
 
+# The archive of a fixed commit saved under the new version holds the old
+# files, whatever another source does
+@test "check_prepared_srcinfo: rejects a renamed download that keeps its URL and checksum next to a source that moves" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.4.0 \
+    "player-1.4.0.zip::https://example.com/archive/0123abc.zip" "$H1" \
+    "player.desktop::https://example.com/raw/v1.4.0/player.desktop" "$H2"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.5.0 \
+    "player-1.5.0.zip::https://example.com/archive/0123abc.zip" "$H1" \
+    "player.desktop::https://example.com/raw/v1.5.0/player.desktop" "$H3"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 saves the download of the old version under a new name: player-1.5.0.zip::https://example.com/archive/0123abc.zip"* ]]
+}
+
+@test "check_prepared_srcinfo: accepts a renamed download with a new checksum" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.4.0 \
+    "player-1.4.0.tar.gz::https://example.com/latest/player.tar.gz" "$H1"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.5.0 \
+    "player-1.5.0.tar.gz::https://example.com/latest/player.tar.gz" "$H3"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
+  [ "$status" -eq 0 ]
+}
+
+# A VCS pin keeps the rule of the whole file, whatever name it is saved under
+@test "check_prepared_srcinfo: accepts a renamed VCS pin that stays next to a source that moves" {
+  local pin="git+https://example.com/demo.git#commit=abc123"
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.4.0 \
+    "demo-1.4.0::$pin" "$H1" "demo.desktop::https://example.com/raw/v1.4.0/demo.desktop" "$H2"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.5.0 \
+    "demo-1.5.0::$pin" "$H1" "demo.desktop::https://example.com/raw/v1.5.0/demo.desktop" "$H3"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
+  [ "$status" -eq 0 ]
+}
+
+# A dependency of a fixed version stays on every bump
+@test "check_prepared_srcinfo: accepts a hashed download that stays next to a source that moves" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.4.0 \
+    "https://example.com/demo-1.4.0.tar.gz" "$H1" "https://example.com/deps/libbar-3.2.tar.gz" "$H2"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.5.0 \
+    "https://example.com/demo-1.5.0.tar.gz" "$H3" "https://example.com/deps/libbar-3.2.tar.gz" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
+  [ "$status" -eq 0 ]
+}
+
+# Helper: .SRCINFO with the given pkgver, a common source, and for each
+# architecture its arch line and a source with its sha256sum. An empty
+# source gives the arch line alone.
+# Usage: write_srcinfo_archs <path> <pkgver> <common source> <common sum> [<arch> <source> <sha256sum>]...
+write_srcinfo_archs() {
+  local path=$1 pkgver=$2 common=$3 common_sum=$4 i
+  shift 4
+  {
+    printf '%s\n' "pkgbase = demo" $'\tpkgver = '"$pkgver" $'\tpkgrel = 1'
+    for ((i = 1; i <= $#; i += 3)); do
+      printf '\tarch = %s\n' "${!i}"
+    done
+    if [[ -n "$common" ]]; then
+      printf '\tsource = %s\n\tsha256sums = %s\n' "$common" "$common_sum"
+    fi
+    while (($# >= 3)); do
+      if [[ -n "$2" ]]; then
+        printf '\tsource_%s = %s\n\tsha256sums_%s = %s\n' "$1" "$2" "$1" "$3"
+      fi
+      shift 3
+    done
+    printf '%s\n' "" "pkgname = demo"
+  } >"$path"
+}
+
+# _armver=2.2.9 builds the aarch64 source, so the aarch64 package would
+# get the new version and the old files
+@test "check_prepared_srcinfo: rejects an architecture whose sources and checksums all stay" {
+  local arm="https://example.com/dl/v2.2.9/tool-2.2.9-aarch64.tar.gz"
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 2.3.0 "" "" \
+    x86_64 "https://example.com/dl/v2.3.0/tool-2.3.0-x86_64.tar.gz" "$H1" aarch64 "$arm" "$H2"
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "" "" \
+    x86_64 "https://example.com/dl/v2.4.0/tool-2.4.0-x86_64.tar.gz" "$H3" aarch64 "$arm" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for aarch64, so the new version would hold the files of the old one"* ]]
+}
+
+# An architecture without sources of its own builds from the common ones
+@test "check_prepared_srcinfo: rejects an architecture with only common sources that all stay" {
+  local common="https://example.com/deps/libbar-3.2.tar.gz"
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 2.3.0 "$common" "$H2" \
+    x86_64 "https://example.com/dl/v2.3.0/tool-2.3.0-x86_64.tar.gz" "$H1" aarch64 "" ""
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "$common" "$H2" \
+    x86_64 "https://example.com/dl/v2.4.0/tool-2.4.0-x86_64.tar.gz" "$H3" aarch64 "" ""
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for aarch64"* ]]
+}
+
+# The common sources count for every architecture
+@test "check_prepared_srcinfo: accepts architectures whose own sources stay when a common source moves" {
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 2.3.0 "https://example.com/dl/tool-2.3.0.tar.gz" "$H1" \
+    x86_64 "https://example.com/deps/helper-3.2-x86_64.tar.gz" "$H2" \
+    aarch64 "https://example.com/deps/helper-3.2-aarch64.tar.gz" "$H4"
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "https://example.com/dl/tool-2.4.0.tar.gz" "$H3" \
+    x86_64 "https://example.com/deps/helper-3.2-x86_64.tar.gz" "$H2" \
+    aarch64 "https://example.com/deps/helper-3.2-aarch64.tar.gz" "$H4"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_srcinfo: accepts architectures whose sources all move" {
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 2.3.0 "https://example.com/deps/libbar-3.2.tar.gz" "$H2" \
+    x86_64 "https://example.com/dl/v2.3.0/tool-2.3.0-x86_64.tar.gz" "$H1" \
+    aarch64 "https://example.com/dl/v2.3.0/tool-2.3.0-aarch64.tar.gz" "$H4"
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "https://example.com/deps/libbar-3.2.tar.gz" "$H2" \
+    x86_64 "https://example.com/dl/v2.4.0/tool-2.4.0-x86_64.tar.gz" "$H3" \
+    aarch64 "https://example.com/dl/v2.4.0/tool-2.4.0-aarch64.tar.gz" "$H1"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+  [ "$status" -eq 0 ]
+}
+
 # pijul: pkgver 1.0.0.beta.11 with pkgver_dash ., the crate URL keeps the dash
 @test "check_prepared_srcinfo: accepts a source with the dash that pkgver_dash replaced" {
   local url=https://static.crates.io/crates/pijul/pijul
