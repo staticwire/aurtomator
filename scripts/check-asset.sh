@@ -91,7 +91,7 @@ if ((${#found[@]} == 0)); then
   exit 1
 fi
 if ((${#found[@]} > 1)); then
-  log_err "Tags ${found[*]} of ${project} all give version ${PKGVER}"
+  log_err "Tags ${found[*]} of ${project} all give version ${PKGVER}; set upstream.tag_version_regex to match one of them"
   exit 1
 fi
 tag="${found[0]}"

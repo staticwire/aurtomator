@@ -3629,7 +3629,7 @@ pkgver_dash: ''"
   asset_var: _twin"
   run "$TEST_TMPDIR/scripts/check-asset.sh" twin 1.0.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Tags v1.0.0 1.0.0 of asset-owner/twin-repo all give version 1.0.0"* ]]
+  [[ "$output" == *"Tags v1.0.0 1.0.0 of asset-owner/twin-repo all give version 1.0.0; set upstream.tag_version_regex to match one of them"* ]]
 }
 
 @test "check-asset: fails when the release cannot be read" {
