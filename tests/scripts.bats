@@ -477,7 +477,7 @@ EOF
   local vcs
   for vcs in "git+https://example.com/app.git" "app::git+https://example.com/app.git#branch=main" \
     "hg+https://example.com/app" "svn+https://example.com/app/trunk" \
-    "bzr+https://example.com/app" "fossil+https://example.com/app"; do
+    "bzr+https://example.com/app"; do
     cat >"$TEST_TMPDIR/test.PKGBUILD" <<EOF
 pkgname=test-vcs-data
 pkgver=1.0.0
@@ -525,7 +525,8 @@ EOF
   source "$TEST_TMPDIR/scripts/lib.sh"
   local vcs
   for vcs in "git+https://example.com/app.git#commit=abc123" "app::git+https://example.com/app.git?signed#tag=v1" \
-    "hg+https://example.com/app#revision=4" "bzr+https://example.com/app#revision=4"; do
+    "hg+https://example.com/app#revision=4" "hg+https://example.com/app#tag=v1" \
+    "bzr+https://example.com/app#revision=4"; do
     cat >"$TEST_TMPDIR/test.PKGBUILD" <<EOF
 pkgname=test-vcs-data
 pkgver=1.0.0
@@ -539,6 +540,47 @@ source=("$vcs"
 sha256sums=('SKIP'
             'abc123')
 EOF
+    run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+    [ "$status" -eq 1 ] || {
+      echo "allowed: $vcs"
+      return 1
+    }
+    [[ "$output" == *"SKIP checksums mixed with real hashes for remote"* ]]
+  done
+}
+
+# Helper: test.PKGBUILD with the given VCS source at SKIP and a download
+# with a real hash
+write_vcs_data_pkgbuild() {
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<EOF
+pkgname=test-vcs-data
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("$1"
+        "https://example.com/data-\${pkgver}.tar.gz")
+sha256sums=('SKIP'
+            'abc123')
+EOF
+}
+
+# makepkg 7.1 has no checksum for svn and writes SKIP at any pin
+@test "audit_pkgbuild: allows the SKIP of an svn source pinned by revision next to a real hash" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  write_vcs_data_pkgbuild "svn+https://svn.example.org/foo/trunk#revision=1234"
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+  [ "$status" -eq 0 ]
+}
+
+# A fossil clone is one file, which makepkg -g hashes as a download
+@test "audit_pkgbuild: blocks the SKIP of a fossil source next to a real hash" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local vcs
+  for vcs in "fossil+https://example.com/app" "fossil+https://example.com/app#commit=abc123"; do
+    write_vcs_data_pkgbuild "$vcs"
     run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
     [ "$status" -eq 1 ] || {
       echo "allowed: $vcs"

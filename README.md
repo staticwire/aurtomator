@@ -79,7 +79,7 @@ See [docs/WORKFLOW.md](docs/WORKFLOW.md) for strategy details, YAML examples, an
 aurtomator only sets `pkgver` and `pkgrel`, updates checksums and `.SRCINFO`, and sets a value from a release asset name where the package YAML asks for one. `pkgrel` goes back to 1 for a new version, and a rebuild with a new asset value raises it by one. It does not build packages or check dependencies. These cases are detected and blocked:
 
 - **`pkgver()` with the wrong strategy**: use `git-latest` for VCS packages
-- **A `SKIP` next to a real checksum of a remote source**: such a `SKIP` turns off `updpkgsums`, and the real checksum would go stale. The `SKIP` of a signature (`.sig`, `.sign`, `.asc`) and that of a VCS source without a `#commit=`, `#tag=` or `#revision=` pin do not count, because makepkg gives them `SKIP` itself
+- **A `SKIP` next to a real checksum of a remote source**: such a `SKIP` turns off `updpkgsums`, and the real checksum would go stale. A `SKIP` that makepkg gives itself does not count: that of a signature (`.sig`, `.sign`, `.asc`), of an svn source, and of a git, hg or bzr source without a pin makepkg hashes, see [docs/SUPPORTED-PACKAGES.md](docs/SUPPORTED-PACKAGES.md#mixed-skip-and-real-checksums-blocked)
 - **Sources that do not follow `pkgver`**: when a download has a real checksum or a VCS source is pinned, a bump has to change a source URL or a checksum for each architecture, or the new version would hold the old files. Make `pkgver` the literal and derive the other variable from it
 - **Source URLs returning HTML** or an error status: a HEAD request checks every `http` and `https` source, also one with a `SKIP` checksum
 

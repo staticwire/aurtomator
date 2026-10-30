@@ -75,9 +75,9 @@ b2sums_x86_64=('SKIP')
 b2sums_aarch64=('SKIP')
 ```
 
-aurtomator reads every checksum array, with and without an arch suffix. A `SKIP` at any position makes it skip `updpkgsums`, which would otherwise replace the `SKIP` of a download with a real hash and clone the repository of every VCS source. The `SKIP` of a signature is the exception, see [Sources with a signature](#sources-with-a-signature). `updpkgsums` also runs next to the `SKIP` of a VCS source without a pin when a remote source has a real hash. The source URLs are checked either way, see [Source URL returns HTML](#source-url-returns-html-blocked).
+aurtomator reads every checksum array, with and without an arch suffix. A `SKIP` at any position makes it skip `updpkgsums`, which would otherwise replace the `SKIP` of a download with a real hash and clone the repository of every VCS source. The `SKIP` of a signature is the exception, see [Sources with a signature](#sources-with-a-signature). `updpkgsums` also runs next to a `SKIP` that makepkg gives a VCS source itself, see [Mixed SKIP and real checksums](#mixed-skip-and-real-checksums-blocked), when a remote source has a real hash. The source URLs are checked either way, see [Source URL returns HTML](#source-url-returns-html-blocked).
 
-A real hash for a remote source next to a `SKIP` other than that of a signature or of a VCS source without a pin is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
+A real hash for a remote source next to a `SKIP` that makepkg does not give itself is blocked by the PKGBUILD audit. See "Mixed SKIP and real checksums" below.
 
 ### Sources with a signature
 
@@ -224,7 +224,7 @@ A URL built from `$pkgver`, such as `releases/download/${pkgver}/` for the tag `
 
 ### Mixed SKIP and real checksums (BLOCKED)
 
-A PKGBUILD with a `SKIP` and a real hash for a remote source, in any order and in any checksum array. The `SKIP` of a signature does not count, see [Sources with a signature](#sources-with-a-signature), and neither does that of a VCS source without a `#commit=`, `#tag=` or `#revision=` pin: makepkg writes both itself, so `updpkgsums` keeps them.
+A PKGBUILD with a `SKIP` and a real hash for a remote source, in any order and in any checksum array. A `SKIP` that makepkg 7.1 writes itself does not count, since `updpkgsums` keeps it: that of a signature, see [Sources with a signature](#sources-with-a-signature), that of an svn source, and that of a git, hg or bzr source without the pin makepkg hashes, which is `#commit=` or `#tag=` for git, `#tag=` or `#revision=` for hg and `#revision=` for bzr. makepkg clones a fossil repository into one file and hashes it as a download, so the `SKIP` of a fossil source counts with or without a pin.
 
 ```bash
 source=("git+https://example.com/app.git#commit=1a2b3c4" "https://example.com/data.tar.gz")

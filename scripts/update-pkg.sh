@@ -154,10 +154,11 @@ if ! validate_source_urls "${aur_dir}/PKGBUILD"; then
   exit 1
 fi
 
-# updpkgsums would put a real hash in place of the SKIP of a download or of
-# a pinned VCS source, and the audit blocks such a SKIP next to a remote
-# hash. Next to the SKIP of a VCS source without a pin, updpkgsums runs only
-# for a remote hash, since makepkg -g clones the repository.
+# updpkgsums would put a real hash in place of the SKIP of a download, of a
+# fossil clone, or of a git, hg or bzr source at a pin makepkg hashes, and
+# the audit blocks such a SKIP next to a remote hash. Next to any other SKIP
+# of a VCS source, updpkgsums runs only for a remote hash, since makepkg -g
+# clones the repository.
 if has_skip_checksums "${aur_dir}/PKGBUILD" && ! has_remote_hash "${aur_dir}/PKGBUILD"; then
   log_info "VCS package, skipping checksums"
 else
