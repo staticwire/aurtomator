@@ -96,7 +96,7 @@ jobs:
       # starts, and builder owns the workspace once check-all.sh ran, so no
       # local action follows run-as-builder in a job
       - name: Check updates
-        uses: ./.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
@@ -111,7 +111,7 @@ jobs:
           if grep -qsE '^(new_version|available_downgrade|new_build): ' .status/*; then
             prepare=true
           fi
-          sudo -u builder ./scripts/update-readme.sh
+          sudo -u builder ./aurtomator/scripts/update-readme.sh
           work=$prepare
           git diff --quiet README.md || work=true
           echo "prepare=$prepare" >>"$GITHUB_OUTPUT"
@@ -166,7 +166,7 @@ jobs:
           path: .status
 
       - name: Prepare updates
-        uses: ./.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder
         with:
           args: --prepare handoff
 
@@ -269,7 +269,7 @@ jobs:
       # git and curl read the AUR repo and the sources here, as builder,
       # who cannot reach the Docker socket that root has in a job container
       - name: Verify checksums
-        uses: ./.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder
         with:
           args: --verify handoff
 
@@ -348,6 +348,10 @@ jobs:
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
         run: |
+          if [[ -z "$AUR_SSH_KEY" ]]; then
+            echo "::error::The secret AUR_SSH_KEY is empty"
+            exit 1
+          fi
           SSH_DIR="/home/builder/.ssh"
           mkdir -m 0700 "$SSH_DIR"
           echo "$AUR_SSH_KEY" > "$SSH_DIR/aur"
@@ -384,7 +388,7 @@ jobs:
       # GPG_KEY_ID comes from Setup GPG, when a key is set. git refuses an
       # empty author name or email in the environment.
       - name: Publish updates
-        uses: ./.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder
         env:
           GIT_AUTHOR_NAME: ${{ secrets.AUR_GIT_NAME || 'aurtomator' }}
           GIT_AUTHOR_EMAIL: ${{ secrets.AUR_GIT_EMAIL || 'aurtomator@users.noreply.github.com' }}
@@ -393,7 +397,7 @@ jobs:
           keep-env: GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL
 
       - name: Update README status table
-        run: sudo -u builder ./scripts/update-readme.sh
+        run: sudo -u builder ./aurtomator/scripts/update-readme.sh
 
       - name: Commit changes via API
         env:
@@ -585,7 +589,7 @@ jobs:
                   "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "*) ;;
                 *) continue ;;
               esac
-              comment=$(bash -c 'source ./scripts/lib.sh && "$@"' _ close_comment "$status_file" "$RUN_URL")
+              comment=$(bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ close_comment "$status_file" "$RUN_URL")
               gh issue close "$number" --comment "$comment"
             done
           done <<<"$open
@@ -634,7 +638,7 @@ jobs:
               echo "Issue already open: $4"
               return 0
             fi
-            body=$(bash -c 'source ./scripts/lib.sh && "$@"' _ "$5" "$6" "$RUN_URL")
+            body=$(bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$5" "$6" "$RUN_URL")
             gh issue create --title "$4" --label "$1" --body "$body" || echo "Warning: could not create issue (issues may be disabled)"
           }
 
@@ -658,7 +662,7 @@ jobs:
                   continue
                 fi
 
-                ISSUE_BODY=$(bash -c 'source ./scripts/lib.sh && failure_issue_body "$@"' _ "$status_file" "$RUN_URL")
+                ISSUE_BODY=$(bash -c 'source ./aurtomator/scripts/lib.sh && failure_issue_body "$@"' _ "$status_file" "$RUN_URL")
 
                 gh issue create \
                   --title "❌ $pkg_name: ${kind//_/ }" \

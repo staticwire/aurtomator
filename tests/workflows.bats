@@ -412,7 +412,7 @@ step_run() {
 }
 
 @test "check-updates: the check job decides the run and executes no PKGBUILD" {
-  run yq '[.jobs.check.steps[] | select(.uses == "./.github/actions/run-as-builder") | .with.args // ""] | @json' "$CHECK_UPDATES"
+  run yq '[.jobs.check.steps[] | select(.uses == "./aurtomator/.github/actions/run-as-builder") | .with.args // ""] | @json' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [ "$output" = '[""]' ]
   run yq '.jobs.check.steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
@@ -472,6 +472,19 @@ run_decide_step() {
   [ "$output" = $'prepare=false\nwork=false' ]
 }
 
+@test "check-updates: the Decide step and publish run update-readme.sh from the aurtomator checkout" {
+  local line="sudo -u builder ./aurtomator/scripts/update-readme.sh"
+  run step_run check Decide
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$line"* ]]
+  run step_run publish "Update README status table"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$line"* ]]
+  run run_blocks "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [[ "${output//"./aurtomator/scripts/"/}" != *"./scripts/"* ]]
+}
+
 @test "check-updates: prepare runs only for outdated packages and decides nothing" {
   run yq '.jobs.prepare.if' "$CHECK_UPDATES"
   [ "$output" = "needs.check.outputs.prepare == 'true'" ]
@@ -494,7 +507,7 @@ BUILDER_ACTION="$GITHUB_DIR/actions/run-as-builder/action.yml"
 # check-all.sh as builder through the run-as-builder action
 builder_steps() {
   yq '.jobs | to_entries[] | .key as $job | .value.steps[] |
-    select(.uses == "./.github/actions/run-as-builder") | $job + "\t" + .name' "$CHECK_UPDATES"
+    select(.uses == "./aurtomator/.github/actions/run-as-builder") | $job + "\t" + .name' "$CHECK_UPDATES"
 }
 
 @test "check-updates: check-all.sh runs only through the run-as-builder action" {
@@ -509,7 +522,7 @@ builder_steps() {
 # builder owns the workspace once check-all.sh ran, so a local action after
 # that step in the same job could run code that builder wrote.
 @test "check-updates: no local action runs after builder in its job" {
-  local job line after
+  local job line after found=0
   for job in $(yq '.jobs | keys | .[]' "$CHECK_UPDATES"); do
     after=0
     run yq ".jobs.$job.steps[] | .uses // \"\"" "$CHECK_UPDATES"
@@ -517,9 +530,14 @@ builder_steps() {
     for line in "${lines[@]}"; do
       echo "$job: $line"
       [[ "$after" -eq 0 || "$line" != ./* ]]
-      [[ "$line" != ./.github/actions/run-as-builder ]] || after=1
+      if [[ "$line" == ./aurtomator/.github/actions/run-as-builder ]]; then
+        after=1
+        found=$((found + 1))
+      fi
     done
   done
+  # All four builder steps, so a path that names no step fails here
+  [ "$found" -eq 4 ]
 }
 
 @test "run-as-builder: takes its inputs through the environment" {
@@ -717,12 +735,12 @@ EOF
 # line, that start with the emoji of the --label it asks for, the first 30
 # unless --limit says otherwise, answers has_issues with $GH_HAS_ISSUES (true
 # by default) or fails it when $GH_API_FAIL is set, and logs every call to
-# $GH_LOG. scripts/lib.sh of the workspace writes the body "body" and logs
-# the function and its arguments to $BODY_LOG. sudo fails.
+# $GH_LOG. aurtomator/scripts/lib.sh of the workspace writes the body "body"
+# and logs the function and its arguments to $BODY_LOG. sudo fails.
 run_issue_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
-  mkdir -p "$ws/.status" "$ws/scripts" "$bin"
-  cat >"$ws/scripts/lib.sh" <<'EOF'
+  mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
+  cat >"$ws/aurtomator/scripts/lib.sh" <<'EOF'
 failure_issue_body() { echo "failure_issue_body $*" >>"$BODY_LOG" && echo body; }
 alert_issue_body() { echo "alert_issue_body $*" >>"$BODY_LOG" && echo body; }
 upstream_issue_body() { echo "upstream_issue_body $*" >>"$BODY_LOG" && echo body; }
@@ -916,13 +934,13 @@ EOF
 # "<number> <title>" per line, whose title starts with the emoji of the
 # --label it asks for, the first 30 unless --limit says otherwise, answers
 # has_issues with $GH_HAS_ISSUES (true by default), fails the list when
-# $GH_FAIL is set and logs every call to $GH_LOG. scripts/lib.sh of the
-# workspace writes the comment "comment" and logs the function and its
-# arguments to $BODY_LOG.
+# $GH_FAIL is set and logs every call to $GH_LOG. aurtomator/scripts/lib.sh
+# of the workspace writes the comment "comment" and logs the function and
+# its arguments to $BODY_LOG.
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
-  mkdir -p "$ws/.status" "$ws/scripts" "$bin"
-  cat >"$ws/scripts/lib.sh" <<'EOF'
+  mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
+  cat >"$ws/aurtomator/scripts/lib.sh" <<'EOF'
 close_comment() { echo "close_comment $*" >>"$BODY_LOG" && echo comment; }
 EOF
   for pair in "$@"; do
@@ -1299,7 +1317,7 @@ EOF
 
 @test "check-updates: verify runs as builder and hands over as prepare does" {
   run yq '.jobs.verify.steps[] | select(.name == "Verify checksums") | .uses + " " + .with.args' "$CHECK_UPDATES"
-  [ "$output" = "./.github/actions/run-as-builder --verify handoff" ]
+  [ "$output" = "./aurtomator/.github/actions/run-as-builder --verify handoff" ]
   [ "$(step_run verify "Hand over")" = "$(step_run prepare "Hand over")" ]
   run yq '[.jobs.verify.steps[].name] | join(",")' "$CHECK_UPDATES"
   [[ "$output" == *"Verify checksums,Hand over,Upload verified handoff"* ]]
@@ -1328,6 +1346,25 @@ EOF
   [ "$output" = ".status" ]
   run yq '.jobs.publish.steps[] | select(.with.name == "verified") | .if' "$CHECK_UPDATES"
   [ "$output" = "needs.verify.result == 'success'" ]
+}
+
+@test "check-updates: Setup AUR SSH fails on an empty key" {
+  local step="$BATS_TEST_TMPDIR/step.sh" bin="$BATS_TEST_TMPDIR/bin" ssh_dir="$BATS_TEST_TMPDIR/ssh" block
+  block=$(step_run publish "Setup AUR SSH")
+  run grep -o -F /home/builder/.ssh <<<"$block"
+  [ "${#lines[@]}" -eq 1 ]
+  printf '%s\n' "${block//"/home/builder/.ssh"/"$ssh_dir"}" >"$step"
+  mkdir -p "$bin"
+  printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
+  chmod +x "$bin/chown"
+  run env AUR_SSH_KEY= PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::The secret AUR_SSH_KEY is empty" ]
+  [ ! -e "$ssh_dir" ]
+  run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ssh_dir/aur")" = "key-text" ]
+  [ -f "$ssh_dir/known_hosts" ]
 }
 
 NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
