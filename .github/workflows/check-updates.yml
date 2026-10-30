@@ -1,20 +1,23 @@
 name: Check AUR Package Updates
 
+# The calling repository is checked out at the workspace root and holds
+# the data. aurtomator is checked out at job.workflow_sha into aurtomator/
+# and holds the code. The image job checks out only the Dockerfile of
+# aurtomator, and the issues job only aurtomator.
 on:
-  schedule:
-    # Every hour at minute 17. GitHub delays scheduled runs at the start of
-    # every hour and drops some of them.
-    - cron: "17 * * * *"
-  workflow_dispatch:
+  workflow_call:
+    secrets:
+      AUR_SSH_KEY:
+        required: false
+      GPG_SIGNING_KEY:
+        required: false
+      AUR_GIT_NAME:
+        required: false
+      AUR_GIT_EMAIL:
+        required: false
 
 permissions:
   contents: read
-
-# Serialize runs so that two of them never push divergent commits to the
-# same AUR repo. A new run waits for the running one to finish.
-concurrency:
-  group: check-updates
-  cancel-in-progress: false
 
 jobs:
   # Reads the pinned Arch image from .github/ci-image/Dockerfile, where
@@ -26,9 +29,23 @@ jobs:
       ref: ${{ steps.read.outputs.ref }}
 
     steps:
+      # With an empty ref, actions/checkout takes the default branch of a
+      # repository other than the one that triggered the run. The run would
+      # then use the code of main, and no step would fail.
+      - name: Check the pin
+        env:
+          SHA: ${{ job.workflow_sha }}
+        run: |
+          if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::job.workflow_sha is not a commit SHA: '$SHA'"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
           sparse-checkout: .github/ci-image
 
@@ -65,6 +82,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+
+      - name: Checkout aurtomator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
           persist-credentials: false
 
       # The runner reads a local action from the workspace when its step
@@ -124,6 +149,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+
+      - name: Checkout aurtomator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
           persist-credentials: false
 
       - name: Download statuses
@@ -219,6 +252,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout aurtomator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
+          persist-credentials: false
+
       - name: Download handoff
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -270,6 +311,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+
+      - name: Checkout aurtomator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
           persist-credentials: false
 
       - name: Download statuses
@@ -476,9 +525,12 @@ jobs:
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed github-cli
 
-      - name: Checkout
+      - name: Checkout aurtomator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
           persist-credentials: false
 
       - name: Download statuses of check

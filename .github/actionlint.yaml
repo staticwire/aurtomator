@@ -1,0 +1,8 @@
+# actionlint 1.7.12 does not know the properties job.workflow_repository
+# and job.workflow_sha. The pull request
+# https://github.com/rhysd/actionlint/pull/707 adds them. The entry goes
+# once a release of actionlint knows them.
+paths:
+  .github/workflows/check-updates.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type'

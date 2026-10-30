@@ -61,14 +61,28 @@ run_blocks() {
   [ "$count" -gt 0 ]
 }
 
+# ci.yml checks out its own commit. A called workflow checks out the pinned
+# commit, so its pin check and the repository and ref of its checkout are
+# left out of the comparison.
 @test "workflows: the image job is the same in every workflow" {
+  local workflow expected count=0
   run yq '.jobs.image' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
   [ "$output" != "null" ]
-  local expected="$output"
-  run yq '.jobs.image' "$GITHUB_DIR/workflows/check-updates.yml"
-  [ "$status" -eq 0 ]
-  [ "$output" = "$expected" ]
+  expected="$output"
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    run yq '.jobs | has("image")' "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "true" ] || continue
+    echo "$workflow"
+    run yq '.jobs.image | del(.steps[] | select(.name == "Check the pin")) |
+      del(.steps[] | select(.uses | test("^actions/checkout@")) | .with | (.repository, .ref))' "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$expected" ]
+    count=$((count + 1))
+  done
+  # ci.yml and at least one called workflow
+  [ "$count" -gt 1 ]
 }
 
 # A pinned image ages, and an old keyring rejects packages signed with a
@@ -106,6 +120,25 @@ run_blocks() {
       }
       END { exit bad }' <<<"$output"
     [ "$status" -eq 0 ]
+  done
+}
+
+@test "workflows: actionlint ignores only the two job.workflow properties" {
+  local config="$GITHUB_DIR/actionlint.yaml" expected key keys
+  run yq '. | keys | join(" ")' "$config"
+  [ "$status" -eq 0 ]
+  [ "$output" = "paths" ]
+  expected=$(cd "$GITHUB_DIR/.." && grep -lF '${{ job.workflow_' .github/workflows/*.yml | sort)
+  [ -n "$expected" ]
+  run yq '.paths | keys | .[]' "$config"
+  [ "$status" -eq 0 ]
+  [ "$(sort <<<"$output")" = "$expected" ]
+  keys=("${lines[@]}")
+  for key in "${keys[@]}"; do
+    echo "$key"
+    run yq -o=json -I=0 ".paths[\"$key\"]" "$config"
+    [ "$status" -eq 0 ]
+    [ "$output" = '{"ignore":["property \"workflow_(repository|sha)\" is not defined in object type"]}' ]
   done
 }
 
@@ -321,11 +354,61 @@ step_run() {
   yq ".jobs.$1.steps[] | select(.name == \"$2\") | .run" "$CHECK_UPDATES"
 }
 
-# GitHub delays scheduled runs at the start of every hour and drops some
-@test "check-updates: runs every hour, off the start of the hour" {
-  run yq '.on.schedule[].cron' "$CHECK_UPDATES"
+@test "check-updates: runs only when called, with the four secrets optional" {
+  run yq -o=json -I=0 '.on' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [[ "$output" =~ ^([1-9]|[1-5][0-9])\ \*\ \*\ \*\ \*$ ]]
+  [ "$output" = '{"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false}}}}' ]
+  run yq '.concurrency' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+}
+
+@test "check-updates: every job checks out aurtomator at the SHA of the called workflow" {
+  local jobs job path repo='${{ job.workflow_repository }}' sha='${{ job.workflow_sha }}'
+  mapfile -t jobs < <(yq '.jobs | keys | .[]' "$CHECK_UPDATES")
+  [ "${#jobs[@]}" -eq 6 ]
+  for job in "${jobs[@]}"; do
+    echo "$job"
+    path=aurtomator
+    [ "$job" != image ] || path=null
+    run yq ".jobs.$job.steps[] | select(.uses | test(\"^actions/checkout@\")) |
+      select(.with.repository == \"$repo\" and .with.ref == \"$sha\" and .with[\"persist-credentials\"] == false) |
+      .with.path" "$CHECK_UPDATES"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$path" ]
+  done
+}
+
+@test "check-updates: check, prepare, verify and publish check out the caller first and aurtomator second" {
+  local job
+  for job in check prepare verify publish; do
+    echo "$job"
+    run yq -o=json -I=0 "[.jobs.$job.steps[] | select(.uses | test(\"^actions/checkout@\")) | .with | [has(\"repository\"), .path]]" "$CHECK_UPDATES"
+    [ "$status" -eq 0 ]
+    [ "$output" = '[[false,null],[true,"aurtomator"]]' ]
+  done
+  run yq -o=json -I=0 '[.jobs.issues.steps[] | select(.uses | test("^actions/checkout@")) | .with | [has("repository"), .path]]' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[[true,"aurtomator"]]' ]
+}
+
+@test "check-updates: the image job checks the pin before its checkout" {
+  local step="$BATS_TEST_TMPDIR/step.sh"
+  run yq -o=json -I=0 '.jobs.image.steps[0] | [.name, .env.SHA]' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = '["Check the pin","${{ job.workflow_sha }}"]' ]
+  run yq '.jobs.image.steps[1].uses' "$CHECK_UPDATES"
+  [[ "$output" == actions/checkout@* ]]
+  step_run image "Check the pin" >"$step"
+  run env SHA= bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::job.workflow_sha is not a commit SHA: ''" ]
+  run env SHA=abc bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::job.workflow_sha is not a commit SHA: 'abc'" ]
+  run env SHA=0123456789abcdef0123456789abcdef01234567 bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "check-updates: the check job decides the run and executes no PKGBUILD" {
