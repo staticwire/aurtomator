@@ -61,7 +61,7 @@ It runs five steps in order:
 4. **secrets**: pushes `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY` to your GitHub repo. It checks the SSH key as the ssh step does, so a key that is missing or has a passphrase stops it before any secret is set.
 5. **verify**: checks identity, SSH access to the AUR, GPG signing and the secrets
 
-The script reads the GitHub repo from the `origin` remote and asks for `owner/repo` when that fails. It saves your answers to `.aurtomator.conf`, also when `verify` finds a problem.
+The script reads the GitHub repo from the `origin` remote and asks for `owner/repo` when that fails. It saves your answers to `.aurtomator.conf` after each step, so a step that fails, and a `verify` that finds a problem, leave the answers given so far for the next run.
 
 ## Identity
 

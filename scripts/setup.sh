@@ -93,7 +93,6 @@ save_config() {
     printf 'GPG_KEY_ID=%s\n' "${GPG_KEY_ID@Q}"
     printf 'AUR_SSH_KEY=%s\n' "${AUR_SSH_KEY@Q}"
   } >"$CONFIG_FILE"
-  ok "Config saved to .aurtomator.conf"
 }
 
 # =============================================================================
@@ -567,13 +566,9 @@ fi
 
 printf "%saurtomator setup%s\n" "$BOLD" "$RESET"
 
-FULL_SETUP=false
-if [[ ${#STEPS[@]} -eq 5 ]]; then
-  FULL_SETUP=true
-fi
-
-# A failed verify still saves the config, so the re-run it suggests has
-# the values of this run
+# Each step is saved as soon as it ends, so a step that fails keeps the
+# answers given before it. A failed verify still saves the config, so the
+# re-run it suggests has the values of this run.
 EXIT_STATUS=0
 for step in "${STEPS[@]}"; do
   case "$step" in
@@ -583,12 +578,7 @@ for step in "${STEPS[@]}"; do
     secrets) setup_secrets ;;
     verify) verify_all || EXIT_STATUS=1 ;;
   esac
-  if [[ "$FULL_SETUP" == "false" ]]; then
-    save_config
-  fi
-done
-
-if [[ "$FULL_SETUP" == "true" ]]; then
   save_config
-fi
+done
+ok "Config saved to .aurtomator.conf"
 exit "$EXIT_STATUS"
