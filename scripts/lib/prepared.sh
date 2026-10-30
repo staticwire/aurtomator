@@ -208,13 +208,15 @@ _asset_pkgrel() {
 # of KDE Frameworks. That last form counts only while it keeps a dot, as a
 # lone major version is too common in other text. One pass from left to
 # right, longest form first, so a replaced part is not matched again: with
-# 5.1.0 -> 5.10.0 the 5.1 at the start of 5.10.0 stays. With
-# pkgver_format, the upstream version inside the version is the last form,
-# as 4215 in 4.4215.
+# 5.1.0 -> 5.10.0 the 5.1 at the start of 5.10.0 stays. A form counts only
+# where it does not continue another number, with no digit or dot before it
+# and no digit after it, so the 0.1 inside 10.1 stays. With pkgver_format,
+# the upstream version inside the version is the last form, as 4215 in
+# 4.4215.
 # Args: $1=line, $2=old version, $3=new version, $4=old upstream version,
 #       $5=new upstream version
 _bump_version() {
-  local rest="$1" old="$2" new="$3" out="" i matched
+  local rest="$1" lead=" $1" old="$2" new="$3" out="" i matched
   if [[ -z "$old" ]]; then
     printf '%s\n' "$rest"
     return 0
@@ -240,10 +242,12 @@ _bump_version() {
     news+=("$5")
   fi
 
+  # lead is the line after a space, so its character at the length of the
+  # part already read is the one before rest
   while [[ -n "$rest" ]]; do
     matched=false
     for i in "${!olds[@]}"; do
-      if [[ "$rest" == "${olds[$i]}"* ]]; then
+      if [[ "${lead:${#1}-${#rest}:1}" != [0-9.] && "$rest" == "${olds[$i]}"* && "${rest:${#olds[$i]}:1}" != [0-9] ]]; then
         out+="${news[$i]}"
         rest="${rest:${#olds[$i]}}"
         matched=true
@@ -511,7 +515,7 @@ check_prepared_srcinfo() {
         if ! _bumped_line "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" &&
           ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
             _name_differs_in_digits "$expected" "$new"; }; then
-          log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $new"
+          log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: ${new#"${new%%[![:space:]]*}"}, expected ${expected#"${expected%%[![:space:]]*}"}"
           return 1
         fi
         group="${key#source}"

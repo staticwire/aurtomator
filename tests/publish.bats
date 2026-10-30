@@ -2782,6 +2782,30 @@ write_srcinfo_sources() {
 }
 
 # A dependency of a fixed version stays on every bump
+# The 0.1 of pkgver after a digit in libbar-10.1, before a digit in
+# libbaz-0.12 and after a dot in libqux-1.0.1
+@test "check_prepared_srcinfo: keeps a version that is part of another number" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 0.1 "https://example.com/demo-0.1.tar.gz" "$H1" \
+    "https://example.com/deps/libbar-10.1.tar.gz" "$H2" "https://example.com/deps/libbaz-0.12.tar.gz" "$H2" \
+    "https://example.com/deps/libqux-1.0.1.tar.gz" "$H2"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 0.2 "https://example.com/demo-0.2.tar.gz" "$H3" \
+    "https://example.com/deps/libbar-10.1.tar.gz" "$H2" "https://example.com/deps/libbaz-0.12.tar.gz" "$H2" \
+    "https://example.com/deps/libqux-1.0.1.tar.gz" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.2
+  [ "$status" -eq 0 ]
+}
+
+# The 2.0 of game-data is ${pkgver%.*} of 2.0.1 as well
+@test "check_prepared_srcinfo: rejects a second source whose version is a form of pkgver" {
+  write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.0.1 \
+    "https://example.com/demo-2.0.1.tar.gz" "$H1" "https://example.com/game-data-2.0.tar.gz" "$H2"
+  write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.1.0 \
+    "https://example.com/demo-2.1.0.tar.gz" "$H3" "https://example.com/game-data-2.0.tar.gz" "$H2"
+  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"line 5 is not the AUR source with the new version: source = https://example.com/game-data-2.0.tar.gz, expected source = https://example.com/game-data-2.1.tar.gz"* ]]
+}
+
 @test "check_prepared_srcinfo: accepts a hashed download that stays next to a source that moves" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.4.0 \
     "https://example.com/demo-1.4.0.tar.gz" "$H1" "https://example.com/deps/libbar-3.2.tar.gz" "$H2"
