@@ -219,10 +219,43 @@ run_blocks() {
   [[ "$output" != *"|| true"* ]]
 }
 
-@test "merge-image: runs only after lint and test" {
+@test "ci: the test job runs no validate step and the validate job calls the reusable workflow" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs.test.steps[] | select(has("run")) | .run' "$ci"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [[ "$output" != *"validate-pkg.sh"* ]]
+  run yq '.jobs.validate.uses' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "./.github/workflows/validate.yml" ]
+  run yq -o=json -I=0 '.jobs.validate.permissions' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"contents":"read"}' ]
+}
+
+@test "ci: the pipeline job calls check-updates for pushes and same-repository pull requests" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs.pipeline.uses' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "./.github/workflows/check-updates.yml" ]
+  run yq '.jobs.pipeline.if' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository" ]
+  run yq -o=json -I=0 '.jobs.pipeline.permissions' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"contents":"write","issues":"write"}' ]
+  run yq '.jobs.validate.secrets' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+  run yq '.jobs.pipeline.secrets' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+}
+
+@test "merge-image: runs only after lint, test, validate and pipeline" {
   run yq '.jobs["merge-image"].needs | sort | join(" ")' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = "lint test" ]
+  [ "$output" = "lint pipeline test validate" ]
 }
 
 @test "merge-image: off unless the variable is true and Dependabot opened the pull request" {

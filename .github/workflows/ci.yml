@@ -87,9 +87,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate package configs
-        run: ./scripts/validate-pkg.sh --all
-
       - name: Run BATS tests with coverage
         run: |
           bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
@@ -104,11 +101,32 @@ jobs:
           files: coverage/coverage.xml
           fail_ci_if_error: false
 
+  # Runs the validator of this commit as a packages repository runs it
+  # from its pin
+  validate:
+    uses: ./.github/workflows/validate.yml
+    permissions:
+      contents: read
+
+  # Runs the update pipeline with aurtomator itself as the packages
+  # repository, where no package exists: prepare, verify and publish are
+  # skipped, and the jobs that run check that the two checkouts, the
+  # action path, the artifacts and the issues job work. A pull request
+  # from a fork gets a read-only token, so the job runs only for pushes
+  # and pull requests from this repository.
+  pipeline:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/check-updates.yml
+    permissions:
+      contents: write
+      issues: write
+
   # Merges a Dependabot pull request that changes only the CI image, after
-  # lint and test passed. Off unless the repository variable
-  # CI_IMAGE_AUTO_MERGE is true.
+  # lint, test, validate and pipeline passed, so the two reusable
+  # workflows ran in the new image first. Off unless the repository
+  # variable CI_IMAGE_AUTO_MERGE is true.
   merge-image:
-    needs: [lint, test]
+    needs: [lint, test, validate, pipeline]
     if: >-
       vars.CI_IMAGE_AUTO_MERGE == 'true' &&
       github.event_name == 'pull_request' &&
@@ -133,5 +151,5 @@ jobs:
             echo "::notice::#$PR changes more than .github/ci-image/Dockerfile and stays open"
             exit 0
           fi
-          # Merges nothing when the branch moved after lint and test
+          # Merges nothing when the branch moved after the checks passed
           gh pr merge "$PR" -R "$REPO" --squash --match-head-commit "$HEAD_SHA"
