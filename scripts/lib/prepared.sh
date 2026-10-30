@@ -4,8 +4,9 @@
 #
 # The job that executes a PKGBUILD holds no secrets, so the files it hands
 # over are untrusted. The job that pushes accepts them only when they differ
-# from the AUR copy in pkgver, pkgrel, checksum values and the value of the
-# asset_var line. None of these checks sources the file.
+# from the AUR copy in pkgver, pkgrel, the checksums as updpkgsums writes
+# them and the value of the asset_var line. None of these checks sources the
+# file.
 #
 # Sourced by lib.sh, after common.sh.
 
@@ -81,12 +82,31 @@ _pkgbuild_parts() {
   ' "$1"
 }
 
+# Print the SKEL lines among the parts in $2 with one SUMS line in place of
+# the checksum arrays: one for each run of consecutive arrays with $1=runs,
+# one for all of them at the place of the first with $1=all
+_merged_skel() {
+  awk -v mode="$1" '
+    !/^SKEL\t/ { next }
+    /^SKEL\tSUMS / { if (!merged) print "SKEL\tSUMS"; merged = 1; next }
+    mode == "runs" { merged = 0 }
+    { print }
+  ' <<<"$2"
+}
+
+# Print the checksum arrays among the parts in $1 whatever their place: a
+# line with the name of each array and a line per checksum, sorted by name,
+# those of arrays of one name in file order
+_sum_arrays() {
+  grep -E $'^(SKEL\tSUMS |SUM\t)' <<<"$1" | sort -s -t $'\t' -k2,2
+}
+
 # Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=expected version,
 #       $4=expected pkgrel (default 1), $5=asset_var of the package, if
 #       any, $6=expected asset value
 # Returns: 0 when the prepared file changes only pkgver (to $3), pkgrel
-#          (to $4), checksum values and the value of its one asset_var line
-#          (to $6), 1 otherwise (reason on stderr)
+#          (to $4), the checksums as updpkgsums writes them and the value of
+#          its one asset_var line (to $6), 1 otherwise (reason on stderr)
 check_prepared_pkgbuild() {
   local version="$3" rel="${4:-1}" asset_var="${5:-}" asset="${6:-}"
   local old_parts new_parts value
@@ -105,11 +125,14 @@ check_prepared_pkgbuild() {
     grep $'^BAD\t' <<<"$new_parts" | cut -f2- >&2
     return 1
   fi
-  if [[ "$(grep $'^SKEL\t' <<<"$old_parts")" != "$(grep $'^SKEL\t' <<<"$new_parts")" ]]; then
+  # updpkgsums writes all checksum arrays in one block at the place of the
+  # first one, and a run without it leaves them where they stand
+  if [[ "$(grep $'^SKEL\t' <<<"$old_parts")" != "$(grep $'^SKEL\t' <<<"$new_parts")" ]] &&
+    [[ "$(_merged_skel all "$old_parts")" != "$(_merged_skel runs "$new_parts")" ]]; then
     log_err "Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"
     return 1
   fi
-  if [[ "$(grep $'^SUM\t' <<<"$old_parts")" != "$(grep $'^SUM\t' <<<"$new_parts")" ]]; then
+  if [[ "$(_sum_arrays "$old_parts")" != "$(_sum_arrays "$new_parts")" ]]; then
     log_err "Prepared PKGBUILD changes the checksum arrays: their names, lengths or SKIP entries differ from the AUR"
     return 1
   fi

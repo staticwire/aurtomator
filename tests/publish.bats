@@ -2355,7 +2355,87 @@ make_unpushable_repo() {
 b2sums=('$H3' '$H4')"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD changes the checksum arrays"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects a new empty checksum array" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')
+sha256sums_aarch64=()"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD changes the checksum arrays"* ]]
+}
+
+# updpkgsums writes all checksum arrays in one block at the place of the
+# first, in the order makepkg -g prints them
+@test "check_prepared_pkgbuild: accepts the checksum arrays updpkgsums writes in one block" {
+  local x86='source_x86_64=("demo-x86_64.bin")' arm='source_aarch64=("demo-aarch64.bin")'
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')
+$x86
+sha256sums_x86_64=('$H1')
+$arm
+sha256sums_aarch64=('$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')
+sha256sums_x86_64=('$H3')
+sha256sums_aarch64=('$H4')
+$x86
+$arm"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_pkgbuild: accepts checksum arrays in the order of makepkg -g" {
+  write_pkgbuild "$OLD" 1.0.0 2 "b2sums=('$H1' '$H2')
+sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')
+b2sums=('$H3' '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+# A run without updpkgsums keeps the layout of the AUR copy
+@test "check_prepared_pkgbuild: accepts checksum arrays that stay apart as in the AUR copy" {
+  local x86='source_x86_64=("git+https://example.com/x86.git")' arm='source_aarch64=("git+https://example.com/arm.git")'
+  local sums="sha256sums=('SKIP' 'SKIP')
+$x86
+sha256sums_x86_64=('SKIP')
+$arm
+sha256sums_aarch64=('SKIP')"
+  write_pkgbuild "$OLD" 1.0.0 2 "$sums"
+  write_pkgbuild "$NEW" 1.1.0 1 "$sums"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_pkgbuild: rejects checksum arrays in two blocks" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')
+b2sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  printf "b2sums=('%s' '%s')\n" "$H3" "$H4" >>"$NEW"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects checksum arrays moved away from the place of the first one" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  sed -i -e '/^sha256sums=/d' -e "1i sha256sums=('$H3' '$H4')" "$NEW"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+}
+
+# bash keeps the last of two arrays of one name
+@test "check_prepared_pkgbuild: rejects a SKIP that moves between two arrays of one name" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('SKIP' '$H2')
+sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')
+sha256sums=('SKIP' '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD changes the checksum arrays"* ]]
 }
 
 @test "check_prepared_pkgbuild: rejects a pkgver other than the expected version" {

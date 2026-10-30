@@ -42,7 +42,7 @@ source_x86_64=("https://example.com/app-${pkgver}-x86_64.tar.gz")
 source_aarch64=("https://example.com/app-${pkgver}-aarch64.tar.gz")
 ```
 
-`updpkgsums` handles arch-specific checksum arrays, and source URL validation covers every `source_<arch>` array. A stable URL pattern is enough.
+`updpkgsums` handles arch-specific checksum arrays and writes all of them in one block at the place of the first one, so a `sha256sums_<arch>` array next to its `source_<arch>` moves into that block on the first update. Source URL validation covers every `source_<arch>` array. A stable URL pattern is enough.
 
 ### VCS packages (-git) with the git-latest strategy
 
