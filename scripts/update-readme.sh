@@ -6,9 +6,13 @@
 #   <!-- BADGES:START --> / <!-- BADGES:END -->     - header badges
 #   <!-- PACKAGES:START --> / <!-- PACKAGES:END --> - package status table
 #
-# Badges auto-detect the repo from git origin and adjust for forks.
-# For public repos, Codecov badge uses tokenless URL.
-# For private repos, Codecov badge links to the upstream aurtomator project.
+# The badge block holds the badges of check-updates.yml and validate.yml,
+# the two workflows a repository calls, and the badge of aurtomator. The
+# workflow badges take the repo from the git origin. Without a GitHub origin
+# the block holds the badge of aurtomator alone.
+#
+# The package block holds the packages badge, the table and the version
+# line of aurtomator.
 #
 # Reads per-package status from .status/ directory (written by check-all.sh).
 #
@@ -80,34 +84,12 @@ if [[ "$has_badges" == true ]]; then
   badges=""
 
   if [[ -n "$repo_url" ]]; then
-    # CI badge, always available
-    badges+="[![Lint & Test](https://github.com/${repo_url}/actions/workflows/ci.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/ci.yml)"
-
-    # Codecov badge: ask the GitHub API (unauthenticated) whether the repo is
-    # public. Without a definite answer, a rate limit for example, the badge
-    # in the README stays, so a public fork does not switch to the badge of
-    # aurtomator for one run.
-    private=$(curl -sfL --max-time 5 "https://api.github.com/repos/${repo_url}" 2>/dev/null |
-      yq -r '.private' 2>/dev/null || true)
-    current_codecov=$(sed -n "/${BADGES_START}/,/${BADGES_END}/p" "$README" |
-      grep -o '\[!\[codecov\]([^)]*)\]([^)]*)' | head -1 || true)
-
-    if [[ "$private" == "false" ]]; then
-      # Public repo: tokenless Codecov badge for this repo
-      badges+=" [![codecov](https://codecov.io/github/${repo_url}/graph/badge.svg)](https://codecov.io/github/${repo_url})"
-    elif [[ "$private" != "true" && -n "$current_codecov" ]]; then
-      badges+=" ${current_codecov}"
-    else
-      # Private repo, or no answer and no badge yet: link to upstream
-      # aurtomator Codecov
-      badges+=" [![codecov](https://codecov.io/github/${AURTOMATOR_UPSTREAM}/graph/badge.svg)](https://codecov.io/github/${AURTOMATOR_UPSTREAM})"
-    fi
+    badges+="[![Check AUR Package Updates](https://github.com/${repo_url}/actions/workflows/check-updates.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/check-updates.yml) "
+    badges+="[![Validate packages](https://github.com/${repo_url}/actions/workflows/validate.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/validate.yml) "
   fi
 
-  # Static badges
-  badges+=" [![Bash](https://img.shields.io/badge/bash-5%2B-green)](https://www.gnu.org/software/bash/)"
-  badges+=" [![AUR](https://img.shields.io/badge/AUR-automation-orange)](https://aur.archlinux.org/)"
-  badges+=" [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)"
+  # Names the project itself, so it does not follow AURTOMATOR_UPSTREAM
+  badges+="[![automated by aurtomator](https://img.shields.io/badge/automated%20by-aurtomator-orange)](https://github.com/staticwire/aurtomator)"
 
   # Replace between badge markers
   {
@@ -231,15 +213,10 @@ fi
 
 # Assemble full table
 table=""
-if [[ -n "$repo_url" ]]; then
-  table+="![Check Updates](https://github.com/${repo_url}/actions/workflows/check-updates.yml/badge.svg)"
-fi
 if [[ -n "$pkg_badge" ]]; then
-  table+=" ${pkg_badge}"
+  table+="${pkg_badge}"$'\n\n'
 fi
-table+="
-
-${table_header}"
+table+="$table_header"
 
 if [[ "$pkg_count" -eq 0 ]]; then
   table+=$(table_row "<em>No packages configured</em>" - - - -)
