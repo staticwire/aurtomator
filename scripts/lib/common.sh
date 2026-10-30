@@ -489,6 +489,16 @@ ere_valid() {
   ((rc != 2))
 }
 
+# Succeeds when grep -P compiles a Perl regex, as github-nightly reads the
+# version out of a release body with it
+# Args: $1=Perl regex
+pcre_valid() {
+  local rc=0
+  # grep exits 2 for a pattern it cannot compile
+  grep -qP -e "$1" </dev/null 2>/dev/null || rc=$?
+  ((rc != 2))
+}
+
 # =============================================================================
 # LOGGING
 # =============================================================================

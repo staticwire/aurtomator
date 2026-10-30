@@ -432,6 +432,9 @@ validate_pkg() {
         elif [[ "$nightly_source" == release_body && -z "$nightly_pattern" ]]; then
           log_err "$file: upstream.version_source release_body needs upstream.version_pattern"
           ((errors++))
+        elif [[ "$nightly_source" == release_body ]] && ! pcre_valid "$nightly_pattern"; then
+          log_err "$file: upstream.version_pattern is not valid PCRE regex: $nightly_pattern"
+          ((errors++))
         fi
         if [[ "$nightly_source" != release_body && -n "$nightly_pattern" ]]; then
           log_err "$file: upstream.version_pattern applies to version_source release_body only"

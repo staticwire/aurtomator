@@ -707,6 +707,19 @@ pkgver_dashes: _"
   [[ "$output" == *"mypkg.yml: upstream.version_source release_body needs upstream.version_pattern"* ]]
 }
 
+# The strategy reads the release body with grep -P, and a pattern it cannot
+# compile gives an empty version on every check
+@test "validate: a version_pattern that grep -P cannot compile rejected" {
+  create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: release_body
+  version_pattern: 'NVIM v(?<x'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mypkg.yml: upstream.version_pattern is not valid PCRE regex: NVIM v(?<x"* ]]
+  [[ "$output" != *"grep:"* ]]
+}
+
 # Without version_source the strategy reads the tag
 @test "validate: version_pattern with another version_source rejected" {
   local source
