@@ -1616,7 +1616,7 @@ make_spaced_project() {
   make_spaced_project
   printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$SPACED/README.md"
   git -C "$SPACED" init -q
-  run "$SPACED/scripts/update-readme.sh"
+  AURTOMATOR_DATA_DIR="$SPACED" run "$SPACED/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   grep -qF '>pkg</a>' "$SPACED/README.md"
 }
@@ -1698,6 +1698,31 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
   grep -q "failed" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: writes the README of AURTOMATOR_DATA_DIR from its packages and origin" {
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$data/packages" "$data/.status"
+  git -C "$data" init -q
+  git -C "$data" remote add origin "https://github.com/owner/data.git"
+  cat >"$data/packages/foo.yml" <<EOF
+name: foo
+strategy: github-release
+upstream:
+  project: owner/repo
+current: '1.0.0'
+EOF
+  # Without this file the package reads as tracking
+  echo "new_version: 3.0.0" >"$data/.status/foo"
+  printf '%s\n' '# test' '<!-- BADGES:START -->' '<!-- BADGES:END -->' \
+    '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$data/README.md"
+
+  AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Badges updated (repo: owner/data)"* ]]
+  grep -qF 'https://github.com/owner/data/actions/workflows/ci.yml/badge.svg' "$data/README.md"
+  grep -q '>foo</a></td><td>1.0.0</td><td nowrap>github-release</td><td nowrap>-</td><td nowrap>.* 3.0.0 available</td></tr>' "$data/README.md"
+  [ ! -e "$TEST_TMPDIR/README.md" ]
 }
 
 # === lib.sh: warn_maintainer_line ===

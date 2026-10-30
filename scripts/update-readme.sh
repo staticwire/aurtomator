@@ -19,8 +19,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 
-readonly README="${AURTOMATOR_DIR}/README.md"
-readonly STATUS_DIR="${AURTOMATOR_DIR}/.status"
+readonly README="${AURTOMATOR_DATA_DIR}/README.md"
+readonly STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
 
 if [[ ! -f "$README" ]]; then
   log_err "README.md not found"
@@ -67,7 +67,7 @@ fi
 # Only a GitHub origin names the repo, so the URL of another remote, or a
 # local path, never reaches the README
 repo_url=""
-origin_url=$(git -C "$AURTOMATOR_DIR" remote get-url origin 2>/dev/null || true)
+origin_url=$(git -C "$AURTOMATOR_DATA_DIR" remote get-url origin 2>/dev/null || true)
 if [[ "$origin_url" =~ [/@]github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+) ]]; then
   repo_url="${BASH_REMATCH[1]%.git}"
 fi
@@ -136,7 +136,7 @@ table_header=$'<table>\n<tr><th>Package</th><th>Version</th><th>Strategy</th><th
 pkg_count=0
 pkg_ok=0
 pkg_fail=0
-for pkg_file in "${AURTOMATOR_DIR}"/packages/*.yml; do
+for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   [[ -f "$pkg_file" ]] || continue
 
   name=$(pkg_get "$pkg_file" .name)
