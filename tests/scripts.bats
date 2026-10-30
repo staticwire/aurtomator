@@ -216,6 +216,33 @@ write_pkgver_pkgbuild() {
   done
 }
 
+# bash also takes a space before the parentheses, the function keyword and
+# an indented header
+@test "audit_pkgbuild: blocks pkgver() under every header bash takes" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local header
+  for header in 'pkgver () {' 'function pkgver {' '  pkgver() {'; do
+    # shellcheck disable=SC2016
+    printf '%s\n' 'pkgname=test' 'pkgver=2.2.0' 'pkgrel=1' 'arch=(any)' \
+      'source=("https://example.com/test-$pkgver.tar.gz")' "sha256sums=('abc123')" \
+      "$header" '  date +%Y%m%d' '}' >"$TEST_TMPDIR/test.PKGBUILD"
+    run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+    echo "$header: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"BLOCKED: pkgver() function detected with strategy 'github-release'."* ]]
+  done
+}
+
+@test "audit_pkgbuild: keeps the errors of sourcing the PKGBUILD out of its output" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  write_pkgver_pkgbuild '  date +%Y%m%d'
+  # shellcheck disable=SC2016
+  printf '%s\n' '_tool=$(aurtomator-no-such-tool)' >>"$TEST_TMPDIR/test.PKGBUILD"
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"aurtomator-no-such-tool"* ]]
+}
+
 @test "audit_pkgbuild: allows pkgver() with git-latest strategy" {
   source "$TEST_TMPDIR/scripts/lib.sh"
   cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'

@@ -103,8 +103,9 @@ audit_pkgbuild() {
 
   # FATAL: pkgver() with incompatible strategy (version mismatch)
   # git-latest and github-nightly are designed for packages with pkgver(),
-  # and a pkgver() that only prints pkgver keeps what sed sets
-  if grep -qE '^pkgver\(\)' "$pkgbuild"; then
+  # and a pkgver() that only prints pkgver keeps what sed sets. bash finds
+  # the function under every header it takes.
+  if bash -c 'source "$1" 2>/dev/null; declare -F pkgver >/dev/null' -- "$pkgbuild"; then
     if [[ "$strategy" != "git-latest" && "$strategy" != "github-nightly" ]] && ! pkgver_prints_pkgver "$pkgbuild"; then
       log_err "BLOCKED: pkgver() function detected with strategy '$strategy'."
       log_err "  pkgver() computes version at build time, sed replacement is meaningless."
