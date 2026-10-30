@@ -175,6 +175,18 @@ _asset_line_value() {
   printf '%s\n' "${values[0]}"
 }
 
+# Print the value of the first line of a PKGBUILD that sets the variable,
+# without the double or single quotes around it, as bash reads it
+# Args: $1=PKGBUILD, $2=variable name
+_plain_value() {
+  local value dq='^"(.*)"$' sq="^'(.*)'$"
+  value=$(sed -n "s/^$2=//p" "$1" | head -1)
+  if [[ "$value" =~ $dq || "$value" =~ $sq ]]; then
+    value="${BASH_REMATCH[1]}"
+  fi
+  printf '%s\n' "$value"
+}
+
 # Print the pkgrel of an update of a package with asset_var: 1 for a new
 # version, the AUR pkgrel plus one for a rebuild, which is a new asset
 # value of the same version, and the AUR pkgrel when the AUR already has
@@ -185,11 +197,11 @@ _asset_line_value() {
 _asset_pkgrel() {
   local old_asset old_rel
   old_asset=$(_asset_line_value "$1" "$2" "AUR PKGBUILD") || return 1
-  if [[ "$3" != "$(sed -n 's/^pkgver=//p' "$1" | head -1)" ]]; then
+  if [[ "$3" != "$(_plain_value "$1" pkgver)" ]]; then
     echo 1
     return 0
   fi
-  old_rel=$(sed -n 's/^pkgrel=//p' "$1" | head -1)
+  old_rel=$(_plain_value "$1" pkgrel)
   if [[ "$4" == "$old_asset" ]]; then
     printf '%s\n' "$old_rel"
     return 0

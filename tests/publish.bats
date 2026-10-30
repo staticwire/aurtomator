@@ -3414,6 +3414,13 @@ write_asset_dirs() {
   [ "$status" -eq 0 ]
 }
 
+@test "check_prepared_files: takes the AUR pkgrel plus one for a rebuild of a quoted pkgver" {
+  write_asset_dirs 2.4.6 "$V246_2" 1 2.4.6 "$V246_3" 2
+  sed -i -e 's/^pkgver=.*/pkgver="2.4.6"/' -e "s/^pkgrel=.*/pkgrel='1'/" "$TEST_TMPDIR/aur/PKGBUILD"
+  run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 2.4.6 drop "" _deb "$V246_3"
+  [ "$status" -eq 0 ]
+}
+
 @test "check_prepared_files: rejects a rebuild that keeps pkgrel" {
   write_asset_dirs 2.4.6 "$V246_2" 1 2.4.6 "$V246_3" 1
   run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 2.4.6 drop "" _deb "$V246_3"
