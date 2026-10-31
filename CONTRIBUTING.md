@@ -1,6 +1,6 @@
 # Contributing to aurtomator
 
-aurtomator is a template repository: you fork it and run your own instance. Upstream contributions are welcome and optional.
+aurtomator holds the scripts, the strategies and the reusable workflows. A user repository, created from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed), holds the package YAMLs and calls the workflows of aurtomator at a pinned SHA, see [docs/SETUP.md](docs/SETUP.md#the-calling-workflows). A run takes the scripts and the strategies from aurtomator at that SHA, so a fix or a new strategy comes here by pull request.
 
 ## Before opening a PR
 
@@ -44,6 +44,8 @@ bats tests/ --recursive
 
 CI runs the suite under bashcov, as `bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive`. bashcov passes `errexit`, `nounset` and `pipefail` to every script a test starts, so a mock has to work under `set -euo pipefail`.
 
+`ci.yml` also calls the reusable workflows of the same commit: the job `validate` calls `validate.yml`, and the job `pipeline` calls `check-updates.yml` with aurtomator itself as the repository of the packages, see [docs/WORKFLOW.md section 6.4](docs/WORKFLOW.md#64-validate-and-pipeline-jobs). A pull request from a fork of aurtomator gets a read-only token, so `pipeline` runs only for a push and for a pull request from a branch of aurtomator.
+
 ## PR workflow
 
 PRs are squash-merged. The squash commit subject on `main` must follow Conventional Commits with a scope, so write the PR title and the commit subjects that way. A PR titled `fix strategy bug` is renamed to something like `fix(strategy): handle empty release list from github-release` before it is merged.
@@ -52,7 +54,7 @@ Keep PRs focused: one logical change per PR. Unrelated refactors go in a separat
 
 ## Releases
 
-aurtomator follows semantic versioning, and `VERSION` holds the version of the code. After a merge to `main`, release-please (`.github/workflows/release-please.yml`) opens or updates a release PR from the commit types since the last release: `fix` raises the patch number, `feat` the minor one, and before 1.0.0 a breaking change raises the minor one too. A `docs`, `ci`, `chore` or `test` commit opens no release PR and goes out with the next release. The release PR writes the new version to `VERSION` and to the version line of the package table in `README.md`. Its merge tags `vX.Y.Z` and publishes the release with the notes GitHub generates from the merged PRs. A line `Release-As: X.Y.Z` in the body of a squash commit sets another number.
+aurtomator follows semantic versioning, and `VERSION` holds the version of the code. After a merge to `main`, release-please (`.github/workflows/release-please.yml`) opens or updates a release PR from the commit types since the last release: `fix` raises the patch number, `feat` the minor one, and before 1.0.0 a breaking change raises the minor one too. A `!` after the type and scope marks a breaking change, as in `feat(workflow)!: run as a reusable workflow`. A `docs`, `ci`, `chore` or `test` commit opens no release PR and goes out with the next release. The release PR writes the new version to `VERSION` and to the version line of the package table in `README.md`. Its merge tags `vX.Y.Z` and publishes the release with the notes GitHub generates from the merged PRs. A line `Release-As: X.Y.Z` in the body of a squash commit sets another number.
 
 The workflow runs release-please with the token of a GitHub App installed on the repository, with read and write access to contents, issues and pull requests. It creates the token from the variable `RELEASE_APP_CLIENT_ID` and the secret `RELEASE_APP_PRIVATE_KEY`. With the workflow token instead, GitHub would run the CI of the release PR only after someone with write access approves it.
 
