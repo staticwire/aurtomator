@@ -39,8 +39,8 @@ readonly PKG_END="<!-- PACKAGES:END -->"
 # Each section is written up to its start marker and from its end marker,
 # each a line of its own. A missing end marker would drop the rest of the
 # README, and a second marker or an end marker above the start would copy
-# the README into itself on every run. The badges are optional, the table
-# is not.
+# the README into itself on every run. The badges are optional, and so is
+# the table while there are no packages to show.
 # Args: $1=start marker, $2=end marker
 # Returns: 1 when the README does not hold each marker once, start first
 check_markers() {
@@ -61,7 +61,13 @@ check_markers() {
   fi
 }
 
-check_markers "$PKG_START" "$PKG_END" || exit 1
+# The README of aurtomator itself has no table, and aurtomator has no packages
+has_table=true
+if ! compgen -G "${AURTOMATOR_DATA_DIR}/packages/*.yml" >/dev/null && ! grep -qxF -e "$PKG_START" -e "$PKG_END" "$README"; then
+  has_table=false
+else
+  check_markers "$PKG_START" "$PKG_END" || exit 1
+fi
 has_badges=false
 if grep -qxF -- "$BADGES_START" "$README"; then
   check_markers "$BADGES_START" "$BADGES_END" || exit 1
@@ -99,6 +105,11 @@ if [[ "$has_badges" == true ]]; then
   } >"${README}.tmp"
   mv "${README}.tmp" "$README"
   log_ok "Badges updated (repo: ${repo_url:-unknown})"
+fi
+
+if [[ "$has_table" == false ]]; then
+  log_info "README.md has no package table and there are no packages to show"
+  exit 0
 fi
 
 # =============================================================================
@@ -225,10 +236,7 @@ else
 fi
 table+=$'\n</table>'
 
-# The version of aurtomator, and the newer release the check run found. The
-# release PR of aurtomator rewrites the version on the line that carries
-# x-release-please-version, so the check run of the upstream repository
-# finds nothing to commit to its protected main.
+# The version of aurtomator, and the newer release the check run found
 version=$(aurtomator_version)
 if [[ -n "$version" ]]; then
   upstream=""
@@ -237,7 +245,6 @@ if [[ -n "$version" ]]; then
   if [[ "$upstream" =~ ^newer:\ ([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
     table+=" ([${BASH_REMATCH[1]} available](https://github.com/${AURTOMATOR_UPSTREAM}/releases/tag/v${BASH_REMATCH[1]}))"
   fi
-  table+=" <!-- x-release-please-version -->"
 fi
 
 # Replace between markers
