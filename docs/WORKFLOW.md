@@ -1277,21 +1277,14 @@ sudo pacman -S --needed git curl go-yq pacman-contrib namcap
 sudo pacman -S --needed bats shellcheck shfmt
 ```
 
-The scripts run from a clone of aurtomator at the tag the calling workflows pin, `vX.Y.Z` in their `# vX.Y.Z` comment, so a local run uses the strategies and the checks of the version a run in CI uses:
+The commands of 7.2 to 7.5 run in your repository through its script `aurtomator.sh`. It runs the scripts of aurtomator at the commit the calling workflows pin, so a local run uses the strategies and the checks of the version a run in CI uses, see [SETUP.md](SETUP.md#the-aurtomatorsh-script).
 
-```bash
-git clone https://github.com/staticwire/aurtomator ~/src/aurtomator
-git -C ~/src/aurtomator checkout vX.Y.Z
-```
-
-After a merge that moves the pin, `git -C ~/src/aurtomator fetch` and `git -C ~/src/aurtomator checkout` with the new tag move the clone to the same release.
-
-The commands of 7.2 to 7.5 run from inside your repository. A script takes the packages, `.status/`, `.aurtomator.conf` and `README.md` from the working directory, or from `AURTOMATOR_DATA_DIR` when it is set, and stops with `AURTOMATOR_DATA_DIR is not a directory: <value>` when that names no directory.
+A script takes the packages, `.status/`, `.aurtomator.conf` and `README.md` from the working directory, or from `AURTOMATOR_DATA_DIR` when it is set, and stops with `AURTOMATOR_DATA_DIR is not a directory: <value>` when that names no directory. `./aurtomator.sh` sets `AURTOMATOR_DATA_DIR` to your repository and `AURTOMATOR_RUNNER` to the path it was run by. When `AURTOMATOR_RUNNER` is set, the commands that `setup.sh` prints start with it, as `./aurtomator.sh setup verify` does.
 
 ### 7.2 Check a single package
 
 ```bash
-~/src/aurtomator/scripts/check-update.sh my-package
+./aurtomator.sh check-update my-package
 ```
 
 The log goes to stderr. When an update is available, the new version is printed on stdout:
@@ -1312,7 +1305,7 @@ When the package is up to date, stdout stays empty:
 ### 7.3 Dry-run an update
 
 ```bash
-~/src/aurtomator/scripts/update-pkg.sh my-package 2.0.0 --dry-run
+./aurtomator.sh update-pkg my-package 2.0.0 --dry-run
 ```
 
 It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `.SRCINFO`, prints the PKGBUILD diff and does not push.
@@ -1320,7 +1313,7 @@ It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `
 ### 7.4 Push an update
 
 ```bash
-~/src/aurtomator/scripts/update-pkg.sh my-package 2.0.0
+./aurtomator.sh update-pkg my-package 2.0.0
 ```
 
 It runs the full cycle, including `git push` to the AUR with your SSH key.
@@ -1329,13 +1322,13 @@ It runs the full cycle, including `git push` to the AUR with your SSH key.
 
 ```bash
 # Check only
-~/src/aurtomator/scripts/check-all.sh
+./aurtomator.sh check-all
 
 # Check and push updates
-~/src/aurtomator/scripts/check-all.sh --update
+./aurtomator.sh check-all --update
 
 # Check and dry-run updates
-~/src/aurtomator/scripts/check-all.sh --update --dry-run
+./aurtomator.sh check-all --update --dry-run
 ```
 
 The last line is a summary:

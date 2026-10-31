@@ -2,13 +2,13 @@
 #
 # setup.sh - First-time aurtomator configuration
 #
-# Usage, from inside your packages repository:
-#   cd <your packages repository> && <clone of aurtomator>/scripts/setup.sh   # full setup (all steps)
-#   setup.sh identity     # git author name/email only
-#   setup.sh ssh          # SSH key for AUR only
-#   setup.sh gpg          # GPG signing key only
-#   setup.sh secrets      # GitHub Secrets only
-#   setup.sh verify       # verify everything works
+# Usage, in your packages repository:
+#   ./aurtomator.sh setup              # full setup (all steps)
+#   ./aurtomator.sh setup identity     # git author name/email only
+#   ./aurtomator.sh setup ssh          # SSH key for AUR only
+#   ./aurtomator.sh setup gpg          # GPG signing key only
+#   ./aurtomator.sh setup secrets      # GitHub Secrets only
+#   ./aurtomator.sh setup verify       # verify everything works
 #
 # Options:
 #   --git-name <name>         Git author name for AUR commits
@@ -21,6 +21,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AURTOMATOR_DIR="${AURTOMATOR_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+
+# The command that the printed commands start with. The script
+# aurtomator.sh of the template sets AURTOMATOR_RUNNER to the path it was
+# run by.
+SETUP_CMD="$0"
+if [[ -n "${AURTOMATOR_RUNNER:-}" ]]; then
+  SETUP_CMD="$AURTOMATOR_RUNNER setup"
+fi
 
 # The data root, resolved as in lib/common.sh, which this script does not
 # source. The variable is set last, so the message names the value as the
@@ -165,7 +173,7 @@ check_ssh_key() {
     printf "\n  CI uses the key without a prompt. Remove the passphrase from a copy:\n"
     printf "    cp %s %s-ci\n" "$AUR_SSH_KEY" "$AUR_SSH_KEY"
     printf "    ssh-keygen -p -N '' -f %s-ci\n" "$AUR_SSH_KEY"
-    printf "    %s ssh --ssh-key %s-ci\n\n" "$0" "$AUR_SSH_KEY"
+    printf "    %s ssh --ssh-key %s-ci\n\n" "$SETUP_CMD" "$AUR_SSH_KEY"
     return 1
   else
     fail "Not a valid private key: $AUR_SSH_KEY"
@@ -376,7 +384,7 @@ setup_secrets() {
       gpg_source="copy"
     elif gpg_key_has_passphrase "$GPG_KEY_ID"; then
       warn "GPG key $GPG_KEY_ID has a passphrase, GPG_SIGNING_KEY not set"
-      warn "Run $0 gpg secrets to make a passphrase-free copy"
+      warn "Run $SETUP_CMD gpg secrets to make a passphrase-free copy"
     else
       gpg_source="key"
     fi
@@ -517,10 +525,14 @@ verify_all() {
 
   if [[ "$errors" -eq 0 ]]; then
     printf "\n  %s%sReady.%s Add your first package:\n" "$GREEN" "$BOLD" "$RESET"
-    printf "    cp %s/packages/example.yml.sample %s/packages/<name>.yml\n\n" "$AURTOMATOR_DIR" "$AURTOMATOR_DATA_DIR"
+    if [[ -n "${AURTOMATOR_RUNNER:-}" ]]; then
+      printf "    %s sample > %s/packages/<name>.yml\n\n" "$AURTOMATOR_RUNNER" "$AURTOMATOR_DATA_DIR"
+    else
+      printf "    cp %s/packages/example.yml.sample %s/packages/<name>.yml\n\n" "$AURTOMATOR_DIR" "$AURTOMATOR_DATA_DIR"
+    fi
   else
     printf "\n  %s%s%d issue(s) found.%s Fix and re-run:\n" "$YELLOW" "$BOLD" "$errors" "$RESET"
-    printf "    %s verify\n\n" "$0"
+    printf "    %s verify\n\n" "$SETUP_CMD"
     return 1
   fi
 }
@@ -563,7 +575,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "Unknown option: $1 (see $0 --help)" >&2
+      echo "Unknown option: $1 (see $SETUP_CMD --help)" >&2
       exit 1
       ;;
   esac
