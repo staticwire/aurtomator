@@ -89,7 +89,7 @@ if [[ "$has_badges" == true ]]; then
   fi
 
   # Names the project itself, so it does not follow AURTOMATOR_UPSTREAM
-  badges+="[![automated by aurtomator](https://img.shields.io/badge/automated%20by-aurtomator-orange)](https://github.com/staticwire/aurtomator)"
+  badges+="[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)"
 
   # Replace between badge markers
   {
