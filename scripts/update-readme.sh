@@ -6,7 +6,7 @@
 #   <!-- BADGES:START --> / <!-- BADGES:END -->     - header badges
 #   <!-- PACKAGES:START --> / <!-- PACKAGES:END --> - package table
 #
-# The badge block holds the badges of check-updates.yml and validate.yml,
+# The badge block holds the badges of validate.yml and check-updates.yml,
 # the two workflows a repository calls, and the badge of aurtomator. The
 # workflow badges take the repo from the git origin. Without a GitHub origin
 # the block holds the badge of aurtomator alone.
@@ -90,8 +90,8 @@ if [[ "$has_badges" == true ]]; then
   badges=""
 
   if [[ -n "$repo_url" ]]; then
-    badges+="[![Check AUR Package Updates](https://github.com/${repo_url}/actions/workflows/check-updates.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/check-updates.yml) "
     badges+="[![Validate packages](https://github.com/${repo_url}/actions/workflows/validate.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/validate.yml) "
+    badges+="[![Check AUR Package Updates](https://github.com/${repo_url}/actions/workflows/check-updates.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/check-updates.yml) "
   fi
 
   # Names the project itself, so it does not follow AURTOMATOR_UPSTREAM
