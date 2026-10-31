@@ -15,9 +15,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: aurtomator version or commit SHA
-      description: Tagged release or short SHA of the commit you are running.
-      placeholder: "v0.2.2 or abc1234"
+      label: aurtomator version
+      description: "The version your calling workflows pin, from the `# vX.Y.Z` comment after the SHA."
+      placeholder: "v0.8.0"
     validations:
       required: true
 
@@ -37,7 +37,7 @@ body:
     attributes:
       label: Workflow run URL
       description: If this is a CI-related bug, link to the failing workflow run.
-      placeholder: "https://github.com/<you>/<fork>/actions/runs/1234567890"
+      placeholder: "https://github.com/<you>/<repository>/actions/runs/1234567890"
 
   - type: input
     id: strategy

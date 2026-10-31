@@ -617,7 +617,7 @@ jobs:
           [[ -d "$STATUS_DIR" ]] || exit 0
 
           # gh issue list fails in a repository with Issues turned off. A
-          # fork like that gets a notice, and any other failure of the
+          # repository like that gets a notice, and any other failure of the
           # list still fails the step.
           if grep -qsE '^(check_failed|update_failed|held|newer):' "$STATUS_DIR"/* || [[ -s "$STATUS_DIR/_alerts" ]]; then
             has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
