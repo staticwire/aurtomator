@@ -8,6 +8,10 @@
 4. [Update Process](#4-update-process)
 5. [CI Workflow: check-updates.yml](#5-ci-workflow-check-updatesyml)
 6. [CI Quality Gate: ci.yml](#6-ci-quality-gate-ciyml)
+   - [6.1 Lint job](#61-lint-job)
+   - [6.2 Test job](#62-test-job)
+   - [6.3 CI image updates](#63-ci-image-updates)
+   - [6.4 Validate and pipeline jobs](#64-validate-and-pipeline-jobs)
 7. [Local Testing](#7-local-testing)
 8. [Writing Custom Strategies](#8-writing-custom-strategies)
 
@@ -17,9 +21,12 @@ aurtomator bumps the version of AUR packages you already maintain. It does **not
 
 ### End-to-end flow
 
+A run involves two repositories. Your repository, created from the template `staticwire/aurtomator-seed`, holds the package YAMLs, the README with the package table and two calling workflows, `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`. aurtomator holds the scripts, the strategies and the reusable workflows `check-updates.yml`, `notify-failure.yml` and `validate.yml`, and the calling workflows run them at the SHA they pin, see [5.1](#51-trigger). A run pushes the new versions to the AUR and commits the changed package YAMLs and README to your repository.
+
 ```mermaid
 flowchart TD
-    A[Schedule / manual trigger] --> K[check job: read-only token, no PKGBUILD]
+    A[your repository: calling workflow, on schedule or by hand] --> A2[aurtomator at the pinned SHA: reusable check-updates.yml]
+    A2 --> K[check job: read-only token, no PKGBUILD]
     K --> B[check-all.sh]
     B --> C{for each package}
     C --> D[check-update.sh]
@@ -51,7 +58,7 @@ flowchart TD
     R --> R2[publish-pkg.sh: check the prepared files against the AUR copy]
     R2 --> R3[git commit + push to AUR]
     R3 --> U[update-readme.sh]
-    U --> L[commit via GitHub API]
+    U --> L[commit to your repository via GitHub API]
     L --> I[issues job: issues token, no secrets, every run]
     I --> N[close resolved issues, open new ones]
     N --> O[done]
@@ -1007,14 +1014,21 @@ A download saved under a name without the value, as in `${pkgname}-${pkgver}-amd
 
 ### 5.1 Trigger
 
-The workflow runs every hour at minute 17 (`cron: "17 * * * *"`) and by hand through `workflow_dispatch`. GitHub delays scheduled runs at the start of every hour and drops some of them when the load is high, so the schedule avoids minute 0. The `check-updates` concurrency group serializes runs: a new run waits for the running one.
+`check-updates.yml` of aurtomator runs only when another workflow calls it: its trigger is `on: workflow_call`. It takes no inputs and declares the secrets `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME` and `AUR_GIT_EMAIL`, each with `required: false`. Only `publish` reads them, and it stops on an empty `AUR_SSH_KEY`, see [5.3](#53-steps).
+
+The calling workflow `.github/workflows/check-updates.yml` of your repository, which [SETUP.md](SETUP.md#the-calling-workflows) shows in full, carries the trigger: every hour at minute 17 (`cron: "17 * * * *"`) and by hand through `workflow_dispatch`. GitHub delays scheduled runs at the start of every hour and drops some of them when the load is high, so the schedule avoids minute 0. Its job `check-updates` calls the reusable file at the pinned SHA and passes the four secrets by name. The concurrency group `check-updates`, with `cancel-in-progress: false`, serializes runs: a new run waits for the running one. The calling workflow sets the group at its workflow level, so it covers the `notify` job of [5.7](#57-failed-runs) too.
+
+The `pipeline` job of `ci.yml` calls the same file in aurtomator itself, see [6.4](#64-validate-and-pipeline-jobs).
 
 ### 5.2 Permissions and container
 
-The workflow has five jobs after a short `image` job. `image` reads the image from `.github/ci-image/Dockerfile`: `archlinux:base-devel`, pinned by digest, so a new image on Docker Hub reaches the jobs with the secrets only through a reviewed commit. Dependabot updates the digest once a month with a pull request, and `ci.yml` runs the tests in the new image before the merge, see [6.3](#63-ci-image-updates). The five jobs run in that image on `ubuntu-latest`, `issues` with a 10-minute timeout and the others with 30 minutes, and `vercmp` from pacman, which `check-all.sh` requires, is the reason `check`, `verify` and `publish` need Arch too. Every install step upgrades `archlinux-keyring` before the system, because a pinned image ages and an old keyring rejects packages signed with a newer packager key. `makepkg` refuses to run as root, so the steps that touch packages in `prepare` and `publish` run as a `builder` user, and `check` runs the strategies as `builder` as well. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`. `verify` executes no PKGBUILD and runs `check-all.sh` as `builder` too.
+A run checks out two repositories. Every job checks out aurtomator at `job.workflow_sha`, the commit of the workflow file that defines the job, which for a job of `check-updates.yml` is the SHA the calling workflow pins. `image` takes a sparse checkout of `.github/ci-image` into the root of the workspace. The other jobs take the whole repository into `aurtomator/`, and `check`, `prepare`, `verify` and `publish` first check out your repository into the root of the workspace. Every step runs in the root of the workspace, so the scripts in `aurtomator/` take the packages, the README and `.status/` from your repository, see [7.1](#71-prerequisites). Inside the called workflow, the `github` context is that of the calling workflow: `github.repository` names your repository, `github.ref_name` the branch of the run, and `github.token` is the token of your repository, with the permissions below.
+
+The workflow has five jobs after a short `image` job. `image` reads the image from `.github/ci-image/Dockerfile` of aurtomator at `job.workflow_sha`: `archlinux:base-devel`, pinned by digest, so a new image on Docker Hub reaches the jobs with the secrets only through a reviewed commit of aurtomator and a move of the pin. Dependabot updates the digest in aurtomator once a month with a pull request, and `ci.yml` runs the tests in the new image before the merge, see [6.3](#63-ci-image-updates). The five jobs run in that image on `ubuntu-latest`, `issues` with a 10-minute timeout and the others with 30 minutes, and `vercmp` from pacman, which `check-all.sh` requires, is the reason `check`, `verify` and `publish` need Arch too. Every install step upgrades `archlinux-keyring` before the system, because a pinned image ages and an old keyring rejects packages signed with a newer packager key. `makepkg` refuses to run as root, so the steps that touch packages in `prepare` and `publish` run as a `builder` user, and `check` runs the strategies as `builder` as well. `builder` has no `sudo` rights: the steps run as root and switch to `builder` with `sudo -u builder`. `verify` executes no PKGBUILD and runs `check-all.sh` as `builder` too.
 
 | Job | Permissions | Secrets |
 |-----|-------------|---------|
+| `check-updates` of your calling workflow | `contents: write` and `issues: write`, the most any job below gets | passes the four secrets by name |
 | `image` | `contents: read` | none |
 | `check` | `contents: read` | none |
 | `prepare` | `contents: read` | none |
@@ -1022,75 +1036,87 @@ The workflow has five jobs after a short `image` job. `image` reads the image fr
 | `publish` | `contents: write` for the status commit | `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` |
 | `issues` | `contents: read`, `issues: write` for the issues of [5.6](#56-issues) | none |
 
+The calling job sets the permissions of the token for the whole call, and a job of the called workflow can only lower them. `check-updates.yml` sets `contents: read` at the workflow level, and `publish` and `issues` set the blocks above. A calling job that grants less than a job requests makes GitHub reject the calling workflow before any job starts, see [SETUP.md](SETUP.md#invalid-workflow-file-a-nested-job-requests-more-permissions).
+
 `check` decides the run. `prepare` and `verify` run only when a package has a new version. `publish` runs for a new version and also for a change in the status table of `README.md`. It runs after a failure of `prepare` or `verify` as well: then it publishes nothing, and every package with a new version gets `update_failed`. In most hours nothing changes, and all three are skipped. `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs.
 
 ### 5.3 Steps
 
-Every job checks out the repository with **Checkout:** `actions/checkout`, pinned by commit SHA like every action in this repository, with `persist-credentials: false`, so the workflow token is not written to `.git/config`. In `image` it is the first step. The five jobs after it install their packages first and check out after that. All of them but `issues` install `git`. The workflow never pushes to GitHub with git: the status commit goes through the API.
+Every checkout uses `actions/checkout`, pinned by commit SHA like every action in aurtomator, with `persist-credentials: false`, so the workflow token is not written to `.git/config`. **Checkout** takes your repository at the commit of the run into the root of the workspace, and **Checkout aurtomator** takes `job.workflow_repository` at `job.workflow_sha` into `aurtomator/`. Your repository comes first: its checkout owns the root of the workspace, and `aurtomator/` is a directory inside it. In `image`, the step **Checkout** takes a sparse checkout of `.github/ci-image` of aurtomator instead, after **Check the pin**. The five jobs after it install their packages first and check out after that. All of them but `issues` install `git`. The workflow never pushes to GitHub with git: the status commit goes through the API.
 
 The four steps that run `check-all.sh` as `builder` stop workflow commands while it runs. Its output carries text that a PKGBUILD, the AUR or an upstream chose: the error text a git server sends, a line of a prepared `.SRCINFO` that `verify` refuses. The runner takes a line as a workflow command when it starts with `::` after leading whitespace, or when it holds `##[` anywhere. A line `::add-mask::true` makes the runner skip the outputs `prepare` and `work` of `check`, so no job after `check` runs. Root prints `::stop-commands::` with a token of 32 hex digits from `/dev/urandom` before the run and `::<token>::` after it, and the runner takes no command in between. The token stays in a variable of root's shell, so `builder` cannot print it. The output goes through a pipe to `cat`, which ends only when no process of `builder` holds the pipe, so nothing `builder` prints comes after the token. The steps run in bash with `pipefail` and exit with the status of `check-all.sh`.
 
-The four steps use the composite action `.github/actions/run-as-builder`. It adds the workspace to `safe.directory` of root's git, gives the workspace to `builder` and runs `check-all.sh` with the words of its input `args`. Its input `keep-env` names the variables of the step that `sudo --preserve-env` passes to `builder`. The runner reads a local action from the workspace when its step starts, and `builder` owns the workspace once `check-all.sh` ran, so no local action follows `run-as-builder` in a job. Hand over runs after `check-all.sh` in `prepare` and in `verify`, so it stays a step of the workflow: `prepare` defines it with the YAML anchor `&hand-over`, and `verify` repeats it with the alias `*hand-over`.
+The four steps use the composite action `.github/actions/run-as-builder` of aurtomator, as `uses: ./aurtomator/.github/actions/run-as-builder`: the runner resolves a `./` path from the root of the workspace. The action adds the workspace to `safe.directory` of root's git, gives the workspace to `builder`, both checkouts included, and runs `scripts/check-all.sh` of its own checkout with the words of its input `args`. It finds that checkout from `GITHUB_ACTION_PATH`, the directory of its `action.yml`. Its input `keep-env` names the variables of the step that `sudo --preserve-env` passes to `builder`. The runner reads a local action from the workspace when its step starts, and `builder` owns the workspace once `check-all.sh` ran, so no local action follows `run-as-builder` in a job. Hand over runs after `check-all.sh` in `prepare` and in `verify`, so it stays a step of the workflow: `prepare` defines it with the YAML anchor `&hand-over`, and `verify` repeats it with the alias `*hand-over`.
 
 `image`:
 
-1. **Checkout:** `.github/ci-image` only.
-2. **Read image:** takes the `FROM` line of `.github/ci-image/Dockerfile` and fails unless it is `archlinux:base-devel@sha256:` with a 64-character digest.
+1. **Check the pin:** fails with `job.workflow_sha is not a commit SHA` unless `job.workflow_sha` is 40 lowercase hex digits. With an empty `ref`, `actions/checkout` takes the default branch of a repository other than the one that triggered the run, so an empty value would run the code of `main` of aurtomator, and no other step would fail. Every other job needs `image`, so this step stops the whole run.
+2. **Checkout:** a sparse checkout of `.github/ci-image` of aurtomator, at `job.workflow_sha`.
+3. **Read image:** takes the `FROM` line of `.github/ci-image/Dockerfile` and fails unless it is `archlinux:base-devel@sha256:` with a 64-character digest.
 
 `check`:
 
 1. **Install dependencies:** `sudo git go-yq`, and the `builder` user.
-2. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
-3. **Decide:** sets the output `prepare` when a status is `new_version`, `available_downgrade` or `new_build`. It runs `update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in the status table.
-4. **Upload statuses:** uploads `.status/` as the `checked` artifact with a retention of 1 day.
+2. **Checkout:** your repository.
+3. **Checkout aurtomator:** into `aurtomator/`.
+4. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
+5. **Decide:** sets the output `prepare` when a status is `new_version`, `available_downgrade` or `new_build`. It runs `./aurtomator/scripts/update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in the status table.
+6. **Upload statuses:** uploads `.status/` as the `checked` artifact with a retention of 1 day.
 
 `prepare`:
 
 1. **Install dependencies:** `sudo git openssh namcap jq go-yq pacman-contrib`, and the `builder` user.
-2. **Download statuses:** the `checked` artifact to `.status/`.
-3. **Prepare updates:** gives the workspace to `builder` and runs `check-all.sh --prepare handoff` as `builder`, without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token stays in `check`. Workflow commands are stopped while it runs.
-4. **Hand over:** code from a PKGBUILD has run in the workspace by now, so the step runs nothing from it. A process started by a PKGBUILD can outlive its step, so the step kills every process whose effective or real user is `builder` and waits up to 30 seconds for them to end. A zombie does not count: it runs nothing, and pid 1 of a job container never reaps one. A process that is still running after that fails the step, and so does a process list that `ps` cannot produce. Only after that does root copy the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
-5. **Upload handoff:** uploads `upload/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
+2. **Checkout:** your repository.
+3. **Checkout aurtomator:** into `aurtomator/`.
+4. **Download statuses:** the `checked` artifact to `.status/`.
+5. **Prepare updates:** gives the workspace to `builder` and runs `check-all.sh --prepare handoff` as `builder`, without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token stays in `check`. Workflow commands are stopped while it runs.
+6. **Hand over:** code from a PKGBUILD has run in the workspace by now, so the step runs nothing from it. A process started by a PKGBUILD can outlive its step, so the step kills every process whose effective or real user is `builder` and waits up to 30 seconds for them to end. A zombie does not count: it runs nothing, and pid 1 of a job container never reaps one. A process that is still running after that fails the step, and so does a process list that `ps` cannot produce. Only after that does root copy the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
+7. **Upload handoff:** uploads `upload/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
 
 `verify`:
 
 1. **Install dependencies:** `sudo git jq go-yq`, and the `builder` user.
-2. **Download handoff:** the `handoff` artifact to `handoff/`.
-3. **Verify checksums:** gives the workspace to `builder` and runs `check-all.sh --verify handoff` as `builder`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
-4. **Hand over:** the same step as in `prepare`, through the alias `*hand-over`.
-5. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
+2. **Checkout:** your repository.
+3. **Checkout aurtomator:** into `aurtomator/`.
+4. **Download handoff:** the `handoff` artifact to `handoff/`.
+5. **Verify checksums:** gives the workspace to `builder` and runs `check-all.sh --verify handoff` as `builder`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
+6. **Hand over:** the same step as in `prepare`, through the alias `*hand-over`.
+7. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
 
 `publish`:
 
 1. **Install dependencies:** `sudo git github-cli openssh gnupg jq go-yq`, and the `builder` user.
-2. **Download statuses:** the `checked` artifact to `.status/`.
-3. **Download verified handoff:** the `verified` artifact to `handoff/`, when `verify` ran.
-4. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
-5. **Setup AUR SSH:** writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. When the AUR changes its host key, update the key in `check-updates.yml`.
-6. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
-7. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
-8. **Update README status table:** runs `update-readme.sh` as `builder`.
-9. **Commit changes via API:** see [5.5](#55-verified-commit).
-10. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
-11. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
+2. **Checkout:** your repository.
+3. **Checkout aurtomator:** into `aurtomator/`.
+4. **Download statuses:** the `checked` artifact to `.status/`.
+5. **Download verified handoff:** the `verified` artifact to `handoff/`, when `verify` ran.
+6. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
+7. **Setup AUR SSH:** fails with `The secret AUR_SSH_KEY is empty` when the secret is empty or the calling workflow does not pass it. Otherwise it writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. The host key is part of `check-updates.yml` of aurtomator, so a new host key of the AUR reaches a run through a release and a move of the pin.
+8. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
+9. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
+10. **Update README status table:** runs `./aurtomator/scripts/update-readme.sh` as `builder`.
+11. **Commit changes via API:** see [5.5](#55-verified-commit).
+12. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
+13. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
 
-Step 9 runs as root with `GH_TOKEN` set to the workflow token, `github.token`. Steps 10 and 11 run as root without it.
+Step 11 runs as root with `GH_TOKEN` set to the workflow token, `github.token`. Steps 12 and 13 run as root without it.
 
 `issues`:
 
-1. **Install dependencies:** `github-cli`. The image has no git, so the job sets `GH_REPO` to the repository for `gh`.
-2. **Download statuses of check:** the `checked` artifact to `.status/`, when `publish` was skipped.
-3. **Download statuses of publish:** the `published` artifact to `.status/`, when `publish` ran.
-4. **Close resolved issues:** see [5.6](#56-issues).
-5. **Create issues:** see [5.6](#56-issues).
+1. **Install dependencies:** `github-cli`. The image has no git, so the job sets `GH_REPO` to your repository for `gh`.
+2. **Checkout aurtomator:** into `aurtomator/`. The job reads no file of your repository, so it does not check it out. Without git in the image, `actions/checkout` downloads the files through the REST API.
+3. **Download statuses of check:** the `checked` artifact to `.status/`, when `publish` was skipped.
+4. **Download statuses of publish:** the `published` artifact to `.status/`, when `publish` ran.
+5. **Close resolved issues:** see [5.6](#56-issues).
+6. **Create issues:** see [5.6](#56-issues).
 
-Steps 4 and 5 run as root with `GH_TOKEN` set to the workflow token. No other user runs code in the workspace of this job, so root writes the bodies with `scripts/lib/issue.sh`.
+Steps 5 and 6 run as root with `GH_TOKEN` set to the workflow token. No other user runs code in the workspace of this job, so root writes the bodies with `scripts/lib/issue.sh` of `aurtomator/`.
 
 ### 5.4 README update
 
 `update-readme.sh` rewrites two blocks of `README.md`:
 
-1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: CI, Codecov and static badges for the repository in `origin`. A public repository gets its own tokenless Codecov badge, and a private one links the upstream aurtomator badge. When the API gives no clear answer, a rate limit for example, the Codecov badge already in the README stays. A README without one then gets the upstream badge.
+1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: the badges `Check AUR Package Updates` and `Validate packages`, the status of `check-updates.yml` and `validate.yml` in the repository in `origin`, and the badge `automated by aurtomator`, which links to aurtomator. Without a GitHub `origin`, the block holds the last badge alone. The badge URLs name the two files, so the calling workflows keep those names.
 2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
 
 The badges are optional. Each marker must be a line of its own, once, with the start marker above the end marker. The script checks this for the table, and for the badges when their start marker is there, and stops before it writes anything otherwise. A line that only quotes a marker in its text is left as it is.
@@ -1117,7 +1143,7 @@ The badges are optional. Each marker must be a line of its own, once, with the s
 | `.status/_error_count` | `0`                              | Total error count of the run             |
 | `.status/_alerts`      | `<name>`, `hold` or `notice`, the note, split by tabs | One line for each alert that fired, see [4.5](#45-update-alerts) |
 | `.status/_assets`      | `<name>` and the asset value, split by a tab | One line for each value found, see [4.6](#46-values-from-release-asset-names) |
-| `.status/_upstream`    | `newer: 0.7.0` or `current: 0.6.0` | The latest aurtomator release against `VERSION`, see [5.8](#58-version-of-aurtomator) |
+| `.status/_upstream`    | `newer: 0.7.0` or `current: 0.6.0` | The latest aurtomator release against `VERSION` at the pin, see [5.8](#58-version-of-aurtomator) |
 
 #### Packages badge
 
@@ -1143,12 +1169,12 @@ The table is HTML, since a Markdown table cell takes no attributes. GitHub keeps
 
 A `git push` from the workflow would show as unverified, so the step commits through the GitHub Git Data API:
 
-1. List the changed tracked files with `git diff --name-only -z`, and stop when there is none. The job writes only `README.md` and `packages/<package-name>.yml`, so a change to any other tracked file fails the step and nothing is committed.
+1. List the changed tracked files with `git diff --name-only -z`, and stop when there is none. The checkout in `aurtomator/` is untracked in your repository and is not listed. The job writes only `README.md` and `packages/<package-name>.yml`, so a change to any other tracked file fails the step and nothing is committed.
 2. Read the branch head and its tree. A head other than the commit the job checked out means a commit was pushed during the run. The step then lists the tree of the new head, and when a changed file differs there from the checked-out commit, or is gone, it prints a notice and commits nothing, because the tree of step 3 replaces each file as a whole and would drop that change. The next run starts from the new head and writes the statuses again. A package that this run pushed to the AUR keeps its old `last_updated`: the next run finds the version in the AUR and writes only `current`. When the pushed commits changed none of these files, the step commits on the new head.
 3. Create a blob for every changed file, a tree on the base tree, and a commit.
 4. Move the branch ref with `force=false`.
 
-The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting `ci.yml`. GitHub marks the commit as verified because the Actions bot creates it through the API.
+The step commits to `github.repository` on `github.ref_name`, your repository and the branch of the run, with the `contents: write` that the calling job grants. The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting the workflows that run on a push: the calling `validate.yml` in your repository, `ci.yml` in aurtomator. GitHub marks the commit as verified because the Actions bot creates it through the API.
 
 ### 5.6 Issues
 
@@ -1165,23 +1191,23 @@ An alert opens an issue as well, see [4.5](#45-update-alerts). Its notes come fr
 - A `held:` status opens an issue titled `✋ <package>: update held` with the label `update-held`, unless an open `update-held` issue has that title. The body holds the held version and the notes of every alert that fired, and asks the maintainer to publish the version by hand and set `current`.
 - An `updated:` or `downgrade:` status of a package with a line in `.status/_alerts` opens an issue titled `🔔 <package>: <version> notice` with the label `update-notice`, unless an open `update-notice` issue has that title. The body holds the published version and the notes. The maintainer closes it once the edit is done.
 
-A newer aurtomator release, `newer: <release>` in `.status/_upstream`, opens an issue titled `🚀 aurtomator <release> available` with the label `aurtomator-update`, unless an open `aurtomator-update` issue has that title. The body comes from `upstream_issue_body`: the release, the version in `VERSION`, a link to the release notes and the run. See [5.8](#58-version-of-aurtomator).
+A newer aurtomator release, `newer: <release>` in `.status/_upstream`, opens an issue titled `🚀 aurtomator <release> available` with the label `aurtomator-update`, unless an open `aurtomator-update` issue has that title. The body comes from `upstream_issue_body`: the release, the version the run uses, a link to the release notes and the run. See [5.8](#58-version-of-aurtomator).
 
 The job runs also when the status table stays the same, so an issue follows the statuses of every run. A package that starts failing gets its issue in that run, and an issue closed while the package still fails comes back in the next run.
 
-The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the run and shows the new status in a code block, as the issue body shows the error. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade` or `rebuilt`, so the version is in the AUR. An open `✋ <package>: update held` closes on the same statuses, so a failed check keeps it open. An open `🚀 aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` holds the release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It runs neither after a failed step nor after a failed `publish`, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
+The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the run and shows the new status in a code block, as the issue body shows the error. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade` or `rebuilt`, so the version is in the AUR. An open `✋ <package>: update held` closes on the same statuses, so a failed check keeps it open. An open `🚀 aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` at the pin has reached the latest release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It runs neither after a failed step nor after a failed `publish`, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
 
 ### 5.7 Failed runs
 
-The job `issues` reports failed packages, and a run that fails in `image` or `check` never reaches it. `notify-failure.yml` runs on `workflow_run` when a run of `Check AUR Package Updates` completes, and its job runs only when the conclusion of that run is `failure` or `timed_out`. It opens one issue titled `❌ Check AUR Package Updates failed`, with a link to the run, its branch and the names of the failed jobs, and opens no second one while that issue is open. The branch stands in a code span whose fence is longer than any run of backticks in its name, so a backtick in the name cannot end the span and turn the text after it into a mention. A repository with Issues turned off gets a notice instead, as in [5.6](#56-issues). The workflow has `actions: read` to list the jobs and `issues: write`, and checks out nothing.
+The job `issues` reports failed packages, and a run that fails in `image` or `check` never reaches it. Your calling workflow has a second job for that case, `notify`, with `needs: check-updates` and `if: ${{ always() && needs.check-updates.result != 'success' }}`. It calls the reusable `notify-failure.yml` at the same pin and grants `actions: read` to list the jobs of the run and `issues: write`. The condition lets `notify` run after every result but `success`, and its one step, `Open an issue for the failed run`, decides from the jobs of the run.
 
-GitHub starts a `workflow_run` workflow only from its file on the default branch.
+The step lists the jobs of the run and takes those with the conclusion `failure` or `timed_out`. It opens one issue titled `❌ Check AUR Package Updates failed`, with a link to the run, its branch and the names of those jobs, and opens no second one while that issue is open. When the list names no such job, the run was canceled: the step prints the notice `No job of the run failed, so the canceled run gets no issue` and opens nothing. When the list cannot be read, the issue says `jobs that could not be listed` in place of the names. The branch stands in a code span whose fence is longer than any run of backticks in its name, so a backtick in the name cannot end the span and turn the text after it into a mention. A repository with Issues turned off gets a notice instead, as in [5.6](#56-issues). The job runs on `ubuntu-latest` with a 5-minute timeout and checks out nothing.
 
 ### 5.8 Version of aurtomator
 
-`VERSION` in the root holds the version of aurtomator that a repository runs. It is the only record of the version that reaches a fork, which gets no tags of the upstream repository, and a template copy, which gets one commit. The release PR of aurtomator writes it, see `CONTRIBUTING.md`.
+`VERSION` in the root of aurtomator holds its version, and the release PR of aurtomator writes it, see `CONTRIBUTING.md`. A run reads it from the checkout in `aurtomator/`, so the version a run uses is that of the SHA the calling workflows pin, the SHA of a release tag. Dependabot opens the pull request in your repository that moves the pin to a new release, see [SETUP.md](SETUP.md#the-calling-workflows).
 
-`check-all.sh` logs the version first. In a check run and with `--update`, it reads the latest release of `staticwire/aurtomator` from the GitHub API, with `GITHUB_TOKEN` when it is set, and compares it with `VERSION` by `vercmp`. It writes `newer: <release>` or `current: <release>` to `.status/_upstream` and logs a line when the release is newer. A failed request, or a tag other than `vX.Y.Z`, logs a warning and writes nothing, and the run goes on. `--prepare` and `--publish` run no request and carry `.status/_upstream` of the check run. A repository without `VERSION` asks nothing.
+`check-all.sh` logs the version first. In a check run and with `--update`, it reads the latest release of `staticwire/aurtomator` from the GitHub API, with `GITHUB_TOKEN` when it is set, and compares it with `VERSION` by `vercmp`. It writes `newer: <release>` or `current: <release>` to `.status/_upstream` and logs a line when the release is newer. A failed request, or a tag other than `vX.Y.Z`, logs a warning and writes nothing, and the run goes on. `--prepare` and `--publish` run no request and carry `.status/_upstream` of the check run. Without `VERSION`, it asks nothing.
 
 `update-readme.sh` writes the version under the package table, and with `newer:` a link to the release:
 
@@ -1189,9 +1215,9 @@ GitHub starts a `workflow_run` workflow only from its file on the default branch
 aurtomator 0.6.0 ([0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0)) <!-- x-release-please-version -->
 ```
 
-The comment marks the line for the release PR of aurtomator, which writes the new version there in the README of the upstream repository. Its check run then finds the README as `update-readme.sh` writes it, and has nothing to commit to a `main` that only takes pull requests. A run that could not read the release writes the line without the link.
+The comment marks the line for the release PR of aurtomator, which writes the new version there in the README of aurtomator. The `pipeline` job of `ci.yml` then finds the README as `update-readme.sh` writes it, and has nothing to commit to a `main` that only takes pull requests, see [6.4](#64-validate-and-pipeline-jobs). A run that could not read the release writes the line without the link.
 
-A newer release also opens an issue, and the run closes it once `VERSION` holds the release, see [5.6](#56-issues). A fork updates by merging the release into its `main`.
+A newer release also opens an issue, and a run closes it once the pin names that release or a newer one is out, see [5.6](#56-issues).
 
 ## 6. CI Quality Gate: ci.yml
 
@@ -1207,16 +1233,15 @@ shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tes
 actionlint
 ```
 
-`-x` follows the `source` directives, and `.shellcheckrc` makes shellcheck look for their files next to the script. `-S warning` sets the minimum severity. `-d` fails on any formatting diff, `-i 2` sets two-space indentation, and `-ci` indents `case` branches. `actionlint` checks every file in `.github/workflows/`: the syntax, the expressions, the `needs` of each job, and the `run:` blocks with `shellcheck`.
+`-x` follows the `source` directives, and `.shellcheckrc` makes shellcheck look for their files next to the script. `-S warning` sets the minimum severity. `-d` fails on any formatting diff, `-i 2` sets two-space indentation, and `-ci` indents `case` branches. `actionlint` checks every file in `.github/workflows/`: the syntax, the expressions, the `needs` of each job, and the `run:` blocks with `shellcheck`. It reads `.github/actionlint.yaml`, which ignores one message in `check-updates.yml` and `validate.yml`: actionlint 1.7.12 does not know the properties `job.workflow_repository` and `job.workflow_sha` and reports them as not defined. The entries go once a release of actionlint knows them.
 
 `actionlint` does not check the `run:` blocks of a composite action. The step `shellcheck the actions` takes them from every `.github/actions/*/action.yml` with the `yq` of the runner image and runs `shellcheck -s bash` on them at its default severity, so an unquoted variable fails the step as it fails `actionlint` in a workflow.
 
 ### 6.2 Test job
 
-15-minute timeout. It runs in the image that the `image` job of `ci.yml` reads, the same job as in [5.2](#52-permissions-and-container). It upgrades `archlinux-keyring`, installs `bash bats git go-yq jq curl openssh namcap ruby ruby-erb` and the gems `bashcov` 4.0.0 and `simplecov-cobertura` 4.0.0, then runs:
+15-minute timeout. It runs in the image that the `image` job of `ci.yml` reads. That job is the `image` job of [5.2](#52-permissions-and-container) without `Check the pin`, and its checkout takes the commit of the run. It upgrades `archlinux-keyring`, installs `bash bats git go-yq jq curl openssh namcap ruby ruby-erb` and the gems `bashcov` 4.0.0 and `simplecov-cobertura` 4.0.0, then runs:
 
 ```bash
-./scripts/validate-pkg.sh --all
 bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 ```
 
@@ -1228,11 +1253,19 @@ The two tests of the `namcap` check in `update-pkg.sh` run the real `namcap`, an
 
 ### 6.3 CI image updates
 
-Once a month, when Docker Hub has a new `archlinux:base-devel`, Dependabot opens a pull request that changes the digest in `.github/ci-image/Dockerfile`. The `image` job reads the digest from the pull request, so `test` runs in the new image before the merge.
+Once a month, when Docker Hub has a new `archlinux:base-devel`, Dependabot opens a pull request in aurtomator that changes the digest in `.github/ci-image/Dockerfile`. The `image` jobs read the digest from the pull request, so `test` and the two calls of [6.4](#64-validate-and-pipeline-jobs) run in the new image before the merge.
 
-The `merge-image` job merges such a pull request without a review. It is off until the repository variable `CI_IMAGE_AUTO_MERGE` is `true`, see [SETUP.md](SETUP.md#recommended). It runs after `lint` and `test` passed, only for a pull request that `dependabot[bot]` opened, on an event Dependabot caused, and gets `contents: write` and `pull-requests: write`. A pull request that changes any other file, a Dependabot update of an action for example, stays open with a notice. Otherwise the job squash-merges it with `--match-head-commit`, so a commit pushed after the tests stops the merge.
+The `merge-image` job merges such a pull request without a review. It is off until `CI_IMAGE_AUTO_MERGE`, a variable of the aurtomator repository, is `true`. It runs after `lint`, `test`, `validate` and `pipeline` passed, only for a pull request that `dependabot[bot]` opened, on an event Dependabot caused, and gets `contents: write` and `pull-requests: write`. A pull request that changes any other file, a Dependabot update of an action for example, stays open with a notice. Otherwise the job squash-merges it with `--match-head-commit`, so a commit pushed after the tests stops the merge.
 
-With the variable set, a new image reaches the jobs with the secrets after the tests and without a review. A branch rule that requires an approval, or an up-to-date branch after `main` has moved, makes the merge fail, and the pull request waits for a manual merge.
+With the variable set, a new image reaches `main` of aurtomator after the tests and without a review. Your repository gets it when its pin moves to a release that holds it. A branch rule that requires an approval, or an up-to-date branch after `main` has moved, makes the merge fail, and the pull request waits for a manual merge.
+
+### 6.4 Validate and pipeline jobs
+
+The two jobs call the reusable workflows of the same commit, with the `./.github/workflows/<file>` form of `uses`, so a change to them runs end to end before the merge. Neither passes a secret.
+
+`validate` calls `validate.yml` with `contents: read`. Your repository calls the same workflow on every push to `main` and on pull requests, see [SETUP.md](SETUP.md#the-calling-workflows). After the `image` job of [5.2](#52-permissions-and-container), its job `validate` runs in the image with a 10-minute timeout. It upgrades `archlinux-keyring` before the system, installs `git` and `go-yq`, runs **Checkout** and **Checkout aurtomator** as in [5.3](#53-steps), and runs `./aurtomator/scripts/validate-pkg.sh --all` in the step `Validate packages`. It creates no `builder`: `validate-pkg.sh` reads YAML and runs no PKGBUILD. In aurtomator, `packages/` holds `example.yml.sample` alone, so the job there checks the call itself: the pin check, the two checkouts and the container. In your repository, the pull request that moves the pin runs the validator of the new release against your packages before the merge.
+
+`pipeline` calls `check-updates.yml` with `contents: write` and `issues: write`, with aurtomator itself as the repository of the packages. No package exists there, so `image`, `check` and `issues` run, `prepare` and `verify` are skipped, and `publish` is skipped as well, because the README that `update-readme.sh` writes equals the committed one. The test `update-readme: the README of aurtomator is what the script writes for it` in `tests/scripts.bats` fails when the two differ. The job shows on GitHub what the BATS tests cannot: that the runner finds the action in `aurtomator/`, that `GITHUB_ACTION_PATH` leads the action to the scripts, that the checkouts at `job.workflow_sha` work in the containers, and that the artifacts pass between the jobs. It runs for a push and for a pull request from a branch of aurtomator, `github.event.pull_request.head.repo.full_name == github.repository`, because a pull request from a fork of aurtomator gets a read-only token.
 
 ## 7. Local Testing
 
@@ -1244,10 +1277,21 @@ sudo pacman -S --needed git curl go-yq pacman-contrib namcap
 sudo pacman -S --needed bats shellcheck shfmt
 ```
 
+The scripts run from a clone of aurtomator at the tag the calling workflows pin, `vX.Y.Z` in their `# vX.Y.Z` comment, so a local run uses the strategies and the checks of the version a run in CI uses:
+
+```bash
+git clone https://github.com/staticwire/aurtomator ~/src/aurtomator
+git -C ~/src/aurtomator checkout vX.Y.Z
+```
+
+After a merge that moves the pin, `git -C ~/src/aurtomator fetch` and `git -C ~/src/aurtomator checkout` with the new tag move the clone to the same release.
+
+The commands of 7.2 to 7.5 run from inside your repository. A script takes the packages, `.status/`, `.aurtomator.conf` and `README.md` from the working directory, or from `AURTOMATOR_DATA_DIR` when it is set, and stops with `AURTOMATOR_DATA_DIR is not a directory: <value>` when that names no directory.
+
 ### 7.2 Check a single package
 
 ```bash
-./scripts/check-update.sh my-package
+~/src/aurtomator/scripts/check-update.sh my-package
 ```
 
 The log goes to stderr. When an update is available, the new version is printed on stdout:
@@ -1268,7 +1312,7 @@ When the package is up to date, stdout stays empty:
 ### 7.3 Dry-run an update
 
 ```bash
-./scripts/update-pkg.sh my-package 2.0.0 --dry-run
+~/src/aurtomator/scripts/update-pkg.sh my-package 2.0.0 --dry-run
 ```
 
 It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `.SRCINFO`, prints the PKGBUILD diff and does not push.
@@ -1276,7 +1320,7 @@ It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `
 ### 7.4 Push an update
 
 ```bash
-./scripts/update-pkg.sh my-package 2.0.0
+~/src/aurtomator/scripts/update-pkg.sh my-package 2.0.0
 ```
 
 It runs the full cycle, including `git push` to the AUR with your SSH key.
@@ -1285,13 +1329,13 @@ It runs the full cycle, including `git push` to the AUR with your SSH key.
 
 ```bash
 # Check only
-./scripts/check-all.sh
+~/src/aurtomator/scripts/check-all.sh
 
 # Check and push updates
-./scripts/check-all.sh --update
+~/src/aurtomator/scripts/check-all.sh --update
 
 # Check and dry-run updates
-./scripts/check-all.sh --update --dry-run
+~/src/aurtomator/scripts/check-all.sh --update --dry-run
 ```
 
 The last line is a summary:
@@ -1301,6 +1345,8 @@ The last line is a summary:
 ```
 
 ### 7.6 Running BATS tests
+
+The tests here and the linters of 7.7 check aurtomator itself, and run in the root of a clone of aurtomator:
 
 ```bash
 # Run all tests
@@ -1335,7 +1381,7 @@ actionlint
 
 ## 8. Writing Custom Strategies
 
-A strategy is a bash script in `strategies/` that finds the latest upstream version of a package.
+Your repository holds no strategies. A run takes them from `strategies/` of aurtomator at the pinned SHA, so a new strategy comes into aurtomator by a pull request, as `CONTRIBUTING.md` describes. A strategy is a bash script in `strategies/` that finds the latest upstream version of a package.
 
 ### 8.1 Interface contract
 
@@ -1344,7 +1390,7 @@ A strategy is a bash script in `strategies/` that finds the latest upstream vers
 - **Failure:** an error on stderr, a non-zero exit code.
 - **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`, and a version without a digit, such as `latest`. `pkgver_dash` replaces the dashes before that check, see [section 2](#2-package-yaml-format).
 
-The script can rely on `yq` and `curl`. `scripts/lib/common.sh` provides YAML helpers, `http_get` for requests and logging, and sets `AURTOMATOR_DIR` to the project root.
+The script can rely on `yq` and `curl`. `scripts/lib/common.sh` provides YAML helpers, `http_get` for requests and logging. It sets `AURTOMATOR_DIR` to the root of the checkout of aurtomator and `AURTOMATOR_DATA_DIR` to the directory with the packages, see [7.1](#71-prerequisites).
 
 ### 8.2 Template
 
