@@ -3,7 +3,7 @@
 [![Lint & Test](https://github.com/staticwire/aurtomator/actions/workflows/ci.yml/badge.svg)](https://github.com/staticwire/aurtomator/actions/workflows/ci.yml) [![codecov](https://codecov.io/github/staticwire/aurtomator/graph/badge.svg)](https://codecov.io/github/staticwire/aurtomator) [![Bash](https://img.shields.io/badge/bash-5%2B-green)](https://www.gnu.org/software/bash/) [![AUR](https://img.shields.io/badge/AUR-automation-orange)](https://aur.archlinux.org/) [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
 Automated AUR package updates from a single GitHub repo.  
-[Fork it](https://github.com/staticwire/aurtomator/fork), drop in your packages, let CI handle the rest.
+Create a repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) and drop in your packages. Its workflows call the pipeline of aurtomator at a pinned commit.
 
 ## Packages
 
@@ -22,7 +22,8 @@ aurtomator 0.7.1 <!-- x-release-please-version -->
 
 ```mermaid
 graph LR
-    A[GitHub Actions<br/>on schedule] -->|for each package| K[check job, read-only token<br/>run strategy<br/>decide the run]
+    U[your repository<br/>package YAMLs<br/>calling workflow on schedule] --> R[aurtomator at the pinned SHA<br/>reusable check-updates.yml]
+    R -->|for each package| K[check job, read-only token<br/>run strategy<br/>decide the run]
     K -->|new version| B[prepare job, no secrets<br/>clone AUR repo<br/>sed pkgver<br/>updpkgsums<br/>makepkg --printsrcinfo]
     B --> V[verify job, no secrets<br/>download the sources<br/>check the checksums]
     V --> C[publish job<br/>check the prepared files<br/>git push to AUR]
@@ -32,17 +33,18 @@ graph LR
     C --> D
 ```
 
-Each package has a YAML config pointing to an upstream source. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow.
+Each package has a YAML config pointing to an upstream source. Your repository holds these configs and calls the pipeline of aurtomator. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow.
 
 ## Quick start
 
-1. Fork this repo (or use as template)
-2. Enable Actions and Issues in your fork's Settings ([why?](docs/SETUP.md#after-forking))
-3. Run `./scripts/setup.sh` ([detailed guide](docs/SETUP.md))
-4. Add a package: `cp packages/example.yml.sample packages/<name>.yml`, where `<name>` is the pkgbase on the AUR
-5. Edit the copy: set `name: <name>`, a `strategy` and its `upstream` fields, see [Strategies](#strategies)
-6. Validate: `./scripts/validate-pkg.sh <name>`
-7. Push and let CI handle the rest
+1. Create a repository from [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) with "Use this template"
+2. Make sure Issues are on in the Settings of the new repository ([why?](docs/SETUP.md#after-creating-the-repository))
+3. Clone aurtomator for the scripts, at the tag the calling workflows pin: `git clone https://github.com/staticwire/aurtomator ~/src/aurtomator` and `git -C ~/src/aurtomator checkout vX.Y.Z`, where `vX.Y.Z` is the version in the `# vX.Y.Z` comment of those workflows
+4. Clone the new repository and run `~/src/aurtomator/scripts/setup.sh` from inside it ([detailed guide](docs/SETUP.md))
+5. Add a package: `cp ~/src/aurtomator/packages/example.yml.sample packages/<name>.yml`, where `<name>` is the pkgbase on the AUR
+6. Edit the copy: set `name: <name>`, a `strategy` and its `upstream` fields, see [Strategies](#strategies)
+7. Validate from inside the new repository: `~/src/aurtomator/scripts/validate-pkg.sh <name>`
+8. Push and let CI handle the rest
 
 The setup script configures your identity (git author for AUR commits), SSH access, and GitHub Secrets. With [gh CLI](https://cli.github.com/) it sets the secrets itself. Without it, the script prints manual instructions. GPG commit signing is optional.
 
@@ -99,7 +101,7 @@ Some upstreams name a release asset with more than the version and rebuild a rel
 
 ## Updates of aurtomator
 
-`VERSION` holds the version of aurtomator a repository runs, and the package table shows it. When a newer aurtomator release is out, a run links it under the table and opens an issue, which closes once the fork has merged the release. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
+The line under the package table shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin. A newer release also gets an issue and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
 
 ## Resource usage
 
@@ -119,7 +121,7 @@ All packages run in one workflow run. `check` and `issues` run every time, `prep
 | [lilac]           | Large repos (archlinuxcn) | Full build bot, needs own infra   |
 | [aur-auto-update] | Centralized service       | Requires bot co-maintainer on AUR |
 | [Renovate]        | Multi-ecosystem           | Enterprise-grade, heavy config    |
-| **aurtomator**    | Individual maintainers    | Fork and go                       |
+| **aurtomator**    | Individual maintainers    | Template and a pinned workflow    |
 
 [nvchecker]: https://github.com/lilydjwg/nvchecker
 [lilac]: https://github.com/archlinuxcn/lilac
