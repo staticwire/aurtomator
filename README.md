@@ -24,16 +24,35 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 
 ## Quick start
 
-1. Create a repository from [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) with "Use this template"
-2. Make sure Issues are on in the Settings of the new repository ([why?](docs/SETUP.md#after-creating-the-repository))
-3. Clone aurtomator for the scripts, at the tag the calling workflows pin: `git clone https://github.com/staticwire/aurtomator ~/src/aurtomator` and `git -C ~/src/aurtomator checkout vX.Y.Z`, where `vX.Y.Z` is the version in the `# vX.Y.Z` comment of those workflows
-4. Clone the new repository and run `~/src/aurtomator/scripts/setup.sh` from inside it ([detailed guide](docs/SETUP.md))
-5. Add a package: `cp ~/src/aurtomator/packages/example.yml.sample packages/<name>.yml`, where `<name>` is the pkgbase on the AUR
-6. Edit the copy: set `name: <name>`, a `strategy` and its `upstream` fields, see [Strategies](#strategies)
-7. Validate from inside the new repository: `~/src/aurtomator/scripts/validate-pkg.sh <name>`
-8. Push and let CI handle the rest
+1. Create your repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) with "Use this template". Check that Issues are enabled in its settings ([why?](docs/SETUP.md#after-creating-the-repository)).
+2. Clone your repository:
 
-The setup script configures your identity (git author for AUR commits), SSH access, and GitHub Secrets. With [gh CLI](https://cli.github.com/) it sets the secrets itself. Without it, the script prints manual instructions. GPG commit signing is optional.
+   ```bash
+   git clone https://github.com/<you>/<repository>
+   cd <repository>
+   ```
+
+3. Set up the git identity of your AUR commits, the AUR SSH key and the GitHub secrets ([details](docs/SETUP.md)):
+
+   ```bash
+   ./aurtomator.sh setup
+   ```
+
+4. Add a package. `<name>` is the pkgbase on the AUR:
+
+   ```bash
+   ./aurtomator.sh sample > packages/<name>.yml
+   ```
+
+   Set `name: <name>`, a `strategy` and its `upstream` fields in that file, see [Strategies](#strategies). Then check it:
+
+   ```bash
+   ./aurtomator.sh validate-pkg <name>
+   ```
+
+5. Commit and push. The workflows do the rest.
+
+`./aurtomator.sh` runs the scripts of aurtomator at the version your workflows pin, see [docs/SETUP.md](docs/SETUP.md#the-aurtomatorsh-script). Without [gh CLI](https://cli.github.com/), `setup` prints how to set the secrets by hand. GPG signing of the AUR commits is optional.
 
 ## Strategies
 
