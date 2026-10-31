@@ -1,20 +1,23 @@
 name: Check AUR Package Updates
 
+# The calling repository is checked out at the workspace root and holds
+# the data. aurtomator is checked out at job.workflow_sha into aurtomator/
+# and holds the code. The image job checks out only the Dockerfile of
+# aurtomator, and the issues job only aurtomator.
 on:
-  schedule:
-    # Every hour at minute 17. GitHub delays scheduled runs at the start of
-    # every hour and drops some of them.
-    - cron: "17 * * * *"
-  workflow_dispatch:
+  workflow_call:
+    secrets:
+      AUR_SSH_KEY:
+        required: false
+      GPG_SIGNING_KEY:
+        required: false
+      AUR_GIT_NAME:
+        required: false
+      AUR_GIT_EMAIL:
+        required: false
 
 permissions:
   contents: read
-
-# Serialize runs so that two of them never push divergent commits to the
-# same AUR repo. A new run waits for the running one to finish.
-concurrency:
-  group: check-updates
-  cancel-in-progress: false
 
 jobs:
   # Reads the pinned Arch image from .github/ci-image/Dockerfile, where
@@ -26,9 +29,23 @@ jobs:
       ref: ${{ steps.read.outputs.ref }}
 
     steps:
+      # With an empty ref, actions/checkout takes the default branch of a
+      # repository other than the one that triggered the run. The run would
+      # then use the code of main, and no step would fail.
+      - name: Check the pin
+        env:
+          SHA: ${{ job.workflow_sha }}
+        run: |
+          if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::job.workflow_sha is not a commit SHA: '$SHA'"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
           sparse-checkout: .github/ci-image
 
@@ -67,11 +84,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout aurtomator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
+          persist-credentials: false
+
       # The runner reads a local action from the workspace when its step
       # starts, and builder owns the workspace once check-all.sh ran, so no
       # local action follows run-as-builder in a job
       - name: Check updates
-        uses: ./.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
@@ -86,7 +111,7 @@ jobs:
           if grep -qsE '^(new_version|available_downgrade|new_build): ' .status/*; then
             prepare=true
           fi
-          sudo -u builder ./scripts/update-readme.sh
+          sudo -u builder ./aurtomator/scripts/update-readme.sh
           work=$prepare
           git diff --quiet README.md || work=true
           echo "prepare=$prepare" >>"$GITHUB_OUTPUT"
@@ -126,6 +151,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout aurtomator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
+          persist-credentials: false
+
       - name: Download statuses
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -133,7 +166,7 @@ jobs:
           path: .status
 
       - name: Prepare updates
-        uses: ./.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder
         with:
           args: --prepare handoff
 
@@ -219,6 +252,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout aurtomator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
+          persist-credentials: false
+
       - name: Download handoff
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -228,7 +269,7 @@ jobs:
       # git and curl read the AUR repo and the sources here, as builder,
       # who cannot reach the Docker socket that root has in a job container
       - name: Verify checksums
-        uses: ./.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder
         with:
           args: --verify handoff
 
@@ -272,6 +313,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout aurtomator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
+          persist-credentials: false
+
       - name: Download statuses
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -299,6 +348,10 @@ jobs:
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
         run: |
+          if [[ -z "$AUR_SSH_KEY" ]]; then
+            echo "::error::The secret AUR_SSH_KEY is empty"
+            exit 1
+          fi
           SSH_DIR="/home/builder/.ssh"
           mkdir -m 0700 "$SSH_DIR"
           echo "$AUR_SSH_KEY" > "$SSH_DIR/aur"
@@ -335,7 +388,7 @@ jobs:
       # GPG_KEY_ID comes from Setup GPG, when a key is set. git refuses an
       # empty author name or email in the environment.
       - name: Publish updates
-        uses: ./.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder
         env:
           GIT_AUTHOR_NAME: ${{ secrets.AUR_GIT_NAME || 'aurtomator' }}
           GIT_AUTHOR_EMAIL: ${{ secrets.AUR_GIT_EMAIL || 'aurtomator@users.noreply.github.com' }}
@@ -344,7 +397,7 @@ jobs:
           keep-env: GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL
 
       - name: Update README status table
-        run: sudo -u builder ./scripts/update-readme.sh
+        run: sudo -u builder ./aurtomator/scripts/update-readme.sh
 
       - name: Commit changes via API
         env:
@@ -476,9 +529,12 @@ jobs:
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed github-cli
 
-      - name: Checkout
+      - name: Checkout aurtomator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: aurtomator
           persist-credentials: false
 
       - name: Download statuses of check
@@ -533,7 +589,7 @@ jobs:
                   "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "*) ;;
                 *) continue ;;
               esac
-              comment=$(bash -c 'source ./scripts/lib.sh && "$@"' _ close_comment "$status_file" "$RUN_URL")
+              comment=$(bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ close_comment "$status_file" "$RUN_URL")
               gh issue close "$number" --comment "$comment"
             done
           done <<<"$open
@@ -582,7 +638,7 @@ jobs:
               echo "Issue already open: $4"
               return 0
             fi
-            body=$(bash -c 'source ./scripts/lib.sh && "$@"' _ "$5" "$6" "$RUN_URL")
+            body=$(bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$5" "$6" "$RUN_URL")
             gh issue create --title "$4" --label "$1" --body "$body" || echo "Warning: could not create issue (issues may be disabled)"
           }
 
@@ -606,7 +662,7 @@ jobs:
                   continue
                 fi
 
-                ISSUE_BODY=$(bash -c 'source ./scripts/lib.sh && failure_issue_body "$@"' _ "$status_file" "$RUN_URL")
+                ISSUE_BODY=$(bash -c 'source ./aurtomator/scripts/lib.sh && failure_issue_body "$@"' _ "$status_file" "$RUN_URL")
 
                 gh issue create \
                   --title "❌ $pkg_name: ${kind//_/ }" \

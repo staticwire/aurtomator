@@ -13,7 +13,7 @@ upstream_issue_body() {
   local release
   release=$(<"$1")
   release="${release#newer: }"
-  printf 'aurtomator %s is out, and this repository runs %s.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nRun: %s\n\nAuto-created by update workflow. A run closes it once `VERSION` holds this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$2"
+  printf 'aurtomator %s is out, and this repository runs %s.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nRun: %s\n\nAuto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$2"
 }
 
 # Body of the issue opened for an update an alert fired on: a held update,

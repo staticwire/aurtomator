@@ -3,8 +3,9 @@ description: >-
   Gives the workspace to builder, runs scripts/check-all.sh as builder with
   workflow commands stopped, and exits with its status.
 
-# The runner reads this file from the workspace when the step starts. A job
-# uses it before builder has run anything there, and no local action may
+# The runner reads this file from the checkout of aurtomator when the step
+# starts, and the step runs the scripts of that checkout. A job uses it
+# before builder has run anything in the workspace, and no local action may
 # follow it in the same job: builder owns the workspace from then on.
 
 inputs:
@@ -32,6 +33,7 @@ runs:
         if [[ -n "$KEEP_ENV" ]]; then
           options=("--preserve-env=$KEEP_ENV" -u builder)
         fi
+        code=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)
         # The runner reads ::cmd:: at the start of a line and ##[cmd]
         # anywhere in it as a workflow command. It ignores both between
         # stop-commands and the token, and the token stays in this shell.
@@ -40,6 +42,6 @@ runs:
         token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
         echo "::stop-commands::$token"
         rc=0
-        sudo "${options[@]}" ./scripts/check-all.sh "${check_args[@]}" 2>&1 | cat || rc=$?
+        sudo "${options[@]}" "$code/scripts/check-all.sh" "${check_args[@]}" 2>&1 | cat || rc=$?
         echo "::$token::"
         exit "$rc"

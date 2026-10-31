@@ -1720,9 +1720,48 @@ EOF
   AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Badges updated (repo: owner/data)"* ]]
-  grep -qF 'https://github.com/owner/data/actions/workflows/ci.yml/badge.svg' "$data/README.md"
+  grep -qF 'https://github.com/owner/data/actions/workflows/validate.yml/badge.svg' "$data/README.md"
   grep -q '>foo</a></td><td>1.0.0</td><td nowrap>github-release</td><td nowrap>-</td><td nowrap>.* 3.0.0 available</td></tr>' "$data/README.md"
   [ ! -e "$TEST_TMPDIR/README.md" ]
+}
+
+# version.sh assigns AURTOMATOR_UPSTREAM, so the environment cannot set it
+# for the script. A copy of version.sh with another value stands in.
+@test "update-readme: the badge block names the two calling workflows of the repository" {
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$data/packages" "$data/.status"
+  git -C "$data" init -q
+  git -C "$data" remote add origin "https://github.com/owner/data.git"
+  printf '%s\n' '# test' '<!-- BADGES:START -->' 'old badges' '<!-- BADGES:END -->' \
+    '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$data/README.md"
+  sed 's|^AURTOMATOR_UPSTREAM=.*|AURTOMATOR_UPSTREAM=other/upstream|' "$PROJECT_DIR/scripts/lib/version.sh" >"$BATS_TEST_TMPDIR/version.sh"
+  ln -sf "$BATS_TEST_TMPDIR/version.sh" "$TEST_TMPDIR/scripts/lib/version.sh"
+
+  AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '3p' "$data/README.md")" = '[![Check AUR Package Updates](https://github.com/owner/data/actions/workflows/check-updates.yml/badge.svg)](https://github.com/owner/data/actions/workflows/check-updates.yml) [![Validate packages](https://github.com/owner/data/actions/workflows/validate.yml/badge.svg)](https://github.com/owner/data/actions/workflows/validate.yml) [![automated by aurtomator](https://img.shields.io/badge/automated%20by-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
+  [ "$(sed -n '4p' "$data/README.md")" = '<!-- BADGES:END -->' ]
+  local pattern
+  for pattern in codecov ci.yml shields.io/badge/bash aur.archlinux.org; do
+    echo "$pattern"
+    run ! grep -qF -- "$pattern" "$data/README.md"
+  done
+}
+
+# aurtomator_version reads VERSION from AURTOMATOR_DIR, which is $TEST_TMPDIR here
+@test "update-readme: the README of aurtomator is what the script writes for it" {
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$data/packages"
+  git -C "$data" init -q
+  git -C "$data" remote add origin "https://github.com/staticwire/aurtomator.git"
+  cp "$PROJECT_DIR/README.md" "$data/README.md"
+  cp "$PROJECT_DIR/VERSION" "$TEST_TMPDIR/VERSION"
+
+  AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  run diff -u "$PROJECT_DIR/README.md" "$data/README.md"
+  echo "$output"
+  [ "$status" -eq 0 ]
 }
 
 # === lib.sh: warn_maintainer_line ===
@@ -2105,8 +2144,8 @@ current: '1.0.0'"
   [ "$(sed -n 2p "$TEST_TMPDIR/README.md")" = "$prose" ]
   [ "$(grep -cxF '<!-- BADGES:START -->' "$TEST_TMPDIR/README.md")" -eq 1 ]
   [ "$(grep -cxF '<!-- PACKAGES:START -->' "$TEST_TMPDIR/README.md")" -eq 1 ]
-  ! grep -q 'old badges' "$TEST_TMPDIR/README.md"
-  ! grep -q 'old table' "$TEST_TMPDIR/README.md"
+  run grep -c -e 'old badges' -e 'old table' "$TEST_TMPDIR/README.md"
+  [ "$output" = "0" ]
 }
 
 @test "update-readme: writes the table when its start marker is the first line" {
@@ -2237,7 +2276,9 @@ EOF
   grep -q "✨ 3.0.0 available" "$TEST_TMPDIR/README.md"
 }
 
-@test "update-readme: shows workflow badge with github origin" {
+# The workflow badges go only into the badge block, so a README without its
+# markers, as the one of aurtomator, shows no workflow badge
+@test "update-readme: a README without the badge markers gets no workflow badge" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
@@ -2248,8 +2289,32 @@ current: '1.0.0'"
 EOF
   git -C "$TEST_TMPDIR" init -q
   git -C "$TEST_TMPDIR" remote add origin "https://github.com/myuser/myrepo.git"
-  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  grep -q "actions/workflows" "$TEST_TMPDIR/README.md"
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  run grep -c "actions/workflows" "$TEST_TMPDIR/README.md"
+  [ "$output" = "0" ]
+}
+
+@test "update-readme: the package block starts with the packages badge" {
+  git -C "$TEST_TMPDIR" init -q
+  git -C "$TEST_TMPDIR" remote add origin "https://github.com/owner/data.git"
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  local block
+
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  mapfile -t block < <(sed -n '/^<!-- PACKAGES:START -->$/,/^<!-- PACKAGES:END -->$/p' "$TEST_TMPDIR/README.md")
+  [ "${block[1]}" = '<table>' ]
+
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  mapfile -t block < <(sed -n '/^<!-- PACKAGES:START -->$/,/^<!-- PACKAGES:END -->$/p' "$TEST_TMPDIR/README.md")
+  [ "${block[1]}" = '![packages](https://img.shields.io/badge/packages-1%2F1-brightgreen)' ]
+  [ "${block[2]}" = '' ]
+  [ "${block[3]}" = '<table>' ]
 }
 
 # Helper: a README with both marker pairs and a line between them
@@ -2258,94 +2323,7 @@ readme_with_badges() {
     'text between' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
 }
 
-@test "update-readme: a public fork gets its own CI and Codecov badges" {
-  create_test_package "pkg-a" "github-release" "upstream:
-  project: owner/repo
-current: '1.0.0'"
-  readme_with_badges
-  git -C "$TEST_TMPDIR" init -q
-  git -C "$TEST_TMPDIR" remote add origin "git@github.com:someone/fork.git"
-  cat >"$MOCK_DIR/curl" <<EOF
-#!/usr/bin/env bash
-echo "\${@: -1}" >>"$TEST_TMPDIR/curl-urls.log"
-echo '{"private": false}'
-EOF
-  chmod +x "$MOCK_DIR/curl"
-
-  run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Badges updated (repo: someone/fork)"* ]]
-  grep -qx 'https://api.github.com/repos/someone/fork' "$TEST_TMPDIR/curl-urls.log"
-  local badges
-  badges=$(sed -n '3p' "$TEST_TMPDIR/README.md")
-  [[ "$badges" == "[![Lint & Test](https://github.com/someone/fork/actions/workflows/ci.yml/badge.svg)](https://github.com/someone/fork/actions/workflows/ci.yml) [![codecov](https://codecov.io/github/someone/fork/graph/badge.svg)](https://codecov.io/github/someone/fork) [![Bash]"* ]]
-  [[ "$badges" == *"[![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)" ]]
-  grep -qx 'text between' "$TEST_TMPDIR/README.md"
-  run ! grep -q 'old badges' "$TEST_TMPDIR/README.md"
-}
-
-# Codecov shows no tokenless badge for a private repository. mikefarah yq
-# prints the "true" of select(...) | "true" whatever the input.
-@test "update-readme: a private repo, or a failed API call on a README without a Codecov badge, links the Codecov of aurtomator" {
-  create_test_package "pkg-a" "github-release" "upstream:
-  project: owner/repo
-current: '1.0.0'"
-  git -C "$TEST_TMPDIR" init -q
-  git -C "$TEST_TMPDIR" remote add origin "https://github.com/someone/private.git"
-  local answer
-  for answer in "echo '{\"private\": true}'" "exit 22"; do
-    readme_with_badges
-    printf '#!/usr/bin/env bash\n%s\n' "$answer" >"$MOCK_DIR/curl"
-    chmod +x "$MOCK_DIR/curl"
-
-    run "$TEST_TMPDIR/scripts/update-readme.sh"
-    [ "$status" -eq 0 ]
-    grep -qF '(https://github.com/someone/private/actions/workflows/ci.yml)' "$TEST_TMPDIR/README.md"
-    grep -qF '[![codecov](https://codecov.io/github/staticwire/aurtomator/graph/badge.svg)](https://codecov.io/github/staticwire/aurtomator)' "$TEST_TMPDIR/README.md"
-  done
-}
-
-@test "update-readme: a repo made private gets the Codecov badge of aurtomator in place of its own" {
-  create_test_package "pkg-a" "github-release" "upstream:
-  project: owner/repo
-current: '1.0.0'"
-  git -C "$TEST_TMPDIR" init -q
-  git -C "$TEST_TMPDIR" remote add origin "https://github.com/someone/fork.git"
-  printf '%s\n' '# test' '<!-- BADGES:START -->' \
-    '[![codecov](https://codecov.io/github/someone/fork/graph/badge.svg)](https://codecov.io/github/someone/fork)' \
-    '<!-- BADGES:END -->' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
-  printf '#!/usr/bin/env bash\n%s\n' "echo '{\"private\": true}'" >"$MOCK_DIR/curl"
-  chmod +x "$MOCK_DIR/curl"
-
-  run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 0 ]
-  grep -qF '[![codecov](https://codecov.io/github/staticwire/aurtomator/graph/badge.svg)](https://codecov.io/github/staticwire/aurtomator)' "$TEST_TMPDIR/README.md"
-  run ! grep -q 'codecov.io/github/someone' "$TEST_TMPDIR/README.md"
-}
-
-# A rate limit of the anonymous API call switched the badge of a public fork
-# to aurtomator and back in the next run
-@test "update-readme: keeps the Codecov badge of the README without a definite answer from the API" {
-  create_test_package "pkg-a" "github-release" "upstream:
-  project: owner/repo
-current: '1.0.0'"
-  git -C "$TEST_TMPDIR" init -q
-  git -C "$TEST_TMPDIR" remote add origin "https://github.com/someone/fork.git"
-  local answer own='[![codecov](https://codecov.io/github/someone/fork/graph/badge.svg)](https://codecov.io/github/someone/fork)'
-  for answer in "exit 22" "echo 'rate limited'" "echo '{}'"; do
-    printf '%s\n' '# test' '<!-- BADGES:START -->' "[![Lint & Test](x)](y) $own [![Bash](z)](w)" '<!-- BADGES:END -->' \
-      '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
-    printf '#!/usr/bin/env bash\n%s\n' "$answer" >"$MOCK_DIR/curl"
-    chmod +x "$MOCK_DIR/curl"
-
-    run "$TEST_TMPDIR/scripts/update-readme.sh"
-    [ "$status" -eq 0 ]
-    grep -qF "(https://github.com/someone/fork/actions/workflows/ci.yml) $own [![Bash]" "$TEST_TMPDIR/README.md"
-    run ! grep -q 'codecov.io/github/staticwire' "$TEST_TMPDIR/README.md"
-  done
-}
-
-@test "update-readme: without a GitHub origin only the static badges remain" {
+@test "update-readme: without a GitHub origin only the badge of aurtomator remains" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
@@ -2355,13 +2333,10 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Badges updated (repo: unknown)"* ]]
-  local badges
-  badges=$(sed -n '3p' "$TEST_TMPDIR/README.md")
-  [[ "$badges" == *"[![Bash]"*"[![AUR]"*"[![License]"* ]]
-  [[ "$badges" != *"Lint & Test"* && "$badges" != *"codecov"* ]]
+  [ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" = '[![automated by aurtomator](https://img.shields.io/badge/automated%20by-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
 }
 
-@test "update-readme: an origin outside GitHub, or a local path, gives only the static badges" {
+@test "update-readme: an origin outside GitHub, or a local path, gives only the badge of aurtomator" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
@@ -2375,8 +2350,9 @@ current: '1.0.0'"
     echo "$origin: $output"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Badges updated (repo: unknown)"* ]]
-    ! grep -qF -e 'someone/fork' -e "$TEST_TMPDIR" "$TEST_TMPDIR/README.md"
-    [[ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" != *"Lint & Test"* ]]
+    run grep -cF -e 'someone/fork' -e "$TEST_TMPDIR" "$TEST_TMPDIR/README.md"
+    [ "$output" = "0" ]
+    [ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" = '[![automated by aurtomator](https://img.shields.io/badge/automated%20by-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
   done
 }
 

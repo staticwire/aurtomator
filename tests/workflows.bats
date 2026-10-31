@@ -61,14 +61,28 @@ run_blocks() {
   [ "$count" -gt 0 ]
 }
 
+# ci.yml checks out its own commit. A called workflow checks out the pinned
+# commit, so its pin check and the repository and ref of its checkout are
+# left out of the comparison.
 @test "workflows: the image job is the same in every workflow" {
+  local workflow expected count=0
   run yq '.jobs.image' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
   [ "$output" != "null" ]
-  local expected="$output"
-  run yq '.jobs.image' "$GITHUB_DIR/workflows/check-updates.yml"
-  [ "$status" -eq 0 ]
-  [ "$output" = "$expected" ]
+  expected="$output"
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    run yq '.jobs | has("image")' "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "true" ] || continue
+    echo "$workflow"
+    run yq '.jobs.image | del(.steps[] | select(.name == "Check the pin")) |
+      del(.steps[] | select(.uses | test("^actions/checkout@")) | .with | (.repository, .ref))' "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$expected" ]
+    count=$((count + 1))
+  done
+  # ci.yml and at least one called workflow
+  [ "$count" -gt 1 ]
 }
 
 # A pinned image ages, and an old keyring rejects packages signed with a
@@ -106,6 +120,25 @@ run_blocks() {
       }
       END { exit bad }' <<<"$output"
     [ "$status" -eq 0 ]
+  done
+}
+
+@test "workflows: actionlint ignores only the two job.workflow properties" {
+  local config="$GITHUB_DIR/actionlint.yaml" expected key keys
+  run yq '. | keys | join(" ")' "$config"
+  [ "$status" -eq 0 ]
+  [ "$output" = "paths" ]
+  expected=$(cd "$GITHUB_DIR/.." && grep -lF '${{ job.workflow_' .github/workflows/*.yml | sort)
+  [ -n "$expected" ]
+  run yq '.paths | keys | .[]' "$config"
+  [ "$status" -eq 0 ]
+  [ "$(sort <<<"$output")" = "$expected" ]
+  keys=("${lines[@]}")
+  for key in "${keys[@]}"; do
+    echo "$key"
+    run yq -o=json -I=0 ".paths[\"$key\"]" "$config"
+    [ "$status" -eq 0 ]
+    [ "$output" = '{"ignore":["property \"workflow_(repository|sha)\" is not defined in object type"]}' ]
   done
 }
 
@@ -186,10 +219,43 @@ run_blocks() {
   [[ "$output" != *"|| true"* ]]
 }
 
-@test "merge-image: runs only after lint and test" {
+@test "ci: the test job runs no validate step and the validate job calls the reusable workflow" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs.test.steps[] | select(has("run")) | .run' "$ci"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [[ "$output" != *"validate-pkg.sh"* ]]
+  run yq '.jobs.validate.uses' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "./.github/workflows/validate.yml" ]
+  run yq -o=json -I=0 '.jobs.validate.permissions' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"contents":"read"}' ]
+}
+
+@test "ci: the pipeline job calls check-updates for pushes and same-repository pull requests" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs.pipeline.uses' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "./.github/workflows/check-updates.yml" ]
+  run yq '.jobs.pipeline.if' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository" ]
+  run yq -o=json -I=0 '.jobs.pipeline.permissions' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"contents":"write","issues":"write"}' ]
+  run yq '.jobs.validate.secrets' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+  run yq '.jobs.pipeline.secrets' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+}
+
+@test "merge-image: runs only after lint, test, validate and pipeline" {
   run yq '.jobs["merge-image"].needs | sort | join(" ")' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = "lint test" ]
+  [ "$output" = "lint pipeline test validate" ]
 }
 
 @test "merge-image: off unless the variable is true and Dependabot opened the pull request" {
@@ -321,15 +387,65 @@ step_run() {
   yq ".jobs.$1.steps[] | select(.name == \"$2\") | .run" "$CHECK_UPDATES"
 }
 
-# GitHub delays scheduled runs at the start of every hour and drops some
-@test "check-updates: runs every hour, off the start of the hour" {
-  run yq '.on.schedule[].cron' "$CHECK_UPDATES"
+@test "check-updates: runs only when called, with the four secrets optional" {
+  run yq -o=json -I=0 '.on' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [[ "$output" =~ ^([1-9]|[1-5][0-9])\ \*\ \*\ \*\ \*$ ]]
+  [ "$output" = '{"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false}}}}' ]
+  run yq '.concurrency' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+}
+
+@test "check-updates: every job checks out aurtomator at the SHA of the called workflow" {
+  local jobs job path repo='${{ job.workflow_repository }}' sha='${{ job.workflow_sha }}'
+  mapfile -t jobs < <(yq '.jobs | keys | .[]' "$CHECK_UPDATES")
+  [ "${#jobs[@]}" -eq 6 ]
+  for job in "${jobs[@]}"; do
+    echo "$job"
+    path=aurtomator
+    [ "$job" != image ] || path=null
+    run yq ".jobs.$job.steps[] | select(.uses | test(\"^actions/checkout@\")) |
+      select(.with.repository == \"$repo\" and .with.ref == \"$sha\" and .with[\"persist-credentials\"] == false) |
+      .with.path" "$CHECK_UPDATES"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$path" ]
+  done
+}
+
+@test "check-updates: check, prepare, verify and publish check out the caller first and aurtomator second" {
+  local job
+  for job in check prepare verify publish; do
+    echo "$job"
+    run yq -o=json -I=0 "[.jobs.$job.steps[] | select(.uses | test(\"^actions/checkout@\")) | .with | [has(\"repository\"), .path]]" "$CHECK_UPDATES"
+    [ "$status" -eq 0 ]
+    [ "$output" = '[[false,null],[true,"aurtomator"]]' ]
+  done
+  run yq -o=json -I=0 '[.jobs.issues.steps[] | select(.uses | test("^actions/checkout@")) | .with | [has("repository"), .path]]' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[[true,"aurtomator"]]' ]
+}
+
+@test "check-updates: the image job checks the pin before its checkout" {
+  local step="$BATS_TEST_TMPDIR/step.sh"
+  run yq -o=json -I=0 '.jobs.image.steps[0] | [.name, .env.SHA]' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = '["Check the pin","${{ job.workflow_sha }}"]' ]
+  run yq '.jobs.image.steps[1].uses' "$CHECK_UPDATES"
+  [[ "$output" == actions/checkout@* ]]
+  step_run image "Check the pin" >"$step"
+  run env SHA= bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::job.workflow_sha is not a commit SHA: ''" ]
+  run env SHA=abc bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::job.workflow_sha is not a commit SHA: 'abc'" ]
+  run env SHA=0123456789abcdef0123456789abcdef01234567 bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "check-updates: the check job decides the run and executes no PKGBUILD" {
-  run yq '[.jobs.check.steps[] | select(.uses == "./.github/actions/run-as-builder") | .with.args // ""] | @json' "$CHECK_UPDATES"
+  run yq '[.jobs.check.steps[] | select(.uses == "./aurtomator/.github/actions/run-as-builder") | .with.args // ""] | @json' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [ "$output" = '[""]' ]
   run yq '.jobs.check.steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
@@ -389,6 +505,19 @@ run_decide_step() {
   [ "$output" = $'prepare=false\nwork=false' ]
 }
 
+@test "check-updates: the Decide step and publish run update-readme.sh from the aurtomator checkout" {
+  local line="sudo -u builder ./aurtomator/scripts/update-readme.sh"
+  run step_run check Decide
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$line"* ]]
+  run step_run publish "Update README status table"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$line"* ]]
+  run run_blocks "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [[ "${output//"./aurtomator/scripts/"/}" != *"./scripts/"* ]]
+}
+
 @test "check-updates: prepare runs only for outdated packages and decides nothing" {
   run yq '.jobs.prepare.if' "$CHECK_UPDATES"
   [ "$output" = "needs.check.outputs.prepare == 'true'" ]
@@ -411,7 +540,7 @@ BUILDER_ACTION="$GITHUB_DIR/actions/run-as-builder/action.yml"
 # check-all.sh as builder through the run-as-builder action
 builder_steps() {
   yq '.jobs | to_entries[] | .key as $job | .value.steps[] |
-    select(.uses == "./.github/actions/run-as-builder") | $job + "\t" + .name' "$CHECK_UPDATES"
+    select(.uses == "./aurtomator/.github/actions/run-as-builder") | $job + "\t" + .name' "$CHECK_UPDATES"
 }
 
 @test "check-updates: check-all.sh runs only through the run-as-builder action" {
@@ -426,7 +555,7 @@ builder_steps() {
 # builder owns the workspace once check-all.sh ran, so a local action after
 # that step in the same job could run code that builder wrote.
 @test "check-updates: no local action runs after builder in its job" {
-  local job line after
+  local job line after found=0
   for job in $(yq '.jobs | keys | .[]' "$CHECK_UPDATES"); do
     after=0
     run yq ".jobs.$job.steps[] | .uses // \"\"" "$CHECK_UPDATES"
@@ -434,9 +563,14 @@ builder_steps() {
     for line in "${lines[@]}"; do
       echo "$job: $line"
       [[ "$after" -eq 0 || "$line" != ./* ]]
-      [[ "$line" != ./.github/actions/run-as-builder ]] || after=1
+      if [[ "$line" == ./aurtomator/.github/actions/run-as-builder ]]; then
+        after=1
+        found=$((found + 1))
+      fi
     done
   done
+  # All four builder steps, so a path that names no step fails here
+  [ "$found" -eq 4 ]
 }
 
 @test "run-as-builder: takes its inputs through the environment" {
@@ -451,10 +585,12 @@ builder_steps() {
 # leaves two processes behind that print $LATE_OUT after it exits, one
 # holding only stdout and one only stderr, and exits with $SUDO_RC. chown
 # and git log their arguments to chown.log and git.log in the test
-# directory.
+# directory. The action sits in aurtomator/ of the workspace, and
+# GITHUB_ACTION_PATH names its directory, or $ACTION_PATH when it is set.
 run_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep
-  mkdir -p "$bin"
+  local action_dir="$BATS_TEST_TMPDIR/aurtomator/.github/actions/run-as-builder"
+  mkdir -p "$bin" "$action_dir"
   printf '#!/bin/sh\necho "$*" >>"$GITHUB_WORKSPACE/chown.log"\n' >"$bin/chown"
   printf '#!/bin/sh\necho "$*" >>"$GITHUB_WORKSPACE/git.log"\n' >"$bin/git"
   rm -f "$BATS_TEST_TMPDIR/chown.log" "$BATS_TEST_TMPDIR/git.log"
@@ -476,18 +612,19 @@ EOF
   args=$(yq "$step | .with.args // \"\"" "$CHECK_UPDATES")
   keep=$(yq "$step | .with[\"keep-env\"] // \"\"" "$CHECK_UPDATES")
   rm -f "$SUDO_LOG"
-  run env PATH="$bin:$PATH" GITHUB_WORKSPACE="$BATS_TEST_TMPDIR" SUDO_LOG="$SUDO_LOG" \
+  run env PATH="$bin:$PATH" GITHUB_WORKSPACE="$BATS_TEST_TMPDIR" \
+    GITHUB_ACTION_PATH="${ACTION_PATH:-$action_dir}" SUDO_LOG="$SUDO_LOG" \
     ARGS="$args" KEEP_ENV="$keep" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: each builder step runs check-all.sh in its mode, with only the variables it needs" {
-  local expected entry job name
+  local expected entry job name script="$BATS_TEST_TMPDIR/aurtomator/scripts/check-all.sh" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    $'check\tCheck updates\t--preserve-env=GITHUB_TOKEN -u builder ./scripts/check-all.sh'
-    $'prepare\tPrepare updates\t-u builder ./scripts/check-all.sh --prepare handoff'
-    $'verify\tVerify checksums\t-u builder ./scripts/check-all.sh --verify handoff'
-    $'publish\tPublish updates\t--preserve-env=GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder ./scripts/check-all.sh --publish handoff'
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_TOKEN -u builder $script"
+    "prepare${tab}Prepare updates${tab}-u builder $script --prepare handoff"
+    "verify${tab}Verify checksums${tab}-u builder $script --verify handoff"
+    "publish${tab}Publish updates${tab}--preserve-env=GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $script --publish handoff"
   )
   for entry in "${expected[@]}"; do
     IFS=$'\t' read -r job name want <<<"$entry"
@@ -506,6 +643,17 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/chown.log")" = "-R builder:builder ." ]
   [ "$(cat "$BATS_TEST_TMPDIR/git.log")" = "config --global --add safe.directory $BATS_TEST_TMPDIR" ]
+}
+
+# A wrong GITHUB_ACTION_PATH fails the step before it stops the workflow
+# commands and before builder runs anything
+@test "run-as-builder: fails at once when its checkout is missing" {
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  ACTION_PATH="$BATS_TEST_TMPDIR/missing/.github/actions/run-as-builder" SUDO_OUT=ok \
+    run_builder_step check "Check updates"
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"::stop-commands::"* ]]
+  [ ! -e "$SUDO_LOG" ]
 }
 
 @test "check-updates: no line of builder reaches the runner as a command" {
@@ -620,12 +768,12 @@ EOF
 # line, that start with the emoji of the --label it asks for, the first 30
 # unless --limit says otherwise, answers has_issues with $GH_HAS_ISSUES (true
 # by default) or fails it when $GH_API_FAIL is set, and logs every call to
-# $GH_LOG. scripts/lib.sh of the workspace writes the body "body" and logs
-# the function and its arguments to $BODY_LOG. sudo fails.
+# $GH_LOG. aurtomator/scripts/lib.sh of the workspace writes the body "body"
+# and logs the function and its arguments to $BODY_LOG. sudo fails.
 run_issue_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
-  mkdir -p "$ws/.status" "$ws/scripts" "$bin"
-  cat >"$ws/scripts/lib.sh" <<'EOF'
+  mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
+  cat >"$ws/aurtomator/scripts/lib.sh" <<'EOF'
 failure_issue_body() { echo "failure_issue_body $*" >>"$BODY_LOG" && echo body; }
 alert_issue_body() { echo "alert_issue_body $*" >>"$BODY_LOG" && echo body; }
 upstream_issue_body() { echo "upstream_issue_body $*" >>"$BODY_LOG" && echo body; }
@@ -819,13 +967,13 @@ EOF
 # "<number> <title>" per line, whose title starts with the emoji of the
 # --label it asks for, the first 30 unless --limit says otherwise, answers
 # has_issues with $GH_HAS_ISSUES (true by default), fails the list when
-# $GH_FAIL is set and logs every call to $GH_LOG. scripts/lib.sh of the
-# workspace writes the comment "comment" and logs the function and its
-# arguments to $BODY_LOG.
+# $GH_FAIL is set and logs every call to $GH_LOG. aurtomator/scripts/lib.sh
+# of the workspace writes the comment "comment" and logs the function and
+# its arguments to $BODY_LOG.
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
-  mkdir -p "$ws/.status" "$ws/scripts" "$bin"
-  cat >"$ws/scripts/lib.sh" <<'EOF'
+  mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
+  cat >"$ws/aurtomator/scripts/lib.sh" <<'EOF'
 close_comment() { echo "close_comment $*" >>"$BODY_LOG" && echo comment; }
 EOF
   for pair in "$@"; do
@@ -1202,7 +1350,7 @@ EOF
 
 @test "check-updates: verify runs as builder and hands over as prepare does" {
   run yq '.jobs.verify.steps[] | select(.name == "Verify checksums") | .uses + " " + .with.args' "$CHECK_UPDATES"
-  [ "$output" = "./.github/actions/run-as-builder --verify handoff" ]
+  [ "$output" = "./aurtomator/.github/actions/run-as-builder --verify handoff" ]
   [ "$(step_run verify "Hand over")" = "$(step_run prepare "Hand over")" ]
   run yq '[.jobs.verify.steps[].name] | join(",")' "$CHECK_UPDATES"
   [[ "$output" == *"Verify checksums,Hand over,Upload verified handoff"* ]]
@@ -1233,16 +1381,43 @@ EOF
   [ "$output" = "needs.verify.result == 'success'" ]
 }
 
+@test "check-updates: Setup AUR SSH fails on an empty key" {
+  local step="$BATS_TEST_TMPDIR/step.sh" bin="$BATS_TEST_TMPDIR/bin" ssh_dir="$BATS_TEST_TMPDIR/ssh" block
+  block=$(step_run publish "Setup AUR SSH")
+  run grep -o -F /home/builder/.ssh <<<"$block"
+  [ "${#lines[@]}" -eq 1 ]
+  printf '%s\n' "${block//"/home/builder/.ssh"/"$ssh_dir"}" >"$step"
+  mkdir -p "$bin"
+  printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
+  chmod +x "$bin/chown"
+  run env AUR_SSH_KEY= PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::The secret AUR_SSH_KEY is empty" ]
+  [ ! -e "$ssh_dir" ]
+  run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ssh_dir/aur")" = "key-text" ]
+  [ -f "$ssh_dir/known_hosts" ]
+}
+
 NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 
-@test "notify-failure: runs on a failed run of the update workflow" {
-  run yq '.name' "$CHECK_UPDATES"
-  local name="$output"
+@test "notify-failure: runs when called, after the caller's condition" {
   run yq -o=json -I=0 '.on' "$NOTIFY"
   [ "$status" -eq 0 ]
-  [ "$output" = "{\"workflow_run\":{\"workflows\":[\"$name\"],\"types\":[\"completed\"]}}" ]
+  [ "$output" = '{"workflow_call":null}' ]
   run yq '.jobs.notify.if' "$NOTIFY"
-  [ "$output" = "github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out'" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+  run yq '.concurrency' "$NOTIFY"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+}
+
+@test "notify-failure: names the run it is called from" {
+  run yq -o=json -I=0 '.jobs.notify.steps[0].env' "$NOTIFY"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"GH_TOKEN":"${{ github.token }}","GH_REPO":"${{ github.repository }}","RUN_ID":"${{ github.run_id }}","RUN_URL":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","RUN_BRANCH":"${{ github.ref_name }}"}' ]
 }
 
 @test "notify-failure: reads the jobs of the run and writes issues, nothing else" {
@@ -1255,8 +1430,9 @@ NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 # Runs the step of notify-failure for run 7 of owner/fork. gh lists the
 # titles in $GH_TITLES as the open issues, answers has_issues with
 # $GH_HAS_ISSUES (true by default), lists the jobs in $GH_JOBS as the failed
-# ones or fails that when $GH_JOBS_FAIL is set, fails the list of issues
-# when $GH_FAIL is set and logs every call to $GH_LOG.
+# ones (an empty $GH_JOBS lists no failed job) or fails that when
+# $GH_JOBS_FAIL is set, fails the list of issues when $GH_FAIL is set and
+# logs every call to $GH_LOG.
 run_notify_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
@@ -1308,6 +1484,14 @@ EOF
   grep -q 'failed in jobs that could not be listed' "$GH_LOG"
 }
 
+@test "notify-failure: opens nothing when no job failed" {
+  GH_JOBS="" run_notify_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::No job of the run failed, so the canceled run gets no issue"* ]]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "notify-failure: opens no second issue while one is open" {
   GH_TITLES="❌ Check AUR Package Updates failed" run_notify_step
   [ "$status" -eq 0 ]
@@ -1328,4 +1512,49 @@ EOF
   [ "$status" -ne 0 ]
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+VALIDATE="$GITHUB_DIR/workflows/validate.yml"
+
+@test "validate: runs validate-pkg.sh --all of the pinned checkout without a secret" {
+  run yq -o=json -I=0 '.on' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"workflow_call":null}' ]
+  run yq -o=json -I=0 '.permissions' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"contents":"read"}' ]
+  run grep -c secrets "$VALIDATE"
+  [ "$output" = "0" ]
+  run yq -o=json -I=0 '[.jobs.validate.steps[] | select(.uses | test("^actions/checkout@")) | .with]' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[{"persist-credentials":false},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
+  run yq '.jobs.validate.steps[] | select(has("run")) | .run' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  grep -qxF './aurtomator/scripts/validate-pkg.sh --all' <<<"$output"
+}
+
+# The loop test of the image job leaves out the pin check and the
+# repository and ref of the checkout, so this test compares the whole job
+# with the one of check-updates.yml
+@test "validate: the image job is the one of check-updates" {
+  local expected
+  run yq '.jobs.image' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" != "null" ]
+  expected="$output"
+  run yq '.jobs.image' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$expected" ]
+}
+
+@test "validate: the validate job runs in the image, after it" {
+  run yq '.jobs.validate.needs' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "image" ]
+  run yq '.jobs.validate.container' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ needs.image.outputs.ref }}' ]
+  run yq '.jobs.validate["timeout-minutes"]' "$VALIDATE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "10" ]
 }
