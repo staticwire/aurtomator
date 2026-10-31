@@ -106,7 +106,7 @@ jobs:
         id: decide
         run: |
           # prepare runs for an outdated package, publish also for a change
-          # in the status table
+          # in the package table
           prepare=false
           if grep -qsE '^(new_version|available_downgrade|new_build): ' .status/*; then
             prepare=true
@@ -287,7 +287,7 @@ jobs:
           retention-days: 1
 
   # Pushes what verify passed on and records the statuses of the check job.
-  # Runs also when prepare is skipped, for a change in the status table, and
+  # Runs also when prepare is skipped, for a change in the package table, and
   # when prepare or verify failed: then it publishes nothing, and every
   # package with a new version gets update_failed. Nothing here executes a
   # PKGBUILD: publish-pkg.sh checks the prepared files against the AUR copy.
@@ -396,7 +396,7 @@ jobs:
           args: --publish handoff
           keep-env: GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL
 
-      - name: Update README status table
+      - name: Update README package table
         run: sudo -u builder ./aurtomator/scripts/update-readme.sh
 
       - name: Commit changes via API

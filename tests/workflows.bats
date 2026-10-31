@@ -482,7 +482,7 @@ run_decide_step() {
   [ "$output" = $'prepare=false\nwork=true' ]
 }
 
-@test "check-updates: Decide publishes only a change of the status table" {
+@test "check-updates: Decide publishes only a change of the package table" {
   README_CHANGED=1 run run_decide_step pkg="check_failed: API down"
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=false\nwork=true' ]
@@ -501,7 +501,7 @@ run_decide_step() {
   run step_run check Decide
   [ "$status" -eq 0 ]
   [[ "$output" == *"$line"* ]]
-  run step_run publish "Update README status table"
+  run step_run publish "Update README package table"
   [ "$status" -eq 0 ]
   [[ "$output" == *"$line"* ]]
   run run_blocks "$CHECK_UPDATES"
@@ -1128,7 +1128,7 @@ no_commit() {
   [ "$output" = "always()" ]
 }
 
-# A change that leaves the status table alone skips publish and still opens
+# A change that leaves the package table alone skips publish and still opens
 # or closes an issue
 @test "check-updates: the issues job runs in every run that checked, after publish" {
   run yq '.jobs.issues.needs | join(" ")' "$CHECK_UPDATES"
