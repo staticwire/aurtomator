@@ -1558,3 +1558,76 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   [ "$status" -eq 0 ]
   [ "$output" = "10" ]
 }
+
+SETUP_DOC="$BATS_TEST_DIRNAME/../docs/SETUP.md"
+
+# Prints the inside of fenced yaml block $1, 1 or 2, of the section "The
+# calling workflows" in docs/SETUP.md
+calling_workflow() {
+  local text
+  text=$(sed -n '/^## The calling workflows$/,/^## /p' "$SETUP_DOC")
+  if [ "$1" -eq 2 ]; then
+    text=$(sed '0,/^```yaml$/d' <<<"$text" | sed '0,/^```$/d')
+  fi
+  sed -n '/^```yaml$/,/^```$/{/^```$/q;/^```yaml$/d;p}' <<<"$text"
+}
+
+# The template repository is created from these two blocks, with the pin
+# of a release in place of <sha> and vX.Y.Z
+@test "template: the calling workflows in SETUP.md pin the three files and grant what the jobs need" {
+  local check="$BATS_TEST_TMPDIR/check-updates.yml" validate="$BATS_TEST_TMPDIR/validate.yml"
+  local workflows=staticwire/aurtomator/.github/workflows
+  calling_workflow 1 >"$check"
+  calling_workflow 2 >"$validate"
+  [ -s "$check" ]
+  [ -s "$validate" ]
+
+  run yq '.name' "$check"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Check AUR Package Updates" ]
+  run yq '.on.schedule[0].cron' "$check"
+  [ "$output" = "17 * * * *" ]
+  run yq '.on | has("workflow_dispatch")' "$check"
+  [ "$output" = "true" ]
+  run yq '.concurrency.group' "$check"
+  [ "$output" = "check-updates" ]
+  run yq '.concurrency.cancel-in-progress' "$check"
+  [ "$output" = "false" ]
+  run yq 'has("permissions")' "$check"
+  [ "$output" = "false" ]
+  run yq '.jobs.check-updates.uses' "$check"
+  [ "$output" = "$workflows/check-updates.yml@<sha>" ]
+  run yq '.jobs.check-updates.uses | line_comment' "$check"
+  [ "$output" = "vX.Y.Z" ]
+  run yq -o=json -I=0 '.jobs.check-updates.permissions' "$check"
+  [ "$output" = '{"contents":"write","issues":"write"}' ]
+  run yq -o=json -I=0 '.jobs.check-updates.secrets | keys | sort' "$check"
+  [ "$output" = '["AUR_GIT_EMAIL","AUR_GIT_NAME","AUR_SSH_KEY","GPG_SIGNING_KEY"]' ]
+  run yq '.jobs.check-updates.secrets | to_entries | .[] | select(.value != "${{ secrets." + .key + " }}") | .key' "$check"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run yq '.jobs.notify.needs' "$check"
+  [ "$output" = "check-updates" ]
+  run yq '.jobs.notify.if' "$check"
+  [ "$output" = "\${{ always() && needs.check-updates.result != 'success' }}" ]
+  run yq '.jobs.notify.uses' "$check"
+  [ "$output" = "$workflows/notify-failure.yml@<sha>" ]
+  run yq '.jobs.notify.uses | line_comment' "$check"
+  [ "$output" = "vX.Y.Z" ]
+  run yq -o=json -I=0 '.jobs.notify.permissions' "$check"
+  [ "$output" = '{"actions":"read","issues":"write"}' ]
+
+  run yq '.name' "$validate"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Validate packages" ]
+  run yq -o=json -I=0 '.on.push.branches' "$validate"
+  [ "$output" = '["main"]' ]
+  run yq '.on | has("pull_request")' "$validate"
+  [ "$output" = "true" ]
+  run yq -o=json -I=0 '.permissions' "$validate"
+  [ "$output" = '{"contents":"read"}' ]
+  run yq '.jobs.validate.uses' "$validate"
+  [ "$output" = "$workflows/validate.yml@<sha>" ]
+  run yq '.jobs.validate.uses | line_comment' "$validate"
+  [ "$output" = "vX.Y.Z" ]
+}
