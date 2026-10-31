@@ -357,16 +357,7 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 @test "release-please: writes VERSION, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
   run yq -o=json -I=0 '.packages["."]' "$RELEASE_CONFIG"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"release-type":"simple","version-file":"VERSION","changelog-type":"github","skip-changelog":true,"bump-minor-pre-major":true,"include-component-in-tag":false,"extra-files":[{"type":"generic","path":"README.md"}]}' ]
-}
-
-# The release PR writes the version line of README.md, so the check run of
-# the upstream repository finds nothing to commit to its protected main
-@test "release-please: the README holds the version line update-readme.sh writes" {
-  local version
-  version=$(<"$GITHUB_DIR/../VERSION")
-  run grep -cxF "aurtomator $version <!-- x-release-please-version -->" "$GITHUB_DIR/../README.md"
-  [ "$output" = "1" ]
+  [ "$output" = '{"release-type":"simple","version-file":"VERSION","changelog-type":"github","skip-changelog":true,"bump-minor-pre-major":true,"include-component-in-tag":false}' ]
 }
 
 # release-please updates VERSION in place and does not create it

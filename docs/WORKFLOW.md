@@ -1119,7 +1119,7 @@ Steps 5 and 6 run as root with `GH_TOKEN` set to the workflow token. No other us
 1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: the badges `Check AUR Package Updates` and `Validate packages`, the status of `check-updates.yml` and `validate.yml` in the repository in `origin`, and the badge `maintained with aurtomator`, which links to aurtomator. Without a GitHub `origin`, the block holds the last badge alone. The badge URLs name the two files, so the calling workflows keep those names.
 2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
 
-The badges are optional. Each marker must be a line of its own, once, with the start marker above the end marker. The script checks this for the table, and for the badges when their start marker is there, and stops before it writes anything otherwise. A line that only quotes a marker in its text is left as it is.
+The badges are optional, and so is the table while `packages/` holds no package: a README without either table marker then gets no table, as the README of aurtomator itself. Each marker must be a line of its own, once, with the start marker above the end marker. The script checks this for the table, and for the badges when their start marker is there, and stops before it writes anything otherwise. A line that only quotes a marker in its text is left as it is.
 
 #### .status/ directory format
 
@@ -1212,10 +1212,10 @@ The step lists the jobs of the run and takes those with the conclusion `failure`
 `update-readme.sh` writes the version under the package table, and with `newer:` a link to the release:
 
 ```text
-aurtomator 0.6.0 ([0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0)) <!-- x-release-please-version -->
+aurtomator 0.6.0 ([0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0))
 ```
 
-The comment marks the line for the release PR of aurtomator, which writes the new version there in the README of aurtomator. The `pipeline` job of `ci.yml` then finds the README as `update-readme.sh` writes it, and has nothing to commit to a `main` that only takes pull requests, see [6.4](#64-validate-and-pipeline-jobs). A run that could not read the release writes the line without the link.
+A run that could not read the release writes the line without the link.
 
 A newer release also opens an issue, and a run closes it once the pin names that release or a newer one is out, see [5.6](#56-issues).
 
@@ -1265,7 +1265,7 @@ The two jobs call the reusable workflows of the same commit, with the `./.github
 
 `validate` calls `validate.yml` with `contents: read`. Your repository calls the same workflow on every push to `main` and on pull requests, see [SETUP.md](SETUP.md#the-calling-workflows). After the `image` job of [5.2](#52-permissions-and-container), its job `validate` runs in the image with a 10-minute timeout. It upgrades `archlinux-keyring` before the system, installs `git` and `go-yq`, runs **Checkout** and **Checkout aurtomator** as in [5.3](#53-steps), and runs `./aurtomator/scripts/validate-pkg.sh --all` in the step `Validate packages`. It creates no `builder`: `validate-pkg.sh` reads YAML and runs no PKGBUILD. In aurtomator, `packages/` holds `example.yml.sample` alone, so the job there checks the call itself: the pin check, the two checkouts and the container. In your repository, the pull request that moves the pin runs the validator of the new release against your packages before the merge.
 
-`pipeline` calls `check-updates.yml` with `contents: write` and `issues: write`, with aurtomator itself as the repository of the packages. No package exists there, so `image`, `check` and `issues` run, `prepare` and `verify` are skipped, and `publish` is skipped as well, because the README that `update-readme.sh` writes equals the committed one. The test `update-readme: the README of aurtomator is what the script writes for it` in `tests/scripts.bats` fails when the two differ. The job shows on GitHub what the BATS tests cannot: that the runner finds the action in `aurtomator/`, that `GITHUB_ACTION_PATH` leads the action to the scripts, that the checkouts at `job.workflow_sha` work in the containers, and that the artifacts pass between the jobs. It runs for a push and for a pull request from a branch of aurtomator, `github.event.pull_request.head.repo.full_name == github.repository`, because a pull request from a fork of aurtomator gets a read-only token.
+`pipeline` calls `check-updates.yml` with `contents: write` and `issues: write`, with aurtomator itself as the repository of the packages. No package exists there, so `image`, `check` and `issues` run, `prepare` and `verify` are skipped, and `publish` is skipped as well: the README of aurtomator has no package table and no badge markers, so `update-readme.sh` leaves it as it is. The test `update-readme: the README of aurtomator is what the script writes for it` in `tests/scripts.bats` fails when the script changes it. The job shows on GitHub what the BATS tests cannot: that the runner finds the action in `aurtomator/`, that `GITHUB_ACTION_PATH` leads the action to the scripts, that the checkouts at `job.workflow_sha` work in the containers, and that the artifacts pass between the jobs. It runs for a push and for a pull request from a branch of aurtomator, `github.event.pull_request.head.repo.full_name == github.repository`, because a pull request from a fork of aurtomator gets a read-only token.
 
 ## 7. Local Testing
 

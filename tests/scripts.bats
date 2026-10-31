@@ -1338,7 +1338,7 @@ EOF
 
   grep -qx '</table>' "$TEST_TMPDIR/README.md"
   run grep -A2 -x '</table>' "$TEST_TMPDIR/README.md"
-  [ "$output" = $'</table>\n\naurtomator 0.6.0 <!-- x-release-please-version -->' ]
+  [ "$output" = $'</table>\n\naurtomator 0.6.0' ]
 }
 
 @test "update-readme: links a newer release of aurtomator" {
@@ -1351,7 +1351,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
-  grep -qxF 'aurtomator 0.6.0 ([0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0)) <!-- x-release-please-version -->' "$TEST_TMPDIR/README.md"
+  grep -qxF 'aurtomator 0.6.0 ([0.7.0 available](https://github.com/staticwire/aurtomator/releases/tag/v0.7.0))' "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: links no release for aurtomator at its release or for another _upstream" {
@@ -1362,7 +1362,7 @@ EOF
     printf '%s\n' "$upstream" >"$TEST_TMPDIR/.status/_upstream"
     printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
     "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-    grep -qxF 'aurtomator 0.6.0 <!-- x-release-please-version -->' "$TEST_TMPDIR/README.md" || {
+    grep -qxF 'aurtomator 0.6.0' "$TEST_TMPDIR/README.md" || {
       echo "linked for: $upstream"
       return 1
     }
@@ -2084,6 +2084,37 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"No <!-- PACKAGES:END --> marker found in README.md"* ]]
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+}
+
+# The README of aurtomator has no package table, and aurtomator has no packages
+@test "update-readme: a README without the table markers and without packages stays as it is" {
+  printf '%s\n' '# test' 'Some text.' '## License' >"$TEST_TMPDIR/README.md"
+  cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"README.md has no package table and there are no packages to show"* ]]
+  cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: fails and keeps a README without the table markers while there are packages" {
+  printf '%s\n' '# test' 'Some text.' '## License' >"$TEST_TMPDIR/README.md"
+  cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+  git -C "$TEST_TMPDIR" init -q
+  create_test_package "mypkg" "github-release" $'upstream:\n  project: owner/repo'
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No <!-- PACKAGES:START --> marker found in README.md"* ]]
+  cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: writes the badges of a README without the table markers and without packages" {
+  printf '%s\n' '# test' '<!-- BADGES:START -->' 'old badges' '<!-- BADGES:END -->' '## License' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  run cat "$TEST_TMPDIR/README.md"
+  [ "$output" = "$(printf '%s\n' '# test' '<!-- BADGES:START -->' '[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' '<!-- BADGES:END -->' '## License')" ]
 }
 
 @test "update-readme: fails and keeps the README without the end marker of the badges" {
