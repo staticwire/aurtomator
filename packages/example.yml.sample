@@ -1,5 +1,5 @@
-# Example package config. Copy it from the clone of aurtomator to
-# packages/<name>.yml of your repository and edit the copy.
+# Example package config for packages/<name>.yml of your repository, where
+# ./aurtomator.sh sample > packages/<name>.yml writes a copy to edit.
 #
 # Top-level fields:
 #   name       - pkgbase on the AUR, the name of its git repository, equal to
