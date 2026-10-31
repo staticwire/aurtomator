@@ -46,7 +46,7 @@ The badge URLs name `check-updates.yml` and `validate.yml` in your repository, s
 
 ## The calling workflows
 
-`.github/workflows/check-updates.yml` runs the update pipeline at minute 17 of every hour, and its `notify` job opens an issue when the run fails:
+`.github/workflows/check-updates.yml` runs the update pipeline on a schedule, and its `notify` job opens an issue when the run fails:
 
 ```yaml
 name: Check AUR Package Updates
@@ -373,7 +373,7 @@ It clones the AUR repo, sets `pkgver`, regenerates checksums and `.SRCINFO`, run
 
 ### 6. Push and let CI take over
 
-Commit the package YAML and push to your repository. The push to `main` runs `Validate packages`. `Check AUR Package Updates` runs every hour at minute 17, as set in `.github/workflows/check-updates.yml`, and can be started by hand through `workflow_dispatch`.
+Commit the package YAML and push to your repository. The push to `main` runs `Validate packages`. `Check AUR Package Updates` runs on the schedule `17 * * * *` of `.github/workflows/check-updates.yml`, and GitHub starts only part of those runs: in October 2026 a repository with this schedule got about five a day, one every five hours. A run can also be started by hand through `workflow_dispatch`.
 
 ## Troubleshooting
 
