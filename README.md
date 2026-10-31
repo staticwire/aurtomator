@@ -24,7 +24,7 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 
 ## Quick start
 
-1. Create your repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) with "Use this template". Check that Issues are enabled in its settings ([why?](docs/SETUP.md#after-creating-the-repository)).
+1. Create your repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) with "Use this template". Check that Issues are enabled in its settings, and that `Check AUR Package Updates` and `Validate packages` are enabled in its Actions tab ([why?](docs/SETUP.md#after-creating-the-repository)).
 2. Clone your repository:
 
    ```bash
