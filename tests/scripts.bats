@@ -1739,7 +1739,7 @@ EOF
 
   AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  [ "$(sed -n '3p' "$data/README.md")" = '[![Check AUR Package Updates](https://github.com/owner/data/actions/workflows/check-updates.yml/badge.svg)](https://github.com/owner/data/actions/workflows/check-updates.yml) [![Validate packages](https://github.com/owner/data/actions/workflows/validate.yml/badge.svg)](https://github.com/owner/data/actions/workflows/validate.yml) [![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
+  [ "$(sed -n '3p' "$data/README.md")" = '[![Validate packages](https://github.com/owner/data/actions/workflows/validate.yml/badge.svg)](https://github.com/owner/data/actions/workflows/validate.yml) [![Check AUR Package Updates](https://github.com/owner/data/actions/workflows/check-updates.yml/badge.svg)](https://github.com/owner/data/actions/workflows/check-updates.yml) [![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
   [ "$(sed -n '4p' "$data/README.md")" = '<!-- BADGES:END -->' ]
   local pattern
   for pattern in codecov ci.yml shields.io/badge/bash aur.archlinux.org; do
