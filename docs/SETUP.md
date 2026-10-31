@@ -40,7 +40,7 @@ A repository created from the template [staticwire/aurtomator-seed](https://gith
 
 ### Badges
 
-`update-readme.sh` writes three badges between the `<!-- BADGES:START -->` and `<!-- BADGES:END -->` markers of the README: `Check AUR Package Updates`, `Validate packages` and `automated by aurtomator`. A run of `Check AUR Package Updates` runs the script and commits the README when it changed.
+`update-readme.sh` writes three badges between the `<!-- BADGES:START -->` and `<!-- BADGES:END -->` markers of the README: `Check AUR Package Updates`, `Validate packages` and `maintained with aurtomator`. A run of `Check AUR Package Updates` runs the script and commits the README when it changed.
 
 The badge URLs name `check-updates.yml` and `validate.yml` in your repository, so the calling workflows keep those file names.
 

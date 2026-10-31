@@ -1116,7 +1116,7 @@ Steps 5 and 6 run as root with `GH_TOKEN` set to the workflow token. No other us
 
 `update-readme.sh` rewrites two blocks of `README.md`:
 
-1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: the badges `Check AUR Package Updates` and `Validate packages`, the status of `check-updates.yml` and `validate.yml` in the repository in `origin`, and the badge `automated by aurtomator`, which links to aurtomator. Without a GitHub `origin`, the block holds the last badge alone. The badge URLs name the two files, so the calling workflows keep those names.
+1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: the badges `Check AUR Package Updates` and `Validate packages`, the status of `check-updates.yml` and `validate.yml` in the repository in `origin`, and the badge `maintained with aurtomator`, which links to aurtomator. Without a GitHub `origin`, the block holds the last badge alone. The badge URLs name the two files, so the calling workflows keep those names.
 2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
 
 The badges are optional. Each marker must be a line of its own, once, with the start marker above the end marker. The script checks this for the table, and for the badges when their start marker is there, and stops before it writes anything otherwise. A line that only quotes a marker in its text is left as it is.
