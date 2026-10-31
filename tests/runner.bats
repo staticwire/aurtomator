@@ -16,8 +16,9 @@ runner_script() {
 }
 
 # Commits the files of a fake aurtomator to the work tree $1: a sample that
-# holds $2, and scripts/show-args.sh, which prints what it got and exits with
-# SHOW_STATUS
+# holds $2, scripts/show-args.sh, which prints what it got and exits with
+# SHOW_STATUS, and scripts/lib.sh, a library that is not executable, as in
+# aurtomator
 commit_aurtomator() {
   mkdir -p "$1/scripts" "$1/packages"
   printf 'name: %s\n' "$2" >"$1/packages/example.yml.sample"
@@ -29,6 +30,7 @@ printf 'arg: %s\n' "$@"
 exit "${SHOW_STATUS:-0}"
 EOF
   chmod +x "$1/scripts/show-args.sh"
+  echo 'echo "lib.sh ran"' >"$1/scripts/lib.sh"
   git -C "$1" add -A
   git -C "$1" -c user.name=t -c user.email=t@example.com commit -q -m "$2"
   git -C "$1" rev-parse HEAD
@@ -174,7 +176,7 @@ teardown() {
   [ "${lines[1]}" = "Commands: sample show-args" ]
 
   local command
-  for command in "" nope ../scripts/show-args Show-args show-args.sh; do
+  for command in "" nope lib ../scripts/show-args Show-args show-args.sh; do
     run "$REPO/aurtomator.sh" "$command"
     [ "$status" -eq 1 ]
     [ "${lines[0]}" = "Usage: $REPO/aurtomator.sh <command> [argument...]" ]

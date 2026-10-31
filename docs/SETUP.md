@@ -113,7 +113,7 @@ The script `aurtomator.sh` in the root of your repository runs the scripts of au
 ./aurtomator.sh sample                 # prints packages/example.yml.sample
 ```
 
-A command is `sample` or the name of a script in `scripts/` of aurtomator without `.sh`, and the arguments after it go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, whatever directory you run it from.
+A command is `sample` or the name of an executable script in `scripts/` of aurtomator without `.sh`, and the arguments after it go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, whatever directory you run it from.
 
 The `uses:` line of `.github/workflows/check-updates.yml` names the repository and the commit. The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or into `$XDG_CACHE_HOME/aurtomator/<sha>` when `XDG_CACHE_HOME` is set. Later runs use that copy, and the first run after a merge that moves the pin fetches the new release.
 
@@ -160,11 +160,16 @@ cmd="${1:-}"
 if [[ "$cmd" == sample ]]; then
   exec cat "$copy/packages/example.yml.sample"
 fi
-if [[ ! "$cmd" =~ ^[a-z]+(-[a-z]+)*$ || ! -f "$copy/scripts/$cmd.sh" ]]; then
-  scripts=("$copy"/scripts/*.sh)
-  scripts=("${scripts[@]##*/}")
+if [[ ! "$cmd" =~ ^[a-z]+(-[a-z]+)*$ || ! -x "$copy/scripts/$cmd.sh" ]]; then
+  commands=(sample)
+  for script in "$copy"/scripts/*.sh; do
+    if [[ -x "$script" ]]; then
+      script="${script##*/}"
+      commands+=("${script%.sh}")
+    fi
+  done
   echo "Usage: $0 <command> [argument...]" >&2
-  echo "Commands: sample ${scripts[*]%.sh}" >&2
+  echo "Commands: ${commands[*]}" >&2
   exit 1
 fi
 shift
