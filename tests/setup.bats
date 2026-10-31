@@ -240,10 +240,13 @@ EOF
   [[ "$output" == *"setup.sh"* ]]
 }
 
-@test "setup: --help shows how to run it from the packages repository" {
+@test "setup: --help shows how to run it through the aurtomator script" {
   run "$TEST_TMPDIR/scripts/setup.sh" --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"cd <your packages repository> && <clone of aurtomator>/scripts/setup.sh"* ]]
+  [[ "$output" == *"#   ./aurtomator.sh setup              # full setup (all steps)"* ]]
+  [[ "$output" == *"#   ./aurtomator.sh setup verify       # verify everything works"* ]]
+  [[ "$output" == *"#   --non-interactive         No prompts, fail if missing"* ]]
+  [[ "$output" != *"clone of aurtomator"* ]]
 }
 
 @test "setup: unknown flag exits 1" {
@@ -803,6 +806,55 @@ EOF
   run "$TEST_TMPDIR/scripts/setup.sh" --bogus-flag
   [ "$status" -eq 1 ]
   [[ "$output" == *"(see $TEST_TMPDIR/scripts/setup.sh --help)"* ]]
+}
+
+# === Commands printed through the aurtomator script ===
+
+# The script aurtomator.sh of the template sets AURTOMATOR_RUNNER to the path
+# it was run by, and the commands setup.sh prints start with it
+
+@test "setup: through the aurtomator script, an unknown option names its --help" {
+  AURTOMATOR_RUNNER=./aurtomator.sh run "$TEST_TMPDIR/scripts/setup.sh" --bogus-flag
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unknown option: --bogus-flag (see ./aurtomator.sh setup --help)"* ]]
+}
+
+@test "setup verify: through the aurtomator script, names its sample command" {
+  write_full_config ""
+
+  AURTOMATOR_RUNNER=./aurtomator.sh run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Ready."* ]]
+  [[ "$output" == *$'\n'"    ./aurtomator.sh sample > $TEST_TMPDIR/packages/<name>.yml"* ]]
+  [[ "$output" != *"example.yml.sample"* ]]
+}
+
+@test "setup verify: through the aurtomator script, names it for a re-run" {
+  write_full_config "VALIDKEY123"
+  mock_ssh_denied
+
+  AURTOMATOR_RUNNER=./aurtomator.sh run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 issue(s) found."* ]]
+  [[ "$output" == *$'\n'"    ./aurtomator.sh setup verify"* ]]
+}
+
+@test "setup ssh: through the aurtomator script, names it for the copy without a passphrase" {
+  mkdir -p "$TEST_TMPDIR/ssh-pass"
+  ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
+
+  AURTOMATOR_RUNNER=./aurtomator.sh run "$TEST_TMPDIR/scripts/setup.sh" ssh \
+    --ssh-key "$TEST_TMPDIR/ssh-pass/key" --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *$'\n'"    ./aurtomator.sh setup ssh --ssh-key $TEST_TMPDIR/ssh-pass/key-ci"* ]]
+}
+
+@test "setup secrets: through the aurtomator script, names it for the passphrase-free copy" {
+  write_full_config "PASSKEY003"
+
+  AURTOMATOR_RUNNER=./aurtomator.sh run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Run ./aurtomator.sh setup gpg secrets to make a passphrase-free copy"* ]]
 }
 
 # === Verify secret counts ===
