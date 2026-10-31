@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# update-readme.sh - Generate badges and package status table in README.md
+# update-readme.sh - Generate the badges and the package table of README.md
 #
 # Looks for two marker pairs in README.md:
 #   <!-- BADGES:START --> / <!-- BADGES:END -->     - header badges
-#   <!-- PACKAGES:START --> / <!-- PACKAGES:END --> - package status table
+#   <!-- PACKAGES:START --> / <!-- PACKAGES:END --> - package table
 #
 # The badge block holds the badges of check-updates.yml and validate.yml,
 # the two workflows a repository calls, and the badge of aurtomator. The

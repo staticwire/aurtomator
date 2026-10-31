@@ -34,10 +34,10 @@ flowchart TD
     E --> F{version changed?}
     F -->|same| G[write up_to_date]
     F -->|new version| G2[write new_version]
-    C -->|all done| W{new version or status table changed?}
+    C -->|all done| W{new version or package table changed?}
     W -->|no| I
     W -->|new version| P[prepare job: no secrets, no token]
-    W -->|status table only| Q
+    W -->|package table only| Q
     P --> B2[check-all.sh --prepare]
     B2 --> H[update-pkg.sh --prepare for each new_version]
     H --> H1[clone AUR repo over HTTPS]
@@ -1038,7 +1038,7 @@ The workflow has five jobs after a short `image` job. `image` reads the image fr
 
 The calling job sets the permissions of the token for the whole call, and a job of the called workflow can only lower them. `check-updates.yml` sets `contents: read` at the workflow level, and `publish` and `issues` set the blocks above. A calling job that grants less than a job requests makes GitHub reject the calling workflow before any job starts, see [SETUP.md](SETUP.md#invalid-workflow-file-a-nested-job-requests-more-permissions).
 
-`check` decides the run. `prepare` and `verify` run only when a package has a new version. `publish` runs for a new version and also for a change in the status table of `README.md`. It runs after a failure of `prepare` or `verify` as well: then it publishes nothing, and every package with a new version gets `update_failed`. In most runs nothing changes, and all three are skipped. `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs.
+`check` decides the run. `prepare` and `verify` run only when a package has a new version. `publish` runs for a new version and also for a change in the package table of `README.md`. It runs after a failure of `prepare` or `verify` as well: then it publishes nothing, and every package with a new version gets `update_failed`. In most runs nothing changes, and all three are skipped. `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs.
 
 ### 5.3 Steps
 
@@ -1060,7 +1060,7 @@ The four steps use the composite action `.github/actions/run-as-builder` of aurt
 2. **Checkout:** your repository.
 3. **Checkout aurtomator:** into `aurtomator/`.
 4. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
-5. **Decide:** sets the output `prepare` when a status is `new_version`, `available_downgrade` or `new_build`. It runs `./aurtomator/scripts/update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in the status table.
+5. **Decide:** sets the output `prepare` when a status is `new_version`, `available_downgrade` or `new_build`. It runs `./aurtomator/scripts/update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in the package table.
 6. **Upload statuses:** uploads `.status/` as the `checked` artifact with a retention of 1 day.
 
 `prepare`:
@@ -1094,7 +1094,7 @@ The four steps use the composite action `.github/actions/run-as-builder` of aurt
 7. **Setup AUR SSH:** fails with `The secret AUR_SSH_KEY is empty` when the secret is empty or the calling workflow does not pass it. Otherwise it writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. The host key is part of `check-updates.yml` of aurtomator, so a new host key of the AUR reaches a run through a release and a move of the pin.
 8. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
 9. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
-10. **Update README status table:** runs `./aurtomator/scripts/update-readme.sh` as `builder`.
+10. **Update README package table:** runs `./aurtomator/scripts/update-readme.sh` as `builder`.
 11. **Commit changes via API:** see [5.5](#55-verified-commit).
 12. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
 13. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
@@ -1153,7 +1153,7 @@ https://img.shields.io/badge/packages-<ok>%2F<total>-<color>
 
 `<ok>` counts every package without a `check_failed` or `update_failed` status, a new one without `current` included. The color is `brightgreen` with no failures and `red` otherwise.
 
-#### Status table
+#### Package table
 
 The table is HTML, since a Markdown table cell takes no attributes. GitHub keeps `nowrap` on a cell, so Strategy, Updated and Status stay on one line and a long package name wraps.
 
@@ -1193,7 +1193,7 @@ An alert opens an issue as well, see [4.5](#45-update-alerts). Its notes come fr
 
 A newer aurtomator release, `newer: <release>` in `.status/_upstream`, opens an issue titled `🚀 aurtomator <release> available` with the label `aurtomator-update`, unless an open `aurtomator-update` issue has that title. The body comes from `upstream_issue_body`: the release, the version the run uses, a link to the release notes and the run. See [5.8](#58-version-of-aurtomator).
 
-The job runs also when the status table stays the same, so an issue follows the statuses of every run. A package that starts failing gets its issue in that run, and an issue closed while the package still fails comes back in the next run.
+The job runs also when the package table stays the same, so an issue follows the statuses of every run. A package that starts failing gets its issue in that run, and an issue closed while the package still fails comes back in the next run.
 
 The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the run and shows the new status in a code block, as the issue body shows the error. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade` or `rebuilt`, so the version is in the AUR. An open `✋ <package>: update held` closes on the same statuses, so a failed check keeps it open. An open `🚀 aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` at the pin has reached the latest release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It runs neither after a failed step nor after a failed `publish`, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
 

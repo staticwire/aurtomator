@@ -15,7 +15,7 @@ graph LR
     B --> V[verify job, no secrets<br/>download the sources<br/>check the checksums]
     V --> C[publish job<br/>check the prepared files<br/>git push to AUR]
     K -->|status change only| C
-    C --> E[update-readme.sh<br/>commit badges + status table]
+    C --> E[update-readme.sh<br/>commit badges + package table]
     K -->|every run| D[issues job<br/>open and close GitHub Issues]
     C --> D
 ```
@@ -107,11 +107,11 @@ Some upstreams name a release asset with more than the version and rebuild a rel
 
 ## Updates of aurtomator
 
-The line under the package table shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin. A newer release also gets an issue and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
+The line under the package table in the README of your repository shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin. A newer release also gets an issue and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
 
 ## Resource usage
 
-All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version, and `publish` for a new version or a change in the status table. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`. A version check is a few API requests per package, or a bare clone for `git-latest`.
+All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version, and `publish` for a new version or a change in the package table. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`. A version check is a few API requests per package, or a bare clone for `git-latest`.
 
 ## Documentation
 

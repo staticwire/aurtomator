@@ -1623,7 +1623,7 @@ make_spaced_project() {
 
 # === update-readme.sh ===
 
-@test "update-readme: generates status table" {
+@test "update-readme: generates the package table" {
   create_test_package "pkg-a" "github-release" "upstream:
   type: github
   project: owner/repo
