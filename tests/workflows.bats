@@ -312,6 +312,46 @@ EOF
   [ "$output" = "0" ]
 }
 
+# A job missing from the needs could fail and still merge
+@test "ci-ok: needs every job of ci.yml but merge-image" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs | keys | map(select(. != "ci-ok" and . != "merge-image")) | sort | join(" ")' "$ci"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  local jobs="$output"
+  run yq '.jobs["ci-ok"].needs | sort | join(" ")' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$jobs" ]
+}
+
+# Without always() a failed need skips ci-ok, and the ruleset counts a
+# skipped check as passed
+@test "ci-ok: runs after a failed need" {
+  run yq '.jobs["ci-ok"].if' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "always()" ]
+}
+
+# A skipped need passes, as pipeline is skipped for a pull request from a fork
+@test "ci-ok: fails only when a need failed or was canceled" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs["ci-ok"].steps | length' "$ci"
+  [ "$output" = "1" ]
+  run yq '.jobs["ci-ok"].steps[0].if' "$ci"
+  [ "$output" = "contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')" ]
+  yq '.jobs["ci-ok"].steps[0].run' "$ci" >"$BATS_TEST_TMPDIR/step.sh"
+  run bash "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "ci-ok: holds no permissions and has a time limit" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs["ci-ok"].permissions' "$ci"
+  [ "$output" = "{}" ]
+  run yq '.jobs["ci-ok"]["timeout-minutes"]' "$ci"
+  [ "$output" = "5" ]
+}
+
 # === release-please.yml ===
 
 RELEASE="$GITHUB_DIR/workflows/release-please.yml"

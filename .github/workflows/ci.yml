@@ -153,3 +153,19 @@ jobs:
           fi
           # Merges nothing when the branch moved after the checks passed
           gh pr merge "$PR" -R "$REPO" --squash --match-head-commit "$HEAD_SHA"
+
+  # Required by the ruleset in place of the pipeline checks, which a fork
+  # skips. always(): a skipped job counts as passed.
+  ci-ok:
+    needs: [image, lint, test, validate, pipeline]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+
+    steps:
+      - name: Fail when a needed job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error::A job that ci-ok needs failed or was canceled"
+          exit 1
