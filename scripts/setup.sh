@@ -401,9 +401,10 @@ setup_secrets() {
 
     printf "\n  Setting secrets on %s:\n" "$gh_repo"
 
+    # gh prints a line for each secret on stdout and its errors on stderr
     # Identity secrets (for CI to use as AUR commit author)
     if [[ -n "$GIT_AUTHOR_NAME" ]]; then
-      if echo "$GIT_AUTHOR_NAME" | gh secret set AUR_GIT_NAME -R "$gh_repo"; then
+      if echo "$GIT_AUTHOR_NAME" | gh secret set AUR_GIT_NAME -R "$gh_repo" >/dev/null; then
         ok "AUR_GIT_NAME"
       else
         fail "AUR_GIT_NAME"
@@ -411,21 +412,21 @@ setup_secrets() {
     fi
 
     if [[ -n "$GIT_AUTHOR_EMAIL" ]]; then
-      if echo "$GIT_AUTHOR_EMAIL" | gh secret set AUR_GIT_EMAIL -R "$gh_repo"; then
+      if echo "$GIT_AUTHOR_EMAIL" | gh secret set AUR_GIT_EMAIL -R "$gh_repo" >/dev/null; then
         ok "AUR_GIT_EMAIL"
       else
         fail "AUR_GIT_EMAIL"
       fi
     fi
 
-    if gh secret set AUR_SSH_KEY -R "$gh_repo" <"$AUR_SSH_KEY"; then
+    if gh secret set AUR_SSH_KEY -R "$gh_repo" <"$AUR_SSH_KEY" >/dev/null; then
       ok "AUR_SSH_KEY"
     else
       fail "AUR_SSH_KEY"
     fi
 
     if [[ "$gpg_source" == "copy" ]]; then
-      if echo "$GPG_CLEAN_KEY" | gh secret set GPG_SIGNING_KEY -R "$gh_repo"; then
+      if echo "$GPG_CLEAN_KEY" | gh secret set GPG_SIGNING_KEY -R "$gh_repo" >/dev/null; then
         ok "GPG_SIGNING_KEY (passphrase-free copy)"
       else
         fail "GPG_SIGNING_KEY"
@@ -434,7 +435,7 @@ setup_secrets() {
       # "!" exports this subkey alone, without the other secret subkeys
       local signing_key
       signing_key=$(gpg --export-secret-subkeys --armor "${GPG_KEY_ID}!" 2>/dev/null) || signing_key=""
-      if [[ -n "$signing_key" ]] && echo "$signing_key" | gh secret set GPG_SIGNING_KEY -R "$gh_repo"; then
+      if [[ -n "$signing_key" ]] && echo "$signing_key" | gh secret set GPG_SIGNING_KEY -R "$gh_repo" >/dev/null; then
         ok "GPG_SIGNING_KEY"
       else
         fail "GPG_SIGNING_KEY"

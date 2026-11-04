@@ -563,6 +563,38 @@ EOF
   grep -qx 'secret set AUR_SSH_KEY -R test/repo' "$TEST_TMPDIR/gh.args"
 }
 
+# On a terminal gh prints a line of its own for each secret
+@test "setup secrets: prints one line per secret" {
+  write_full_config "VALIDKEY123"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Set Actions secret"* ]]
+  [[ "$output" == *"  ✓ AUR_GIT_NAME"* ]]
+  [[ "$output" == *"  ✓ AUR_GIT_EMAIL"* ]]
+  [[ "$output" == *"  ✓ AUR_SSH_KEY"* ]]
+  [[ "$output" == *"  ✓ GPG_SIGNING_KEY"* ]]
+}
+
+@test "setup secrets: shows the error of a failed gh" {
+  write_full_config "VALIDKEY123"
+  # gh that is logged in and refuses every secret
+  cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  api) echo "testuser" ;;
+  secret) cat >/dev/null; echo "failed to set secret \"$3\": HTTP 403" >&2; exit 1 ;;
+esac
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/gh"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'failed to set secret "AUR_SSH_KEY": HTTP 403'* ]]
+  [[ "$output" == *"✗ AUR_SSH_KEY"* ]]
+}
+
 @test "setup secrets: shows manual instructions without gh" {
   mock_gh_unavailable
   write_full_config ""
@@ -726,6 +758,16 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"GPG_SIGNING_KEY (passphrase-free copy)"* ]]
   grep -q "mocked-passphrase-free" "$TEST_TMPDIR/secret-GPG_SIGNING_KEY"
+}
+
+@test "setup gpg secrets: prints one line for the passphrase-free copy" {
+  mock_gpg_strip_flow
+  write_full_config "PASSKEY003"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<"y"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Set Actions secret"* ]]
+  [[ "$output" == *"  ✓ GPG_SIGNING_KEY (passphrase-free copy)"* ]]
 }
 
 @test "setup gpg secrets: reports a failed upload of the passphrase-free copy" {
