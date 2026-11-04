@@ -107,7 +107,7 @@ Some upstreams name a release asset with more than the version and rebuild a rel
 
 ## Updates of aurtomator
 
-The line under the package table in the README of your repository shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin. A newer release also gets an issue and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
+The line under the package table in the README of your repository shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin to a new release at its first check at least 3 days after the release. "Check for updates" under Insights > Dependency graph > Dependabot runs a check at once. A newer release also gets an issue and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
 
 ## Resource usage
 
