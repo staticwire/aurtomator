@@ -17,7 +17,7 @@ body:
     attributes:
       label: aurtomator version
       description: "The version your calling workflows pin, from the `# vX.Y.Z` comment after the SHA."
-      placeholder: "v0.8.0"
+      placeholder: "vX.Y.Z"
     validations:
       required: true
 
