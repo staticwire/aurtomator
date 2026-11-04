@@ -2044,7 +2044,7 @@ EOF
 
 # === upstream_issue_body ===
 
-@test "upstream_issue_body: names the release, the version of the repository and the notes" {
+@test "upstream_issue_body: names the release, the version of the repository, the update and the notes" {
   echo "0.6.0" >"$TEST_TMPDIR/VERSION"
   echo "newer: 0.7.0" >"$TEST_TMPDIR/_upstream"
   run upstream_issue_body "$TEST_TMPDIR/_upstream" https://example.invalid/run
@@ -2053,7 +2053,10 @@ EOF
     cat <<'EOF'
 aurtomator 0.7.0 is out, and this repository runs 0.6.0.
 
+To update: Insights > Dependency graph > Dependabot > Check for updates. Dependabot opens the pull request that moves the pin.
+
 Release notes: https://github.com/staticwire/aurtomator/releases/tag/v0.7.0
+Manual update: https://github.com/staticwire/aurtomator/blob/main/docs/SETUP.md#the-calling-workflows
 Run: https://example.invalid/run
 
 Auto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.

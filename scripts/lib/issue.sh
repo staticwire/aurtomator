@@ -7,13 +7,11 @@
 # Body of the issue opened for a newer release of aurtomator
 # Args: $1=_upstream in .status/, holding newer: and the release; $2=URL
 #       of the run
-# The backticks are Markdown code
-# shellcheck disable=SC2016
 upstream_issue_body() {
   local release
   release=$(<"$1")
   release="${release#newer: }"
-  printf 'aurtomator %s is out, and this repository runs %s.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nRun: %s\n\nAuto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$2"
+  printf 'aurtomator %s is out, and this repository runs %s.\n\nTo update: Insights > Dependency graph > Dependabot > Check for updates. Dependabot opens the pull request that moves the pin.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nManual update: https://github.com/%s/blob/main/docs/SETUP.md#the-calling-workflows\nRun: %s\n\nAuto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$AURTOMATOR_UPSTREAM" "$2"
 }
 
 # Body of the issue opened for an update an alert fired on: a held update,
