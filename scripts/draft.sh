@@ -31,8 +31,10 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export GIT_TERMINAL_PROMPT=0
-aur_clone "https://aur.archlinux.org/${NAME}.git" "$tmp/aur" --depth 1 -q >&2 || exit 1
-info_file="$tmp/aur/.SRCINFO"
+# A checkout would apply the attributes and filters of the AUR repository
+aur_clone "https://aur.archlinux.org/${NAME}.git" "$tmp/aur" --depth 1 --no-checkout -q >&2 || exit 1
+aur_export "$tmp/aur" "$tmp/files" || exit 1
+info_file="$tmp/files/.SRCINFO"
 # The AUR answers an unknown name with an empty repository
 if [[ ! -e "$info_file" && ! -L "$info_file" ]]; then
   log_err "No AUR package $NAME"
