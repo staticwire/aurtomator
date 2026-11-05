@@ -1220,15 +1220,19 @@ make_handoff() {
 # line, that start with the emoji of the --label it asks for, the first 30
 # unless --limit says otherwise, answers has_issues with $GH_HAS_ISSUES (true
 # by default) or fails it when $GH_API_FAIL is set, and logs every call to
-# $GH_LOG. aurtomator/scripts/lib.sh of the workspace writes the body "body"
-# and logs the function and its arguments to $BODY_LOG. sudo fails.
+# $GH_LOG. A creation fails with an error of two lines when $GH_CREATE_FAIL
+# is set. aurtomator/scripts/lib.sh of the workspace takes failed_hosts from
+# scripts/lib/issue.sh, writes the body "body" and logs the function and its
+# arguments to $BODY_LOG. sudo fails.
 run_issue_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
-  cat >"$ws/aurtomator/scripts/lib.sh" <<'EOF'
+  printf 'set -euo pipefail\nsource %q\n' "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" >"$ws/aurtomator/scripts/lib.sh"
+  cat >>"$ws/aurtomator/scripts/lib.sh" <<'EOF'
 failure_issue_body() { echo "failure_issue_body $*" >>"$BODY_LOG" && echo body; }
 alert_issue_body() { echo "alert_issue_body $*" >>"$BODY_LOG" && echo body; }
 upstream_issue_body() { echo "upstream_issue_body $*" >>"$BODY_LOG" && echo body; }
+host_issue_body() { echo "host_issue_body $*" >>"$BODY_LOG" && echo body; }
 EOF
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
@@ -1240,6 +1244,10 @@ if [[ "$*" == "api repos/$GITHUB_REPOSITORY --jq .has_issues" ]]; then
   [[ -z "${GH_API_FAIL:-}" ]] || exit 1
   echo "${GH_HAS_ISSUES:-true}"
   exit 0
+fi
+if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_FAIL:-}" ]]; then
+  printf 'GraphQL: was submitted too quickly (createIssue)\nsecond line\n' >&2
+  exit 1
 fi
 [[ "$1 $2" == "issue list" ]] || exit 0
 [[ -z "${GH_FAIL:-}" ]] || exit 1
@@ -1276,7 +1284,7 @@ EOF
   step_run issues "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
-    GITHUB_REPOSITORY=owner/fork \
+    GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GITHUB_REPOSITORY=owner/fork \
     RUN_URL=https://example.invalid/run bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
@@ -1414,18 +1422,94 @@ EOF
   [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
 }
 
+# Prints a name=status pair for each of $1 packages, named $3 and a number,
+# whose check failed on host $2
+host_failures() {
+  local i
+  for ((i = 1; i <= $1; i++)); do
+    printf '%s\n' "$3$i=check_failed: https://$2/repos/o/$3$i/tags: The requested URL returned error: 503"
+  done
+}
+
+@test "check-updates: 5 packages whose check failed on one host share one issue" {
+  local pairs
+  mapfile -t pairs < <(host_failures 5 api.github.com a)
+  run_issue_step "${pairs[@]}" b="check_failed: https://github.com/o/b: error: 503" c="update_failed: boom"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue create --title ❌ api.github.com: 5 packages failed to check --label auto-update --body body' "$GH_LOG"
+  grep -q '^issue create --title ❌ b: check failed ' "$GH_LOG"
+  grep -q '^issue create --title ❌ c: update failed ' "$GH_LOG"
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "3" ]
+  grep -qx 'host_issue_body .status api.github.com https://example.invalid/run a1 a2 a3 a4 a5' "$BODY_LOG"
+}
+
+@test "check-updates: 4 packages whose check failed on one host get an issue each" {
+  local pairs
+  mapfile -t pairs < <(host_failures 4 api.github.com a)
+  run_issue_step "${pairs[@]}"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create --title ❌ a[1-4]: check failed ' "$GH_LOG"
+  [ "$output" = "4" ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "4" ]
+}
+
+@test "check-updates: an open issue of the host holds back another one, whatever its count" {
+  local pairs
+  mapfile -t pairs < <(host_failures 6 api.github.com a)
+  GH_TITLES="❌ api.github.com: 9 packages failed to check" run_issue_step "${pairs[@]}"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: only the title of the host issue holds it back" {
+  local pairs
+  mapfile -t pairs < <(host_failures 5 api.github.com a)
+  GH_TITLES=$'❌ apixgithubxcom: 9 packages failed to check\n❌ api.github.com: 9 packages failed to check twice\n❌ api.github.com: many packages failed to check' \
+    run_issue_step "${pairs[@]}"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue create --title ❌ api.github.com: 5 packages failed to check --label auto-update --body body' "$GH_LOG"
+}
+
+@test "check-updates: the issue step creates each label once and lists its open issues once" {
+  local pairs
+  mapfile -t pairs < <(host_failures 5 api.github.com a)
+  run_issue_step "${pairs[@]}" b="check_failed: boom" c="update_failed: boom" d="held: 1.0" e="held: 2.0"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "5" ]
+  run grep -c '^label create auto-update ' "$GH_LOG"
+  [ "$output" = "1" ]
+  run grep -c '^issue list --label auto-update ' "$GH_LOG"
+  [ "$output" = "1" ]
+  run grep -c '^label create update-held ' "$GH_LOG"
+  [ "$output" = "1" ]
+  run grep -c '^issue list --label update-held ' "$GH_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "check-updates: a refused issue gives a warning with the error of gh" {
+  GH_CREATE_FAIL=1 run_issue_step foo="update_failed: boom" bar="held: 1.0"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::Could not create the issue ❌ foo: update failed: GraphQL: was submitted too quickly (createIssue) second line"* ]]
+  [[ "$output" == *"::warning::Could not create the issue ✋ bar: update held: GraphQL: was submitted too quickly (createIssue) second line"* ]]
+}
+
 # Runs the close step of the issues job in a workspace with the statuses given as
 # name=status pairs. gh lists the open issues in $GH_OPEN, one
 # "<number> <title>" per line, whose title starts with the emoji of the
 # --label it asks for, the first 30 unless --limit says otherwise, answers
 # has_issues with $GH_HAS_ISSUES (true by default), fails the list when
 # $GH_FAIL is set and logs every call to $GH_LOG. aurtomator/scripts/lib.sh
-# of the workspace writes the comment "comment" and logs the function and
-# its arguments to $BODY_LOG.
+# of the workspace takes scripts/lib/issue.sh, writes the comment "comment"
+# of a package and logs the function and its arguments to $BODY_LOG.
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
-  cat >"$ws/aurtomator/scripts/lib.sh" <<'EOF'
+  printf 'set -euo pipefail\nsource %q\n' "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" >"$ws/aurtomator/scripts/lib.sh"
+  cat >>"$ws/aurtomator/scripts/lib.sh" <<'EOF'
 close_comment() { echo "close_comment $*" >>"$BODY_LOG" && echo comment; }
 EOF
   for pair in "$@"; do
@@ -1831,6 +1915,18 @@ no_commit() {
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+@test "check-updates: closes the issue of a host once fewer than 5 of its packages failed to check" {
+  local pairs
+  mapfile -t pairs < <(host_failures 4 api.github.com a && host_failures 5 apixgithub.com x && host_failures 5 cdn.gitlab.com y)
+  GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check\n22 ❌ apixgithub.com: 5 packages failed to check\n23 ❌ gitlab.com: 7 packages failed to check\n24 ❌ gitlab.com: many packages failed to check' \
+    run_close_step "${pairs[@]}"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 21 --comment Fewer than 5 packages of `api.github.com` failed to check in https://example.invalid/run.' "$GH_LOG"
+  grep -qx 'issue close 23 --comment Fewer than 5 packages of `gitlab.com` failed to check in https://example.invalid/run.' "$GH_LOG"
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "2" ]
 }
 
 @test "check-updates: the close step lists nothing when Issues are disabled" {

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# issue.sh - Text of the issues the update workflow opens
+# issue.sh - Text of the issues the update workflow opens, and the hosts
+# whose failed checks share one
 #
 # Sourced by lib.sh.
 
@@ -35,18 +36,16 @@ alert_issue_body() {
   printf 'Package: `%s`\n%s version: `%s`\nRun: %s\n\n%s\n\nAuto-created by update workflow. %s\n' "$package" "$state" "${status#*: }" "$2" "$notes" "$footer"
 }
 
-# Print a text as a code block, where links, images and mentions do not
-# render. The fence is longer than any run of backticks in the text, so the
-# text cannot close it. A text over 4000 characters keeps its last 4000,
-# where the cause of an error usually is. The job containers run in the C
-# locale, where bash counts bytes, so the cut could split a character.
-# Args: $1=text
+# Print text $1 as a code block, where links, images and mentions do not
+# render. A longer text keeps its last $2 characters, 4000 by default.
 _code_block() {
-  local text="$1" fence='```' limit=4000
+  local text="$1" fence='```' limit="${2:-4000}"
+  # In the C locale of the job containers, bash counts bytes
   local LC_ALL=C.UTF-8
   if ((${#text} > limit)); then
     text="[first $((${#text} - limit)) characters cut]"$'\n'"${text:${#text}-limit}"
   fi
+  # No run of backticks in the text can close a longer fence
   while [[ "$text" == *"$fence"* ]]; do
     fence+='`'
   done
@@ -77,4 +76,61 @@ close_comment() {
   # The backticks are Markdown code around the package name
   # shellcheck disable=SC2016
   printf 'The status of `%s` in %s:\n\n%s\n' "${1##*/}" "$2" "$(_code_block "$status")"
+}
+
+# The packages of one host whose checks failed in a run share one issue
+# from this count on
+HOST_ISSUE_MIN=5
+
+# Print the host, in lower case and without the port, of the first URL in
+# check_failed status file $1: the URL that http_get or git failed on
+failure_host() {
+  local status
+  status=$(<"$1")
+  if [[ "$status" == check_failed:* && "$status" =~ https?://([A-Za-z0-9.-]+) ]]; then
+    printf '%s\n' "${BASH_REMATCH[1],,}"
+  fi
+}
+
+# Print each host with HOST_ISSUE_MIN or more failed checks in status
+# directory $1, and its packages, on a line split by spaces
+failed_hosts() {
+  local file host list
+  local -A packages=()
+  for file in "$1"/*; do
+    [[ -f "$file" ]] || continue
+    host=$(failure_host "$file")
+    [[ -z "$host" ]] || packages[$host]+=" ${file##*/}"
+  done
+  for host in "${!packages[@]}"; do
+    read -ra list <<<"${packages[$host]}"
+    if ((${#list[@]} >= HOST_ISSUE_MIN)); then
+      printf '%s%s\n' "$host" "${packages[$host]}"
+    fi
+  done | LC_ALL=C sort
+}
+
+# Print the issue body for host $2, run URL $3 and packages $4... of status
+# directory $1. Errors share 50000 of the 65536 characters GitHub accepts.
+host_issue_body() {
+  local dir="$1" host="$2" url="$3" package status limit
+  shift 3
+  limit=$((50000 / $#))
+  ((limit <= 4000)) || limit=4000
+  # The backticks are Markdown code around the host and the package names
+  # shellcheck disable=SC2016
+  printf 'Host: `%s`\nStatus: check failed\nRun: %s\n' "$host" "$url"
+  for package in "$@"; do
+    status=$(<"$dir/$package")
+    # shellcheck disable=SC2016
+    printf '\nPackage: `%s`\n\n%s\n' "$package" "$(_code_block "${status#*: }" "$limit")"
+  done
+  printf '\nAuto-created by update workflow. A run closes it when fewer than %s packages of the host fail to check.\n' "$HOST_ISSUE_MIN"
+}
+
+# Print the comment for host $1 and run URL $2 on a host issue a run closes
+host_close_comment() {
+  # The backticks are Markdown code around the host
+  # shellcheck disable=SC2016
+  printf 'Fewer than %s packages of `%s` failed to check in %s.\n' "$HOST_ISSUE_MIN" "$1" "$2"
 }

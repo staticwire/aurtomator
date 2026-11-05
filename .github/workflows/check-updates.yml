@@ -623,6 +623,10 @@ jobs:
           open=$(gh issue list --label "auto-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
           held=$(gh issue list --label "update-held" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
 
+          lib() {
+            bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
+          }
+
           while read -r number title; do
             [[ -n "$number" ]] || continue
             for status_file in "$STATUS_DIR"/*; do
@@ -642,11 +646,24 @@ jobs:
                   "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "*) ;;
                 *) continue ;;
               esac
-              comment=$(bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ close_comment "$status_file" "$RUN_URL")
+              comment=$(lib close_comment "$status_file" "$RUN_URL")
               gh issue close "$number" --comment "$comment"
             done
           done <<<"$open
           $held"
+
+          # A host issue closes once fewer than HOST_ISSUE_MIN packages of the
+          # host, in scripts/lib/issue.sh, failed to check
+          hosts=$(lib failed_hosts "$STATUS_DIR")
+          failing=$(cut -d ' ' -f 1 <<<"$hosts")
+          host_re='^([a-z0-9.-]+): [0-9]+ packages failed to check$'
+          while read -r number title; do
+            [[ "$title" == "❌ "* && "${title#"❌ "}" =~ $host_re ]] || continue
+            host=${BASH_REMATCH[1]}
+            grep -qxF -e "$host" <<<"$failing" && continue
+            comment=$(lib host_close_comment "$host" "$RUN_URL")
+            gh issue close "$number" --comment "$comment"
+          done <<<"$open"
 
           # notify-failure opens this issue, and a run with no failed job
           # closes it
@@ -689,48 +706,83 @@ jobs:
             fi
           fi
 
+          lib() {
+            bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
+          }
+
+          # Creates label $1 with color $2 and description $3 when it is
+          # missing and lists the titles of its open issues, once per label
+          declare -A titles=()
+          use_label() {
+            [[ -z "${titles[$1]+set}" ]] || return 0
+            gh label create "$1" --color "$2" --description "$3" 2>/dev/null || true
+            titles[$1]=$(gh issue list --label "$1" --state open --limit 1000 --json title --jq '.[].title')
+          }
+
+          # Opens an issue with label $1, title $2 and body $3, and turns a
+          # refusal of GitHub into a warning
+          create_issue() {
+            local out
+            if out=$(gh issue create --title "$2" --label "$1" --body "$3" 2>&1); then
+              echo "$out"
+            else
+              echo "::warning::Could not create the issue $2: ${out//$'\n'/ }"
+            fi
+          }
+
           # Opens an issue with label $1, made with color $2 and description
           # $3 when it is missing, and title $4, unless an open issue of the
           # label has that title. Function $5 of scripts/lib/issue.sh writes
           # the body from status file $6.
           open_issue() {
-            gh label create "$1" --color "$2" --description "$3" 2>/dev/null || true
-            titles=$(gh issue list --label "$1" --state open --limit 1000 --json title --jq '.[].title')
-            if grep -qxF -e "$4" <<<"$titles"; then
+            use_label "$1" "$2" "$3"
+            if grep -qxF -e "$4" <<<"${titles[$1]}"; then
               echo "Issue already open: $4"
               return 0
             fi
-            body=$(bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$5" "$6" "$RUN_URL")
-            gh issue create --title "$4" --label "$1" --body "$body" || echo "Warning: could not create issue (issues may be disabled)"
+            body=$(lib "$5" "$6" "$RUN_URL")
+            create_issue "$1" "$4" "$body"
           }
+
+          # The packages of a host that failed HOST_ISSUE_MIN or more checks,
+          # in scripts/lib/issue.sh, share one issue
+          hosts=$(lib failed_hosts "$STATUS_DIR")
+          declare -A shared=()
+          while read -r host packages; do
+            [[ -n "$host" ]] || continue
+            read -ra list <<<"$packages"
+            for pkg_name in "${list[@]}"; do
+              shared[$pkg_name]=1
+            done
+            use_label auto-update d73a4a "Automated update failure"
+            if grep -qxE "❌ ${host//./\\.}: [0-9]+ packages failed to check" <<<"${titles[auto-update]}"; then
+              echo "Issue already open for $host, skipping"
+              continue
+            fi
+            body=$(lib host_issue_body "$STATUS_DIR" "$host" "$RUN_URL" "${list[@]}")
+            create_issue auto-update "❌ $host: ${#list[@]} packages failed to check" "$body"
+          done <<<"$hosts"
 
           for status_file in "$STATUS_DIR"/*; do
             [[ -f "$status_file" ]] || continue
             pkg_name=$(basename "$status_file")
-            [[ "$pkg_name" == _* ]] && continue
+            [[ "$pkg_name" == _* || -n "${shared[$pkg_name]:-}" ]] && continue
 
             status=$(cat "$status_file")
             case "$status" in
               check_failed:*|update_failed:*)
                 kind="${status%%:*}"
-
-                gh label create "auto-update" --color "d73a4a" --description "Automated update failure" 2>/dev/null || true
+                use_label auto-update d73a4a "Automated update failure"
 
                 # Exact titles: search splits foo-bar into words, so a
                 # search for foo also finds the issue of foo-bar
-                titles=$(gh issue list --label "auto-update" --state open --limit 1000 --json title --jq '.[].title')
-                if grep -qxF -e "❌ $pkg_name: check failed" -e "❌ $pkg_name: update failed" <<<"$titles"; then
+                if grep -qxF -e "❌ $pkg_name: check failed" -e "❌ $pkg_name: update failed" <<<"${titles[auto-update]}"; then
                   echo "Issue already open for $pkg_name, skipping"
                   continue
                 fi
 
-                ISSUE_BODY=$(bash -c 'source ./aurtomator/scripts/lib.sh && failure_issue_body "$@"' _ "$status_file" "$RUN_URL")
-
-                gh issue create \
-                  --title "❌ $pkg_name: ${kind//_/ }" \
-                  --label "auto-update" \
-                  --body "$ISSUE_BODY" || echo "Warning: could not create issue (issues may be disabled)"
-                echo "Created issue for $pkg_name"
+                body=$(lib failure_issue_body "$status_file" "$RUN_URL")
+                create_issue auto-update "❌ $pkg_name: ${kind//_/ }" "$body"
                 ;;
               "held: "*)
                 open_issue update-held fbca04 "Update waits for a hand edit" "✋ $pkg_name: update held" alert_issue_body "$status_file"

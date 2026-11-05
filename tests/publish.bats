@@ -2165,6 +2165,165 @@ EOF
   [ "${lines[4]}" = "$tail" ]
 }
 
+# === failure_host and failed_hosts ===
+
+@test "failure_host: names the host of the URL that http_get could not read" {
+  printf '%s\n' 'check_failed: → Checking demo (strategy: github-release, current: 1.0)' \
+    'https://api.github.com/repos/o/demo/releases/latest: The requested URL returned error: 503' \
+    '✗ Strategy failed for demo' >"$TEST_TMPDIR/demo"
+  run failure_host "$TEST_TMPDIR/demo"
+  [ "$status" -eq 0 ]
+  [ "$output" = "api.github.com" ]
+}
+
+@test "failure_host: names the host of the URL that git could not reach" {
+  echo "check_failed: fatal: unable to access 'https://gitlab.com/o/demo.git/': Could not resolve host: gitlab.com" >"$TEST_TMPDIR/demo"
+  run failure_host "$TEST_TMPDIR/demo"
+  [ "$status" -eq 0 ]
+  [ "$output" = "gitlab.com" ]
+}
+
+@test "failure_host: names the host of the first URL, in lower case and without the port" {
+  printf '%s\n' 'check_failed: https://Git.Example.ORG:8443/o/demo.git: error: 404' 'https://api.github.com/x: error: 503' >"$TEST_TMPDIR/demo"
+  run failure_host "$TEST_TMPDIR/demo"
+  [ "$output" = "git.example.org" ]
+  echo "check_failed: http://example.org/demo: Protocol \"http\" disabled" >"$TEST_TMPDIR/demo"
+  run failure_host "$TEST_TMPDIR/demo"
+  [ "$output" = "example.org" ]
+}
+
+@test "failure_host: prints nothing for an error without a URL or for a failed update" {
+  echo "check_failed: timed out after 120 s" >"$TEST_TMPDIR/demo"
+  run failure_host "$TEST_TMPDIR/demo"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  echo "update_failed: https://api.github.com/x: error: 503" >"$TEST_TMPDIR/demo"
+  run failure_host "$TEST_TMPDIR/demo"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Writes into $TEST_TMPDIR/st the statuses of $1 packages, named $3 and a
+# number, whose check failed on host $2
+fail_checks() {
+  local i
+  mkdir -p "$TEST_TMPDIR/st"
+  for ((i = 1; i <= $1; i++)); do
+    echo "check_failed: https://$2/repos/o/$3$i/tags: The requested URL returned error: 503" >"$TEST_TMPDIR/st/$3$i"
+  done
+}
+
+@test "failed_hosts: names a host once the checks of 5 of its packages failed" {
+  fail_checks 4 api.github.com a
+  run failed_hosts "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  fail_checks 5 api.github.com a
+  run failed_hosts "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$output" = "api.github.com a1 a2 a3 a4 a5" ]
+}
+
+@test "failed_hosts: names each host on a line of its own" {
+  fail_checks 6 github.com g
+  fail_checks 5 api.github.com a
+  fail_checks 4 gitlab.com l
+  run failed_hosts "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'api.github.com a1 a2 a3 a4 a5\ngithub.com g1 g2 g3 g4 g5 g6' ]
+}
+
+@test "failed_hosts: counts no failed update" {
+  fail_checks 4 api.github.com a
+  echo "update_failed: https://api.github.com/x: error: 503" >"$TEST_TMPDIR/st/u"
+  echo "up_to_date" >"$TEST_TMPDIR/st/b"
+  run failed_hosts "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "failed_hosts: prints nothing for a directory without statuses" {
+  mkdir -p "$TEST_TMPDIR/st"
+  run failed_hosts "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# === host_issue_body and host_close_comment ===
+
+@test "host_issue_body: lists each package with its error in a code block" {
+  mkdir -p "$TEST_TMPDIR/st"
+  echo "check_failed: https://api.github.com/a: error: 503" >"$TEST_TMPDIR/st/a"
+  printf '%s\n' 'check_failed: https://api.github.com/b: ``` @octocat' 'second line' >"$TEST_TMPDIR/st/b"
+  run host_issue_body "$TEST_TMPDIR/st" api.github.com https://example.invalid/run a b
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+Host: `api.github.com`
+Status: check failed
+Run: https://example.invalid/run
+
+Package: `a`
+
+```
+https://api.github.com/a: error: 503
+```
+
+Package: `b`
+
+````
+https://api.github.com/b: ``` @octocat
+second line
+````
+
+Auto-created by update workflow. A run closes it when fewer than 5 packages of the host fail to check.
+EOF
+  )
+  [ "$output" = "$expected" ]
+}
+
+@test "host_issue_body: cuts each error to a share of 50000 characters, 4000 at most" {
+  local i tail packages=()
+  mkdir -p "$TEST_TMPDIR/st"
+  tail=$(printf 'x%.0s' {1..4000})
+  for i in 1 2 3 4 5; do
+    echo "check_failed: HEAD${tail}" >"$TEST_TMPDIR/st/p$i"
+    packages+=("p$i")
+  done
+  run --keep-empty-lines host_issue_body "$TEST_TMPDIR/st" h https://example.invalid/run "${packages[@]}"
+  [ "$status" -eq 0 ]
+  [ "${lines[7]}" = "[first 4 characters cut]" ]
+  [ "${lines[8]}" = "$tail" ]
+  for i in {6..20}; do
+    echo "check_failed: HEAD${tail}" >"$TEST_TMPDIR/st/p$i"
+    packages+=("p$i")
+  done
+  run --keep-empty-lines host_issue_body "$TEST_TMPDIR/st" h https://example.invalid/run "${packages[@]}"
+  [ "$status" -eq 0 ]
+  [ "${lines[7]}" = "[first 1504 characters cut]" ]
+  [ "${lines[8]}" = "${tail:1500}" ]
+}
+
+# GitHub refuses the body of an issue over 65536 characters
+@test "host_issue_body: stays under 65536 characters for 100 packages with long errors" {
+  local i tail packages=()
+  mkdir -p "$TEST_TMPDIR/st"
+  tail=$(printf 'x%.0s' {1..4000})
+  for i in {1..100}; do
+    echo "check_failed: ${tail}" >"$TEST_TMPDIR/st/package-name-$i"
+    packages+=("package-name-$i")
+  done
+  run host_issue_body "$TEST_TMPDIR/st" api.github.com https://github.com/owner/repo/actions/runs/1 "${packages[@]}"
+  [ "$status" -eq 0 ]
+  ((${#output} < 65536))
+}
+
+@test "host_close_comment: says that fewer than 5 packages of the host failed to check" {
+  run host_close_comment api.github.com https://example.invalid/run
+  [ "$status" -eq 0 ]
+  [ "$output" = 'Fewer than 5 packages of `api.github.com` failed to check in https://example.invalid/run.' ]
+}
+
 # === status_label and run_summary ===
 
 @test "status_label: names a status as the package table shows it" {
