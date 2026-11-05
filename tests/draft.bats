@@ -364,6 +364,27 @@ stub_git_latest() {
   [[ "$output" != *"epoch"* ]]
 }
 
+# Whoever can push to the AUR package writes .SRCINFO, and a control byte
+# in the terminal moves the cursor, erases a line or sets the title
+@test "draft: prints the url and the sources with each control byte as ?" {
+  aur_package esc 1.0.0 $'url = https://example.invalid/\e]0;title\a\e[2K' \
+    $'source = local.patch\e[1A\e[2Kline hidden'
+  run "$TEST_TMPDIR/scripts/draft.sh" esc
+  [ "$status" -eq 1 ]
+  [[ "$output" != *$'\e'* && "$output" != *$'\a'* ]]
+  [[ "$output" == *"  url: https://example.invalid/?]0;title??[2K"* ]]
+  [[ "$output" == *"  source: local.patch?[1A?[2Kline hidden"* ]]
+}
+
+@test "draft: prints the source it takes and the epoch with each control byte as ?" {
+  aur_package demo 1.0.0 $'epoch = 2\e[2K' \
+    $'source = https://github.com/o/demo/archive/v1.0.0.tar.gz#\e]0;title\a'
+  run "$TEST_TMPDIR/scripts/draft.sh" demo
+  [[ "$output" != *$'\e'* && "$output" != *$'\a'* ]]
+  [[ "$output" == *"PKGBUILD sets epoch=2?[2K: an update keeps it"* ]]
+  [[ "$output" == *"packages/demo.yml: github-tag from https://github.com/o/demo/archive/v1.0.0.tar.gz#?]0;title?"* ]]
+}
+
 @test "draft: keeps the file for an edit when the check fails" {
   aur_package demo 1.0.0 'source = https://invent.kde.org/group/demo/-/archive/v1.0.0/demo-v1.0.0.tar.gz'
   run "$TEST_TMPDIR/scripts/draft.sh" demo
