@@ -1014,7 +1014,7 @@ A download saved under a name without the value, as in `${pkgname}-${pkgver}-amd
 
 ### 5.1 Trigger
 
-`check-updates.yml` of aurtomator runs only when another workflow calls it: its trigger is `on: workflow_call`. It takes no inputs and declares the secrets `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME` and `AUR_GIT_EMAIL`, each with `required: false`. Only `publish` reads them, and it stops on an empty `AUR_SSH_KEY`, see [5.3](#53-steps).
+`check-updates.yml` of aurtomator runs only when another workflow calls it: its trigger is `on: workflow_call`. It takes no inputs and declares the secrets `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME` and `AUR_GIT_EMAIL`, each with `required: false`. Only `publish` reads them, and it stops on an empty `AUR_SSH_KEY` when a package goes to the AUR, see [5.3](#53-steps).
 
 The calling workflow `.github/workflows/check-updates.yml` of your repository, which [SETUP.md](SETUP.md#the-calling-workflows) shows in full, carries the trigger: the schedule `cron: "17 * * * *"` and `workflow_dispatch` for a run by hand. GitHub delays scheduled runs at the start of an hour, when its load is highest, so the schedule avoids minute 0. GitHub starts only part of the scheduled runs: in October 2026 a repository with this schedule got about five a day, one every five hours. Its job `check-updates` calls the reusable file at the pinned SHA and passes the four secrets by name. The concurrency group `check-updates`, with `cancel-in-progress: false`, serializes runs: a new run waits for the running one. The calling workflow sets the group at its workflow level, so it covers the `notify` job of [5.7](#57-failed-runs) too.
 
@@ -1098,18 +1098,19 @@ Root runs no git in the workspace that `builder` owns. `builder` can write `.git
 3. **Checkout aurtomator:** into `aurtomator/`.
 4. **Download statuses:** the `checked` artifact to `.status/`.
 5. **Download verified handoff:** the `verified` artifact to `handoff/`, when `verify` ran.
-6. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
-7. **Setup AUR SSH:** fails with `The secret AUR_SSH_KEY is empty` when the secret is empty or the calling workflow does not pass it. Otherwise it writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. The host key is part of `check-updates.yml` of aurtomator, so a new host key of the AUR reaches a run through a release and a move of the pin.
-8. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
-9. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
-10. **Update README package table:** runs `./aurtomator/scripts/update-readme.sh` as `builder`.
-11. **Commit changes via API:** see [5.5](#55-verified-commit).
-12. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
-13. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
-14. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
-15. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
+6. **Find packages to push:** sets the output `packages` to `true` when `handoff/prepared/` holds a directory, a package that `verify` passed, and to `false` otherwise. Steps 8 and 9 run only with `true`, so a run that pushes nothing to the AUR, such as a run before `setup secrets` or a run that only changes the package table, needs neither key and still commits the README.
+7. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
+8. **Setup AUR SSH:** fails with `The secret AUR_SSH_KEY is empty` when the secret is empty or the calling workflow does not pass it. Otherwise it writes `AUR_SSH_KEY` to `~builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. The host key is part of `check-updates.yml` of aurtomator, so a new host key of the AUR reaches a run through a release and a move of the pin.
+9. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the AUR commits are not signed.
+10. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
+11. **Update README package table:** runs `./aurtomator/scripts/update-readme.sh` as `builder`.
+12. **Commit changes via API:** see [5.5](#55-verified-commit).
+13. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
+14. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
+15. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
+16. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
-Step 11 runs as root with `GH_TOKEN` set to the workflow token, `github.token`, and runs git and reads the files as `builder`. Steps 12 to 15 run as root without it.
+Step 12 runs as root with `GH_TOKEN` set to the workflow token, `github.token`, and runs git and reads the files as `builder`. Steps 13 to 16 run as root without it.
 
 `issues`:
 

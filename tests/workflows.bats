@@ -1680,6 +1680,52 @@ EOF
   [ -f "$ssh_dir/known_hosts" ]
 }
 
+# Prints the index of step $2 in job $1 of check-updates.yml
+step_index() {
+  yq ".jobs.$1.steps | to_entries | map(select(.value.name == \"$2\")) | .[0].key" "$CHECK_UPDATES"
+}
+
+# A run before setup secrets pushes nothing and commits the README
+@test "check-updates: publish sets up SSH and GPG only for a package to push" {
+  local find
+  find=$(step_index publish "Find packages to push")
+  [ "$find" -gt "$(step_index publish "Download verified handoff")" ]
+  [ "$find" -lt "$(step_index publish "Setup AUR SSH")" ]
+  [ "$find" -lt "$(step_index publish "Setup GPG")" ]
+  run yq '.jobs.publish.steps[] | select(.name == "Find packages to push") | .id' "$CHECK_UPDATES"
+  [ "$output" = "handoff" ]
+  run yq -o=json -I=0 '[.jobs.publish.steps[] | select(.name == "Setup AUR SSH" or .name == "Setup GPG") | .if]' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[\"steps.handoff.outputs.packages == 'true'\",\"steps.handoff.outputs.packages == 'true'\"]" ]
+}
+
+# Runs Find packages to push in $BATS_TEST_TMPDIR/ws and prints its outputs
+run_find_packages_step() {
+  mkdir -p "$BATS_TEST_TMPDIR/ws"
+  step_run publish "Find packages to push" >"$BATS_TEST_TMPDIR/step.sh"
+  : >"$BATS_TEST_TMPDIR/output"
+  (cd "$BATS_TEST_TMPDIR/ws" && GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" bash -e "$BATS_TEST_TMPDIR/step.sh")
+  cat "$BATS_TEST_TMPDIR/output"
+}
+
+@test "check-updates: Find packages to push counts a prepared package only" {
+  local dir="$BATS_TEST_TMPDIR/ws/handoff"
+  run run_find_packages_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "packages=false" ]
+  mkdir -p "$dir/status" "$dir/prepared"
+  echo "update_failed: bad checksum" >"$dir/status/foo"
+  echo stray >"$dir/prepared/notes.txt"
+  run run_find_packages_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "packages=false" ]
+  mkdir "$dir/prepared/foo"
+  echo pkgbuild >"$dir/prepared/foo/PKGBUILD"
+  run run_find_packages_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "packages=true" ]
+}
+
 NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 
 @test "notify-failure: runs when called, after the caller's condition" {

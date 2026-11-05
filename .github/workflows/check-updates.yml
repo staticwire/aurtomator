@@ -355,6 +355,17 @@ jobs:
           name: verified
           path: handoff
 
+      # Only a package to push needs the SSH and GPG keys, so a run before
+      # the secrets are set still commits the README
+      - name: Find packages to push
+        id: handoff
+        run: |
+          packages=false
+          if compgen -G 'handoff/prepared/*/' >/dev/null; then
+            packages=true
+          fi
+          echo "packages=$packages" >>"$GITHUB_OUTPUT"
+
       - name: Setup workspace
         env:
           AUR_GIT_NAME: ${{ secrets.AUR_GIT_NAME }}
@@ -365,6 +376,7 @@ jobs:
           chown -R builder:builder .
 
       - name: Setup AUR SSH
+        if: steps.handoff.outputs.packages == 'true'
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
         run: |
@@ -392,6 +404,7 @@ jobs:
           chown -R builder:builder "$SSH_DIR"
 
       - name: Setup GPG
+        if: steps.handoff.outputs.packages == 'true'
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
         run: |
