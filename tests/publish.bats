@@ -731,6 +731,9 @@ current: '1.0.0'"
 # turns +AAo- in a comment into a new line, ident collapses $Id: ...$
 @test "publish-pkg: commits the prepared bytes whatever the attributes of the AUR repo say" {
   setup_publish
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' # +AAo-)+AAo-echo PWNED+AAo-x=(
+            '$H2')"
+  aur_add_file PKGBUILD "$(<"$OLD")"
   write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$H3' # +AAo-)+AAo-echo PWNED+AAo-x=(
             '$H4')"
   sed -i 's/^\tpkgdesc = demo$/&, $Id: kept $/' "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
@@ -749,6 +752,17 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+}
+
+@test "publish-pkg: refuses a comment in a checksum array that the AUR copy has not" {
+  setup_publish
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$H3' # Maintainer: Mallory <mallory@example.org>
+            '$H4')"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD adds comments or empty lines to the checksum arrays:"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
 }
@@ -2573,13 +2587,74 @@ make_unpushable_repo() {
 }
 
 @test "check_prepared_pkgbuild: accepts comments inside a checksum array" {
-  local sums="sha256sums=( # git
+  local sums="sha256sums=( # source
             'SKIP' # patch (local)
             'SKIP')"
   write_pkgbuild "$OLD" 1.0.0 2 "$sums"
   write_pkgbuild "$NEW" 1.1.0 1 "$sums"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 0 ]
+}
+
+# updpkgsums drops them, so a prepared file holds some of them or none
+@test "check_prepared_pkgbuild: accepts the comments and empty lines of the AUR copy" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=( # git
+            '$H1' # patch (local)
+
+            '$H2')  # sources"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' # patch (local)
+            '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_pkgbuild: rejects a comment in a checksum array that the AUR copy has not" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' # Maintainer: Mallory <mallory@example.org>
+            '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD adds comments or empty lines to the checksum arrays:"* ]]
+  [[ "$output" == *"  '# Maintainer: Mallory <mallory@example.org>'"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects a comment after a checksum array that the AUR copy has not" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4') # end of the checksums"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"  '# end of the checksums'"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects an empty line in a checksum array that the AUR copy has not" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3'
+
+            '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD adds comments or empty lines to the checksum arrays:"* ]]
+  [[ "$output" == *"  ''"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects a comment of the AUR copy that the prepared file repeats" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' # patch
+            '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' # patch
+            '$H4') # patch"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"  '# patch'"* ]]
+}
+
+@test "check_prepared_pkgbuild: names an added comment with its control bytes escaped" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' # "$'\e[1A\e[2K'"hidden
+            '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" != *$'\e'* ]]
+  [[ "$output" == *"  \$'# \\E[1A\\E[2Khidden'"* ]]
 }
 
 # bash joins the next line to the assignment, and runs it as a command
