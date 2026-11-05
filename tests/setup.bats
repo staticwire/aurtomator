@@ -470,14 +470,23 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"Git author: $name <$email>"* ]]
 
-  # lib.sh sources the file the same way
-  run bash -c 'source "$1"; printf "%s\n" "$GIT_AUTHOR_NAME" "$GIT_AUTHOR_EMAIL" "$GPG_KEY_ID" "$AUR_SSH_KEY"' \
-    _ "$TEST_TMPDIR/.aurtomator.conf"
+  # update-pkg.sh and publish-pkg.sh read the file with lib.sh
+  run bash -c 'source "$1/scripts/lib.sh" && load_config && printf "%s\n" "$GIT_AUTHOR_NAME" "$GIT_AUTHOR_EMAIL" "$GPG_KEY_ID" "$AUR_SSH_KEY"' \
+    _ "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "$name" ]
   [ "${lines[1]}" = "$email" ]
   [ "${lines[2]}" = "$gpg_key" ]
   [ "${lines[3]}" = "$ssh_key" ]
+  [ ! -e "$TEST_TMPDIR/injected" ]
+}
+
+@test "setup: stops on a config line that is no saved value and runs nothing" {
+  printf '%s\n' "GPG_KEY_ID='KEY1'" "touch $TEST_TMPDIR/injected" >"$TEST_TMPDIR/.aurtomator.conf"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [ "$output" = "$TEST_TMPDIR/.aurtomator.conf: line 2 is not NAME='value' for GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GPG_KEY_ID or AUR_SSH_KEY" ]
   [ ! -e "$TEST_TMPDIR/injected" ]
 }
 
@@ -1022,7 +1031,8 @@ log_gh_calls() {
 @test "setup secrets: refuses a passphrase-protected key from the saved config" {
   mkdir -p "$TEST_TMPDIR/ssh-pass"
   ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
-  printf 'AUR_SSH_KEY=%q\n' "$TEST_TMPDIR/ssh-pass/key" >"$TEST_TMPDIR/.aurtomator.conf"
+  local key="$TEST_TMPDIR/ssh-pass/key"
+  printf 'AUR_SSH_KEY=%s\n' "${key@Q}" >"$TEST_TMPDIR/.aurtomator.conf"
   log_gh_calls
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive

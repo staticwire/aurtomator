@@ -23,6 +23,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AURTOMATOR_DIR="${AURTOMATOR_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 # shellcheck source=lib/version.sh
 source "$SCRIPT_DIR/lib/version.sh"
+# shellcheck source=lib/config.sh
+source "$SCRIPT_DIR/lib/config.sh"
 
 # The command that the printed commands start with. The script
 # aurtomator.sh of the template sets AURTOMATOR_RUNNER to the path it was
@@ -118,17 +120,10 @@ origin_repo() {
 }
 
 # =============================================================================
-# LOAD / SAVE CONFIG
+# SAVE CONFIG
 # =============================================================================
 
-load_config() {
-  if [[ -f "$CONFIG_FILE" ]]; then
-    # shellcheck source=/dev/null
-    source "$CONFIG_FILE"
-  fi
-}
-
-# load_config sources the file, so each value is written shell-quoted
+# load_config of lib/config.sh reads each value in this form
 save_config() {
   {
     printf 'GIT_AUTHOR_NAME=%s\n' "${GIT_AUTHOR_NAME@Q}"

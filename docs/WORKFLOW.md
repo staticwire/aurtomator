@@ -809,7 +809,7 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--
 
 ### 4.2 Step-by-step
 
-1. Load `.aurtomator.conf` when it exists. In CI, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GPG_KEY_ID` come from the workflow environment.
+1. Read `.aurtomator.conf` when it exists, as data, see [SETUP.md](SETUP.md#configuration-file). In CI, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GPG_KEY_ID` come from the workflow environment.
 2. Wait 2 seconds, then clone `ssh://aur@aur.archlinux.org/<package-name>.git` into a temporary directory, with up to 3 attempts 5 seconds apart. A clone without a PKGBUILD stops the update.
 3. When the clone lands on a detached `HEAD`, reset `master` to `origin/master`, so the push is a fast-forward.
 4. Warn when the PKGBUILD has no `# Maintainer:` line.
@@ -1493,7 +1493,6 @@ echo "$version"
 | `to_pkgver <version> [dash] [format]` | Prints the pkgver of an upstream version, with `pkgver_dash` and `pkgver_format` applied |
 | `pkg_asset_var <file>`          | Prints the `upstream.asset_var` of a package or nothing, returns 1 for a name that is not a variable name starting with `_` |
 | `require_cmd <cmd>`             | Exits 1 if the command is not in `PATH`             |
-| `load_config`                   | Sources `.aurtomator.conf` if present               |
 | `http_get <url> [curl option]...` | Fetches a URL with `curl`, see 8.3                |
 | `http_get_json <url> [curl option]...` | `http_get` for an API that answers JSON, see 8.3 |
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |

@@ -426,7 +426,7 @@ Steps can be combined:
 
 ## Configuration file
 
-Setup saves its state to `.aurtomator.conf` in the root of your repository, next to `packages/`. The scripts source it as a shell file, so `setup.sh` writes every value shell-quoted, and a `"`, `$` or backtick in a name stays part of the name. A file from an older version, with double quotes, still loads.
+Setup saves its state to `.aurtomator.conf` in the root of your repository, next to `packages/`. The scripts read it as data and never run it. Each line holds one of the four names below and a value in single quotes, as the setup writes it, so a `"`, `$` or backtick in a name stays part of the name. A file from an older version, with double quotes, still loads while its values hold no `$`, backtick or backslash. Empty lines and lines that start with `#` are skipped, and any other line stops the script with the number of that line.
 
 ```bash
 GIT_AUTHOR_NAME='Jane Doe'
