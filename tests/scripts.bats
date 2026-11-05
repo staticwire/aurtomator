@@ -1204,7 +1204,7 @@ run_alert_fires() {
 @test "lib.sh: fired_alerts fails on a rule it cannot evaluate" {
   local rule message
   for rule in "hold: true|alerts[0] must hold exactly one of when, from, match" \
-    "when: minor|alerts[0].when must be major" \
+    "when: minor|alerts[0].when must be major, got minor" \
     "match: '(?:29)'|alerts[0].match must be a non-empty ERE that bash accepts"; do
     create_test_package "pkg" "github-release" "alerts:
   - ${rule%%|*}
@@ -1417,6 +1417,7 @@ EOF
   run "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Version string rejected, it holds no digit: 'latest'"* ]]
+  [[ "$output" != *"holds a dash"* ]]
 }
 
 # npm cli-pride-flags is 1.9.0-1, crates.io pijul 1.0.0-beta.24
@@ -1431,6 +1432,7 @@ EOF
   run "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed: '1.0.0-beta-24'"* ]]
+  [[ "$output" == *"The version holds a dash: set pkgver_dash, or tag_version_regex to leave such tags out"* ]]
 }
 
 @test "check-update: pkgver_dash replaces every dash in the version" {

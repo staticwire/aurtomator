@@ -90,7 +90,7 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 | `pkgver_format` | no      | The upstream version with a fixed text around it, `%s` in its place, as `4.%s`, see below |
 | `alerts`       | no       | Rules for steps of upstream that need a hand edit: each pauses the update or reports a note, see [4.5](#45-update-alerts) |
 
-`validate-pkg.sh` refuses a key that is not in this table, and an `upstream` key that the strategy does not read, so a misspelled key does not go unread. A misspelled `allow_downgrade` gives `has an unknown key: allow_downgrades`. The `upstream` keys of each strategy are its line of `UPSTREAM_KEYS` in `scripts/validate-pkg.sh`, and the error names the strategies that read the key, as in `upstream.branch applies to the git-latest strategy only`. A key that no strategy reads gives `upstream.projet is not a field of any strategy`. A file that is not a map of fields, and an `upstream` that is not a map, are refused before these checks.
+`validate-pkg.sh` refuses a key that is not in this table, and an `upstream` key that the strategy does not read, so a misspelled key does not go unread. A misspelled `allow_downgrade` gives `packages/<name>.yml: unknown key: allow_downgrades`. The `upstream` keys of each strategy are its line of `UPSTREAM_KEYS` in `scripts/validate-pkg.sh`, and the error names the strategies that read the key, as in `upstream.branch applies to the git-latest strategy only`. A key that no strategy reads gives `upstream.projet is not a field of any strategy`. A file that is not a map of fields, and an `upstream` that is not a map, are refused before these checks.
 
 Example:
 

@@ -409,7 +409,29 @@ allow_downgrades: true
 pkgver_dashes: _"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"mypkg.yml has an unknown key: allow_downgrades, pkgver_dashes"* ]]
+  [[ "$output" == *"packages/mypkg.yml: unknown key: allow_downgrades, pkgver_dashes"* ]]
+}
+
+# The data directory is the same for every file of a run, and in CI it is a
+# path of the runner
+@test "validate: names a file by packages/<name>.yml" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+tpyo: x
+alerts:
+  - when: minor
+    note: New major"
+  for args in mypkg --all; do
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "$args"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"packages/mypkg.yml: unknown key: tpyo"* ]]
+    [[ "$output" == *"packages/mypkg.yml: alerts[0].when must be major, got minor"* ]]
+    [[ "$output" != *"$TEST_TMPDIR"* ]]
+  done
+  echo "name: [" >"$TEST_TMPDIR/packages/mypkg.yml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" mypkg
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid YAML syntax: packages/mypkg.yml"* ]]
 }
 
 @test "validate: a key made of two known names rejected" {
@@ -419,7 +441,7 @@ pkgver_dashes: _"
 \"name strategy\": x"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"mypkg.yml has an unknown key: name strategy"* ]]
+  [[ "$output" == *"packages/mypkg.yml: unknown key: name strategy"* ]]
   [[ "$output" == *"mypkg.yml: upstream.project tag_version_regex is not a field of any strategy"* ]]
 }
 
@@ -1086,7 +1108,7 @@ alerts:
     notify: true"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"alerts[0] has an unknown key: notify"* ]]
+  [[ "$output" == *"packages/mypkg.yml: alerts[0]: unknown key: notify"* ]]
 }
 
 @test "validate: an alert without one condition rejected" {
@@ -1115,7 +1137,7 @@ alerts:
     note: New major"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"alerts[0].when must be major"* ]]
+    [[ "$output" == *"alerts[0].when must be major, got "* ]]
   done
 }
 
