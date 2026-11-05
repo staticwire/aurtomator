@@ -1708,6 +1708,43 @@ run_find_packages_step() {
   cat "$BATS_TEST_TMPDIR/output"
 }
 
+@test "check-updates: the issues job writes the run summary before it touches an issue" {
+  local write
+  write=$(step_index issues "Write the run summary")
+  [ "$write" -gt "$(step_index issues "Download statuses of publish")" ]
+  [ "$write" -lt "$(step_index issues "Close resolved issues")" ]
+}
+
+# Runs Write the run summary in a workspace with the statuses given as
+# name=status pairs and aurtomator/ linked to this repository; prints the
+# summary
+run_summary_step() {
+  local ws="$BATS_TEST_TMPDIR/ws" pair
+  mkdir -p "$ws"
+  ln -sfn "$BATS_TEST_DIRNAME/.." "$ws/aurtomator"
+  for pair in "$@"; do
+    mkdir -p "$ws/.status"
+    printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
+  done
+  step_run issues "Write the run summary" >"$BATS_TEST_TMPDIR/step.sh"
+  : >"$BATS_TEST_TMPDIR/summary"
+  (cd "$ws" && GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" bash -e "$BATS_TEST_TMPDIR/step.sh")
+  cat "$BATS_TEST_TMPDIR/summary"
+}
+
+@test "check-updates: the summary step writes the summary of the statuses" {
+  run run_summary_step foo="updated: 1.2.0" bar=up_to_date
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "2 packages, 1 up to date." ]
+  [[ "$output" == *'| `foo` | 📦 updated to 1.2.0 |'* ]]
+}
+
+@test "check-updates: the summary step writes nothing without statuses" {
+  run run_summary_step
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "check-updates: Find packages to push counts a prepared package only" {
   local dir="$BATS_TEST_TMPDIR/ws/handoff"
   run run_find_packages_step

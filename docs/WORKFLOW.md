@@ -1118,10 +1118,11 @@ Step 12 runs as root with `GH_TOKEN` set to the workflow token, `github.token`, 
 2. **Checkout aurtomator:** into `aurtomator/`. The job reads no file of your repository, so it does not check it out. Without git in the image, `actions/checkout` downloads the files through the REST API.
 3. **Download statuses of check:** the `checked` artifact to `.status/`, when `publish` was skipped.
 4. **Download statuses of publish:** the `published` artifact to `.status/`, when `publish` ran.
-5. **Close resolved issues:** see [5.6](#56-issues).
-6. **Create issues:** see [5.6](#56-issues).
+5. **Write the run summary:** see [5.6](#56-issues).
+6. **Close resolved issues:** see [5.6](#56-issues).
+7. **Create issues:** see [5.6](#56-issues).
 
-Steps 5 and 6 run as root with `GH_TOKEN` set to the workflow token. No other user runs code in the workspace of this job, so root writes the bodies with `scripts/lib/issue.sh` of `aurtomator/`.
+Steps 6 and 7 run as root with `GH_TOKEN` set to the workflow token. No other user runs code in the workspace of this job, so root writes the bodies with `scripts/lib/issue.sh` of `aurtomator/`.
 
 ### 5.4 README update
 
@@ -1188,7 +1189,11 @@ The step commits to `github.repository` on `github.ref_name`, your repository an
 
 ### 5.6 Issues
 
-The job `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs. It reads the final statuses: those of `publish` when it ran, and those of `check` otherwise. Its step `Create issues` runs with `if: always()`. When a package failed, is held or has an alert in `.status/_alerts`, or a newer aurtomator release is out, it first reads `has_issues` of the repository. `gh issue list` fails in a repository with Issues turned off, so when GitHub answers `false`, the step prints a notice and opens no issue. Any other answer goes on, and a failure to read the answer or to list the issues fails the step.
+The job `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs. It reads the final statuses: those of `publish` when it ran, and those of `check` otherwise.
+
+Before it touches an issue, the job writes the summary of the run to `$GITHUB_STEP_SUMMARY`, and the page of the run shows it. The summary counts the packages and the ones up to date, lists every other package in a table with the label of the package table of the README, and shows the error of each failed package in a code block, as its issue does. `run_summary` and `status_label` in `scripts/lib/status.sh` write it, and `update-readme.sh` takes its labels from `status_label` too.
+
+The step `Create issues` runs with `if: always()`. When a package failed, is held or has an alert in `.status/_alerts`, or a newer aurtomator release is out, it first reads `has_issues` of the repository. `gh issue list` fails in a repository with Issues turned off, so when GitHub answers `false`, the step prints a notice and opens no issue. Any other answer goes on, and a failure to read the answer or to list the issues fails the step.
 
 For every `.status/` entry with `check_failed:` or `update_failed:`, the step:
 

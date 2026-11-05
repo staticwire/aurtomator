@@ -2165,6 +2165,80 @@ EOF
   [ "${lines[4]}" = "$tail" ]
 }
 
+# === status_label and run_summary ===
+
+@test "status_label: names a status as the package table shows it" {
+  run status_label up_to_date
+  [ "$output" = "✅ up to date" ]
+  run status_label "updated: 1.2.0"
+  [ "$output" = "📦 updated to 1.2.0" ]
+  run status_label "check_failed: boom"
+  [ "$output" = "❌ failed" ]
+  run status_label "update_failed: boom"
+  [ "$output" = "❌ failed" ]
+  run status_label "unknown: 1.0"
+  [ "$output" = "✅ tracking" ]
+}
+
+# Helper: writes the statuses given as name=status pairs to $TEST_TMPDIR/st
+make_statuses() {
+  local pair
+  mkdir -p "$TEST_TMPDIR/st"
+  for pair in "$@"; do
+    printf '%s\n' "${pair#*=}" >"$TEST_TMPDIR/st/${pair%%=*}"
+  done
+}
+
+@test "run_summary: counts the packages when all are up to date" {
+  make_statuses foo=up_to_date bar=up_to_date _upstream="newer: 9.9.9"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2 packages, all up to date." ]
+  rm "$TEST_TMPDIR/st/bar"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$output" = "1 package, all up to date." ]
+}
+
+@test "run_summary: lists the packages that are not up to date, and the errors in code blocks" {
+  make_statuses a=up_to_date bar='check_failed: rejected `1.0` @octocat' baz="held: 2.0" \
+    foo="updated: 1.2.0" qux=$'update_failed: a ``` b\nc' _alerts=$'baz\thold\tnote'
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+5 packages, 1 up to date.
+
+| Package | Status |
+|---|---|
+| `bar` | ❌ failed |
+| `baz` | ✋ 2.0 held |
+| `foo` | 📦 updated to 1.2.0 |
+| `qux` | ❌ failed |
+
+`bar`: check failed
+
+```
+rejected `1.0` @octocat
+```
+
+`qux`: update failed
+
+````
+a ``` b
+c
+````
+EOF
+  )
+  [ "$output" = "$expected" ]
+}
+
+@test "run_summary: prints nothing without the status of a package" {
+  make_statuses _upstream="newer: 9.9.9"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 # === aur_export and aur_reanchor ===
 
 # Helper: a repo with a file, an executable, a symlink out of the repo and a

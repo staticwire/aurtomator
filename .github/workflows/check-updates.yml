@@ -590,6 +590,9 @@ jobs:
           name: published
           path: .status
 
+      - name: Write the run summary
+        run: bash -c 'source ./aurtomator/scripts/lib.sh && run_summary .status' >>"$GITHUB_STEP_SUMMARY"
+
       # Before the issue step: an open issue of a package holds back a new
       # one, so the check issue of a package whose update now fails has to
       # be closed first. The step runs neither after a failed step nor after
