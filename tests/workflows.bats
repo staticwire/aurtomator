@@ -844,8 +844,10 @@ make_builder_inputs() {
   echo notes >"$ws/handoff/prepared/foo/notes.txt"
   ln -s "$BATS_TEST_TMPDIR/secret" "$ws/handoff/prepared/foo/link"
   echo "update_failed: boom" >"$ws/handoff/status/foo"
-  mkdir -p "$ws/handoff/status/sub"
+  mkdir -p "$ws/handoff/status/sub" "$ws/handoff/prepared/foo/status" "$ws/handoff/prepared/xstatus"
   echo x >"$ws/handoff/status/sub/x"
+  echo x >"$ws/handoff/prepared/foo/status/x"
+  echo x >"$ws/handoff/prepared/xstatus/x"
   echo other >"$ws/handoff/other"
 }
 
@@ -1088,9 +1090,11 @@ make_handoff() {
   make_handoff
   chmod 0755 "$work/handoff/prepared/foo/PKGBUILD"
   echo notes >"$work/handoff/prepared/foo/notes.txt"
-  mkdir -p "$work/handoff/prepared/.x" "$work/handoff/status/sub"
+  mkdir -p "$work/handoff/prepared/.x" "$work/handoff/status/sub" "$work/handoff/prepared/foo/status" "$work/handoff/prepared/xstatus"
   echo hidden >"$work/handoff/prepared/.x/PKGBUILD"
   echo x >"$work/handoff/status/sub/x"
+  echo x >"$work/handoff/prepared/foo/status/x"
+  echo x >"$work/handoff/prepared/xstatus/x"
   echo other >"$work/handoff/other"
   run_hand_over_step
   [ "$status" -eq 0 ]
