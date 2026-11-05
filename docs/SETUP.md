@@ -205,7 +205,7 @@ It runs five steps in order:
 2. **ssh**: an existing SSH key for the AUR. CI uses the key without a prompt, so the step refuses a key with a passphrase and prints the commands that make a copy without one.
 3. **gpg**: optional GPG commit signing
 4. **secrets**: pushes `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY` to your GitHub repo. It checks the SSH key as the ssh step does, so a key that is missing or has a passphrase stops it before any secret is set.
-5. **verify**: checks identity, SSH access to the AUR with the saved key alone, as CI has it, GPG signing and the secrets
+5. **verify**: checks identity, SSH access to the AUR with the saved key alone, as CI has it, GPG signing, and the secrets, Issues and the two calling workflows of your GitHub repo
 
 The setup works on the repository that holds `aurtomator.sh`, whatever directory you run it from, and the `identity` step prints it as `Data directory:`. The `secrets` step sets the secrets of the GitHub repo of its `origin` remote and prints that repo as `Target repo:`. It asks for `owner/repo` when `origin` is missing or is not a repository on github.com. The secrets hold the key that pushes all of your AUR packages, so an interactive run asks before it sets them. The setup saves your answers to `.aurtomator.conf` after each step, so a step that fails, and a `verify` that finds a problem, leave the answers given so far for the next run.
 
@@ -267,7 +267,7 @@ That output works in CI only for a key without a passphrase. For a key with one,
 ./aurtomator.sh setup verify
 ```
 
-It checks identity, SSH access, GPG signing when configured, and the secrets when `gh` is available. When a check fails, the others still run, and `verify` then prints how many failed and exits with status 1.
+It checks identity, SSH access, and GPG signing when configured. With `gh` available, it also checks the GitHub repo of `origin`: its secrets, that Issues are on, and that `check-updates.yml` and `validate.yml` are active workflows, as [Required](#required) asks. An `origin` that is not a repository on github.com counts as a failed check. Two findings are warnings and count as no failure: an open `❌ Check AUR Package Updates failed` issue, which the next run without a failed job closes, and a pin to a version of aurtomator other than its latest release. When a check fails, the others still run, and `verify` then prints how many failed and exits with status 1.
 
 ## GPG signing (optional)
 
@@ -347,7 +347,7 @@ Without a step, all of them run in order.
 | `ssh`      | SSH key for AUR access                           |
 | `gpg`      | GPG signing key (yes/no prompt)                  |
 | `secrets`  | Push secrets to GitHub, or print manual instructions |
-| `verify`   | Check identity, SSH, GPG and secrets             |
+| `verify`   | Check identity, SSH, GPG, secrets, Issues and workflows |
 
 Steps can be combined:
 
