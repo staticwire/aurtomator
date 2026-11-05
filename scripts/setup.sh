@@ -413,6 +413,10 @@ setup_secrets() {
       gh_repo=$(ask "GitHub repo (owner/name)")
     fi
     ok "Target repo: $gh_repo"
+    [[ -z "$GIT_AUTHOR_NAME" ]] || printf "  AUR_GIT_NAME: %s\n" "$GIT_AUTHOR_NAME"
+    [[ -z "$GIT_AUTHOR_EMAIL" ]] || printf "  AUR_GIT_EMAIL: %s\n" "$GIT_AUTHOR_EMAIL"
+    printf "  AUR_SSH_KEY: the key in %s\n" "$(realpath -- "$AUR_SSH_KEY")"
+    [[ -z "$gpg_source" ]] || printf "  GPG_SIGNING_KEY: GPG key %s\n" "$GPG_KEY_ID"
 
     # The secrets hold the key that pushes every package of the user
     if [[ "$NON_INTERACTIVE" != "true" ]]; then

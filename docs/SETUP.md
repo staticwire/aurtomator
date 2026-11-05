@@ -476,6 +476,8 @@ AUR_SSH_KEY='/home/<user>/.ssh/aur_ed25519'
 
 A re-run of `./aurtomator.sh setup` loads this file first and does not ask again for the values it holds. A command line option overrides the saved value, and the new value is saved. The `.gitignore` of the template lists the file, because it holds local paths.
 
+The scripts stop when git tracks `.aurtomator.conf`. A tracked file takes the place of the ignored one at a checkout or a merge, so a pull request that adds it would choose the key the `secrets` step uploads and the name and email of your AUR commits. Check the values of such a file, then `git rm --cached .aurtomator.conf` takes it out of the repository and keeps it on disk. Before the `secrets` step sets the secrets, it prints each value and the file of the SSH key.
+
 ## Adding your first package
 
 ### 1. Draft the YAML

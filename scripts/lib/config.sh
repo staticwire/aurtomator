@@ -23,6 +23,12 @@ _config_value() {
 load_config() {
   local config="${AURTOMATOR_DATA_DIR}/.aurtomator.conf" line value n=0
   [[ -f "$config" ]] || return 0
+  # git puts a tracked file in place of the ignored one at a checkout or a
+  # merge, so its values can come from any commit
+  if git -C "$AURTOMATOR_DATA_DIR" ls-files --error-unmatch -- .aurtomator.conf >/dev/null 2>&1; then
+    echo "$config is tracked by git, so a commit can set its values. Check them, then take the file out of the repository: git rm --cached .aurtomator.conf" >&2
+    return 1
+  fi
   while IFS= read -r line || [[ -n "$line" ]]; do
     n=$((n + 1))
     [[ -n "$line" && "$line" != \#* ]] || continue
