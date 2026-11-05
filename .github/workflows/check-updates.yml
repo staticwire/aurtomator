@@ -535,7 +535,7 @@ jobs:
   # secret. No other user runs code in the workspace it checks out, so root
   # writes the bodies with scripts/lib/issue.sh.
   issues:
-    needs: [image, check, publish]
+    needs: [image, check, prepare, verify, publish]
     if: "!cancelled() && needs.check.result == 'success'"
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
@@ -587,6 +587,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_OK: ${{ (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
         run: |
           STATUS_DIR=".status"
           [[ -d "$STATUS_DIR" ]] || exit 0
@@ -620,6 +621,15 @@ jobs:
             done
           done <<<"$open
           $held"
+
+          # notify-failure opens this issue, and a run with no failed job
+          # closes it
+          if [[ "$RUN_OK" == true ]]; then
+            while read -r number title; do
+              [[ "$title" == "❌ Check AUR Package Updates failed" ]] || continue
+              gh issue close "$number" --comment "Run $RUN_URL succeeded."
+            done <<<"$open"
+          fi
 
           # The issue of an aurtomator release closes once VERSION holds it
           # or a newer release is out. A run that could not read the latest

@@ -1153,7 +1153,7 @@ EOF
   : >"$BODY_LOG"
   step_run issues "Close resolved issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
-    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork \
+    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
@@ -1310,7 +1310,7 @@ no_commit() {
 # or closes an issue
 @test "check-updates: the issues job runs in every run that checked, after publish" {
   run yq '.jobs.issues.needs | join(" ")' "$CHECK_UPDATES"
-  [ "$output" = "image check publish" ]
+  [ "$output" = "image check prepare verify publish" ]
   run yq '.jobs.issues.if' "$CHECK_UPDATES"
   [ "$output" = "!cancelled() && needs.check.result == 'success'" ]
   run yq '.jobs.check.steps[] | select(.name == "Upload statuses") | has("if")' "$CHECK_UPDATES"
@@ -1447,11 +1447,35 @@ EOF
 }
 
 @test "check-updates: closes no issue of another package" {
-  GH_OPEN=$'12 ❌ foo-bar: check failed\n13 ❌ Check AUR Package Updates failed' \
+  GH_OPEN=$'12 ❌ foo-bar: check failed\n13 ❌ Check AUR Package Updates failed' RUN_OK=false \
     run_close_step foo=up_to_date
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+@test "check-updates: a run without a failed job closes the issue of a failed run" {
+  GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ Check AUR Package Updates failed' \
+    run_close_step foo="check_failed: API down"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 13 --comment Run https://example.invalid/run succeeded.' "$GH_LOG"
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "check-updates: keeps the issue of a failed run after a failed prepare or verify" {
+  GH_OPEN=$'13 ❌ Check AUR Package Updates failed' RUN_OK=false run_close_step foo=up_to_date
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+# The close step runs only after a publish that succeeded or was skipped, and
+# the issues job runs only after a check that succeeded
+@test "check-updates: the close step knows whether prepare and verify failed" {
+  run yq '.jobs.issues.steps[] | select(.name == "Close resolved issues") | .env.RUN_OK' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = "\${{ (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}" ]
 }
 
 @test "check-updates: closes the issue of a package that is no longer held" {
@@ -1646,6 +1670,7 @@ EOF
   grep -q '^issue create --title ❌ Check AUR Package Updates failed --label auto-update --body ' "$GH_LOG"
   grep -q 'https://example.invalid/runs/7' "$GH_LOG"
   grep -q 'failed in check, publish' "$GH_LOG"
+  grep -q 'until a run succeeds, and that run closes this issue\.$' "$GH_LOG"
 }
 
 @test "notify-failure: opens the issue when the jobs cannot be listed" {

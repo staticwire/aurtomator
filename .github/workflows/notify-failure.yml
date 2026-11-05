@@ -64,4 +64,4 @@ jobs:
           gh issue create --title "$title" --label auto-update --body "$(printf '%s\n' \
             "Run $RUN_URL on $fence $RUN_BRANCH $fence failed in ${failed:-jobs that could not be listed}." \
             "" \
-            "Packages may be left unchecked or unpublished until a run succeeds.")"
+            "Packages may be left unchecked or unpublished until a run succeeds, and that run closes this issue.")"
