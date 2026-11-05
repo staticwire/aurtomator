@@ -63,6 +63,15 @@ if [[ -n "$nightly_tag_regex" ]]; then
     echo "Failed to fetch releases for ${owner_repo}" >&2
     exit 1
   }
+  if [[ -z "$release" ]]; then
+    # An empty list says nothing about the regex
+    if [[ "$(github_api "${api}/releases?per_page=1" | yq 'length')" == 0 ]]; then
+      echo "The release list of ${owner_repo} is empty" >&2
+    else
+      echo "No release among the newest 300 of ${owner_repo} has a tag that nightly_tag_regex '${nightly_tag_regex}' matches" >&2
+    fi
+    exit 1
+  fi
 elif [[ "$nightly_tag" == "latest" ]]; then
   # Pattern C: separate nightly repo, use /releases/latest
   release=$(github_api "${api}/releases/latest") || {
@@ -114,6 +123,10 @@ case "$version_source" in
   tag_date)
     tag=$(echo "$release" | yq -r '.tag_name')
     date=$(echo "$tag" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+    if [[ "$date" == *$'\n'* ]]; then
+      echo "Tag '${tag}' holds more than one date; version_source tag with tag_version_regex picks one" >&2
+      exit 1
+    fi
     version=$(format_date "$date")
     ;;
   release_body)

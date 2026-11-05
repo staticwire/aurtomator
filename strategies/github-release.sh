@@ -36,7 +36,12 @@ if [[ -n "$tag_version_regex" ]]; then
     exit 1
   }
   if [[ -z "$release" ]]; then
-    echo "No release of ${owner_repo} outside pre-releases among the newest 1000 has a tag that tag_version_regex '${tag_version_regex}' matches; github-nightly with nightly_tag_regex reads pre-releases" >&2
+    # An empty list says nothing about the regex
+    if [[ "$(github_api "${api}/releases?per_page=1" | yq 'length')" == 0 ]]; then
+      echo "The release list of ${owner_repo} is empty" >&2
+    else
+      echo "No release of ${owner_repo} outside pre-releases among the newest 1000 has a tag that tag_version_regex '${tag_version_regex}' matches; github-nightly with nightly_tag_regex reads pre-releases" >&2
+    fi
     exit 1
   fi
   version=$(yq -r '.tag_name' <<<"$release")

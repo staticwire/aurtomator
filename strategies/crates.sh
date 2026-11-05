@@ -25,8 +25,7 @@ if [[ $(pkg_get "$pkg_file" '.upstream.prerelease') == true ]]; then
   field=max_version
 fi
 
-version=$(http_get "https://crates.io/api/v1/crates/${registry}" |
-  yq -r ".crate.${field}") || {
+version=$(http_get_json "https://crates.io/api/v1/crates/${registry}" | yq -r ".crate.${field}") || {
   echo "Failed to fetch crates.io info for ${registry}" >&2
   exit 1
 }
