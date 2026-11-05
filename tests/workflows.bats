@@ -156,6 +156,24 @@ run_blocks() {
   [[ "$output" == *'shellcheck -s bash "$RUNNER_TEMP/run.sh"'* ]]
 }
 
+@test "ci: the lint job checks the runner of SETUP.md with shellcheck and shfmt" {
+  run yq '.jobs.lint.steps[] | select(.name == "shellcheck and shfmt the runner") | .run' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = 'bash tests/helpers/runner-script.sh >"$RUNNER_TEMP/aurtomator.sh"' ]
+  [ "${lines[1]}" = 'shellcheck "$RUNNER_TEMP/aurtomator.sh"' ]
+  [ "${lines[2]}" = 'shfmt -d -i 2 -ci "$RUNNER_TEMP/aurtomator.sh"' ]
+}
+
+@test "runner-script: fails when SETUP.md holds no runner" {
+  local dir="$BATS_TEST_TMPDIR/tree"
+  mkdir -p "$dir/tests/helpers" "$dir/docs"
+  cp "$BATS_TEST_DIRNAME/helpers/runner-script.sh" "$dir/tests/helpers/"
+  printf '# Setup\n\n```bash\necho hi\n```\n' >"$dir/docs/SETUP.md"
+  run bash "$dir/tests/helpers/runner-script.sh"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
 # The lint steps check only the files they name: shellcheck -x reads a
 # sourced file but reports nothing in it, and shfmt does not read it
 @test "ci: shellcheck and shfmt check every script in scripts and strategies" {

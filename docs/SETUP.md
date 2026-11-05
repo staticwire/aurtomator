@@ -115,7 +115,7 @@ The script `aurtomator.sh` in the root of your repository runs the scripts of au
 
 A command is `sample` or the name of an executable script in `scripts/` of aurtomator without `.sh`, and the arguments after it go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, whatever directory you run it from.
 
-The `uses:` line of `.github/workflows/check-updates.yml` names the repository and the commit. The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or into `$XDG_CACHE_HOME/aurtomator/<sha>` when `XDG_CACHE_HOME` is set. Later runs use that copy, and the first run after a merge that moves the pin fetches the new release.
+The `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA gives the repository and the commit. The script stops when the file holds no such line or more than one, and it reads no comment, so an old pin kept in a comment changes nothing. The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or into `$XDG_CACHE_HOME/aurtomator/<sha>` when `XDG_CACHE_HOME` is set. Later runs use that copy, and the first run after a merge that moves the pin fetches the new release.
 
 In CI, the jobs check out your repository and then aurtomator into `aurtomator/` of that checkout, which deletes whatever that path holds. So the script is `aurtomator.sh`, and nothing in the root of your repository may be named `aurtomator`.
 
@@ -137,13 +137,25 @@ The template holds this block as the file `aurtomator.sh`. A repository created 
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-uses='[[:alnum:]_.-]+/[[:alnum:]_.-]+/\.github/workflows/check-updates\.yml@[0-9a-f]{40}'
-pin="$(grep -s -oE "$uses" "$root/.github/workflows/check-updates.yml" || true)"
-if [[ -z "$pin" ]]; then
-  echo "No commit SHA pinned in .github/workflows/check-updates.yml" >&2
+workflow=.github/workflows/check-updates.yml
+if [[ ! -f "$root/$workflow" ]]; then
+  echo "No $workflow in $root" >&2
   exit 1
 fi
-sha="${pin##*@}"
+# The repository and the commit come from one uses: line, never a comment
+uses='^[[:space:]]*uses:[[:space:]]+([[:alnum:]_.-]+/[[:alnum:]_.-]+)/\.github/workflows/check-updates\.yml@([0-9a-f]{40})([[:space:]]|$)'
+mapfile -t pins < <(grep -E "$uses" "$root/$workflow" || true)
+if [[ ${#pins[@]} -eq 0 ]]; then
+  echo "No commit SHA pinned in $workflow" >&2
+  exit 1
+fi
+if [[ ${#pins[@]} -gt 1 ]]; then
+  echo "More than one uses: line pins check-updates.yml in $workflow" >&2
+  exit 1
+fi
+[[ "${pins[0]}" =~ $uses ]]
+repo="${BASH_REMATCH[1]}"
+sha="${BASH_REMATCH[2]}"
 copy="${XDG_CACHE_HOME:-$HOME/.cache}/aurtomator/$sha"
 
 if [[ ! -d "$copy" ]]; then
@@ -151,9 +163,10 @@ if [[ ! -d "$copy" ]]; then
   tmp="$(mktemp -d "$copy.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
   git -C "$tmp" init -q
-  git -C "$tmp" fetch -q --depth 1 "https://github.com/${pin%%/.github/*}" "$sha"
+  git -C "$tmp" fetch -q --depth 1 "https://github.com/$repo" "$sha"
   git -C "$tmp" checkout -q FETCH_HEAD
-  mv "$tmp" "$copy"
+  # A run that started at the same time can make the copy first
+  mv -T "$tmp" "$copy" 2>/dev/null || rm -rf "$tmp"
 fi
 
 cmd="${1:-}"

@@ -4,23 +4,19 @@ load helpers/setup.sh
 
 SETUP_DOC="$BATS_TEST_DIRNAME/../docs/SETUP.md"
 
-# Prints the script aurtomator.sh of the template: the fenced bash block of
-# docs/SETUP.md that starts with a shebang
+# Prints the script aurtomator.sh of the template, as the lint job of CI
+# takes it from docs/SETUP.md
 runner_script() {
-  awk '
-    /^```bash$/ { start = NR + 1; next }
-    NR == start && $0 == "#!/usr/bin/env bash" { inside = 1 }
-    inside && /^```$/ { exit }
-    inside { print }
-  ' "$SETUP_DOC"
+  bash "$BATS_TEST_DIRNAME/helpers/runner-script.sh"
 }
 
 # Commits the files of a fake aurtomator to the work tree $1: a sample that
 # holds $2, scripts/show-args.sh, which prints what it got and exits with
-# SHOW_STATUS, and scripts/lib.sh, a library that is not executable, as in
-# aurtomator
+# SHOW_STATUS, scripts/lib.sh, a library that is not executable, as in
+# aurtomator, and the directory scripts/show
 commit_aurtomator() {
-  mkdir -p "$1/scripts" "$1/packages"
+  mkdir -p "$1/scripts/show" "$1/packages"
+  : >"$1/scripts/show/.keep"
   printf 'name: %s\n' "$2" >"$1/packages/example.yml.sample"
   cat >"$1/scripts/show-args.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -157,16 +153,73 @@ teardown() {
 }
 
 @test "runner: stops when check-updates.yml pins no commit" {
-  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@v0.8.0"
-  run "$REPO/aurtomator.sh" sample
-  [ "$status" -eq 1 ]
-  [ "$output" = "No commit SHA pinned in .github/workflows/check-updates.yml" ]
+  local pin
+  for pin in v0.8.0 "${PINNED}0"; do
+    pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$pin"
+    run "$REPO/aurtomator.sh" sample
+    [ "$status" -eq 1 ]
+    [ "$output" = "No commit SHA pinned in .github/workflows/check-updates.yml" ]
+  done
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
 
+@test "runner: names a missing check-updates.yml" {
   rm "$REPO/.github/workflows/check-updates.yml"
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 1 ]
-  [ "$output" = "No commit SHA pinned in .github/workflows/check-updates.yml" ]
+  [ "$output" = "No .github/workflows/check-updates.yml in $REPO" ]
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+# A hand edit can keep the old pin as a comment, and a pull request can add
+# one: the repository and the commit both come from the uses: line
+@test "runner: takes the pin from the uses: line, not from a comment" {
+  cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
+jobs:
+  check-updates:
+    # was: uses: someone/aurtomator-fork/.github/workflows/check-updates.yml@$TIP # vX.Y.Z
+    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED # vX.Y.Z
+    # was: uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP # vX.Y.Z
+EOF
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+  run ls -A "$XDG_CACHE_HOME/aurtomator"
+  [ "$output" = "$PINNED" ]
+}
+
+@test "runner: stops when two uses: lines pin check-updates.yml" {
+  cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
+jobs:
+  one:
+    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED # vX.Y.Z
+  two:
+    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP # vX.Y.Z
+EOF
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "More than one uses: line pins check-updates.yml in .github/workflows/check-updates.yml" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+# The fetch of each run waits a second, so both find no copy and fetch
+@test "runner: two first runs of a pin at once leave one copy" {
+  local bin="$TEST_TMPDIR/slow" one two
+  mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\n[[ " $* " != *" fetch "* ]] || sleep 1\nexec %q "$@"\n' "$(command -v git)" >"$bin/git"
+  chmod +x "$bin/git"
+  PATH="$bin:$PATH" "$REPO/aurtomator.sh" sample >"$TEST_TMPDIR/one.out" 2>&1 &
+  one=$!
+  PATH="$bin:$PATH" "$REPO/aurtomator.sh" sample >"$TEST_TMPDIR/two.out" 2>&1 &
+  two=$!
+  wait "$one"
+  wait "$two"
+  [ "$(cat "$TEST_TMPDIR/one.out")" = "name: pinned" ]
+  [ "$(cat "$TEST_TMPDIR/two.out")" = "name: pinned" ]
+  run ls -A "$XDG_CACHE_HOME/aurtomator"
+  [ "$output" = "$PINNED" ]
+  run ls -A "$XDG_CACHE_HOME/aurtomator/$PINNED"
+  [[ "$output" != *"$PINNED"* ]]
 }
 
 @test "runner: lists the commands for a command that names no script" {
@@ -176,7 +229,7 @@ teardown() {
   [ "${lines[1]}" = "Commands: sample show-args" ]
 
   local command
-  for command in "" nope lib ../scripts/show-args Show-args show-args.sh; do
+  for command in "" nope lib ../scripts/show-args Show-args show-args.sh show/../show-args show-args/x; do
     run "$REPO/aurtomator.sh" "$command"
     [ "$status" -eq 1 ]
     [ "${lines[0]}" = "Usage: $REPO/aurtomator.sh <command> [argument...]" ]
