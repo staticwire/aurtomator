@@ -127,7 +127,7 @@ Before that fetch, the script warns when no tag of the repository points to the 
 
 `./aurtomator.sh pin vX.Y.Z` moves the pin to a release. It reads the commit of that tag with `git ls-remote`, puts it and `# vX.Y.Z` into every `uses:` line of the pinned repository in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. It fetches nothing. The next run of the script fetches the release, and CI takes it once the two files are committed and pushed.
 
-In CI, the jobs check out your repository and then aurtomator into `aurtomator/` of that checkout, which deletes whatever that path holds. So the script is `aurtomator.sh`, and nothing in the root of your repository may be named `aurtomator`. The jobs also make the directories `upload`, `handoff` and `statuses` in that root, so these names are taken as well: a tracked `upload` or `statuses` stops the step that makes the directory, and the files of a tracked `handoff` change in the run, which the commit of the results refuses.
+In CI, the jobs check out your repository and then aurtomator into `aurtomator/` of that checkout, which deletes whatever that path holds. So the script is `aurtomator.sh`, and nothing in the root of your repository may be named `aurtomator`. The jobs also make the directories `upload`, `handoff` and `statuses` in that root, so these names are taken as well: a tracked `upload` or `statuses` stops the step that makes the directory, and the files of a tracked `handoff` reach the steps of `builder` beside those of the run.
 
 The template holds this block as the file `aurtomator.sh`. A repository created without the template needs it in its root, made executable with `chmod +x aurtomator.sh`:
 

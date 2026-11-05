@@ -1,12 +1,11 @@
 name: Run check-all.sh as builder
 description: >-
-  Gives the workspace to builder, runs scripts/check-all.sh as builder with
-  workflow commands stopped, and exits with its status.
+  Copies the inputs of builder into a directory of its own, runs
+  scripts/check-all.sh there as builder with workflow commands stopped, and
+  exits with its status.
 
-# The runner reads this file from the checkout of aurtomator when the step
-# starts, and the step runs the scripts of that checkout. A job uses it
-# before builder has run anything in the workspace, and no local action may
-# follow it in the same job: builder owns the workspace from then on.
+# builder writes only into its own directory. The workspace and aurtomator/
+# stay root's, and the Hand over step of the job takes the results as data.
 
 inputs:
   args:
@@ -17,6 +16,10 @@ inputs:
     description: Comma-separated names of the variables of the step that builder keeps
     required: false
     default: ""
+  readme:
+    description: true runs scripts/update-readme.sh as builder after a successful check-all.sh
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -25,14 +28,52 @@ runs:
       env:
         ARGS: ${{ inputs.args }}
         KEEP_ENV: ${{ inputs.keep-env }}
+        README_TOO: ${{ inputs.readme }}
+        WORK: /work
       run: |
-        chown -R builder:builder .
-        read -ra check_args <<<"$ARGS"
-        options=(-u builder)
-        if [[ -n "$KEEP_ENV" ]]; then
-          options=("--preserve-env=$KEEP_ENV" -u builder)
-        fi
         code=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)
+        # A directory of an earlier step could hold files that builder chose
+        if [[ -e "$WORK" || -L "$WORK" ]]; then
+          echo "::error::$WORK exists already"
+          exit 1
+        fi
+        if ! sudo -u builder test -x "$code/scripts/check-all.sh"; then
+          echo "::error::builder cannot run $code/scripts/check-all.sh"
+          exit 1
+        fi
+        install -d -m 0700 "$WORK"
+        # The regular files of the expected names, never a link
+        name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
+        take() {
+          [[ -f "$1" && ! -L "$1" ]] || return 0
+          install -D -m 0644 "$1" "$WORK/$1"
+        }
+        take README.md
+        if [[ -d packages && ! -L packages ]]; then
+          for f in packages/*.yml; do
+            [[ "${f#packages/}" =~ ^${name_re}\.yml$ ]] || continue
+            take "$f"
+          done
+        fi
+        if [[ -d .status && ! -L .status ]]; then
+          for f in .status/*; do
+            [[ "${f#.status/}" =~ ^${name_re}$ ]] || continue
+            take "$f"
+          done
+        fi
+        if [[ -d handoff && ! -L handoff ]]; then
+          (cd handoff && find prepared status -type f -print0 2>/dev/null || true) |
+            while IFS= read -r -d '' f; do
+              if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
+                [[ "$f" =~ ^status/${name_re}$ ]]; then
+                take "handoff/$f"
+              fi
+            done
+        fi
+        chown -R builder:builder "$WORK"
+
+        read -ra check_args <<<"$ARGS"
+        keep="GITHUB_REPOSITORY${KEEP_ENV:+,$KEEP_ENV}"
         # The runner reads ::cmd:: at the start of a line and ##[cmd]
         # anywhere in it as a workflow command. It ignores both between
         # stop-commands and the token, and the token stays in this shell.
@@ -41,6 +82,9 @@ runs:
         token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
         echo "::stop-commands::$token"
         rc=0
-        sudo "${options[@]}" "$code/scripts/check-all.sh" "${check_args[@]}" 2>&1 | cat || rc=$?
+        (cd "$WORK" && sudo "--preserve-env=$keep" -u builder "$code/scripts/check-all.sh" "${check_args[@]}") 2>&1 | cat || rc=$?
+        if [[ "$rc" -eq 0 && "$README_TOO" == true ]]; then
+          (cd "$WORK" && sudo "--preserve-env=$keep" -u builder "$code/scripts/update-readme.sh") 2>&1 | cat || rc=$?
+        fi
         echo "::$token::"
         exit "$rc"

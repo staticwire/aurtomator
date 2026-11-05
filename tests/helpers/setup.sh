@@ -5,6 +5,9 @@
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$(cd "$TESTS_DIR/.." && pwd)"
 
+# CI sets it for the repository of aurtomator, and update-readme.sh reads it
+unset GITHUB_REPOSITORY
+
 # Create temp workspace
 setup_test_env() {
   TEST_TMPDIR=$(mktemp -d)
