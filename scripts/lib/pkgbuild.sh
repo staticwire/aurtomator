@@ -94,6 +94,12 @@ pkgver_prints_pkgver() {
   ' <<<"$body"
 }
 
+# Warn about epoch $1, which pacman compares before pkgver
+warn_epoch() {
+  log_warn "PKGBUILD sets epoch=${1}: an update keeps it, and current holds the version without it."
+  log_warn "  pacman does not install a downgrade over the newer version unless epoch is raised by hand."
+}
+
 # Audit PKGBUILD for unsupported features before updating.
 # Args: $1=pkgbuild path, $2=strategy name
 # Returns: 0=ok, 1=fatal (block update), 2=warnings only
@@ -144,8 +150,7 @@ audit_pkgbuild() {
   local epoch
   epoch=$(bash -c 'source "$1" 2>/dev/null; printf "%s" "${epoch:-}"' -- "$pkgbuild" 2>/dev/null || true)
   if [[ -n "$epoch" && "$epoch" != 0 ]]; then
-    log_warn "PKGBUILD sets epoch=${epoch}: an update keeps it, and current holds the version without it."
-    log_warn "  pacman does not install a downgrade over the newer version unless epoch is raised by hand."
+    warn_epoch "$epoch"
     warnings=$((warnings + 1))
   fi
 

@@ -623,9 +623,9 @@ verify_all() {
   if [[ "$errors" -eq 0 ]]; then
     printf "\n  %s%sReady.%s Add your first package:\n" "$GREEN" "$BOLD" "$RESET"
     if [[ -n "${AURTOMATOR_RUNNER:-}" ]]; then
-      printf "    %s sample > %s/packages/<name>.yml\n\n" "$AURTOMATOR_RUNNER" "$AURTOMATOR_DATA_DIR"
+      printf "    %s draft <name>\n\n" "$AURTOMATOR_RUNNER"
     else
-      printf "    cp %s/packages/example.yml.sample %s/packages/<name>.yml\n\n" "$AURTOMATOR_DIR" "$AURTOMATOR_DATA_DIR"
+      printf "    AURTOMATOR_DATA_DIR=%s %s/scripts/draft.sh <name>\n\n" "$AURTOMATOR_DATA_DIR" "$AURTOMATOR_DIR"
     fi
   else
     printf "\n  %s%s%d issue(s) found.%s Fix and re-run:\n" "$YELLOW" "$BOLD" "$errors" "$RESET"

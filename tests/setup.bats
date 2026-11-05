@@ -577,7 +577,7 @@ EOF
   [[ "$output" == *"$TEST_TMPDIR/scripts/setup.sh verify"* ]]
 }
 
-@test "setup verify: names the sample of the clone and the packages of AURTOMATOR_DATA_DIR" {
+@test "setup verify: names draft.sh of the clone with AURTOMATOR_DATA_DIR" {
   write_full_config ""
   mkdir -p "$BATS_TEST_TMPDIR/data"
   cp "$TEST_TMPDIR/.aurtomator.conf" "$BATS_TEST_TMPDIR/data/"
@@ -586,7 +586,7 @@ EOF
 
   AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"cp $TEST_TMPDIR/packages/example.yml.sample $BATS_TEST_TMPDIR/data/packages/<name>.yml"* ]]
+  [[ "$output" == *$'\n'"    AURTOMATOR_DATA_DIR=$BATS_TEST_TMPDIR/data $TEST_TMPDIR/scripts/draft.sh <name>"$'\n'* ]]
 }
 
 @test "setup verify: counts every failed check" {
@@ -940,14 +940,14 @@ EOF
   [[ "$output" == *"Unknown option: --bogus-flag (see ./aurtomator.sh setup --help)"* ]]
 }
 
-@test "setup verify: through the aurtomator script, names its sample command" {
+@test "setup verify: through the aurtomator script, names its draft command" {
   write_full_config ""
 
   AURTOMATOR_RUNNER=./aurtomator.sh run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"Ready."* ]]
-  [[ "$output" == *$'\n'"    ./aurtomator.sh sample > $TEST_TMPDIR/packages/<name>.yml"* ]]
-  [[ "$output" != *"example.yml.sample"* ]]
+  [[ "$output" == *$'\n'"    ./aurtomator.sh draft <name>"$'\n'* ]]
+  [[ "$output" != *"draft.sh"* && "$output" != *"AURTOMATOR_DATA_DIR="* ]]
 }
 
 @test "setup verify: through the aurtomator script, names it for a re-run" {

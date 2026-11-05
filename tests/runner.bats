@@ -12,9 +12,9 @@ runner_script() {
 
 # Commits the files of a fake aurtomator to the work tree $1: a sample that
 # holds $2, scripts/show-args.sh, which prints what it got and exits with
-# SHOW_STATUS, the same script as scripts/setup.sh, a documented command,
-# scripts/lib.sh, a library that is not executable, as in aurtomator, and
-# the directory scripts/show
+# SHOW_STATUS, the same script as scripts/setup.sh and scripts/draft.sh,
+# documented commands, scripts/lib.sh, a library that is not executable, as
+# in aurtomator, and the directory scripts/show
 commit_aurtomator() {
   mkdir -p "$1/scripts/show" "$1/packages"
   : >"$1/scripts/show/.keep"
@@ -28,6 +28,7 @@ exit "${SHOW_STATUS:-0}"
 EOF
   chmod +x "$1/scripts/show-args.sh"
   cp -p "$1/scripts/show-args.sh" "$1/scripts/setup.sh"
+  cp -p "$1/scripts/show-args.sh" "$1/scripts/draft.sh"
   echo 'echo "lib.sh ran"' >"$1/scripts/lib.sh"
   git -C "$1" add -A
   git -C "$1" -c user.name=t -c user.email=t@example.com commit -q -m "$2"
@@ -231,14 +232,14 @@ EOF
   run "$REPO/aurtomator.sh"
   [ "$status" -eq 1 ]
   [ "${lines[0]}" = "Usage: $REPO/aurtomator.sh <command> [argument...]" ]
-  [ "${lines[1]}" = "Commands: setup sample validate-pkg check-update update-pkg check-all pin" ]
+  [ "${lines[1]}" = "Commands: setup draft sample validate-pkg check-update update-pkg check-all pin" ]
 
   local command
   for command in "" nope lib ../scripts/show-args Show-args show-args.sh show/../show-args show-args/x; do
     run "$REPO/aurtomator.sh" "$command"
     [ "$status" -eq 1 ]
     [ "${lines[0]}" = "Usage: $REPO/aurtomator.sh <command> [argument...]" ]
-    [ "${lines[1]}" = "Commands: setup sample validate-pkg check-update update-pkg check-all pin" ]
+    [ "${lines[1]}" = "Commands: setup draft sample validate-pkg check-update update-pkg check-all pin" ]
   done
 }
 
@@ -249,6 +250,9 @@ EOF
   [ "${lines[0]}" = "Warning: show-args is a step of the CI jobs, not a documented command" ]
   [ "${lines[1]}" = "data: $REPO" ]
   run "$REPO/aurtomator.sh" setup one
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "data: $REPO" ]
+  run "$REPO/aurtomator.sh" draft one
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "data: $REPO" ]
 }
