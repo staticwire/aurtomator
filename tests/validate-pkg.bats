@@ -352,6 +352,20 @@ EOF
   [[ "$output" == *"missing required field 'name'"* ]]
 }
 
+# check-all.sh finds a package by its name, so a file under another name
+# is never checked
+@test "validate: fails on a name other than the file name" {
+  create_test_package a github-release "upstream:
+  project: owner/repo"
+  sed -i 's/^name: a$/name: b/' "$TEST_TMPDIR/packages/a.yml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" a
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/a.yml: name 'b' must equal the file name 'a'"* ]]
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/a.yml: name 'b' must equal the file name 'a'"* ]]
+}
+
 @test "validate: fails on missing strategy" {
   cat >"$TEST_TMPDIR/packages/bad.yml" <<'EOF'
 name: bad

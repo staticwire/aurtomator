@@ -172,8 +172,14 @@ validate_pkg() {
   strategy=$(pkg_get "$file" '.strategy // ""')
 
   # --- Required core fields ---
+  # check-all.sh finds a package by its name, never by its file
+  local stem="${file##*/}"
+  stem="${stem%.yml}"
   if [[ -z "$name" || "$name" == "null" ]]; then
     log_err "$file: missing required field 'name'"
+    ((errors++))
+  elif [[ "$name" != "$stem" ]]; then
+    log_err "$file: name '$name' must equal the file name '$stem'"
     ((errors++))
   fi
 

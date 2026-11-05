@@ -74,7 +74,7 @@ flowchart TD
 
 ## 2. Package YAML Format
 
-Each package has a file at `packages/<name>.yml`. The file name, the `name` field and the `pkgbase` on the AUR are the same. The `pkgbase` names the AUR git repository, and it is the package name, except for a split package such as `pkgbase=liblinear` with `pkgname=(liblinear python-liblinear)`.
+Each package has a file at `packages/<name>.yml`. The file name, the `name` field and the `pkgbase` on the AUR are the same. A run finds the file of a package by its `name`, so `validate-pkg.sh` refuses a `name` other than the file name. The `pkgbase` names the AUR git repository, and it is the package name, except for a split package such as `pkgbase=liblinear` with `pkgname=(liblinear python-liblinear)`.
 
 | Field          | Required | Description                                                                 |
 |----------------|----------|-----------------------------------------------------------------------------|
