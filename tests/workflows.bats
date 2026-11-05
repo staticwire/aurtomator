@@ -1051,7 +1051,8 @@ EOF
 # with $BATS_TEST_TMPDIR/work as the directory of builder and
 # $BATS_TEST_TMPDIR/results as the directory of root, and the commands of
 # $BATS_TEST_TMPDIR/bin first on PATH. sudo logs its arguments to $SUDO_LOG
-# and runs the command of -u builder as the test user.
+# and runs the command of -u builder as the test user. bash takes the
+# options in $HAND_OVER_SHELL, -e by default, as the default shell of a step.
 run_hand_over_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BATS_TEST_TMPDIR/ws" "$bin"
@@ -1066,8 +1067,9 @@ EOF
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   : >"$SUDO_LOG"
   step_run prepare "Hand over" >"$BATS_TEST_TMPDIR/step.sh"
+  # shellcheck disable=SC2086
   run env -C "$BATS_TEST_TMPDIR/ws" PATH="$bin:$PATH" SUDO_LOG="$SUDO_LOG" WORK="$BATS_TEST_TMPDIR/work" \
-    RESULTS="$BATS_TEST_TMPDIR/results" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    RESULTS="$BATS_TEST_TMPDIR/results" bash ${HAND_OVER_SHELL:--e} "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Writes the files that prepare hands over for the package foo into the
@@ -1193,15 +1195,20 @@ make_handoff() {
     handoff/prepared/foo/PKGBUILD handoff/prepared/foo/base handoff/status/foo packages/foo.yml | LC_ALL=C sort)" ]
 }
 
-# prepare hands over no status/ when no update failed
+# prepare hands over no status/ when no update failed. bashcov exports
+# SHELLOPTS, so in CI the step runs with pipefail.
 @test "check-updates: Hand over copies a handoff without statuses" {
-  local ws="$BATS_TEST_TMPDIR/ws"
-  make_handoff
-  rm -r "$BATS_TEST_TMPDIR/work/handoff/status"
-  run_hand_over_step
-  [ "$status" -eq 0 ]
-  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
-  [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base' ]
+  local ws="$BATS_TEST_TMPDIR/ws" shell
+  for shell in "-e" "-eo pipefail"; do
+    echo "$shell"
+    rm -rf "$ws" "$BATS_TEST_TMPDIR/work"
+    make_handoff
+    rm -r "$BATS_TEST_TMPDIR/work/handoff/status"
+    HAND_OVER_SHELL="$shell" run_hand_over_step
+    [ "$status" -eq 0 ]
+    run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
+    [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base' ]
+  done
 }
 
 @test "check-updates: Hand over copies nothing without a directory of builder" {

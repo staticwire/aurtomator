@@ -157,8 +157,9 @@ jobs:
           # A package name never starts with a dot, so . and .. do not match
           name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
           if [[ -d "$WORK/handoff" && ! -L "$WORK/handoff" ]]; then
-            # find follows no link; -print0, as a name may hold a newline
-            (cd "$WORK/handoff" && find prepared status -type f -print0 2>/dev/null) |
+            # find follows no link; -print0, as a name may hold a newline. find
+            # fails on a missing prepared/ or status/, and the step goes on.
+            (cd "$WORK/handoff" && find prepared status -type f -print0 2>/dev/null || true) |
               while IFS= read -r -d '' f; do
                 if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
                   [[ "$f" =~ ^status/${name_re}$ ]]; then
