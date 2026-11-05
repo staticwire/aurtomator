@@ -42,7 +42,7 @@ The schedule runs from the start, so runs can come before the secrets are set. S
 
 ### Badges
 
-`update-readme.sh` writes three badges between the `<!-- BADGES:START -->` and `<!-- BADGES:END -->` markers of the README: `Validate packages`, `Check AUR Package Updates` and `maintained with aurtomator`. A run of `Check AUR Package Updates` runs the script and commits the README when it changed.
+`update-readme.sh` writes three badges between the `<!-- BADGES:START -->` and `<!-- BADGES:END -->` markers of the README: `Validate packages`, `Check AUR Package Updates` and `maintained with aurtomator`. A run of `Check AUR Package Updates` runs the script and commits the README when it changed. While `packages/` holds no package, the script writes nothing, so the setup steps of the template stay in the README until the first package.
 
 The badge URLs name `validate.yml` and `check-updates.yml` in your repository, so the calling workflows keep those file names.
 
