@@ -66,6 +66,7 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 | `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag      |
 | `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                    |
 | `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea            |
+| `gitea-release`    | Gitea/Forgejo API   | Releases on Codeberg or a Gitea host   |
 | `git-tag`          | `git ls-remote`     | Any HTTPS git host, such as sourcehut  |
 | `git-latest`       | `git clone --bare`  | `-git` packages, any HTTPS git repo    |
 | `pypi`             | PyPI JSON API       | Python packages                        |

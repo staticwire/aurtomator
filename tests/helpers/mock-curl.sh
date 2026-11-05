@@ -22,6 +22,7 @@ case "$url" in
   # The bot check of a site, as on forge.soutade.fr: a redirect to an HTML
   # page that answers 200
   *codeberg.org/api/v1/repos/gated-owner/gated-repo/tags* | \
+    *codeberg.org/api/v1/repos/gated-owner/gated-repo/releases* | \
     *gitlab.com/api/v4/projects/gated-group%2Fgated-project/repository/tags*)
     effective_url="${url%%/api/*}/402.html"
     echo '<!DOCTYPE html><html><body><h1>Are you Human?</h1></body></html>'
@@ -377,6 +378,39 @@ case "$url" in
     echo '[{"name": "latest"}, {"name": "nightly"}]'
     ;;
 
+  # Gitea releases. /releases/latest answers 404 when no release is outside
+  # drafts and pre-releases, and when there is none.
+  *codeberg.org/api/v1/repos/no-releases/repo/releases/latest | \
+    *codeberg.org/api/v1/repos/prerelease-only/repo/releases/latest | \
+    *codeberg.org/api/v1/repos/broken/repo/releases/latest)
+    printf '%s\tThe requested URL returned error: 404\t' "$url" >&2
+    exit 22
+    ;;
+  *"codeberg.org/api/v1/repos/no-releases/repo/releases?limit=1" | \
+    *"codeberg.org/api/v1/repos/empty/repo/releases?limit=50&page=1" | \
+    *"codeberg.org/api/v1/repos/prerelease-only/repo/releases?limit=50&page=2")
+    echo '[]'
+    ;;
+  *"codeberg.org/api/v1/repos/prerelease-only/repo/releases?limit=1" | \
+    *"codeberg.org/api/v1/repos/prerelease-only/repo/releases?limit=50&page=1")
+    echo '[{"tag_name": "v2.0.0-rc1", "prerelease": true, "draft": false}]'
+    ;;
+  # Two products in one repository, a pre-release and a draft newer than
+  # every release, and the newest release on the second page
+  *"codeberg.org/api/v1/repos/multi-product/repo/releases?limit=50&page=1")
+    echo '[{"tag_name": "app-web-release-370.0", "prerelease": false, "draft": false}, {"tag_name": "app-desktop-release-367.0", "prerelease": true, "draft": false}, {"tag_name": "app-desktop-release-366.0", "prerelease": false, "draft": true}, {"tag_name": "app-desktop-release-361.0", "prerelease": false, "draft": false}]'
+    ;;
+  *"codeberg.org/api/v1/repos/multi-product/repo/releases?limit=50&page=2")
+    echo '[{"tag_name": "app-desktop-release-365.0", "prerelease": false, "draft": false}]'
+    ;;
+  *"codeberg.org/api/v1/repos/multi-product/repo/releases?limit=50&page=3")
+    echo '[]'
+    ;;
+  # A release list without an end: page N holds v1.N.0
+  *"codeberg.org/api/v1/repos/endless/repo/releases?limit=50&page="*)
+    printf '[{"tag_name": "v1.%s.0", "prerelease": false, "draft": false}]\n' "${url##*page=}"
+    ;;
+
   # Releases of savonet/liquidsoap. v2.4.6 has builds for two OCaml
   # versions, v2.5.0-rc1 for one. MOCK_RELEASE_AGE gives the hours since
   # v2.5.0-rc1 was published, 48 by default, MOCK_RELEASE_DATE the date
@@ -439,6 +473,10 @@ case "$url" in
   # Gitea Tags API
   *codeberg.org/api/v1/repos/*/tags*)
     echo '[{"name": "v1.5.0"}, {"name": "v1.4.0"}]'
+    ;;
+  # Gitea Releases API
+  *codeberg.org/api/v1/repos/*/releases/latest)
+    echo '{"tag_name": "v2.4.0", "prerelease": false, "draft": false}'
     ;;
   # PyPI JSON API
   *pypi.org/pypi/*/json)

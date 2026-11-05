@@ -122,7 +122,7 @@ current: "4.4215"
 
 ## 3. Strategies
 
-aurtomator ships 15 strategies. A strategy is a bash script in `strategies/`. It takes the package name, reads its settings from the package YAML, queries the upstream, and prints one version string on stdout. On failure it prints an error to stderr and exits non-zero. The HTTP-based strategies use `curl` with a 30-second timeout, and the tag-based ones strip a leading `v`.
+aurtomator ships 16 strategies. A strategy is a bash script in `strategies/`. It takes the package name, reads its settings from the package YAML, queries the upstream, and prints one version string on stdout. On failure it prints an error to stderr and exits non-zero. The HTTP-based strategies use `curl` with a 30-second timeout, and the tag-based ones strip a leading `v`.
 
 ### 3.1 github-release
 
@@ -760,6 +760,33 @@ name: my-package
 strategy: git-tag
 upstream:
   url: https://gitlab.gnome.org/GNOME/gtk.git
+```
+
+### 3.16 gitea-release
+
+**Upstream:** Gitea/Forgejo Releases API (`/api/v1/repos/{owner}/{repo}/releases/latest`, and `/releases` with `tag_version_regex`).
+
+**When to use:** a project on Codeberg or another Gitea or Forgejo host that publishes releases and also pushes tags that are no release, which [gitea-tag](#36-gitea-tag) reads as well.
+
+**YAML fields:**
+
+| Field                  | Required | Description                              |
+|------------------------|----------|------------------------------------------|
+| `upstream.host`        | yes      | Instance hostname (e.g. `codeberg.org`)  |
+| `upstream.project`     | yes      | `owner/repo` format                      |
+| `upstream.tag_version_regex` | no | ERE whose first capture group is the version; the release list replaces `/releases/latest`, see [3.1](#31-github-release) |
+| `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
+
+**Version:** without `tag_version_regex`, it takes the tag of `/releases/latest`, the newest release by date that is neither a draft nor a pre-release, and strips a leading `v`. Gitea answers 404 when there is no such release, and the check then reads the release list to say whether the project has no release at all or pre-releases only. With `tag_version_regex`, it reads the release list, up to 10 pages of 50 releases and up to the first empty page, leaves out drafts and pre-releases, and returns the newest version by `vercmp` among the tags that the regex matches, as [gitea-tag](#36-gitea-tag) does. This fits a repository that publishes the releases of several products. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check).
+
+**Example YAML:**
+
+```yaml
+name: my-package
+strategy: gitea-release
+upstream:
+  host: codeberg.org
+  project: owner/repo
 ```
 
 ## 4. Update Process
