@@ -1663,6 +1663,16 @@ run_github_strategies() {
   [ "$(grep -c -- '--retry 2 --retry-delay 5 --retry-connrefused' "$TEST_TMPDIR/curl.args")" -eq "$calls" ]
 }
 
+# curl follows a redirect to plain http by default, where the network can
+# change the answer
+@test "github strategies: follow https only, redirects included" {
+  setup_github_strategies
+  run_github_strategies
+  calls=$(wc -l <"$TEST_TMPDIR/curl.args")
+  [ "$calls" -gt 0 ]
+  [ "$(grep -c -- "--proto =https --proto-redir =https" "$TEST_TMPDIR/curl.args")" -eq "$calls" ]
+}
+
 # A request that goes around http_get makes one attempt
 @test "strategies: send every request through http_get" {
   run grep -nE '^[^#]*\bcurl -' "$PROJECT_DIR"/strategies/*.sh
