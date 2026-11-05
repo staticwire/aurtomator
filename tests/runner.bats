@@ -169,6 +169,14 @@ teardown() {
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
+@test "runner: names yq when it is missing" {
+  mkdir "$TEST_TMPDIR/bin"
+  ln -s "$(command -v bash)" "$TEST_TMPDIR/bin/"
+  run env PATH="$TEST_TMPDIR/bin" "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$REPO/aurtomator.sh needs yq: https://github.com/mikefarah/yq" ]
+}
+
 @test "runner: names a missing check-updates.yml" {
   rm "$REPO/.github/workflows/check-updates.yml"
   run "$REPO/aurtomator.sh" sample
@@ -205,6 +213,77 @@ EOF
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 1 ]
   [ "$output" = "More than one uses: line pins check-updates.yml in .github/workflows/check-updates.yml" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+# GitHub reads YAML: a line in a block of text is no uses: line for it, and a
+# pin in quotes is one
+@test "runner: stops when GitHub reads a pin in quotes beside a uses: line in a text" {
+  cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: |
+          uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP # vX.Y.Z
+jobs:
+  check-updates:
+    uses: "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" # vX.Y.Z
+EOF
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "${lines[0]}" = "Write the pin of check-updates.yml in .github/workflows/check-updates.yml on one uses: line without quotes. GitHub reads:" ]
+  [ "${lines[1]}" = "  staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" ]
+  [ "${#lines[@]}" -eq 2 ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+@test "runner: stops when GitHub reads the pin on the line after uses:" {
+  cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
+env:
+  NOTE: |
+    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP # vX.Y.Z
+jobs:
+  check-updates:
+    uses:
+      staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED
+EOF
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "${lines[1]}" = "  staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+@test "runner: stops when GitHub reads a pin through an alias" {
+  cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
+env:
+  PIN: &pin staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP
+jobs:
+  check-updates:
+    uses: *pin
+  other:
+    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED # vX.Y.Z
+EOF
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "${lines[1]}" = "  staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP" ]
+  [ "${lines[2]}" = "  staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+@test "runner: stops when GitHub reads no pin of check-updates.yml" {
+  cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED # vX.Y.Z
+EOF
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "${lines[0]}" = "Write the pin of check-updates.yml in .github/workflows/check-updates.yml on one uses: line without quotes. GitHub reads:" ]
+  [ "${lines[1]}" = "  none" ]
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
@@ -376,6 +455,52 @@ EOF
   run "$REPO/aurtomator.sh" pin v1.2.0
   [ "$status" -eq 0 ]
   grep -qxF "    uses: staticwire/aurtomator/.github/workflows/validate.yml@$TIP # v1.2.0" "$REPO/.github/workflows/validate.yml"
+}
+
+@test "runner: pin stops before it changes a file when GitHub reads a pin it cannot move" {
+  calling_workflows "$PINNED" v1.0.0
+  cat >"$REPO/.github/workflows/validate.yml" <<EOF
+jobs:
+  validate:
+    uses: "staticwire/aurtomator/.github/workflows/validate.yml@$PINNED" # v1.0.0
+EOF
+  cp -r "$REPO/.github/workflows" "$TEST_TMPDIR/before"
+
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 1 ]
+  [ "${lines[0]}" = "Write each pin of staticwire/aurtomator in .github/workflows/validate.yml on one uses: line without quotes. GitHub reads:" ]
+  [ "${lines[1]}" = "  staticwire/aurtomator/.github/workflows/validate.yml@$PINNED" ]
+  [ "${#lines[@]}" -eq 2 ]
+  diff -r "$TEST_TMPDIR/before" "$REPO/.github/workflows"
+}
+
+@test "runner: pin stops when GitHub reads a pin of validate.yml through an alias" {
+  calling_workflows "$PINNED" v1.0.0
+  cat >"$REPO/.github/workflows/validate.yml" <<EOF
+env:
+  PIN: &pin staticwire/aurtomator/.github/workflows/validate.yml@$PINNED
+jobs:
+  validate:
+    uses: *pin
+EOF
+  cp -r "$REPO/.github/workflows" "$TEST_TMPDIR/before"
+
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 1 ]
+  [ "${lines[1]}" = "  staticwire/aurtomator/.github/workflows/validate.yml@$PINNED" ]
+  diff -r "$TEST_TMPDIR/before" "$REPO/.github/workflows"
+}
+
+@test "runner: pin refuses a tag that names no commit SHA" {
+  calling_workflows "$PINNED" v1.0.0
+  cp -r "$REPO/.github/workflows" "$TEST_TMPDIR/before"
+  printf '#!/usr/bin/env bash\n[[ "$1" == ls-remote ]] && exec printf "&\\trefs/tags/v1.1.0\\n"\nexec /usr/bin/git "$@"\n' >"$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/git"
+
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 1 ]
+  [ "$output" = "Tag v1.1.0 of staticwire/aurtomator names no commit SHA" ]
+  diff -r "$TEST_TMPDIR/before" "$REPO/.github/workflows"
 }
 
 @test "runner: pin refuses a tag the repository lacks and an argument of another form" {

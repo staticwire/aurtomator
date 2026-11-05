@@ -122,11 +122,11 @@ The script `aurtomator.sh` in the root of your repository runs the scripts of au
 
 A command is `sample`, `pin` or the name of an executable script in `scripts/` of aurtomator without `.sh`, and the arguments after it go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, whatever directory you run it from. The commands above are the documented ones, and the list that the script prints for an unknown command holds these alone. Any other script of `scripts/`, such as `publish-pkg`, is a step of the CI jobs and runs after a warning.
 
-The `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA gives the repository and the commit. The script stops when the file holds no such line or more than one, and it reads no comment, so an old pin kept in a comment changes nothing. The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or into `$XDG_CACHE_HOME/aurtomator/<sha>` when `XDG_CACHE_HOME` is set. Later runs use that copy, and the first run after a merge that moves the pin fetches the new release. That first run also removes the copies fetched more than 30 days ago, so a pin still in use is fetched again on its next run.
+The `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA gives the repository and the commit. The script stops when the file holds no such line or more than one, and it reads no comment, so an old pin kept in a comment changes nothing. GitHub reads the file as YAML, and the script reads it with `yq` too: it stops unless the jobs of the file call `check-updates.yml` once, at the pin of that line. A pin in quotes, on the line after `uses:` or through an alias stops it, and so does a `uses:` line inside a block of text, which GitHub reads as text. The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or into `$XDG_CACHE_HOME/aurtomator/<sha>` when `XDG_CACHE_HOME` is set. Later runs use that copy, and the first run after a merge that moves the pin fetches the new release. That first run also removes the copies fetched more than 30 days ago, so a pin still in use is fetched again on its next run.
 
 Before that fetch, the script warns when no tag of the repository points to the pinned commit. GitHub serves a commit of any fork of a repository under the name of that repository too, so a `uses:` line that names `staticwire/aurtomator` can pin a commit that is not in aurtomator. The warning shows only when the script runs. Before you merge a pull request that moves the pin, `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
 
-`./aurtomator.sh pin vX.Y.Z` moves the pin to a release. It reads the commit of that tag with `git ls-remote`, puts it and `# vX.Y.Z` into every `uses:` line of the pinned repository in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. It fetches nothing. The next run of the script fetches the release, and CI takes it once the two files are committed and pushed.
+`./aurtomator.sh pin vX.Y.Z` moves the pin to a release. It reads the commit of that tag with `git ls-remote`, puts it and `# vX.Y.Z` into every `uses:` line of the pinned repository in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. Before it changes a file, it stops when the tag names no commit SHA, or when `yq` reads a pin of the repository in one of the two files that is on no such line, as a pin in quotes is. It fetches nothing. The next run of the script fetches the release, and CI takes it once the two files are committed and pushed.
 
 In CI, the jobs check out your repository and then aurtomator into `aurtomator/` of that checkout, which deletes whatever that path holds. So the script is `aurtomator.sh`, and nothing in the root of your repository may be named `aurtomator`. The jobs also make the directories `upload`, `handoff` and `statuses` in that root, so these names are taken as well: a tracked `upload` or `statuses` stops the step that makes the directory, and the files of a tracked `handoff` reach the steps of `builder` beside those of the run.
 
@@ -152,6 +152,10 @@ The template holds this block as the file `aurtomator.sh`. A repository created 
 
 set -euo pipefail
 
+if ! command -v yq >/dev/null; then
+  echo "$0 needs yq: https://github.com/mikefarah/yq" >&2
+  exit 1
+fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 workflow=.github/workflows/check-updates.yml
 if [[ ! -f "$root/$workflow" ]]; then
@@ -172,6 +176,14 @@ fi
 [[ "${pins[0]}" =~ $uses ]]
 repo="${BASH_REMATCH[1]}"
 sha="${BASH_REMATCH[2]}"
+# GitHub reads YAML, where a pin in quotes counts and a line in a text does
+# not, so yq has to read the same one pin
+mapfile -t read_pins < <(yq -r 'explode(.) | .jobs[].uses | select(. != null) | select(test("/[.]github/workflows/check-updates[.]yml@"))' "$root/$workflow")
+if [[ ${#read_pins[@]} -ne 1 || "${read_pins[0]}" != "$repo/.github/workflows/check-updates.yml@$sha" ]]; then
+  echo "Write the pin of check-updates.yml in $workflow on one uses: line without quotes. GitHub reads:" >&2
+  printf '  %s\n' "${read_pins[@]:-none}" >&2
+  exit 1
+fi
 
 if [[ "${1:-}" == pin ]]; then
   if [[ $# -ne 2 || ! "$2" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -184,7 +196,23 @@ if [[ "${1:-}" == pin ]]; then
     echo "No tag $2 in $repo" >&2
     exit 1
   fi
+  if [[ ! "$new" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Tag $2 of $repo names no commit SHA" >&2
+    exit 1
+  fi
   cd "$root"
+  # sed moves a pin on a uses: line alone, so every pin GitHub reads in the
+  # two files has to be on one before any file changes
+  for file in "$workflow" .github/workflows/validate.yml; do
+    [[ -f "$file" ]] || continue
+    mapfile -t on_lines < <(sed -nE "s|^[[:space:]]*uses:[[:space:]]+($repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40})([[:space:]].*)?$|\1|p" "$file" | sort)
+    mapfile -t read_pins < <(yq -r 'explode(.) | .jobs[].uses | select(. != null)' "$file" | grep -E "^$repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40}\$" | sort)
+    if [[ "${on_lines[*]}" != "${read_pins[*]}" ]]; then
+      echo "Write each pin of $repo in $file on one uses: line without quotes. GitHub reads:" >&2
+      printf '  %s\n' "${read_pins[@]:-none}" >&2
+      exit 1
+    fi
+  done
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
     sed -i -E "s|^([[:space:]]*uses:[[:space:]]+$repo/\.github/workflows/[a-z-]+\.yml@)[0-9a-f]{40}([[:space:]].*)?$|\1$new # $2|" "$file"
