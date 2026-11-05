@@ -12,8 +12,9 @@ runner_script() {
 
 # Commits the files of a fake aurtomator to the work tree $1: a sample that
 # holds $2, scripts/show-args.sh, which prints what it got and exits with
-# SHOW_STATUS, scripts/lib.sh, a library that is not executable, as in
-# aurtomator, and the directory scripts/show
+# SHOW_STATUS, the same script as scripts/setup.sh, a documented command,
+# scripts/lib.sh, a library that is not executable, as in aurtomator, and
+# the directory scripts/show
 commit_aurtomator() {
   mkdir -p "$1/scripts/show" "$1/packages"
   : >"$1/scripts/show/.keep"
@@ -26,6 +27,7 @@ printf 'arg: %s\n' "$@"
 exit "${SHOW_STATUS:-0}"
 EOF
   chmod +x "$1/scripts/show-args.sh"
+  cp -p "$1/scripts/show-args.sh" "$1/scripts/setup.sh"
   echo 'echo "lib.sh ran"' >"$1/scripts/lib.sh"
   git -C "$1" add -A
   git -C "$1" -c user.name=t -c user.email=t@example.com commit -q -m "$2"
@@ -50,10 +52,12 @@ setup() {
   # https://github.com/<owner>/<repo> is $TEST_TMPDIR/github/<owner>/<repo>
   git config --global url."file://$TEST_TMPDIR/github/".insteadOf https://github.com/
 
-  # aurtomator has two commits, and the calling workflow pins the first
+  # aurtomator has two releases, and the calling workflow pins the first
   git init -q "$TEST_TMPDIR/work"
   PINNED=$(commit_aurtomator "$TEST_TMPDIR/work" pinned)
   TIP=$(commit_aurtomator "$TEST_TMPDIR/work" tip)
+  git -C "$TEST_TMPDIR/work" tag v1.0.0 "$PINNED"
+  git -C "$TEST_TMPDIR/work" tag v1.1.0 "$TIP"
   publish staticwire/aurtomator "$TEST_TMPDIR/work"
 
   REPO="$TEST_TMPDIR/repo"
@@ -83,7 +87,7 @@ teardown() {
 
 @test "runner: runs a script with the repository as the data directory" {
   cd "$REPO/packages"
-  run ../aurtomator.sh show-args one "two words"
+  run ../aurtomator.sh setup one "two words"
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "data: $REPO" ]
   [ "${lines[1]}" = "runner: ../aurtomator.sh" ]
@@ -126,6 +130,7 @@ teardown() {
   git init -q "$TEST_TMPDIR/fork"
   local forked
   forked=$(commit_aurtomator "$TEST_TMPDIR/fork" forked)
+  git -C "$TEST_TMPDIR/fork" tag v9.0.0
   publish someone/aurtomator-fork "$TEST_TMPDIR/fork"
   pin "someone/aurtomator-fork/.github/workflows/check-updates.yml@$forked"
 
@@ -222,17 +227,166 @@ EOF
   [[ "$output" != *"$PINNED"* ]]
 }
 
-@test "runner: lists the commands for a command that names no script" {
+@test "runner: lists the documented commands for a command that names no script" {
   run "$REPO/aurtomator.sh"
   [ "$status" -eq 1 ]
   [ "${lines[0]}" = "Usage: $REPO/aurtomator.sh <command> [argument...]" ]
-  [ "${lines[1]}" = "Commands: sample show-args" ]
+  [ "${lines[1]}" = "Commands: setup sample validate-pkg check-update update-pkg check-all pin" ]
 
   local command
   for command in "" nope lib ../scripts/show-args Show-args show-args.sh show/../show-args show-args/x; do
     run "$REPO/aurtomator.sh" "$command"
     [ "$status" -eq 1 ]
     [ "${lines[0]}" = "Usage: $REPO/aurtomator.sh <command> [argument...]" ]
-    [ "${lines[1]}" = "Commands: sample show-args" ]
+    [ "${lines[1]}" = "Commands: setup sample validate-pkg check-update update-pkg check-all pin" ]
   done
+}
+
+# publish-pkg, verify-pkg and the like are steps of the CI jobs
+@test "runner: warns before a script that is no documented command" {
+  run "$REPO/aurtomator.sh" show-args one
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "Warning: show-args is a step of the CI jobs, not a documented command" ]
+  [ "${lines[1]}" = "data: $REPO" ]
+  run "$REPO/aurtomator.sh" setup one
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "data: $REPO" ]
+}
+
+# GitHub serves the commits of every fork under the name of the parent
+@test "runner: warns when no tag of the repository is at the pin" {
+  local untagged annotated
+  untagged=$(commit_aurtomator "$TEST_TMPDIR/work" untagged)
+  annotated=$(commit_aurtomator "$TEST_TMPDIR/work" annotated)
+  git -C "$TEST_TMPDIR/work" -c user.name=t -c user.email=t@example.com tag -a v1.2.0 -m release "$annotated"
+  publish staticwire/aurtomator "$TEST_TMPDIR/work"
+
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$untagged"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "Warning: no tag of staticwire/aurtomator points to $untagged, check where the pin comes from" ]
+  [ "${lines[1]}" = "name: untagged" ]
+  # The copy is there, and the check runs before a fetch only
+  run "$REPO/aurtomator.sh" sample
+  [ "$output" = "name: untagged" ]
+
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$annotated"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: annotated" ]
+}
+
+@test "runner: the first run of a pin removes the copies made over 30 days ago" {
+  local cache="$XDG_CACHE_HOME/aurtomator" old=0000000000000000000000000000000000000001 recent=0000000000000000000000000000000000000002
+  mkdir -p "$cache/$old" "$cache/$recent" "$cache/cafe"
+  touch -d '40 days ago' "$cache/$old" "$cache/cafe"
+  touch -d '10 days ago' "$cache/$recent"
+
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ ! -e "$cache/$old" ]
+  [ -d "$cache/$recent" ]
+  [ -d "$cache/cafe" ]
+  [ -d "$cache/$PINNED" ]
+
+  # A run with its copy in place removes nothing
+  mkdir "$cache/$old"
+  touch -d '40 days ago' "$cache/$old"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ -d "$cache/$old" ]
+}
+
+# A run at the same time can remove its directory while find reads, and
+# find then fails: the cleanup must not stop the command
+@test "runner: a failed cleanup of the cache stops nothing" {
+  local cache="$XDG_CACHE_HOME/aurtomator" old=0000000000000000000000000000000000000001 bin="$TEST_TMPDIR/norm"
+  mkdir -p "$cache/$old" "$bin"
+  touch -d '40 days ago' "$cache/$old"
+  printf '#!/bin/sh\ncase "$*" in *%s*) echo "rm: cannot remove" >&2; exit 1 ;; esac\nexec %q "$@"\n' "$old" "$(command -v rm)" >"$bin/rm"
+  chmod +x "$bin/rm"
+
+  PATH="$bin:$PATH" run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+  [ -d "$cache/$old" ]
+}
+
+# Writes the two calling workflows with every uses: line at the pin $1 and
+# its comment $2, a uses: line of another repository, a comment line and a
+# pin one digit too long
+calling_workflows() {
+  cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
+jobs:
+  check-updates:
+    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$1 # $2
+  other:
+    uses: someone/else/.github/workflows/other.yml@$1 # $2
+  notify:
+    # uses: staticwire/aurtomator/.github/workflows/notify-failure.yml@$1 # $2
+    uses: staticwire/aurtomator/.github/workflows/notify-failure.yml@$1 # $2
+EOF
+  cat >"$REPO/.github/workflows/validate.yml" <<EOF
+jobs:
+  validate:
+    uses: staticwire/aurtomator/.github/workflows/validate.yml@$1 # $2
+  typo:
+    uses: staticwire/aurtomator/.github/workflows/validate.yml@${1}0 # $2
+EOF
+}
+
+@test "runner: pin moves every uses: line of aurtomator to the commit of a tag" {
+  calling_workflows "$PINNED" v1.0.0
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = ".github/workflows/check-updates.yml:3:    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP # v1.1.0" ]
+  [ "${lines[1]}" = ".github/workflows/check-updates.yml:8:    uses: staticwire/aurtomator/.github/workflows/notify-failure.yml@$TIP # v1.1.0" ]
+  [ "${lines[2]}" = ".github/workflows/validate.yml:3:    uses: staticwire/aurtomator/.github/workflows/validate.yml@$TIP # v1.1.0" ]
+  [ "${#lines[@]}" -eq 3 ]
+  grep -qxF "    uses: someone/else/.github/workflows/other.yml@$PINNED # v1.0.0" "$REPO/.github/workflows/check-updates.yml"
+  grep -qxF "    # uses: staticwire/aurtomator/.github/workflows/notify-failure.yml@$PINNED # v1.0.0" "$REPO/.github/workflows/check-updates.yml"
+  grep -qxF "    uses: staticwire/aurtomator/.github/workflows/validate.yml@${PINNED}0 # v1.0.0" "$REPO/.github/workflows/validate.yml"
+  # pin fetches nothing
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+@test "runner: pin needs no aurtomator line in validate.yml, nor the file" {
+  calling_workflows "$PINNED" v1.0.0
+  printf 'jobs: {}\n' >"$REPO/.github/workflows/validate.yml"
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+
+  rm "$REPO/.github/workflows/validate.yml"
+  run "$REPO/aurtomator.sh" pin v1.0.0
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  [ ! -e "$REPO/.github/workflows/validate.yml" ]
+}
+
+@test "runner: pin takes the commit of an annotated tag" {
+  git -C "$TEST_TMPDIR/work" -c user.name=t -c user.email=t@example.com tag -a v1.2.0 -m release "$TIP"
+  publish staticwire/aurtomator "$TEST_TMPDIR/work"
+  calling_workflows "$PINNED" v1.0.0
+
+  run "$REPO/aurtomator.sh" pin v1.2.0
+  [ "$status" -eq 0 ]
+  grep -qxF "    uses: staticwire/aurtomator/.github/workflows/validate.yml@$TIP # v1.2.0" "$REPO/.github/workflows/validate.yml"
+}
+
+@test "runner: pin refuses a tag the repository lacks and an argument of another form" {
+  calling_workflows "$PINNED" v1.0.0
+  cp -r "$REPO/.github/workflows" "$TEST_TMPDIR/before"
+
+  run "$REPO/aurtomator.sh" pin v9.9.9
+  [ "$status" -eq 1 ]
+  [ "$output" = "No tag v9.9.9 in staticwire/aurtomator" ]
+  local args
+  for args in "" 1.1.0 "v1.1.0 v1.2.0" v1.1 "v1.1.0x" xv1.1.0; do
+    # shellcheck disable=SC2086
+    run "$REPO/aurtomator.sh" pin $args
+    [ "$status" -eq 1 ]
+    [ "$output" = "Usage: $REPO/aurtomator.sh pin vX.Y.Z" ]
+  done
+  diff -r "$TEST_TMPDIR/before" "$REPO/.github/workflows"
 }
