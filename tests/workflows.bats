@@ -1650,7 +1650,8 @@ no_commit() {
   make_commit_repo README.md="new table"
   run_commit_step
   [ "$status" -eq 0 ]
-  grep -q "^api repos/owner/fork/git/refs/heads/main " "$GH_LOG"
+  # Without force=false a push during the run would be overwritten
+  grep -qx "api repos/owner/fork/git/refs/heads/main -f sha=commit -F force=false --method PATCH" "$GH_LOG"
   no_call "recursive"
 }
 
