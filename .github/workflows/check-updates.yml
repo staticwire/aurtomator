@@ -113,7 +113,8 @@ jobs:
           fi
           sudo -u builder ./aurtomator/scripts/update-readme.sh
           work=$prepare
-          git diff --quiet README.md || work=true
+          # builder owns .git, and git runs the commands its config names
+          sudo -u builder git diff --quiet README.md || work=true
           echo "prepare=$prepare" >>"$GITHUB_OUTPUT"
           echo "work=$work" >>"$GITHUB_OUTPUT"
 
@@ -126,6 +127,45 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+
+      - &stop-builder
+        name: Stop builder
+        if: always()
+        run: |
+          # A job that failed before useradd has no builder and no checkout
+          uid=$(id -u builder) || exit 0
+          # A process builder started can outlive its step. Stop all of
+          # them before root reads anything builder wrote. A zombie runs
+          # nothing, and pid 1 of a job container never reaps one, so only
+          # the other processes count, by effective or real user. live exits
+          # with 0 for a running process, 1 for none and 2 when the list
+          # fails, and only 1 lets the step go on.
+          live() {
+            procs=$(ps -e -o uid=,ruid=,stat=) || return 2
+            printf '%s\n' "$procs" |
+              awk -v u="$uid" '($1 == u || $2 == u) && $3 !~ /^Z/ { n++ } END { exit !n }'
+          }
+          for _ in $(seq 30); do
+            rc=0
+            live || rc=$?
+            [ "$rc" -eq 1 ] && break
+            pkill -KILL -u builder || true
+            pkill -KILL -U builder || true
+            sleep 1
+          done
+          rc=0
+          live || rc=$?
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::A process of builder is still running, or the process list failed"
+            exit 1
+          fi
+
+      # The post step of a checkout runs git as root in the tree that
+      # builder owns, and does nothing once .git/config is gone
+      - &drop-checkouts
+        name: Drop the checkouts
+        if: always()
+        run: rm -rf -- .git aurtomator
 
   # Every step that executes a PKGBUILD from the AUR runs here, without
   # secrets and without a token. Code from one PKGBUILD can write the files
@@ -170,38 +210,13 @@ jobs:
         with:
           args: --prepare handoff
 
+      - *stop-builder
+
       # verify repeats this step through the anchor. A local action would be
       # read from the workspace that builder owns by now.
       - &hand-over
         name: Hand over
         run: |
-          # A process builder started can outlive its step. Stop all of
-          # them before root reads anything builder wrote. A zombie runs
-          # nothing, and pid 1 of a job container never reaps one, so only
-          # the other processes count, by effective or real user. live exits
-          # with 0 for a running process, 1 for none and 2 when the list
-          # fails, and only 1 lets the step go on.
-          uid=$(id -u builder)
-          live() {
-            procs=$(ps -e -o uid=,ruid=,stat=) || return 2
-            printf '%s\n' "$procs" |
-              awk -v u="$uid" '($1 == u || $2 == u) && $3 !~ /^Z/ { n++ } END { exit !n }'
-          }
-          for _ in $(seq 30); do
-            rc=0
-            live || rc=$?
-            [ "$rc" -eq 1 ] && break
-            pkill -KILL -u builder || true
-            pkill -KILL -U builder || true
-            sleep 1
-          done
-          rc=0
-          live || rc=$?
-          if [ "$rc" -ne 1 ]; then
-            echo "::error::A process of builder is still running, or the process list failed"
-            exit 1
-          fi
-
           # Copy regular files from the expected paths only, and nothing
           # else gets uploaded. find does not follow symlinks; -print0,
           # because a name may hold a newline. A package name never starts
@@ -228,6 +243,8 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+
+      - *drop-checkouts
 
   # Checks the checksums that prepare handed over against the sources, so
   # code from one PKGBUILD cannot forge those of another package. Runs no
@@ -273,6 +290,8 @@ jobs:
         with:
           args: --verify handoff
 
+      - *stop-builder
+
       # The Hand over step of prepare
       - *hand-over
 
@@ -285,6 +304,8 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+
+      - *drop-checkouts
 
   # Pushes what verify passed on and records the statuses of the check job.
   # Runs also when prepare is skipped, for a change in the package table, and
@@ -339,7 +360,6 @@ jobs:
           AUR_GIT_NAME: ${{ secrets.AUR_GIT_NAME }}
           AUR_GIT_EMAIL: ${{ secrets.AUR_GIT_EMAIL }}
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           sudo -u builder git config --global user.name "${AUR_GIT_NAME:-aurtomator}"
           sudo -u builder git config --global user.email "${AUR_GIT_EMAIL:-aurtomator@users.noreply.github.com}"
           chown -R builder:builder .
@@ -407,9 +427,11 @@ jobs:
         run: |
           # Only the files this job writes are committed: the package YAMLs
           # and README.md. A change to any other tracked file fails the step.
-          # Through a file, so that a failing git diff stops the step
+          # git and the reads of files run as builder, who owns the work tree.
+          # Through a file of root, so that a failing git diff stops the step
           list=$(mktemp)
-          git diff --name-only -z >"$list"
+          # shellcheck disable=SC2024
+          sudo -u builder git diff --name-only -z >"$list"
           mapfile -d '' changed <"$list"
           if [[ ${#changed[@]} -eq 0 ]]; then
             echo "No changes to commit"
@@ -431,11 +453,11 @@ jobs:
           # commit pushed during the run that changed one of them would be
           # lost. Then this run commits nothing, and the next run starts
           # from the new head.
-          if [[ "$HEAD_SHA" != "$(git rev-parse HEAD)" ]]; then
+          if [[ "$HEAD_SHA" != "$(sudo -u builder git rev-parse HEAD)" ]]; then
             remote=$(gh api "repos/$REPO/git/trees/$BASE_TREE?recursive=1" \
               --jq '.tree[] | select(.type == "blob") | .path + " " + .sha')
             for file in "${changed[@]}"; do
-              if ! grep -qxF -- "$file $(git rev-parse "HEAD:$file")" <<<"$remote"; then
+              if ! grep -qxF -- "$file $(sudo -u builder git rev-parse "HEAD:$file")" <<<"$remote"; then
                 echo "::notice::$file changed on $BRANCH during the run, so the statuses of this run are not committed"
                 exit 0
               fi
@@ -444,7 +466,7 @@ jobs:
 
           TREE_ENTRIES="[]"
           for file in "${changed[@]}"; do
-            CONTENT=$(base64 -w0 "$file")
+            CONTENT=$(sudo -u builder base64 -w0 -- "$file")
             BLOB_SHA=$(gh api "repos/$REPO/git/blobs" \
               -f content="$CONTENT" \
               -f encoding="base64" \
@@ -503,6 +525,10 @@ jobs:
           path: statuses/
           if-no-files-found: error
           retention-days: 1
+
+      - *stop-builder
+
+      - *drop-checkouts
 
   # Opens and closes the issues in every run that checked, from the statuses
   # of publish when it ran and from those of check otherwise. Holds no

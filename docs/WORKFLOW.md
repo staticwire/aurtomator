@@ -1046,7 +1046,9 @@ Every checkout uses `actions/checkout`, pinned by commit SHA like every action i
 
 The four steps that run `check-all.sh` as `builder` stop workflow commands while it runs. Its output carries text that a PKGBUILD, the AUR or an upstream chose: the error text a git server sends, a line of a prepared `.SRCINFO` that `verify` refuses. The runner takes a line as a workflow command when it starts with `::` after leading whitespace, or when it holds `##[` anywhere. A line `::add-mask::true` makes the runner skip the outputs `prepare` and `work` of `check`, so no job after `check` runs. Root prints `::stop-commands::` with a token of 32 hex digits from `/dev/urandom` before the run and `::<token>::` after it, and the runner takes no command in between. The token stays in a variable of root's shell, so `builder` cannot print it. The output goes through a pipe to `cat`, which ends only when no process of `builder` holds the pipe, so nothing `builder` prints comes after the token. The steps run in bash with `pipefail` and exit with the status of `check-all.sh`.
 
-The four steps use the composite action `.github/actions/run-as-builder` of aurtomator, as `uses: ./aurtomator/.github/actions/run-as-builder`: the runner resolves a `./` path from the root of the workspace. The action adds the workspace to `safe.directory` of root's git, gives the workspace to `builder`, both checkouts included, and runs `scripts/check-all.sh` of its own checkout with the words of its input `args`. It finds that checkout from `GITHUB_ACTION_PATH`, the directory of its `action.yml`. Its input `keep-env` names the variables of the step that `sudo --preserve-env` passes to `builder`. The runner reads a local action from the workspace when its step starts, and `builder` owns the workspace once `check-all.sh` ran, so no local action follows `run-as-builder` in a job. Hand over runs after `check-all.sh` in `prepare` and in `verify`, so it stays a step of the workflow: `prepare` defines it with the YAML anchor `&hand-over`, and `verify` repeats it with the alias `*hand-over`.
+The four steps use the composite action `.github/actions/run-as-builder` of aurtomator, as `uses: ./aurtomator/.github/actions/run-as-builder`: the runner resolves a `./` path from the root of the workspace. The action gives the workspace to `builder`, both checkouts included, and runs `scripts/check-all.sh` of its own checkout with the words of its input `args`. It finds that checkout from `GITHUB_ACTION_PATH`, the directory of its `action.yml`. Its input `keep-env` names the variables of the step that `sudo --preserve-env` passes to `builder`. The runner reads a local action from the workspace when its step starts, and `builder` owns the workspace once `check-all.sh` ran, so no local action follows `run-as-builder` in a job. Hand over runs after `check-all.sh` in `prepare` and in `verify`, so it stays a step of the workflow: `prepare` defines it with the YAML anchor `&hand-over`, and `verify` repeats it with the alias `*hand-over`.
+
+Root runs no git in the workspace that `builder` owns. `builder` can write `.git/config`, and git runs the commands that some of its settings name, such as `core.fsmonitor`. The steps that need git run it as `builder`, and no step adds the workspace to `safe.directory` of root's git, so root's git refuses that tree. The post step of `actions/checkout` runs git as root at the end of the job, with a `safe.directory` of its own, and stops at once when `.git/config` is missing. So `check`, `prepare`, `verify` and `publish` end with two steps that `check` defines with the anchors `&stop-builder` and `&drop-checkouts`: **Stop builder** after the last step that runs anything as `builder`, and **Drop the checkouts** last, which removes `.git` and `aurtomator/`. Both run also after a failed step.
 
 `image`:
 
@@ -1060,8 +1062,10 @@ The four steps use the composite action `.github/actions/run-as-builder` of aurt
 2. **Checkout:** your repository.
 3. **Checkout aurtomator:** into `aurtomator/`.
 4. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
-5. **Decide:** sets the output `prepare` when a status is `new_version`, `available_downgrade` or `new_build`. It runs `./aurtomator/scripts/update-readme.sh` as `builder` and sets the output `work` for `prepare` and for a change in the package table.
+5. **Decide:** sets the output `prepare` when a status is `new_version`, `available_downgrade` or `new_build`. It runs `./aurtomator/scripts/update-readme.sh` and `git diff` as `builder` and sets the output `work` for `prepare` and for a change in the package table.
 6. **Upload statuses:** uploads `.status/` as the `checked` artifact with a retention of 1 day.
+7. **Stop builder:** a process of `builder` can outlive its step, so the step kills every process whose effective or real user is `builder` and waits up to 30 seconds for them to end. A zombie does not count: it runs nothing, and pid 1 of a job container never reaps one. A process that is still running after that fails the step, and so does a process list that `ps` cannot produce. In a job that failed before it created `builder`, the step does nothing.
+8. **Drop the checkouts:** removes `.git` and `aurtomator/`. `rm` removes a link named `aurtomator` and does not follow it.
 
 `prepare`:
 
@@ -1070,8 +1074,10 @@ The four steps use the composite action `.github/actions/run-as-builder` of aurt
 3. **Checkout aurtomator:** into `aurtomator/`.
 4. **Download statuses:** the `checked` artifact to `.status/`.
 5. **Prepare updates:** gives the workspace to `builder` and runs `check-all.sh --prepare handoff` as `builder`, without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token stays in `check`. Workflow commands are stopped while it runs.
-6. **Hand over:** code from a PKGBUILD has run in the workspace by now, so the step runs nothing from it. A process started by a PKGBUILD can outlive its step, so the step kills every process whose effective or real user is `builder` and waits up to 30 seconds for them to end. A zombie does not count: it runs nothing, and pid 1 of a job container never reaps one. A process that is still running after that fails the step, and so does a process list that `ps` cannot produce. Only after that does root copy the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
-7. **Upload handoff:** uploads `upload/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
+6. **Stop builder:** the step of `check`, through the alias `*stop-builder`. A process started by a PKGBUILD ends here.
+7. **Hand over:** code from a PKGBUILD has run in the workspace by now, so the step runs nothing from it. Root copies the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
+8. **Upload handoff:** uploads `upload/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
+9. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
 `verify`:
 
@@ -1080,8 +1086,10 @@ The four steps use the composite action `.github/actions/run-as-builder` of aurt
 3. **Checkout aurtomator:** into `aurtomator/`.
 4. **Download handoff:** the `handoff` artifact to `handoff/`.
 5. **Verify checksums:** gives the workspace to `builder` and runs `check-all.sh --verify handoff` as `builder`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
-6. **Hand over:** the same step as in `prepare`, through the alias `*hand-over`.
-7. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
+6. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
+7. **Hand over:** the same step as in `prepare`, through the alias `*hand-over`.
+8. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
+9. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
 `publish`:
 
@@ -1098,8 +1106,10 @@ The four steps use the composite action `.github/actions/run-as-builder` of aurt
 11. **Commit changes via API:** see [5.5](#55-verified-commit).
 12. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
 13. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
+14. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
+15. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
-Step 11 runs as root with `GH_TOKEN` set to the workflow token, `github.token`. Steps 12 and 13 run as root without it.
+Step 11 runs as root with `GH_TOKEN` set to the workflow token, `github.token`, and runs git and reads the files as `builder`. Steps 12 to 15 run as root without it.
 
 `issues`:
 
@@ -1169,9 +1179,9 @@ The table is HTML, since a Markdown table cell takes no attributes. GitHub keeps
 
 A `git push` from the workflow would show as unverified, so the step commits through the GitHub Git Data API:
 
-1. List the changed tracked files with `git diff --name-only -z`, and stop when there is none. The checkout in `aurtomator/` is untracked in your repository and is not listed. The job writes only `README.md` and `packages/<package-name>.yml`, so a change to any other tracked file fails the step and nothing is committed.
+1. List the changed tracked files with `git diff --name-only -z` as `builder`, and stop when there is none. The checkout in `aurtomator/` is untracked in your repository and is not listed. The job writes only `README.md` and `packages/<package-name>.yml`, so a change to any other tracked file fails the step and nothing is committed.
 2. Read the branch head and its tree. A head other than the commit the job checked out means a commit was pushed during the run. The step then lists the tree of the new head, and when a changed file differs there from the checked-out commit, or is gone, it prints a notice and commits nothing, because the tree of step 3 replaces each file as a whole and would drop that change. The next run starts from the new head and writes the statuses again. A package that this run pushed to the AUR keeps its old `last_updated`: the next run finds the version in the AUR and writes only `current`. When the pushed commits changed none of these files, the step commits on the new head.
-3. Create a blob for every changed file, a tree on the base tree, and a commit.
+3. Create a blob for every changed file, which `builder` reads, a tree on the base tree, and a commit. A link in the work tree reaches nothing that `builder` cannot read.
 4. Move the branch ref with `force=false`.
 
 The step commits to `github.repository` on `github.ref_name`, your repository and the branch of the run, with the `contents: write` that the calling job grants. The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting the workflows that run on a push: the calling `validate.yml` in your repository, `ci.yml` in aurtomator. GitHub marks the commit as verified because the Actions bot creates it through the API.
