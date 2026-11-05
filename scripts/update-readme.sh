@@ -81,12 +81,16 @@ if grep -qxF -- "$BADGES_START" "$README"; then
   has_badges=true
 fi
 
-# Only a GitHub origin names the repo, so the URL of another remote, or a
-# local path, never reaches the README
+# CI names the repo in GITHUB_REPOSITORY, and the data directory there has
+# no .git. Otherwise only a GitHub origin names it, never a local path.
 repo_url=""
-origin_url=$(git -C "$AURTOMATOR_DATA_DIR" remote get-url origin 2>/dev/null || true)
-if [[ "$origin_url" =~ [/@]github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+) ]]; then
-  repo_url="${BASH_REMATCH[1]%.git}"
+if [[ "${GITHUB_REPOSITORY:-}" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]]; then
+  repo_url="$GITHUB_REPOSITORY"
+else
+  origin_url=$(git -C "$AURTOMATOR_DATA_DIR" remote get-url origin 2>/dev/null || true)
+  if [[ "$origin_url" =~ [/@]github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+) ]]; then
+    repo_url="${BASH_REMATCH[1]%.git}"
+  fi
 fi
 
 # =============================================================================

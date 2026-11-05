@@ -1073,9 +1073,9 @@ Every checkout uses `actions/checkout`, pinned by commit SHA like every action i
 
 The four steps that run `check-all.sh` as `builder` stop workflow commands while it runs. Its output carries text that a PKGBUILD, the AUR or an upstream chose: the error text a git server sends, a line of a prepared `.SRCINFO` that `verify` refuses. The runner takes a line as a workflow command when it starts with `::` after leading whitespace, or when it holds `##[` anywhere. A line `::add-mask::true` makes the runner skip the outputs `prepare` and `work` of `check`, so no job after `check` runs. Root prints `::stop-commands::` with a token of 32 hex digits from `/dev/urandom` before the run and `::<token>::` after it, and the runner takes no command in between. The token stays in a variable of root's shell, so `builder` cannot print it. The output goes through a pipe to `cat`, which ends only when no process of `builder` holds the pipe, so nothing `builder` prints comes after the token. The steps run in bash with `pipefail` and exit with the status of `check-all.sh`.
 
-The four steps use the composite action `.github/actions/run-as-builder` of aurtomator, as `uses: ./aurtomator/.github/actions/run-as-builder`: the runner resolves a `./` path from the root of the workspace. The action gives the workspace to `builder`, both checkouts included, and runs `scripts/check-all.sh` of its own checkout with the words of its input `args`. It finds that checkout from `GITHUB_ACTION_PATH`, the directory of its `action.yml`. Its input `keep-env` names the variables of the step that `sudo --preserve-env` passes to `builder`. The runner reads a local action from the workspace when its step starts, and `builder` owns the workspace once `check-all.sh` ran, so no local action follows `run-as-builder` in a job. Hand over runs after `check-all.sh` in `prepare` and in `verify`, so it stays a step of the workflow: `prepare` defines it with the YAML anchor `&hand-over`, and `verify` repeats it with the alias `*hand-over`.
+The four steps use the composite action `.github/actions/run-as-builder` of aurtomator, as `uses: ./aurtomator/.github/actions/run-as-builder`: the runner resolves a `./` path from the root of the workspace. The action makes the directory `/work` with mode 0700 and fails when it exists already, so no earlier step can leave files there. It copies into it the regular files that the scripts read: `packages/*.yml` and `README.md` of your repository, and `.status/` and `handoff/` when the job downloaded them, each by the pattern of its names and never a link. It checks that `builder` can run `scripts/check-all.sh` of its own checkout, which it finds from `GITHUB_ACTION_PATH`, the directory of its `action.yml`, and runs it as `builder` in that directory with the words of its input `args`. With the input `readme: true`, `scripts/update-readme.sh` runs after it as `builder` when `check-all.sh` succeeded. The input `keep-env` names the variables of the step that `sudo --preserve-env` passes to `builder`, beside `GITHUB_REPOSITORY`, which names your repository for the badges of the README.
 
-Root runs no git in the workspace that `builder` owns. `builder` can write `.git/config`, and git runs the commands that some of its settings name, such as `core.fsmonitor`. The steps that need git run it as `builder`, and no step adds the workspace to `safe.directory` of root's git, so root's git refuses that tree. The post step of `actions/checkout` runs git as root at the end of the job, with a `safe.directory` of its own, and stops at once when `.git/config` is missing. So `check`, `prepare`, `verify` and `publish` end with two steps that `check` defines with the anchors `&stop-builder` and `&drop-checkouts`: **Stop builder** after the last step that runs anything as `builder`, and **Drop the checkouts** last, which removes `.git` and `aurtomator/`. Both run also after a failed step.
+The workspace, with `.git` of your repository and `aurtomator/`, stays root's, and `builder` writes only into its own directory. A user who could write `.git/config` of a tree could have root's git run a command, because git runs the commands that some of its settings name, such as `core.fsmonitor`. So `check`, `prepare`, `verify` and `publish` follow the step of `builder` with two steps that `check` defines with the anchors `&stop-builder` and `&hand-over`, **Stop builder** and **Hand over**, and end with **Drop the checkouts**, the anchor `&drop-checkouts`. The three run also after a failed step. Root reads what `builder` wrote only through **Hand over**, as data, and runs git only in the commit step of `publish`, in the checkout. **Drop the checkouts** removes `.git` and `aurtomator/` as a second layer: the post step of `actions/checkout` runs git as root at the end of the job and stops at once when `.git/config` is missing.
 
 `image`:
 
@@ -1088,11 +1088,12 @@ Root runs no git in the workspace that `builder` owns. `builder` can write `.git
 1. **Install dependencies:** `sudo git go-yq`, and the `builder` user.
 2. **Checkout:** your repository.
 3. **Checkout aurtomator:** into `aurtomator/`.
-4. **Check updates:** gives the workspace to `builder` and runs `check-all.sh` as `builder`, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
-5. **Decide:** sets the output `prepare` when a status is `new_version`, `available_downgrade` or `new_build`. It runs `./aurtomator/scripts/update-readme.sh` and `git diff` as `builder` and sets the output `work` for `prepare` and for a change in the package table.
-6. **Upload statuses:** uploads `.status/` as the `checked` artifact with a retention of 1 day.
-7. **Stop builder:** a process of `builder` can outlive its step, so the step kills every process whose effective or real user is `builder` and waits up to 30 seconds for them to end. A zombie does not count: it runs nothing, and pid 1 of a job container never reaps one. A process that is still running after that fails the step, and so does a process list that `ps` cannot produce. In a job that failed before it created `builder`, the step does nothing.
-8. **Drop the checkouts:** removes `.git` and `aurtomator/`. `rm` removes a link named `aurtomator` and does not follow it.
+4. **Check updates:** runs `check-all.sh` and then `update-readme.sh` as `builder` in its directory, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
+5. **Stop builder:** a process of `builder` can outlive its step, so the step kills every process whose effective or real user is `builder` and waits up to 30 seconds for them to end. A zombie does not count: it runs nothing, and pid 1 of a job container never reaps one. A process that is still running after that fails the step, and so does a process list that `ps` cannot produce. In a job that failed before it created `builder`, the step does nothing.
+6. **Hand over:** copies the regular files of the directory of `builder` whose names fit: `.status/<name>` to `statuses/`, `handoff/prepared/<package>/PKGBUILD`, `.SRCINFO` and `base` and `handoff/status/<package>` to `upload/`, and `README.md` and `packages/<package>.yml` to `/results/`, a directory of root in the container. `find` follows no link and separates paths with NUL, because a name may hold a newline. A package name never starts with a dot, so `.` and `..` match no path. No process of `builder` runs by then, and `builder` reads each file, so a link swapped in after the test reaches nothing that `builder` cannot read.
+7. **Decide:** sets the output `prepare` when a status in `statuses/` is `new_version`, `available_downgrade` or `new_build`, and the output `work` for `prepare` and for a copy of the README in `/results/` that differs from the README of the checkout.
+8. **Upload statuses:** uploads `statuses/` as the `checked` artifact with a retention of 1 day.
+9. **Drop the checkouts:** removes `.git` and `aurtomator/`. `rm` removes a link named `aurtomator` and does not follow it.
 
 `prepare`:
 
@@ -1100,9 +1101,9 @@ Root runs no git in the workspace that `builder` owns. `builder` can write `.git
 2. **Checkout:** your repository.
 3. **Checkout aurtomator:** into `aurtomator/`.
 4. **Download statuses:** the `checked` artifact to `.status/`.
-5. **Prepare updates:** gives the workspace to `builder` and runs `check-all.sh --prepare handoff` as `builder`, without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token stays in `check`. Workflow commands are stopped while it runs.
+5. **Prepare updates:** runs `check-all.sh --prepare handoff` as `builder` in its directory, with the statuses of `check` and without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token stays in `check`. Workflow commands are stopped while it runs.
 6. **Stop builder:** the step of `check`, through the alias `*stop-builder`. A process started by a PKGBUILD ends here.
-7. **Hand over:** code from a PKGBUILD has run in the workspace by now, so the step runs nothing from it. Root copies the regular files at `prepared/<package>/PKGBUILD`, `prepared/<package>/.SRCINFO`, `prepared/<package>/base` and `status/<package>` from `handoff/` to `upload/`. `find` does not follow symlinks and separates paths with NUL, because a name may hold a newline, so a link to a file outside the workspace does not reach the artifact. A package name never starts with a dot, so `.` and `..` match no path.
+7. **Hand over:** the step of `check`, through the alias `*hand-over`. Code from a PKGBUILD has run in the directory of `builder` by now, and only the prepared files and the statuses of the expected names reach `upload/`.
 8. **Upload handoff:** uploads `upload/` as the `handoff` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
 9. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
@@ -1112,9 +1113,9 @@ Root runs no git in the workspace that `builder` owns. `builder` can write `.git
 2. **Checkout:** your repository.
 3. **Checkout aurtomator:** into `aurtomator/`.
 4. **Download handoff:** the `handoff` artifact to `handoff/`.
-5. **Verify checksums:** gives the workspace to `builder` and runs `check-all.sh --verify handoff` as `builder`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
+5. **Verify checksums:** runs `check-all.sh --verify handoff` as `builder` in its directory, on the handoff it downloaded, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
 6. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
-7. **Hand over:** the same step as in `prepare`, through the alias `*hand-over`.
+7. **Hand over:** the step of `check`, through the alias `*hand-over`.
 8. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
 9. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
@@ -1129,15 +1130,14 @@ Root runs no git in the workspace that `builder` owns. `builder` can write `.git
 7. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
 8. **Setup AUR SSH:** fails with `The secret AUR_SSH_KEY is empty` when the secret is empty or the calling workflow does not pass it. Otherwise it writes `AUR_SSH_KEY` to `~builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. The host key is part of `check-updates.yml` of aurtomator, so a new host key of the AUR reaches a run through a release and a move of the pin.
 9. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the AUR commits are not signed.
-10. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
-11. **Update README package table:** runs `./aurtomator/scripts/update-readme.sh` as `builder`.
-12. **Commit changes via API:** see [5.5](#55-verified-commit).
-13. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
+10. **Publish updates:** runs `check-all.sh --publish handoff` and then `update-readme.sh` as `builder` in its directory, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
+11. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
+12. **Hand over:** the step of `check`, through the alias `*hand-over`: the statuses, `_alerts` and `_upstream` included, the README and the package YAMLs.
+13. **Commit changes via API:** see [5.5](#55-verified-commit).
 14. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
-15. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
-16. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
+15. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
-Step 12 runs as root with `GH_TOKEN` set to the workflow token, `github.token`, and runs git and reads the files as `builder`. Steps 13 to 16 run as root without it.
+Step 13 runs as root with `GH_TOKEN` set to the workflow token, `github.token`. It reads the copies in `/results/` and runs git only in the checkout. Steps 14 and 15 run as root without it.
 
 `issues`:
 
@@ -1155,7 +1155,7 @@ Steps 6 and 7 run as root with `GH_TOKEN` set to the workflow token. No other us
 
 `update-readme.sh` rewrites two blocks of `README.md`:
 
-1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: the badges `Validate packages` and `Check AUR Package Updates`, the status of `validate.yml` and `check-updates.yml` in the repository in `origin`, and the badge `maintained with aurtomator`, which links to aurtomator. Without a GitHub `origin`, the block holds the last badge alone. The badge URLs name the two files, so the calling workflows keep those names.
+1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: the badges `Validate packages` and `Check AUR Package Updates`, the status of `validate.yml` and `check-updates.yml` in your repository, which `GITHUB_REPOSITORY` names in CI and the GitHub `origin` names in a local run, and the badge `maintained with aurtomator`, which links to aurtomator. Without either, the block holds the last badge alone. The badge URLs name the two files, so the calling workflows keep those names.
 2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
 
 While `packages/` holds no package, the script writes nothing. A repository made from the template keeps the setup steps in its README until its first package, and the README of aurtomator stays as it is. A README whose last package was removed keeps the table it had. With a package, the table markers are required and the badges are optional. Each marker must be a line of its own, once, with the start marker above the end marker. The script checks this for the table, and for the badges when their start marker is there, and stops before it writes anything otherwise. A line that only quotes a marker in its text is left as it is.
@@ -1207,18 +1207,18 @@ The table is HTML, since a Markdown table cell takes no attributes. GitHub keeps
 
 A `git push` from the workflow would show as unverified, so the step commits through the GitHub Git Data API:
 
-1. List the changed tracked files with `git diff --name-only -z` as `builder`, and stop when there is none. The checkout in `aurtomator/` is untracked in your repository and is not listed. The job writes only `README.md` and `packages/<package-name>.yml`, so a change to any other tracked file fails the step and nothing is committed.
+1. Compare the copies that **Hand over** took from `builder` with the files of the checkout, `README.md` and every `packages/<package-name>.yml` that the checkout holds, and stop when none differs. No other file is committed, and a YAML that is not in your repository is left out.
 2. Read the branch head and its tree. A head other than the commit the job checked out means a commit was pushed during the run. The step then lists the tree of the new head, and when a changed file differs there from the checked-out commit, or is gone, it prints a notice and commits nothing, because the tree of step 3 replaces each file as a whole and would drop that change. The next run starts from the new head and writes the statuses again. A package that this run pushed to the AUR keeps its old `last_updated`: the next run finds the version in the AUR and writes only `current`. When the pushed commits changed none of these files, the step commits on the new head.
-3. Create a blob for every changed file, which `builder` reads, a tree on the base tree, and a commit. A link in the work tree reaches nothing that `builder` cannot read.
+3. Create a blob for every changed file from its copy, a tree on the base tree, and a commit. git runs as root in the checkout, which `builder` never writes, with that one directory as `safe.directory`.
 4. Move the branch ref with `force=false`.
 
 The step commits to `github.repository` on `github.ref_name`, your repository and the branch of the run, with the `contents: write` that the calling job grants. A run started by hand from another branch therefore reads the package YAMLs of that branch, pushes their updates to the AUR and commits to that branch, while the schedule runs on the default branch only. The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting the workflows that run on a push: the calling `validate.yml` in your repository, `ci.yml` in aurtomator. GitHub marks the commit as verified because the Actions bot creates it through the API.
 
 ### 5.6 Issues
 
-The job `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs. It reads the final statuses: those of `publish` when it ran, and those of `check` otherwise.
+The job `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs. It reads the final statuses: those of `publish` when it ran, and those of `check` otherwise. Its name is `status`, so the page of the run lists it as `check-updates / status`.
 
-Before it touches an issue, the job writes the summary of the run to `$GITHUB_STEP_SUMMARY`, and the page of the run shows it. The summary counts the packages and the ones up to date, lists every other package in a table with the label of the package table of the README, and shows the error of each failed package in a code block, as its issue does. `run_summary` and `status_label` in `scripts/lib/status.sh` write it, and `update-readme.sh` takes its labels from `status_label` too.
+Before it touches an issue, the job writes the summary of the run to `$GITHUB_STEP_SUMMARY`, and the page of the run shows it under `check-updates / status summary`. The summary counts the packages and the ones up to date, lists every other package in a table with the label of the package table of the README, and shows the error of each failed package in a code block, as its issue does. `run_summary` and `status_label` in `scripts/lib/status.sh` write it, and `update-readme.sh` takes its labels from `status_label` too.
 
 The step `Create issues` runs with `if: always()`. When a package failed, is held or has an alert in `.status/_alerts`, or a newer aurtomator release is out, it first reads `has_issues` of the repository. `gh issue list` fails in a repository with Issues turned off, so when GitHub answers `false`, the step prints a notice and opens no issue. Any other answer goes on, and a failure to read the answer or to list the issues fails the step.
 
@@ -1228,16 +1228,20 @@ For every `.status/` entry with `check_failed:` or `update_failed:`, the step:
 2. Skips the package when an open `auto-update` issue already has the title `❌ <package>: check failed` or `❌ <package>: update failed`, so a package never gets a second issue while one is open. The step compares the titles of up to 1000 open issues and uses no search, because a search splits `foo-bar` into words and finds the issue of `foo-bar` for `foo`.
 3. Opens an issue titled `❌ <package>: check failed` or `❌ <package>: update failed`, after the status, with the package, the status, a link to the run and the error. The error holds text from upstream, a rejected tag name for example, so it stands in a code block, where links, images and mentions do not render, and is cut to its last 4000 characters. The body comes from `failure_issue_body` in `scripts/lib/issue.sh`.
 
-An alert opens an issue as well, see [4.5](#45-update-alerts). Its notes come from `.status/_alerts`, where `check-all.sh` writes one line for each alert that fired: the package, `hold` or `notice`, and the note, split by tabs. The body comes from `alert_issue_body` in `scripts/lib/issue.sh`, and the step creates each label the first time it needs it.
+When the checks of 5 or more packages failed on one host, `HOST_ISSUE_MIN` in `scripts/lib/issue.sh`, those packages share one issue instead. The host is that of the first `http://` or `https://` URL in the error, the URL that `http_get` could not read or that git could not reach, in lower case and without the port. `failure_host` reads it, and `failed_hosts` lists the hosts with their packages. The issue is titled `❌ <host>: <count> packages failed to check`, with the label `auto-update`, unless an open `auto-update` issue has that title for the host with any count. The body comes from `host_issue_body`: the host, a link to the run, and each package with its error in a code block. The errors share 50000 characters, at most 4000 each, so the body stays under the 65536 characters that GitHub accepts. A later run edits neither the title nor the body of an open host issue. An error without a URL, a timeout for example, always gets the issue of its package, and so does every failed update. `api.github.com` and `github.com` are two hosts.
+
+An alert opens an issue as well, see [4.5](#45-update-alerts). Its notes come from `.status/_alerts`, where `check-all.sh` writes one line for each alert that fired: the package, `hold` or `notice`, and the note, split by tabs. The body comes from `alert_issue_body` in `scripts/lib/issue.sh`.
 
 - A `held:` status opens an issue titled `✋ <package>: update held` with the label `update-held`, unless an open `update-held` issue has that title. The body holds the held version and the notes of every alert that fired, and asks the maintainer to publish the version by hand and set `current`.
 - An `updated:` or `downgrade:` status of a package with a line in `.status/_alerts` opens an issue titled `🔔 <package>: <version> notice` with the label `update-notice`, unless an open `update-notice` issue has that title. The body holds the published version and the notes. The maintainer closes it once the edit is done.
 
 A newer aurtomator release, `newer: <release>` in `.status/_upstream`, opens an issue titled `🚀 aurtomator <release> available` with the label `aurtomator-update`, unless an open `aurtomator-update` issue has that title. The body comes from `upstream_issue_body`: the release, the version the run uses, the update through Dependabot, and links to the release notes, to the manual update in SETUP.md and to the run. See [5.8](#58-version-of-aurtomator).
 
+The step creates each label the first time it needs it and lists the open issues of each label once. When GitHub refuses an issue, the step prints a warning with the error of `gh` and goes on.
+
 The job runs also when the package table stays the same, so an issue follows the statuses of every run. A package that starts failing gets its issue in that run, and an issue closed while the package still fails comes back in the next run.
 
-The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the run and shows the new status in a code block, as the issue body shows the error. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade` or `rebuilt`, so the version is in the AUR. An open `✋ <package>: update held` closes on the same statuses, so a failed check keeps it open. An open `🚀 aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` at the pin has reached the latest release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. An open `❌ Check AUR Package Updates failed`, which [5.7](#57-failed-runs) opens, closes with the comment `Run <url> succeeded.` when `prepare` and `verify` succeeded or were skipped, since the step itself runs only after a `check` that succeeded and a `publish` that succeeded or was skipped. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It runs neither after a failed step nor after a failed `publish`, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
+The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the run and shows the new status in a code block, as the issue body shows the error. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade` or `rebuilt`, so the version is in the AUR. An open `✋ <package>: update held` closes on the same statuses, so a failed check keeps it open. An open `❌ <host>: <count> packages failed to check` closes when fewer than 5 packages of the host failed to check, with the comment `Fewer than 5 packages of <host> failed to check in <url>.`, and each of those packages that still fails gets an issue of its own in `Create issues` of the same run. An open `🚀 aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` at the pin has reached the latest release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. An open `❌ Check AUR Package Updates failed`, which [5.7](#57-failed-runs) opens, closes with the comment `Run <url> succeeded.` when `prepare` and `verify` succeeded or were skipped, since the step itself runs only after a `check` that succeeded and a `publish` that succeeded or was skipped. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It runs neither after a failed step nor after a failed `publish`, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
 
 ### 5.7 Failed runs
 
@@ -1319,11 +1323,42 @@ sudo pacman -S --needed git curl go-yq pacman-contrib namcap
 sudo pacman -S --needed bats shellcheck shfmt
 ```
 
-The commands of 7.2 to 7.5 run in your repository through its script `aurtomator.sh`. It runs the scripts of aurtomator at the commit the calling workflows pin, so a local run uses the strategies and the checks of the version a run in CI uses, see [SETUP.md](SETUP.md#the-aurtomatorsh-script).
+The commands of 7.2 to 7.6 run in your repository through its script `aurtomator.sh`. It runs the scripts of aurtomator at the commit the calling workflows pin, so a local run uses the strategies and the checks of the version a run in CI uses, see [SETUP.md](SETUP.md#the-aurtomatorsh-script).
 
-A script takes the packages, `.status/`, `.aurtomator.conf` and `README.md` from the working directory, or from `AURTOMATOR_DATA_DIR` when it is set, and stops with `AURTOMATOR_DATA_DIR is not a directory: <value>` when that names no directory. `./aurtomator.sh` sets `AURTOMATOR_DATA_DIR` to your repository and `AURTOMATOR_RUNNER` to the path it was run by. When `AURTOMATOR_RUNNER` is set, the commands that `setup.sh` prints start with it, as `./aurtomator.sh setup verify` does.
+A script takes the packages, `.status/`, `.aurtomator.conf` and `README.md` from the working directory, or from `AURTOMATOR_DATA_DIR` when it is set, and stops with `AURTOMATOR_DATA_DIR is not a directory: <value>` when that names no directory. `./aurtomator.sh` sets `AURTOMATOR_DATA_DIR` to your repository and `AURTOMATOR_RUNNER` to the path it was run by. When `AURTOMATOR_RUNNER` is set, the commands that `setup.sh` and `draft.sh` print start with it, as `./aurtomator.sh setup verify` does.
 
-### 7.2 Check a single package
+### 7.2 Draft a package
+
+```bash
+./aurtomator.sh draft my-package
+```
+
+The command writes a first `packages/my-package.yml` from the AUR. The argument must have the form of a package name, and an existing `packages/my-package.yml` stops the command and stays as it is. It clones the AUR repository of the package with `--depth 1` and reads its `.SRCINFO` as data: `pkgver`, `epoch`, `url` and every `source` and `source_<arch>` of the pkgbase section, in their order. It never reads or runs the PKGBUILD. The AUR serves an empty repository for an unknown name, so a clone without `.SRCINFO` stops the command with `No AUR package my-package`, and a `.SRCINFO` that is a link stops it as well.
+
+The first source that a rule matches decides. The rules read the URL after a `<file>::` prefix, without its query and its fragment, and a local file and a signature (`.sig`, `.asc`, `.sign`) match none:
+
+| Source | Strategy | Fields |
+|---|---|---|
+| `https://github.com/<owner>/<repo>/releases/download/...` | `github-release` | `project` |
+| `https://github.com/<owner>/<repo>/archive/...` | `github-tag` | `project` |
+| `git+https://github.com/<owner>/<repo>` | `git-latest` with `type: github` for a `-git` package, else `github-tag` | `project` |
+| `https://<host>/<group>/<project>/-/archive/...`, GitLab on any host | `gitlab-tag` | `host`, `project` |
+| `git+https://gitlab.com/<group>/<project>` | `git-latest` with `type: gitlab` for a `-git` package, else `gitlab-tag` | `host`, `project` |
+| `https://codeberg.org/<owner>/<repo>/releases/download/...` | `gitea-release` | `host`, `project` |
+| `https://codeberg.org/<owner>/<repo>/archive/...` | `gitea-tag` | `host`, `project` |
+| any other `git+https://...` | `git-latest` with `type: git` for a `-git` package, else `git-tag` | `url` |
+| `https://files.pythonhosted.org/packages/source/<letter>/<name>/...`, or the same path on `pypi.io` | `pypi` | `registry` |
+| `https://registry.npmjs.org/<name>/-/...`, with `@<scope>/<name>` too | `npm` | `registry` |
+| `https://static.crates.io/crates/<name>/...`, `https://crates.io/api/v1/crates/<name>/...` | `crates` | `registry` |
+| `https://download.kde.org/<path>/.../<project>-<pkgver>.tar.xz` | `kde-tarball` | `project` and `path` where they differ from the defaults |
+
+A `git-latest` draft also takes `branch` from the `#branch=` of its source. A `-git` package is one whose name ends in `-git`, as the Arch guidelines name them, because `.SRCINFO` does not show whether the PKGBUILD has a `pkgver()`. The `path` of a KDE tarball is its directory without a last `src/` and without a last directory of digits and dots, the version or the series: `stable/plasma/6.9.5/oxygen-6.9.5.tar.xz` and `stable/frameworks/6.9/kio-6.9.0.tar.xz` give `stable/plasma` and `stable/frameworks`, as [3.14](#314-kde-tarball) reads them.
+
+When no source matches, the `url` of the package decides: `https://github.com/<owner>/<repo>` gives `github-tag`, `https://gitlab.com/<group>/<project>` gives `gitlab-tag`, and `https://codeberg.org/<owner>/<repo>` gives `gitea-tag`. When that fails too, the command writes no file, prints the `url` and every source it read and the command that writes the file from the sample, and exits with status 1.
+
+The file holds `name`, `strategy`, the fields of `upstream` and `current` from `pkgver`. `yq` writes each value as a string, so quotes or `$(...)` from a `.SRCINFO` stay text in the YAML. With an `epoch` other than 0, the command prints the warning of the PKGBUILD audit, see [4.2](#42-step-by-step). It prints the strategy, the source or the url it came from, and the file. Then it runs `validate-pkg.sh` and, when that passes, `check-update.sh` on the file, see [7.3](#73-check-a-single-package), which shows a strategy that reads another version than `current`. When either fails, the file stays for an edit, and the command says to fix or delete it and exits with status 1. A `-git` package whose `pkgver` has the form of `git describe` fails `validate-pkg` until `upstream.describe` is set, see [3.7](#37-git-latest).
+
+### 7.3 Check a single package
 
 ```bash
 ./aurtomator.sh check-update my-package
@@ -1344,7 +1379,7 @@ When the package is up to date, stdout stays empty:
 ✓ my-package is up to date (2.0.0)
 ```
 
-### 7.3 Dry-run an update
+### 7.4 Dry-run an update
 
 ```bash
 ./aurtomator.sh update-pkg my-package 2.0.0 --dry-run
@@ -1352,7 +1387,7 @@ When the package is up to date, stdout stays empty:
 
 It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `.SRCINFO`, prints the PKGBUILD diff and does not push. Those steps run the PKGBUILD of the AUR on your machine, with your SSH key in reach of its code, so read the PKGBUILD first when someone else can push to the package.
 
-### 7.4 Push an update
+### 7.5 Push an update
 
 ```bash
 ./aurtomator.sh update-pkg my-package 2.0.0
@@ -1360,7 +1395,7 @@ It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `
 
 It runs the full cycle, including `git push` to the AUR with your SSH key.
 
-### 7.5 Check all packages
+### 7.6 Check all packages
 
 ```bash
 # Check only
@@ -1379,9 +1414,9 @@ The last line is a summary:
 → Checked: 4, Updated: 2, Errors: 0
 ```
 
-### 7.6 Running BATS tests
+### 7.7 Running BATS tests
 
-The tests here and the linters of 7.7 check aurtomator itself, and run in the root of a clone of aurtomator:
+The tests here and the linters of 7.8 check aurtomator itself, and run in the root of a clone of aurtomator:
 
 ```bash
 # Run all tests
@@ -1398,7 +1433,7 @@ bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 
 `tests/helpers/setup.sh` gives every test a temporary project directory with symlinked scripts and strategies. It copies `tests/helpers/mock-curl.sh` there as `curl`, puts it first in `PATH`, and removes the directory afterwards, unless `AURTOMATOR_KEEP_TEST_DIRS` is set, as `bashcov-bats.sh` sets it (see [6.2](#62-test-job)). Tests that need `git`, `ssh` or `gh` put their own mocks in the same place. The suite makes no network requests and never touches real AUR repos.
 
-### 7.7 Linting locally
+### 7.8 Linting locally
 
 ```bash
 # shellcheck

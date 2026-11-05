@@ -2465,6 +2465,32 @@ current: '1.0.0'"
   done
 }
 
+# In CI the data directory is a copy of builder, without .git
+@test "update-readme: the badges name GITHUB_REPOSITORY before the origin" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
+  git -C "$TEST_TMPDIR" init -q
+  git -C "$TEST_TMPDIR" remote add origin "https://github.com/owner/data.git"
+  readme_with_badges
+  GITHUB_REPOSITORY=owner/ci run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Badges updated (repo: owner/ci)"* ]]
+  [ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" = '[![Validate packages](https://github.com/owner/ci/actions/workflows/validate.yml/badge.svg)](https://github.com/owner/ci/actions/workflows/validate.yml) [![Check AUR Package Updates](https://github.com/owner/ci/actions/workflows/check-updates.yml/badge.svg)](https://github.com/owner/ci/actions/workflows/check-updates.yml) [![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
+}
+
+@test "update-readme: a GITHUB_REPOSITORY that is not owner/repo leaves the origin" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
+  git -C "$TEST_TMPDIR" init -q
+  git -C "$TEST_TMPDIR" remote add origin "https://github.com/owner/data.git"
+  local repo
+  for repo in "" owner a/b/c "owner/repo x" ../x .owner/repo owner_x/repo 'owner/re$po'; do
+    readme_with_badges
+    GITHUB_REPOSITORY="$repo" run "$TEST_TMPDIR/scripts/update-readme.sh"
+    echo "$repo: $output"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Badges updated (repo: owner/data)"* ]]
+  done
+}
+
 @test "update-readme: an unknown status reads as tracking" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo

@@ -20,7 +20,7 @@ graph LR
     C --> D
 ```
 
-Each package has a YAML config pointing to an upstream source. Your repository holds these configs and calls the pipeline of aurtomator. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow.
+Each package has a YAML config pointing to an upstream source. Your repository holds these configs and calls the pipeline of aurtomator. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow. When the checks of 5 or more packages fail on one host in a run, those packages share one issue.
 
 ## Quick start
 
@@ -41,12 +41,13 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 4. Add a package. `<name>` is the pkgbase on the AUR:
 
    ```bash
-   ./aurtomator.sh sample > packages/<name>.yml
+   ./aurtomator.sh draft <name>
    ```
 
-   Set `name: <name>`, a `strategy` and its `upstream` fields in that file, see [Strategies](#strategies). Then check it:
+   It reads the `.SRCINFO` of the package in the AUR, writes `packages/<name>.yml` with a strategy and its `upstream` fields, and runs `validate-pkg` and `check-update` on that file, see [docs/WORKFLOW.md](docs/WORKFLOW.md#72-draft-a-package). When no rule matches the url or a source of the package, it writes nothing. Then write the file from the sample, with `name: <name>`, a `strategy` and its `upstream` fields, see [Strategies](#strategies), and check it:
 
    ```bash
+   ./aurtomator.sh sample > packages/<name>.yml
    ./aurtomator.sh validate-pkg <name>
    ```
 

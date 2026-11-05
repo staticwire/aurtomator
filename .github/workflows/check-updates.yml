@@ -92,41 +92,15 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
-      # The runner reads a local action from the workspace when its step
-      # starts, and builder owns the workspace once check-all.sh ran, so no
-      # local action follows run-as-builder in a job
+      # builder works in /work, and the workspace and
+      # aurtomator/ stay root's
       - name: Check updates
         uses: ./aurtomator/.github/actions/run-as-builder
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           keep-env: GITHUB_TOKEN
-
-      - name: Decide
-        id: decide
-        run: |
-          # prepare runs for an outdated package, publish also for a change
-          # in the package table
-          prepare=false
-          if grep -qsE '^(new_version|available_downgrade|new_build): ' .status/*; then
-            prepare=true
-          fi
-          sudo -u builder ./aurtomator/scripts/update-readme.sh
-          work=$prepare
-          # builder owns .git, and git runs the commands its config names
-          sudo -u builder git diff --quiet README.md || work=true
-          echo "prepare=$prepare" >>"$GITHUB_OUTPUT"
-          echo "work=$work" >>"$GITHUB_OUTPUT"
-
-      # The issues job reads them in every run
-      - name: Upload statuses
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: checked
-          path: .status/
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
+          readme: "true"
 
       - &stop-builder
         name: Stop builder
@@ -160,8 +134,84 @@ jobs:
             exit 1
           fi
 
-      # The post step of a checkout runs git as root in the tree that
-      # builder owns, and does nothing once .git/config is gone
+      # Takes what builder wrote as data, now that no process of builder
+      # runs. builder reads each file, so a link reaches nothing it cannot.
+      - &hand-over
+        name: Hand over
+        if: always()
+        env:
+          WORK: /work
+          RESULTS: /results
+        run: |
+          mkdir upload statuses
+          install -d -m 0700 "$RESULTS" "$RESULTS/packages"
+          [[ -d "$WORK" && ! -L "$WORK" ]] || exit 0
+          # Copies file $1 of builder to $2 when it is a regular file
+          take() {
+            [[ -f "$WORK/$1" && ! -L "$WORK/$1" ]] || return 0
+            mkdir -p "$(dirname "$2")"
+            # The redirect is root's on purpose
+            # shellcheck disable=SC2024
+            sudo -u builder cat -- "$WORK/$1" >"$2"
+          }
+          # A package name never starts with a dot, so . and .. do not match
+          name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
+          if [[ -d "$WORK/handoff" && ! -L "$WORK/handoff" ]]; then
+            # find follows no link; -print0, as a name may hold a newline. find
+            # fails on a missing prepared/ or status/, and the step goes on.
+            (cd "$WORK/handoff" && find prepared status -type f -print0 2>/dev/null || true) |
+              while IFS= read -r -d '' f; do
+                if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
+                  [[ "$f" =~ ^status/${name_re}$ ]]; then
+                  take "handoff/$f" "upload/$f"
+                fi
+              done
+          fi
+          if [[ -d "$WORK/.status" && ! -L "$WORK/.status" ]]; then
+            for f in "$WORK"/.status/*; do
+              name=${f##*/}
+              [[ "$name" =~ ^${name_re}$ ]] || continue
+              take ".status/$name" "statuses/$name"
+            done
+          fi
+          take README.md "$RESULTS/README.md"
+          if [[ -d "$WORK/packages" && ! -L "$WORK/packages" ]]; then
+            for f in "$WORK"/packages/*.yml; do
+              name=${f##*/}
+              [[ "$name" =~ ^${name_re}\.yml$ ]] || continue
+              take "packages/$name" "$RESULTS/packages/$name"
+            done
+          fi
+
+      - name: Decide
+        id: decide
+        env:
+          RESULTS: /results
+        run: |
+          # prepare runs for an outdated package, publish also for a change
+          # in the package table
+          prepare=false
+          if grep -qsE '^(new_version|available_downgrade|new_build): ' statuses/*; then
+            prepare=true
+          fi
+          work=$prepare
+          if [[ -f "$RESULTS/README.md" ]] && ! cmp -s "$RESULTS/README.md" README.md; then
+            work=true
+          fi
+          echo "prepare=$prepare" >>"$GITHUB_OUTPUT"
+          echo "work=$work" >>"$GITHUB_OUTPUT"
+
+      # The issues job reads them in every run
+      - name: Upload statuses
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: checked
+          path: statuses/
+          if-no-files-found: error
+          retention-days: 1
+
+      # A second layer: the post step of a checkout runs git as root, and
+      # does nothing once .git/config is gone
       - &drop-checkouts
         name: Drop the checkouts
         if: always()
@@ -212,27 +262,7 @@ jobs:
 
       - *stop-builder
 
-      # verify repeats this step through the anchor. A local action would be
-      # read from the workspace that builder owns by now.
-      - &hand-over
-        name: Hand over
-        run: |
-          # Copy regular files from the expected paths only, and nothing
-          # else gets uploaded. find does not follow symlinks; -print0,
-          # because a name may hold a newline. A package name never starts
-          # with a dot, so . and .. do not match.
-          mkdir upload
-          if [[ -d handoff && ! -L handoff ]]; then
-            pkg_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
-            (cd handoff && find prepared status -type f -print0 2>/dev/null) |
-              while IFS= read -r -d '' f; do
-                if [[ "$f" =~ ^prepared/${pkg_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
-                  [[ "$f" =~ ^status/${pkg_re}$ ]]; then
-                  [[ -f "handoff/$f" && ! -L "handoff/$f" ]] || continue
-                  install -D -m 0644 "handoff/$f" "upload/$f"
-                fi
-              done
-          fi
+      - *hand-over
 
       - name: Upload handoff
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -292,7 +322,6 @@ jobs:
 
       - *stop-builder
 
-      # The Hand over step of prepare
       - *hand-over
 
       - name: Upload verified handoff
@@ -373,7 +402,6 @@ jobs:
         run: |
           sudo -u builder git config --global user.name "${AUR_GIT_NAME:-aurtomator}"
           sudo -u builder git config --global user.email "${AUR_GIT_EMAIL:-aurtomator@users.noreply.github.com}"
-          chown -R builder:builder .
 
       - name: Setup AUR SSH
         if: steps.handoff.outputs.packages == 'true'
@@ -428,34 +456,32 @@ jobs:
         with:
           args: --publish handoff
           keep-env: GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL
+          readme: "true"
 
-      - name: Update README package table
-        run: sudo -u builder ./aurtomator/scripts/update-readme.sh
+      - *stop-builder
+
+      - *hand-over
 
       - name: Commit changes via API
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
+          RESULTS: /results
         run: |
-          # Only the files this job writes are committed: the package YAMLs
-          # and README.md. A change to any other tracked file fails the step.
-          # git and the reads of files run as builder, who owns the work tree.
-          # Through a file of root, so that a failing git diff stops the step
-          list=$(mktemp)
-          # shellcheck disable=SC2024
-          sudo -u builder git diff --name-only -z >"$list"
-          mapfile -d '' changed <"$list"
+          # Only README.md and the package YAMLs of the checkout are
+          # committed, from the copies that Hand over took from builder
+          changed=()
+          for copy in "$RESULTS/README.md" "$RESULTS"/packages/*.yml; do
+            [[ -f "$copy" ]] || continue
+            file=${copy#"$RESULTS"/}
+            [[ -f "$file" && ! -L "$file" ]] || continue
+            cmp -s -- "$copy" "$file" || changed+=("$file")
+          done
           if [[ ${#changed[@]} -eq 0 ]]; then
             echo "No changes to commit"
             exit 0
           fi
-          for file in "${changed[@]}"; do
-            if [[ ! "$file" =~ ^(README\.md|packages/[A-Za-z0-9@._+-]+\.yml)$ ]]; then
-              echo "::error::Refusing to commit a change to ${file@Q}"
-              exit 1
-            fi
-          done
 
           MESSAGE="chore: update package versions [skip ci]"
 
@@ -465,12 +491,14 @@ jobs:
           # The tree below replaces each changed file as a whole, so a
           # commit pushed during the run that changed one of them would be
           # lost. Then this run commits nothing, and the next run starts
-          # from the new head.
-          if [[ "$HEAD_SHA" != "$(sudo -u builder git rev-parse HEAD)" ]]; then
+          # from the new head. builder never writes the checkout, so root's
+          # git may trust it.
+          git_ws() { git -c safe.directory="$PWD" "$@"; }
+          if [[ "$HEAD_SHA" != "$(git_ws rev-parse HEAD)" ]]; then
             remote=$(gh api "repos/$REPO/git/trees/$BASE_TREE?recursive=1" \
               --jq '.tree[] | select(.type == "blob") | .path + " " + .sha')
             for file in "${changed[@]}"; do
-              if ! grep -qxF -- "$file $(sudo -u builder git rev-parse "HEAD:$file")" <<<"$remote"; then
+              if ! grep -qxF -- "$file $(git_ws rev-parse "HEAD:$file")" <<<"$remote"; then
                 echo "::notice::$file changed on $BRANCH during the run, so the statuses of this run are not committed"
                 exit 0
               fi
@@ -479,7 +507,7 @@ jobs:
 
           TREE_ENTRIES="[]"
           for file in "${changed[@]}"; do
-            CONTENT=$(sudo -u builder base64 -w0 -- "$file")
+            CONTENT=$(base64 -w0 -- "$RESULTS/$file")
             BLOB_SHA=$(gh api "repos/$REPO/git/blobs" \
               -f content="$CONTENT" \
               -f encoding="base64" \
@@ -513,23 +541,7 @@ jobs:
           echo "Committed: $COMMIT_SHA (verified)"
 
       # The issues job reads the statuses of this job, also after a failed
-      # step. Only the regular files of .status with a package name reach
-      # it, _alerts and _upstream included. builder wrote them and reads
-      # them, so a link swapped in after the test reaches nothing that
-      # builder cannot read, and root writes the copies into its own
-      # directory.
-      - name: Hand over statuses
-        if: always()
-        run: |
-          mkdir statuses
-          for file in .status/*; do
-            name=${file##*/}
-            [[ "$name" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ && -f "$file" && ! -L "$file" ]] || continue
-            # The redirect is root's on purpose
-            # shellcheck disable=SC2024
-            sudo -u builder cat -- "$file" >"statuses/$name"
-          done
-
+      # step
       - name: Upload statuses
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -539,8 +551,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - *stop-builder
-
       - *drop-checkouts
 
   # Opens and closes the issues in every run that checked, from the statuses
@@ -548,6 +558,7 @@ jobs:
   # secret. No other user runs code in the workspace it checks out, so root
   # writes the bodies with scripts/lib/issue.sh.
   issues:
+    name: status
     needs: [image, check, prepare, verify, publish]
     if: "!cancelled() && needs.check.result == 'success'"
     runs-on: ubuntu-latest
@@ -613,6 +624,10 @@ jobs:
           open=$(gh issue list --label "auto-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
           held=$(gh issue list --label "update-held" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
 
+          lib() {
+            bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
+          }
+
           while read -r number title; do
             [[ -n "$number" ]] || continue
             for status_file in "$STATUS_DIR"/*; do
@@ -632,11 +647,24 @@ jobs:
                   "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "*) ;;
                 *) continue ;;
               esac
-              comment=$(bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ close_comment "$status_file" "$RUN_URL")
+              comment=$(lib close_comment "$status_file" "$RUN_URL")
               gh issue close "$number" --comment "$comment"
             done
           done <<<"$open
           $held"
+
+          # A host issue closes once fewer than HOST_ISSUE_MIN packages of the
+          # host, in scripts/lib/issue.sh, failed to check
+          hosts=$(lib failed_hosts "$STATUS_DIR")
+          failing=$(cut -d ' ' -f 1 <<<"$hosts")
+          host_re='^([a-z0-9.-]+): [0-9]+ packages failed to check$'
+          while read -r number title; do
+            [[ "$title" == "❌ "* && "${title#"❌ "}" =~ $host_re ]] || continue
+            host=${BASH_REMATCH[1]}
+            grep -qxF -e "$host" <<<"$failing" && continue
+            comment=$(lib host_close_comment "$host" "$RUN_URL")
+            gh issue close "$number" --comment "$comment"
+          done <<<"$open"
 
           # notify-failure opens this issue, and a run with no failed job
           # closes it
@@ -679,48 +707,83 @@ jobs:
             fi
           fi
 
+          lib() {
+            bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
+          }
+
+          # Creates label $1 with color $2 and description $3 when it is
+          # missing and lists the titles of its open issues, once per label
+          declare -A titles=()
+          use_label() {
+            [[ -z "${titles[$1]+set}" ]] || return 0
+            gh label create "$1" --color "$2" --description "$3" 2>/dev/null || true
+            titles[$1]=$(gh issue list --label "$1" --state open --limit 1000 --json title --jq '.[].title')
+          }
+
+          # Opens an issue with label $1, title $2 and body $3, and turns a
+          # refusal of GitHub into a warning
+          create_issue() {
+            local out
+            if out=$(gh issue create --title "$2" --label "$1" --body "$3" 2>&1); then
+              echo "$out"
+            else
+              echo "::warning::Could not create the issue $2: ${out//$'\n'/ }"
+            fi
+          }
+
           # Opens an issue with label $1, made with color $2 and description
           # $3 when it is missing, and title $4, unless an open issue of the
           # label has that title. Function $5 of scripts/lib/issue.sh writes
           # the body from status file $6.
           open_issue() {
-            gh label create "$1" --color "$2" --description "$3" 2>/dev/null || true
-            titles=$(gh issue list --label "$1" --state open --limit 1000 --json title --jq '.[].title')
-            if grep -qxF -e "$4" <<<"$titles"; then
+            use_label "$1" "$2" "$3"
+            if grep -qxF -e "$4" <<<"${titles[$1]}"; then
               echo "Issue already open: $4"
               return 0
             fi
-            body=$(bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$5" "$6" "$RUN_URL")
-            gh issue create --title "$4" --label "$1" --body "$body" || echo "Warning: could not create issue (issues may be disabled)"
+            body=$(lib "$5" "$6" "$RUN_URL")
+            create_issue "$1" "$4" "$body"
           }
+
+          # The packages of a host that failed HOST_ISSUE_MIN or more checks,
+          # in scripts/lib/issue.sh, share one issue
+          hosts=$(lib failed_hosts "$STATUS_DIR")
+          declare -A shared=()
+          while read -r host packages; do
+            [[ -n "$host" ]] || continue
+            read -ra list <<<"$packages"
+            for pkg_name in "${list[@]}"; do
+              shared[$pkg_name]=1
+            done
+            use_label auto-update d73a4a "Automated update failure"
+            if grep -qxE "❌ ${host//./\\.}: [0-9]+ packages failed to check" <<<"${titles[auto-update]}"; then
+              echo "Issue already open for $host, skipping"
+              continue
+            fi
+            body=$(lib host_issue_body "$STATUS_DIR" "$host" "$RUN_URL" "${list[@]}")
+            create_issue auto-update "❌ $host: ${#list[@]} packages failed to check" "$body"
+          done <<<"$hosts"
 
           for status_file in "$STATUS_DIR"/*; do
             [[ -f "$status_file" ]] || continue
             pkg_name=$(basename "$status_file")
-            [[ "$pkg_name" == _* ]] && continue
+            [[ "$pkg_name" == _* || -n "${shared[$pkg_name]:-}" ]] && continue
 
             status=$(cat "$status_file")
             case "$status" in
               check_failed:*|update_failed:*)
                 kind="${status%%:*}"
-
-                gh label create "auto-update" --color "d73a4a" --description "Automated update failure" 2>/dev/null || true
+                use_label auto-update d73a4a "Automated update failure"
 
                 # Exact titles: search splits foo-bar into words, so a
                 # search for foo also finds the issue of foo-bar
-                titles=$(gh issue list --label "auto-update" --state open --limit 1000 --json title --jq '.[].title')
-                if grep -qxF -e "❌ $pkg_name: check failed" -e "❌ $pkg_name: update failed" <<<"$titles"; then
+                if grep -qxF -e "❌ $pkg_name: check failed" -e "❌ $pkg_name: update failed" <<<"${titles[auto-update]}"; then
                   echo "Issue already open for $pkg_name, skipping"
                   continue
                 fi
 
-                ISSUE_BODY=$(bash -c 'source ./aurtomator/scripts/lib.sh && failure_issue_body "$@"' _ "$status_file" "$RUN_URL")
-
-                gh issue create \
-                  --title "❌ $pkg_name: ${kind//_/ }" \
-                  --label "auto-update" \
-                  --body "$ISSUE_BODY" || echo "Warning: could not create issue (issues may be disabled)"
-                echo "Created issue for $pkg_name"
+                body=$(lib failure_issue_body "$status_file" "$RUN_URL")
+                create_issue auto-update "❌ $pkg_name: ${kind//_/ }" "$body"
                 ;;
               "held: "*)
                 open_issue update-held fbca04 "Update waits for a hand edit" "✋ $pkg_name: update held" alert_issue_body "$status_file"
