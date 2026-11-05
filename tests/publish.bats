@@ -168,6 +168,22 @@ current: '0.9.0'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "0.9.0" ]
 }
 
+# A package added without current gets the version the AUR has, and a
+# pkgrel the AUR maintainer raised has to stay
+@test "update-pkg --prepare: keeps the AUR pkgrel when the AUR has the version" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo"
+  write_pkgbuild "$OLD" 1.0.0 3 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 3 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.0.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"demo already at 1.0.0 on AUR, nothing to do"* ]]
+  cmp "$OLD" "$TEST_TMPDIR/out/demo/PKGBUILD"
+}
+
 @test "update-pkg: commits the updated PKGBUILD and .SRCINFO" {
   create_test_package "demo" "github-nightly" "upstream:
   project: owner/repo
@@ -676,6 +692,28 @@ current: '1.0.0'"
   [ "$(git -C "$AUR_REMOTE" log -1 --format=%s)" = "1.1.0 release from github-release" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" 'has("current_asset")')" = "false" ]
+}
+
+# Without the rule, a run that found the version the AUR has pushed it with
+# pkgrel 1 over the pkgrel of the AUR
+@test "publish-pkg: refuses to lower the pkgrel of the version the AUR has" {
+  setup_publish
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
+  write_srcinfo "$PREPARED/.SRCINFO" 1.0.0 1 "$H1" "$H2"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD has pkgrel=1, expected 2"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: takes the files of the AUR for the version it has, and sets current" {
+  setup_publish
+  cp "$OLD" "$PREPARED/PKGBUILD"
+  cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 2 ]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
 }
 
 @test "publish-pkg: clones the AUR repo without a checkout and keeps its other files" {
