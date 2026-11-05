@@ -26,7 +26,6 @@ runs:
         ARGS: ${{ inputs.args }}
         KEEP_ENV: ${{ inputs.keep-env }}
       run: |
-        git config --global --add safe.directory "$GITHUB_WORKSPACE"
         chown -R builder:builder .
         read -ra check_args <<<"$ARGS"
         options=(-u builder)

@@ -19,8 +19,7 @@ source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 pkg_file=$(pkg_file "$NAME")
 registry=$(pkg_get "$pkg_file" .upstream.registry)
 
-version=$(http_get "https://registry.npmjs.org/${registry}/latest" |
-  yq -r '.version') || {
+version=$(http_get_json "https://registry.npmjs.org/${registry}/latest" | yq -r '.version') || {
   echo "Failed to fetch npm info for ${registry}" >&2
   exit 1
 }

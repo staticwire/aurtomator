@@ -115,7 +115,7 @@ The script `aurtomator.sh` in the root of your repository runs the scripts of au
 
 A command is `sample` or the name of an executable script in `scripts/` of aurtomator without `.sh`, and the arguments after it go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, whatever directory you run it from.
 
-The `uses:` line of `.github/workflows/check-updates.yml` names the repository and the commit. The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or into `$XDG_CACHE_HOME/aurtomator/<sha>` when `XDG_CACHE_HOME` is set. Later runs use that copy, and the first run after a merge that moves the pin fetches the new release.
+The `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA gives the repository and the commit. The script stops when the file holds no such line or more than one, and it reads no comment, so an old pin kept in a comment changes nothing. The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or into `$XDG_CACHE_HOME/aurtomator/<sha>` when `XDG_CACHE_HOME` is set. Later runs use that copy, and the first run after a merge that moves the pin fetches the new release.
 
 In CI, the jobs check out your repository and then aurtomator into `aurtomator/` of that checkout, which deletes whatever that path holds. So the script is `aurtomator.sh`, and nothing in the root of your repository may be named `aurtomator`.
 
@@ -137,13 +137,25 @@ The template holds this block as the file `aurtomator.sh`. A repository created 
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-uses='[[:alnum:]_.-]+/[[:alnum:]_.-]+/\.github/workflows/check-updates\.yml@[0-9a-f]{40}'
-pin="$(grep -s -oE "$uses" "$root/.github/workflows/check-updates.yml" || true)"
-if [[ -z "$pin" ]]; then
-  echo "No commit SHA pinned in .github/workflows/check-updates.yml" >&2
+workflow=.github/workflows/check-updates.yml
+if [[ ! -f "$root/$workflow" ]]; then
+  echo "No $workflow in $root" >&2
   exit 1
 fi
-sha="${pin##*@}"
+# The repository and the commit come from one uses: line, never a comment
+uses='^[[:space:]]*uses:[[:space:]]+([[:alnum:]_.-]+/[[:alnum:]_.-]+)/\.github/workflows/check-updates\.yml@([0-9a-f]{40})([[:space:]]|$)'
+mapfile -t pins < <(grep -E "$uses" "$root/$workflow" || true)
+if [[ ${#pins[@]} -eq 0 ]]; then
+  echo "No commit SHA pinned in $workflow" >&2
+  exit 1
+fi
+if [[ ${#pins[@]} -gt 1 ]]; then
+  echo "More than one uses: line pins check-updates.yml in $workflow" >&2
+  exit 1
+fi
+[[ "${pins[0]}" =~ $uses ]]
+repo="${BASH_REMATCH[1]}"
+sha="${BASH_REMATCH[2]}"
 copy="${XDG_CACHE_HOME:-$HOME/.cache}/aurtomator/$sha"
 
 if [[ ! -d "$copy" ]]; then
@@ -151,9 +163,10 @@ if [[ ! -d "$copy" ]]; then
   tmp="$(mktemp -d "$copy.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
   git -C "$tmp" init -q
-  git -C "$tmp" fetch -q --depth 1 "https://github.com/${pin%%/.github/*}" "$sha"
+  git -C "$tmp" fetch -q --depth 1 "https://github.com/$repo" "$sha"
   git -C "$tmp" checkout -q FETCH_HEAD
-  mv "$tmp" "$copy"
+  # A run that started at the same time can make the copy first
+  mv -T "$tmp" "$copy" 2>/dev/null || rm -rf "$tmp"
 fi
 
 cmd="${1:-}"
@@ -192,9 +205,9 @@ It runs five steps in order:
 2. **ssh**: an existing SSH key for the AUR. CI uses the key without a prompt, so the step refuses a key with a passphrase and prints the commands that make a copy without one.
 3. **gpg**: optional GPG commit signing
 4. **secrets**: pushes `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY` to your GitHub repo. It checks the SSH key as the ssh step does, so a key that is missing or has a passphrase stops it before any secret is set.
-5. **verify**: checks identity, SSH access to the AUR, GPG signing and the secrets
+5. **verify**: checks identity, SSH access to the AUR with the saved key alone, as CI has it, GPG signing and the secrets
 
-The setup works on the repository that holds `aurtomator.sh`, whatever directory you run it from, and the `identity` step prints it as `Data directory:`. The `secrets` step sets the secrets of the GitHub repo of its `origin` remote, prints that repo as `Target repo:`, and asks for `owner/repo` when there is no `origin`. The setup saves your answers to `.aurtomator.conf` after each step, so a step that fails, and a `verify` that finds a problem, leave the answers given so far for the next run.
+The setup works on the repository that holds `aurtomator.sh`, whatever directory you run it from, and the `identity` step prints it as `Data directory:`. The `secrets` step sets the secrets of the GitHub repo of its `origin` remote and prints that repo as `Target repo:`. It asks for `owner/repo` when `origin` is missing or is not a repository on github.com. The secrets hold the key that pushes all of your AUR packages, so an interactive run asks before it sets them. The setup saves your answers to `.aurtomator.conf` after each step, so a step that fails, and a `verify` that finds a problem, leave the answers given so far for the next run.
 
 ## Identity
 
@@ -225,10 +238,10 @@ On <https://aur.archlinux.org>, open My Account > SSH Public Key, paste the key 
 ### 3. Test SSH access
 
 ```bash
-ssh -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org
+ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org
 ```
 
-A "Welcome" message means it works. The connection then closes, which is expected.
+The options make ssh offer this key alone, as CI does: without them, another key in your SSH agent or in `~/.ssh/config` can answer for it. A "Welcome" message means it works. The connection then closes, which is expected.
 
 ### 4. Set GitHub Secrets in the web UI
 
@@ -389,7 +402,7 @@ AUR_SSH_KEY='/home/<user>/.ssh/aur_ed25519'
 | `GIT_AUTHOR_NAME`  | Name used as git commit author for AUR pushes.             |
 | `GIT_AUTHOR_EMAIL` | Email used as git commit author for AUR pushes.            |
 | `GPG_KEY_ID`       | GPG key ID for commit signing. Empty string if not used.   |
-| `AUR_SSH_KEY`      | Absolute path to the SSH private key for AUR.              |
+| `AUR_SSH_KEY`      | Absolute path to the SSH private key for AUR. A relative path given to the setup is saved as an absolute one. |
 
 A re-run of `./aurtomator.sh setup` loads this file first and does not ask again for the values it holds. A command line option overrides the saved value, and the new value is saved. The `.gitignore` of the template lists the file, because it holds local paths.
 
@@ -451,7 +464,7 @@ Commit the package YAML and push to your repository. The push to `main` runs `Va
 **Causes:**
 
 1. The public key is not on your AUR account. Add it under My Account > SSH Public Key on <https://aur.archlinux.org>.
-2. SSH picks the wrong key. Name it explicitly: `ssh -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org`
+2. SSH picks the wrong key. Offer that key alone: `ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org`
 3. The key file permissions are too open. Fix them with `chmod 600 ~/.ssh/aur_ed25519`.
 
 ### GPG: No secret key / unusable secret key

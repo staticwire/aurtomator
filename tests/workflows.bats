@@ -156,6 +156,24 @@ run_blocks() {
   [[ "$output" == *'shellcheck -s bash "$RUNNER_TEMP/run.sh"'* ]]
 }
 
+@test "ci: the lint job checks the runner of SETUP.md with shellcheck and shfmt" {
+  run yq '.jobs.lint.steps[] | select(.name == "shellcheck and shfmt the runner") | .run' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = 'bash tests/helpers/runner-script.sh >"$RUNNER_TEMP/aurtomator.sh"' ]
+  [ "${lines[1]}" = 'shellcheck "$RUNNER_TEMP/aurtomator.sh"' ]
+  [ "${lines[2]}" = 'shfmt -d -i 2 -ci "$RUNNER_TEMP/aurtomator.sh"' ]
+}
+
+@test "runner-script: fails when SETUP.md holds no runner" {
+  local dir="$BATS_TEST_TMPDIR/tree"
+  mkdir -p "$dir/tests/helpers" "$dir/docs"
+  cp "$BATS_TEST_DIRNAME/helpers/runner-script.sh" "$dir/tests/helpers/"
+  printf '# Setup\n\n```bash\necho hi\n```\n' >"$dir/docs/SETUP.md"
+  run bash "$dir/tests/helpers/runner-script.sh"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
 # The lint steps check only the files they name: shellcheck -x reads a
 # sourced file but reports nothing in it, and shfmt does not read it
 @test "ci: shellcheck and shfmt check every script in scripts and strategies" {
@@ -488,26 +506,27 @@ step_run() {
 }
 
 # Runs the Decide step in a workspace with the statuses given as name=status
-# pairs, a sudo that does nothing and a git whose diff reports a README
-# change when $README_CHANGED is set; prints the step outputs
+# pairs, a sudo that runs git as the test user and nothing else, and a git
+# whose diff reports a README change when $README_CHANGED is set; prints the
+# step outputs
 run_decide_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   mkdir -p "$ws/.status" "$bin"
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
   done
-  printf '#!/bin/sh\nexit 0\n' >"$bin/sudo"
+  printf '#!/bin/sh\n[ "$1 $2 $3" = "-u builder git" ] || exit 0\nshift 2\nexec "$@"\n' >"$bin/sudo"
   printf '#!/bin/sh\n[ -z "${README_CHANGED:-}" ]\n' >"$bin/git"
   chmod +x "$bin/sudo" "$bin/git"
   step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
   (cd "$ws" && PATH="$bin:$PATH" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
-    sh -e "$BATS_TEST_TMPDIR/step.sh") >/dev/null
+    bash -e "$BATS_TEST_TMPDIR/step.sh") >/dev/null
   cat "$BATS_TEST_TMPDIR/output"
 }
 
 @test "check-updates: Decide prepares when a package is outdated" {
-  run run_decide_step pkg="new_version: 2.0.0" other=up_to_date _error_count=0
+  run run_decide_step pkg="new_version: 2.0.0" other=up_to_date
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=true\nwork=true' ]
   run run_decide_step pkg="available_downgrade: 1.0.0"
@@ -531,7 +550,7 @@ run_decide_step() {
 }
 
 @test "check-updates: Decide does nothing when nothing changed" {
-  run run_decide_step pkg=up_to_date _error_count=0
+  run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=false\nwork=false' ]
 }
@@ -556,13 +575,100 @@ run_decide_step() {
   [ "$output" = "null" ]
 }
 
-@test "check-updates: Hand over runs nothing from the workspace" {
-  run step_run prepare "Hand over"
+@test "check-updates: Stop builder, Hand over and Drop the checkouts run nothing from the workspace" {
+  local step
+  for step in "Stop builder" "Hand over" "Drop the checkouts"; do
+    echo "$step"
+    run step_run prepare "$step"
+    [ "$status" -eq 0 ]
+    [ -n "$output" ]
+    [[ "$output" != *"./scripts/"* ]]
+    [[ "$output" != *"sudo -u builder"* ]]
+    [[ "$output" != *"GITHUB_OUTPUT"* ]]
+  done
+}
+
+# Prints the index of the last step of job $1 that runs anything as builder
+last_builder_step() {
+  yq ".jobs.$1.steps | to_entries |
+    map(select(.value.uses == \"./aurtomator/.github/actions/run-as-builder\" or (.value.run // \"\" | test(\"sudo -u builder\")))) |
+    .[-1].key" "$CHECK_UPDATES"
+}
+
+# The post step of a checkout runs git as root, and git runs the commands
+# that .git/config names, which builder can write
+@test "check-updates: builder stops after its last step, and the checkouts go last" {
+  local job stop
+  for job in check prepare verify publish; do
+    echo "$job"
+    stop=$(yq ".jobs.$job.steps | to_entries | map(select(.value.name == \"Stop builder\")) | .[0].key" "$CHECK_UPDATES")
+    [ "$stop" -gt "$(last_builder_step "$job")" ]
+    run yq -o=json -I=0 "[.jobs.$job.steps[$stop], .jobs.$job.steps[-1]] | map([.name, .if])" "$CHECK_UPDATES"
+    [ "$status" -eq 0 ]
+    [ "$output" = '[["Stop builder","always()"],["Drop the checkouts","always()"]]' ]
+    [ "$(step_run "$job" "Stop builder")" = "$(step_run check "Stop builder")" ]
+    [ "$(step_run "$job" "Drop the checkouts")" = "$(step_run check "Drop the checkouts")" ]
+  done
+}
+
+# Runs Drop the checkouts in a workspace that holds README.md and the git
+# directory of the caller's checkout, and aurtomator/ unless it exists
+run_drop_step() {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws/.git"
+  echo "[core]" >"$ws/.git/config"
+  echo "readme" >"$ws/README.md"
+  if [[ ! -e "$ws/aurtomator" && ! -L "$ws/aurtomator" ]]; then
+    mkdir -p "$ws/aurtomator/.git"
+    echo "[core]" >"$ws/aurtomator/.git/config"
+  fi
+  step_run check "Drop the checkouts" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "check-updates: Drop the checkouts removes .git and aurtomator, and nothing else" {
+  run_drop_step
   [ "$status" -eq 0 ]
-  [ -n "$output" ]
-  [[ "$output" != *"./scripts/"* ]]
-  [[ "$output" != *"sudo -u builder"* ]]
-  [[ "$output" != *"GITHUB_OUTPUT"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/ws/.git" ]
+  [ ! -e "$BATS_TEST_TMPDIR/ws/aurtomator" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/ws/README.md")" = "readme" ]
+}
+
+@test "check-updates: Drop the checkouts removes a link named aurtomator, not what it points to" {
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere/.git" "$BATS_TEST_TMPDIR/ws"
+  echo "[core]" >"$BATS_TEST_TMPDIR/elsewhere/.git/config"
+  ln -s ../elsewhere "$BATS_TEST_TMPDIR/ws/aurtomator"
+  run_drop_step
+  [ "$status" -eq 0 ]
+  [ ! -L "$BATS_TEST_TMPDIR/ws/aurtomator" ]
+  [ -f "$BATS_TEST_TMPDIR/elsewhere/.git/config" ]
+}
+
+# builder can write .git/config, and git runs the commands it names, so
+# every git in the jobs of builder runs as builder
+@test "check-updates: root runs no git in the jobs of builder" {
+  local job line count=0 git_re='(^|[[:space:];&|(!])git[[:space:]]'
+  for job in check prepare verify publish; do
+    run yq ".jobs.$job.steps[] | select(has(\"run\") and .name != \"Install dependencies\") | .run" "$CHECK_UPDATES"
+    [ "$status" -eq 0 ]
+    for line in "${lines[@]}"; do
+      [[ ! "$line" =~ ^[[:space:]]*# && "$line" =~ $git_re ]] || continue
+      echo "$job: $line"
+      [[ "$line" == *"sudo -u builder git "* ]]
+      count=$((count + 1))
+    done
+  done
+  [ "$count" -gt 0 ]
+}
+
+# Without safe.directory, root's git refuses a tree that builder owns
+@test "check-updates: no step lets root's git into the tree of builder" {
+  run run_blocks "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"safe.directory"* ]]
+  run yq '.runs.steps[] | .run' "$BUILDER_ACTION"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"safe.directory"* ]]
 }
 
 BUILDER_ACTION="$GITHUB_DIR/actions/run-as-builder/action.yml"
@@ -666,14 +772,12 @@ EOF
   done
 }
 
-# Root's git refuses a repository that another user owns, and Decide and
-# the commit step of publish run git as root
-@test "run-as-builder: gives the workspace to builder and keeps it safe for root's git" {
+@test "run-as-builder: gives the workspace to builder and runs no git" {
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   SUDO_OUT=ok run_builder_step check "Check updates"
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/chown.log")" = "-R builder:builder ." ]
-  [ "$(cat "$BATS_TEST_TMPDIR/git.log")" = "config --global --add safe.directory $BATS_TEST_TMPDIR" ]
+  [ ! -e "$BATS_TEST_TMPDIR/git.log" ]
 }
 
 # A wrong GITHUB_ACTION_PATH fails the step before it stops the workflow
@@ -729,13 +833,14 @@ EOF
   [ "$output" = "!cancelled() && needs.check.outputs.work == 'true'" ]
 }
 
-# Runs the Hand over step in an empty workspace. builder has uid 1000. ps
-# lists the processes in $PS_LINES until pkill ran and those in
-# $PS_AFTER_KILL after it, as "<uid> <ruid> <state>" separated by commas,
-# with the uid of ps itself, and exits with $PS_RC. pgrep matches any process
-# of builder, zombies included, as the real one does. pkill and sleep only
-# log their calls. A step still running after 20 s fails.
-run_hand_over_step() {
+# Runs the Stop builder step in an empty workspace. builder has uid 1000,
+# and no uid when $NO_BUILDER is set. ps lists the processes in $PS_LINES
+# until pkill ran and those in $PS_AFTER_KILL after it, as
+# "<uid> <ruid> <state>" separated by commas, with the uid of ps itself,
+# and exits with $PS_RC. pgrep matches any process of builder, zombies
+# included, as the real one does. pkill and sleep only log their calls. A
+# step still running after 20 s fails.
+run_stop_builder_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$ws" "$bin"
   cat >"$bin/ps" <<'EOF'
@@ -746,52 +851,127 @@ echo "0 0 R"
 [[ -z "$lines" ]] || tr ',' '\n' <<<"$lines"
 EOF
   printf '#!/bin/sh\nps | grep -q " 1000 \\| 1000 "\n' >"$bin/pgrep"
-  printf '#!/bin/sh\n[ "$*" = "-u builder" ] && echo 1000\n' >"$bin/id"
+  printf '#!/bin/sh\n[ "$*" = "-u builder" ] && [ -z "$NO_BUILDER" ] && echo 1000\n' >"$bin/id"
   printf '#!/bin/sh\necho "$*" >>"$CALLS/pkill"\n' >"$bin/pkill"
   printf '#!/bin/sh\necho x >>"$CALLS/sleep"\n' >"$bin/sleep"
   chmod +x "$bin/ps" "$bin/pgrep" "$bin/id" "$bin/pkill" "$bin/sleep"
   CALLS="$BATS_TEST_TMPDIR/calls"
   mkdir -p "$CALLS"
-  step_run prepare "Hand over" >"$BATS_TEST_TMPDIR/step.sh"
+  step_run check "Stop builder" >"$BATS_TEST_TMPDIR/step.sh"
   run timeout 20 env -C "$ws" PATH="$bin:$PATH" CALLS="$CALLS" PS_LINES="${PS_LINES:-}" \
-    PS_AFTER_KILL="${PS_AFTER_KILL:-}" PS_RC="${PS_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
+    PS_AFTER_KILL="${PS_AFTER_KILL:-}" PS_RC="${PS_RC:-0}" NO_BUILDER="${NO_BUILDER:-}" \
+    bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
-@test "check-updates: Hand over goes on when builder runs nothing" {
-  PS_LINES="0 0 S" run_hand_over_step
+@test "check-updates: Stop builder goes on when builder runs nothing" {
+  PS_LINES="0 0 S" run_stop_builder_step
   [ "$status" -eq 0 ]
   [ ! -e "$CALLS/pkill" ]
 }
 
-@test "check-updates: Hand over kills builder and goes on when its processes end" {
-  PS_LINES="1000 1000 S,1000 1000 R" PS_AFTER_KILL="" run_hand_over_step
+# A job that failed before useradd has no builder and no checkout
+@test "check-updates: Stop builder does nothing when the job has no builder" {
+  NO_BUILDER=1 PS_RC=1 run_stop_builder_step
+  [ "$status" -eq 0 ]
+  [ ! -e "$CALLS/pkill" ]
+}
+
+@test "check-updates: Stop builder kills builder and goes on when its processes end" {
+  PS_LINES="1000 1000 S,1000 1000 R" PS_AFTER_KILL="" run_stop_builder_step
   [ "$status" -eq 0 ]
   grep -qx -- "-KILL -u builder" "$CALLS/pkill"
   grep -qx -- "-KILL -U builder" "$CALLS/pkill"
 }
 
-@test "check-updates: Hand over does not wait for zombies" {
-  PS_LINES="1000 1000 S" PS_AFTER_KILL="1000 1000 Z,1000 1000 Z+" run_hand_over_step
+@test "check-updates: Stop builder does not wait for zombies" {
+  PS_LINES="1000 1000 S" PS_AFTER_KILL="1000 1000 Z,1000 1000 Z+" run_stop_builder_step
   [ "$status" -eq 0 ]
 }
 
-@test "check-updates: Hand over fails when a process of builder survives" {
-  PS_LINES="1000 1000 S" PS_AFTER_KILL="1000 1000 Z,1000 1000 D" run_hand_over_step
+@test "check-updates: Stop builder fails when a process of builder survives" {
+  PS_LINES="1000 1000 S" PS_AFTER_KILL="1000 1000 Z,1000 1000 D" run_stop_builder_step
   [ "$status" -ne 0 ]
   [[ "$output" == *"::error::"* ]]
   [ "$(wc -l <"$CALLS/sleep")" -le 30 ]
 }
 
-@test "check-updates: Hand over counts a process whose real user is builder" {
-  PS_LINES="0 1000 S" PS_AFTER_KILL="0 1000 S" run_hand_over_step
+@test "check-updates: Stop builder counts a process whose real user is builder" {
+  PS_LINES="0 1000 S" PS_AFTER_KILL="0 1000 S" run_stop_builder_step
   [ "$status" -ne 0 ]
   [[ "$output" == *"::error::"* ]]
 }
 
-@test "check-updates: Hand over fails when the process list cannot be read" {
-  PS_RC=1 run_hand_over_step
+@test "check-updates: Stop builder fails when the process list cannot be read" {
+  PS_RC=1 run_stop_builder_step
   [ "$status" -ne 0 ]
   [[ "$output" == *"::error::"* ]]
+}
+
+# Runs the Hand over step of prepare in $BATS_TEST_TMPDIR/ws, with the
+# commands of $BATS_TEST_TMPDIR/bin first on PATH
+run_hand_over_step() {
+  mkdir -p "$BATS_TEST_TMPDIR/ws" "$BATS_TEST_TMPDIR/bin"
+  step_run prepare "Hand over" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$BATS_TEST_TMPDIR/ws" PATH="$BATS_TEST_TMPDIR/bin:$PATH" bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+# Writes the files that prepare hands over for the package foo
+make_handoff() {
+  local dir="$BATS_TEST_TMPDIR/ws/handoff"
+  mkdir -p "$dir/prepared/foo" "$dir/status"
+  echo pkgbuild >"$dir/prepared/foo/PKGBUILD"
+  echo srcinfo >"$dir/prepared/foo/.SRCINFO"
+  echo base >"$dir/prepared/foo/base"
+  echo "updated: 2.0" >"$dir/status/foo"
+}
+
+@test "check-updates: Hand over copies the prepared files and the statuses, nothing else" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_handoff
+  chmod 0755 "$ws/handoff/prepared/foo/PKGBUILD"
+  echo notes >"$ws/handoff/prepared/foo/notes.txt"
+  mkdir -p "$ws/handoff/prepared/.x"
+  echo hidden >"$ws/handoff/prepared/.x/PKGBUILD"
+  echo other >"$ws/handoff/other"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
+  [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/foo' ]
+  [ "$(stat -c %a "$ws/upload/prepared/foo/PKGBUILD")" = "644" ]
+  [ "$(cat "$ws/upload/status/foo")" = "updated: 2.0" ]
+}
+
+# A link would put a file that root can read into an artifact anyone with
+# read access to the repository can download
+@test "check-updates: Hand over copies no link, also one that find lists" {
+  local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" round
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  for round in real listed; do
+    echo "$round"
+    rm -rf "$ws"
+    make_handoff
+    ln -sf "$BATS_TEST_TMPDIR/secret" "$ws/handoff/prepared/foo/PKGBUILD"
+    if [[ "$round" == listed ]]; then
+      mkdir -p "$bin"
+      # Lists links too, as a link swapped in after the listing would be
+      printf '#!/usr/bin/env bash\nexec %q prepared status -print0\n' "$(command -v find)" >"$bin/find"
+      chmod +x "$bin/find"
+    fi
+    run_hand_over_step
+    [ "$status" -eq 0 ]
+    [ ! -e "$ws/upload/prepared/foo/PKGBUILD" ]
+    [ -f "$ws/upload/prepared/foo/base" ]
+  done
+}
+
+@test "check-updates: Hand over copies nothing from a handoff that is a link" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_handoff
+  mv "$ws/handoff" "$BATS_TEST_TMPDIR/elsewhere"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$ws/handoff"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  [ -z "$(ls -A "$ws/upload")" ]
 }
 
 # Runs the issue step of the issues job in a workspace with the statuses
@@ -856,7 +1036,7 @@ EOF
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GITHUB_REPOSITORY=owner/fork \
-    RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
+    RUN_URL=https://example.invalid/run bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: an open issue of another package holds back no issue" {
@@ -1040,8 +1220,8 @@ EOF
   : >"$BODY_LOG"
   step_run issues "Close resolved issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
-    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork \
-    RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
+    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" \
+    RUN_URL=https://example.invalid/run bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # A git repository at $BATS_TEST_TMPDIR/ws whose HEAD holds README.md,
@@ -1077,6 +1257,13 @@ moved_tree() {
 run_commit_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
+  cat >"$bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$SUDO_LOG"
+[[ "$1 $2" == "-u builder" ]] || exit 97
+shift 2
+exec "$@"
+EOF
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
@@ -1094,11 +1281,13 @@ case "$2" in
   *) exit 1 ;;
 esac
 EOF
-  chmod +x "$bin/gh"
+  chmod +x "$bin/gh" "$bin/sudo"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   : >"$GH_LOG"
+  : >"$SUDO_LOG"
   step_run publish "Commit changes via API" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" REPO=owner/fork BRANCH=main \
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" SUDO_LOG="$SUDO_LOG" REPO=owner/fork BRANCH=main \
     GH_HEAD="${GH_HEAD:-$(git -C "$ws" rev-parse HEAD)}" GH_TREE_FAIL="${GH_TREE_FAIL:-}" \
     GH_TREE="${GH_TREE:-$(git -C "$ws" ls-tree -r HEAD | awk '{ print $4 " " $3 }')}" \
     bash -e "$BATS_TEST_TMPDIR/step.sh"
@@ -1152,6 +1341,40 @@ no_commit() {
   no_commit
 }
 
+# builder owns the work tree: git runs as builder, and builder reads each
+# file, so a link reaches nothing that builder cannot read
+@test "check-updates: the commit step reads the work tree as builder" {
+  make_commit_repo README.md="new table" packages/foo.yml="current: 2.0"
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/bar.yml)" run_commit_step
+  [ "$status" -eq 0 ]
+  run cat "$SUDO_LOG"
+  [ "${lines[0]}" = "-u builder git diff --name-only -z" ]
+  [ "${lines[1]}" = "-u builder git rev-parse HEAD" ]
+  [ "${lines[2]}" = "-u builder git rev-parse HEAD:README.md" ]
+  [ "${lines[3]}" = "-u builder git rev-parse HEAD:packages/foo.yml" ]
+  [ "${lines[4]}" = "-u builder base64 -w0 -- README.md" ]
+  [ "${lines[5]}" = "-u builder base64 -w0 -- packages/foo.yml" ]
+  [ "${#lines[@]}" -eq 6 ]
+}
+
+# The step commits with contents: write, and the job writes only the README
+# and the package YAMLs
+@test "check-updates: the commit step refuses a change to any other tracked file" {
+  local file ws="$BATS_TEST_TMPDIR/ws"
+  for file in aurtomator.sh packages/sub/x.yml .github/workflows/check-updates.yml; do
+    echo "$file"
+    rm -rf "$ws"
+    # make_commit_repo commits every file of the work tree
+    mkdir -p "$(dirname "$ws/$file")"
+    echo old >"$ws/$file"
+    make_commit_repo README.md="new table" "$file=new"
+    run_commit_step
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::Refusing to commit a change to '$file'"* ]]
+    no_commit
+  done
+}
+
 @test "check-updates: the commit step fails when it cannot list the tree of a moved head" {
   make_commit_repo README.md="new table"
   GH_HEAD=$MOVED GH_TREE_FAIL=1 run_commit_step
@@ -1172,7 +1395,7 @@ no_commit() {
 # or closes an issue
 @test "check-updates: the issues job runs in every run that checked, after publish" {
   run yq '.jobs.issues.needs | join(" ")' "$CHECK_UPDATES"
-  [ "$output" = "image check publish" ]
+  [ "$output" = "image check prepare verify publish" ]
   run yq '.jobs.issues.if' "$CHECK_UPDATES"
   [ "$output" = "!cancelled() && needs.check.result == 'success'" ]
   run yq '.jobs.check.steps[] | select(.name == "Upload statuses") | has("if")' "$CHECK_UPDATES"
@@ -1276,7 +1499,7 @@ EOF
 
 @test "check-updates: closes the check issue of a package whose check passed" {
   GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' \
-    run_close_step foo=up_to_date bar="new_version: 2.0.0" _error_count=0
+    run_close_step foo=up_to_date bar="new_version: 2.0.0"
   [ "$status" -eq 0 ]
   grep -qx 'issue close 12 --comment comment' "$GH_LOG"
   grep -qx 'issue close 13 --comment comment' "$GH_LOG"
@@ -1309,11 +1532,35 @@ EOF
 }
 
 @test "check-updates: closes no issue of another package" {
-  GH_OPEN=$'12 ❌ foo-bar: check failed\n13 ❌ Check AUR Package Updates failed' \
+  GH_OPEN=$'12 ❌ foo-bar: check failed\n13 ❌ Check AUR Package Updates failed' RUN_OK=false \
     run_close_step foo=up_to_date
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+@test "check-updates: a run without a failed job closes the issue of a failed run" {
+  GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ Check AUR Package Updates failed' \
+    run_close_step foo="check_failed: API down"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 13 --comment Run https://example.invalid/run succeeded.' "$GH_LOG"
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "check-updates: keeps the issue of a failed run after a failed prepare or verify" {
+  GH_OPEN=$'13 ❌ Check AUR Package Updates failed' RUN_OK=false run_close_step foo=up_to_date
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+# The close step runs only after a publish that succeeded or was skipped, and
+# the issues job runs only after a check that succeeded
+@test "check-updates: the close step knows whether prepare and verify failed" {
+  run yq '.jobs.issues.steps[] | select(.name == "Close resolved issues") | .env.RUN_OK' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = "\${{ (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}" ]
 }
 
 @test "check-updates: closes the issue of a package that is no longer held" {
@@ -1384,7 +1631,9 @@ EOF
   [ "$output" = "./aurtomator/.github/actions/run-as-builder --verify handoff" ]
   [ "$(step_run verify "Hand over")" = "$(step_run prepare "Hand over")" ]
   run yq '[.jobs.verify.steps[].name] | join(",")' "$CHECK_UPDATES"
-  [[ "$output" == *"Verify checksums,Hand over,Upload verified handoff"* ]]
+  [[ "$output" == *"Verify checksums,Stop builder,Hand over,Upload verified handoff"* ]]
+  run yq '[.jobs.prepare.steps[].name] | join(",")' "$CHECK_UPDATES"
+  [[ "$output" == *"Prepare updates,Stop builder,Hand over,Upload handoff"* ]]
   run yq '.jobs.verify.steps[] | select(.name == "Upload verified handoff") | .with.path' "$CHECK_UPDATES"
   [ "$output" = "upload/" ]
 }
@@ -1506,6 +1755,7 @@ EOF
   grep -q '^issue create --title ❌ Check AUR Package Updates failed --label auto-update --body ' "$GH_LOG"
   grep -q 'https://example.invalid/runs/7' "$GH_LOG"
   grep -q 'failed in check, publish' "$GH_LOG"
+  grep -q 'until a run succeeds, and that run closes this issue\.$' "$GH_LOG"
 }
 
 @test "notify-failure: opens the issue when the jobs cannot be listed" {

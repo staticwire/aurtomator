@@ -123,7 +123,7 @@ fi
 # =============================================================================
 
 log_info "Updating pkgver to $NEW_VERSION"
-pkgrel=1
+pkgrel=$(_update_pkgrel "${aur_dir}/PKGBUILD" "$NEW_VERSION")
 if [[ -n "$ASSET_VAR" ]]; then
   pkgrel=$(_asset_pkgrel "${aur_dir}/PKGBUILD" "$ASSET_VAR" "$NEW_VERSION" "$ASSET") || exit 1
   sed -i "s/^${ASSET_VAR}=.*/${ASSET_VAR}=${ASSET}/" "${aur_dir}/PKGBUILD"

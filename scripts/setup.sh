@@ -95,6 +95,26 @@ ask() {
   fi
 }
 
+# Prints the key path $1 with ~/ expanded and made absolute, so the saved
+# path works from any directory. ~user/ stays as it is.
+key_path() {
+  local path="${1/#\~\//$HOME/}"
+  [[ "$path" == /* || "$path" == \~* ]] || path="$PWD/$path"
+  printf '%s\n' "$path"
+}
+
+# Prints owner/repo of the origin remote of the data directory when it is a
+# repository on github.com, and nothing otherwise
+origin_repo() {
+  local url
+  url=$(git -C "$AURTOMATOR_DATA_DIR" remote get-url origin 2>/dev/null) || return 0
+  url="${url%/}"
+  url="${url%.git}"
+  if [[ "$url" =~ ^(https://|ssh://git@|git@)github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[2]}"
+  fi
+}
+
 # =============================================================================
 # LOAD / SAVE CONFIG
 # =============================================================================
@@ -187,8 +207,7 @@ setup_ssh() {
   if [[ -z "$AUR_SSH_KEY" ]]; then
     AUR_SSH_KEY=$(ask "Path to SSH private key for AUR" "$HOME/.ssh/aur_ed25519")
   fi
-  # Expand ~/ to the home dir. ~user/ stays as it is.
-  AUR_SSH_KEY="${AUR_SSH_KEY/#\~\//$HOME/}"
+  AUR_SSH_KEY=$(key_path "$AUR_SSH_KEY")
 
   check_ssh_key || return 1
   ok "SSH key: $AUR_SSH_KEY"
@@ -391,13 +410,22 @@ setup_secrets() {
   fi
 
   if [[ "$has_gh" == "true" ]]; then
-    # Detect repo from origin remote (not upstream)
     local gh_repo
-    gh_repo=$(git -C "$AURTOMATOR_DATA_DIR" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||; s|\.git$||' || true)
+    gh_repo=$(origin_repo)
     if [[ -z "$gh_repo" ]]; then
       gh_repo=$(ask "GitHub repo (owner/name)")
     fi
     ok "Target repo: $gh_repo"
+
+    # The secrets hold the key that pushes every package of the user
+    if [[ "$NON_INTERACTIVE" != "true" ]]; then
+      local set_secrets
+      set_secrets=$(ask "Set the secrets on $gh_repo? (Y/n)")
+      if [[ "$set_secrets" == "n" || "$set_secrets" == "N" ]]; then
+        fail "Secrets not set on $gh_repo"
+        return 1
+      fi
+    fi
 
     printf "\n  Setting secrets on %s:\n" "$gh_repo"
 
@@ -477,9 +505,10 @@ verify_all() {
     errors=$((errors + 1))
   fi
 
-  # SSH (AUR returns exit 1 even on success, so check output for "Welcome")
+  # SSH with that key alone, as CI has it: no ssh config and no agent. AUR
+  # returns exit 1 even on success, so check output for "Welcome".
   local ssh_out
-  ssh_out=$(ssh -o BatchMode=yes -o ConnectTimeout=5 -i "$AUR_SSH_KEY" aur@aur.archlinux.org 2>&1 || true)
+  ssh_out=$(ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o ConnectTimeout=5 -i "$AUR_SSH_KEY" aur@aur.archlinux.org 2>&1 || true)
   if echo "$ssh_out" | grep -qi "welcome"; then
     ok "SSH: aur.archlinux.org accessible"
   else
@@ -502,7 +531,7 @@ verify_all() {
   # Secrets
   if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
     local gh_repo
-    gh_repo=$(git -C "$AURTOMATOR_DATA_DIR" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||; s|\.git$||' || true)
+    gh_repo=$(origin_repo)
     local secret_list
     secret_list=$(gh secret list -R "$gh_repo" 2>/dev/null || true)
     local secret_count=0
@@ -551,20 +580,17 @@ while [[ $# -gt 0 ]]; do
       STEPS+=("$1")
       shift
       ;;
-    --git-name)
-      GIT_AUTHOR_NAME="$2"
-      shift 2
-      ;;
-    --git-email)
-      GIT_AUTHOR_EMAIL="$2"
-      shift 2
-      ;;
-    --gpg-key)
-      GPG_KEY_ID="$2"
-      shift 2
-      ;;
-    --ssh-key)
-      AUR_SSH_KEY="$2"
+    --git-name | --git-email | --gpg-key | --ssh-key)
+      if [[ $# -lt 2 ]]; then
+        echo "$1 needs a value (see $SETUP_CMD --help)" >&2
+        exit 1
+      fi
+      case "$1" in
+        --git-name) GIT_AUTHOR_NAME="$2" ;;
+        --git-email) GIT_AUTHOR_EMAIL="$2" ;;
+        --gpg-key) GPG_KEY_ID="$2" ;;
+        --ssh-key) AUR_SSH_KEY=$(key_path "$2") ;;
+      esac
       shift 2
       ;;
     --non-interactive)

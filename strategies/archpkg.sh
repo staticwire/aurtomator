@@ -31,7 +31,7 @@ fi
 # The server reads a + in the query as a space, so it goes as %2B
 search_url="https://archlinux.org/packages/search/json/?name=${archpkg_name//+/%2B}"
 # One line per entry: repo, epoch and pkgver
-entries=$(http_get "$search_url" | yq -o csv '.results[] | [.repo, .epoch, .pkgver]') || {
+entries=$(http_get_json "$search_url" | yq -o csv '.results[] | [.repo, .epoch, .pkgver]') || {
   echo "Failed to fetch Arch package info for ${archpkg_name}" >&2
   exit 1
 }

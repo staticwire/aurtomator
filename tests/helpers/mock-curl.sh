@@ -26,6 +26,14 @@ case "$url" in
     effective_url="${url%%/api/*}/402.html"
     echo '<!DOCTYPE html><html><body><h1>Are you Human?</h1></body></html>'
     ;;
+  # The same page in front of a registry or of archlinux.org
+  *registry.npmjs.org/gated-pkg/latest | *pypi.org/pypi/gated-pkg/json | \
+    *crates.io/api/v1/crates/gated-pkg | *repology.org/api/v1/project/gated-pkg | \
+    *archlinux.org/packages/search/json/?name=gated-pkg)
+    host="${url#https://}"
+    effective_url="https://${host%%/*}/402.html"
+    echo '<!DOCTYPE html><html><body><h1>Are you Human?</h1></body></html>'
+    ;;
 
   # GitHub Release: a body without tag_name. A real 404 is exit 22 with
   # no body, see the tests of curl exit codes.
@@ -271,12 +279,21 @@ case "$url" in
     printf ']\n'
     ;;
   # GitHub answered [] for a page of ruffle-rs/ruffle that a retry filled
-  *"api.github.com/repos/empty-nightly/repo/releases?per_page=100&page="*)
+  *"api.github.com/repos/empty-nightly/repo/releases?per_page=100&page="* | \
+    *"api.github.com/repos/empty-nightly/repo/releases?per_page=1")
     echo '[]'
+    ;;
+  # The first release, which tells a list from an empty one
+  *"api.github.com/repos/"*"/releases?per_page=1")
+    echo '[{"tag_name": "v0.1", "published_at": "2026-01-01T00:00:00Z"}]'
     ;;
   # Pattern B+D: release names and tags that hold a double quote
   *api.github.com/repos/owner/quoted-repo/releases\?per_page=20)
     echo '[{"tag_name": "v1.0.0", "name": "Stable"}, {"tag_name": "v2.0.0", "name": "Beta \"b\""}, {"tag_name": "nightly-\"q\"-2026-04-01", "name": "Nightly"}]'
+    ;;
+  # Pattern B: a tag that holds two dates
+  *api.github.com/repos/owner/two-dates/releases\?per_page=20)
+    echo '[{"tag_name": "build-2026-11-04-from-2026-11-01", "name": "Build"}]'
     ;;
   # Pattern B+D: releases list (for dated tags and channel filter)
   *api.github.com/repos/*/releases\?per_page=20)

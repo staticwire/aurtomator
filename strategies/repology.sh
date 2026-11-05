@@ -21,7 +21,7 @@ repology_name=$(pkg_get "$pkg_file" '.upstream.repology // .name')
 
 # Repology returns an array of package entries from various repos, and
 # an empty array for a project it does not know.
-entries=$(http_get "https://repology.org/api/v1/project/${repology_name}") || {
+entries=$(http_get_json "https://repology.org/api/v1/project/${repology_name}") || {
   echo "Failed to fetch Repology info for ${repology_name}" >&2
   exit 1
 }

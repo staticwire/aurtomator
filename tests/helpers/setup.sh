@@ -60,3 +60,16 @@ strategy: ${strategy}
 ${extra}
 EOF
 }
+
+# Prints how many status files of directory $1 hold check_failed or
+# update_failed
+failed_statuses() {
+  local file count=0
+  for file in "$1"/*; do
+    [[ -f "$file" && "${file##*/}" != _* ]] || continue
+    case "$(<"$file")" in
+      check_failed:* | update_failed:*) count=$((count + 1)) ;;
+    esac
+  done
+  echo "$count"
+}

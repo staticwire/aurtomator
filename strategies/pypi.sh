@@ -19,8 +19,7 @@ source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 pkg_file=$(pkg_file "$NAME")
 registry=$(pkg_get "$pkg_file" .upstream.registry)
 
-version=$(http_get "https://pypi.org/pypi/${registry}/json" |
-  yq -r '.info.version') || {
+version=$(http_get_json "https://pypi.org/pypi/${registry}/json" | yq -r '.info.version') || {
   echo "Failed to fetch PyPI info for ${registry}" >&2
   exit 1
 }

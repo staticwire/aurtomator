@@ -98,7 +98,6 @@ done
 # run prepares the package again. Only package names from packages/ reach a
 # path.
 if [[ "$MODE" == "verify" ]]; then
-  failed=0
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     [[ -f "$pkg_file" ]] || continue
     pkg_name=$(pkg_get "$pkg_file" .name)
@@ -122,21 +121,9 @@ if [[ "$MODE" == "verify" ]]; then
         mkdir -p "${WORK_DIR}/status"
         rm -f "${WORK_DIR}/status/${pkg_name}"
         echo "update_failed: ${verify_err}" >"${WORK_DIR}/status/${pkg_name}"
-        ((failed++)) || true
         ;;
     esac
   done
-
-  if ((failed > 0)); then
-    count_file="${WORK_DIR}/status/_error_count"
-    count=0
-    if [[ -f "$count_file" && ! -L "$count_file" ]]; then
-      count=$(<"$count_file")
-    fi
-    [[ "$count" =~ ^[0-9]+$ ]] || count=0
-    rm -f "$count_file"
-    echo "$((count + failed))" >"$count_file"
-  fi
   exit 0
 fi
 
@@ -509,9 +496,6 @@ done
 
 echo ""
 log_info "Checked: $checked, Updated: $updated, Errors: $errors"
-
-# Write summary for downstream steps
-echo "${errors}" >"${STATUS_DIR}/_error_count"
 
 # Hand the statuses to the publish run
 if [[ "$MODE" == "prepare" ]]; then

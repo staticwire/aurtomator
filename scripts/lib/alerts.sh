@@ -65,7 +65,7 @@ fired_alerts() {
     fi
     value=$(pkg_get "$file" ".alerts[$i].$kind")
     if [[ "$kind" == when && "$value" != major ]]; then
-      log_err "alerts[$i].when must be major: $value"
+      log_err "alerts[$i].when must be major, got $value"
       return 1
     fi
     if ! note=$(alert_note "$file" "$i"); then

@@ -187,6 +187,16 @@ _plain_value() {
   printf '%s\n' "$value"
 }
 
+# Print the pkgrel of an update of AUR PKGBUILD $1 to version $2: the AUR
+# pkgrel when the AUR has that version already, and 1 for a new version
+_update_pkgrel() {
+  if [[ "$2" == "$(_plain_value "$1" pkgver)" ]]; then
+    _plain_value "$1" pkgrel
+  else
+    echo 1
+  fi
+}
+
 # Print the pkgrel of an update of a package with asset_var: 1 for a new
 # version, the AUR pkgrel plus one for a rebuild, which is a new asset
 # value of the same version, and the AUR pkgrel when the AUR already has
@@ -619,7 +629,7 @@ prepared_base() {
 #       package, if any, $7=expected asset value
 # Returns: 0 when both files pass, 1 otherwise (reason on stderr)
 check_prepared_files() {
-  local f rel=1 old_asset=""
+  local f rel old_asset=""
   # git keeps symlinks, and cp writes through one
   for f in PKGBUILD .SRCINFO; do
     if [[ -L "$1/$f" || ! -f "$1/$f" ]]; then
@@ -627,6 +637,7 @@ check_prepared_files() {
       return 1
     fi
   done
+  rel=$(_update_pkgrel "$1/PKGBUILD" "$3")
   if [[ -n "${6:-}" ]]; then
     rel=$(_asset_pkgrel "$1/PKGBUILD" "$6" "$3" "$7") || return 1
     old_asset=$(_asset_line_value "$1/PKGBUILD" "$6" "AUR PKGBUILD")

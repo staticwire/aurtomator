@@ -97,14 +97,14 @@ key_strategies() {
 # Args: $1=package file, $2=index of the entry, $3=pkgver_format, if any
 # Returns 0 if valid, 1 if invalid (errors printed to stderr)
 validate_alert() {
-  local file="$1" i="$2" format="$3" rule="$1: alerts[$2]" errors=0 unknown tag value
+  local file="$1" i="$2" format="$3" rule="packages/${1##*/}: alerts[$2]" errors=0 unknown tag value
   if [[ $(pkg_get "$file" ".alerts[$i] | tag") != "!!map" ]]; then
     log_err "$rule must be a map with note and one of when, from, match"
     return 1
   fi
   unknown=$(pkg_get "$file" ".alerts[$i] | [keys[] | select(. != \"when\" and . != \"from\" and . != \"match\" and . != \"note\" and . != \"hold\")] | join(\", \")")
   if [[ -n "$unknown" ]]; then
-    log_err "$rule has an unknown key: $unknown"
+    log_err "$rule: unknown key: $unknown"
     errors=1
   fi
   if [[ $(pkg_get "$file" ".alerts[$i] | [keys[] | select(. == \"when\" or . == \"from\" or . == \"match\")] | length") != 1 ]]; then
@@ -115,7 +115,7 @@ validate_alert() {
   tag=$(pkg_get "$file" ".alerts[$i].when | tag")
   value=$(pkg_get "$file" ".alerts[$i].when")
   if [[ "$tag" != "!!null" && "$value" != major ]]; then
-    log_err "$rule.when must be major: $value"
+    log_err "$rule.when must be major, got $value"
     errors=1
   # The fixed text of a format such as 4.%s holds the first number
   elif [[ "$tag" != "!!null" && -n "$format" ]]; then
@@ -156,14 +156,16 @@ validate_alert() {
 validate_pkg() {
   local file="$1"
   local errors=0
+  # The messages name the file in the data directory, as the user sees it
+  local shown="packages/${file##*/}"
 
   # --- YAML syntax ---
   if ! yq '.' "$file" >/dev/null 2>&1; then
-    log_err "Invalid YAML syntax: $file"
+    log_err "Invalid YAML syntax: $shown"
     return 1
   fi
   if [[ $(pkg_get "$file" 'tag') != "!!map" ]]; then
-    log_err "$file must be a map of fields"
+    log_err "$shown must be a map of fields"
     return 1
   fi
 
@@ -172,13 +174,19 @@ validate_pkg() {
   strategy=$(pkg_get "$file" '.strategy // ""')
 
   # --- Required core fields ---
+  # check-all.sh finds a package by its name, never by its file
+  local stem="${file##*/}"
+  stem="${stem%.yml}"
   if [[ -z "$name" || "$name" == "null" ]]; then
-    log_err "$file: missing required field 'name'"
+    log_err "$shown: missing required field 'name'"
+    ((errors++))
+  elif [[ "$name" != "$stem" ]]; then
+    log_err "$shown: name '$name' must equal the file name '$stem'"
     ((errors++))
   fi
 
   if [[ -z "$strategy" || "$strategy" == "null" ]]; then
-    log_err "$file: missing required field 'strategy'"
+    log_err "$shown: missing required field 'strategy'"
     ((errors++))
     # Strategy-specific fields cannot be checked without a strategy
     return 1
@@ -193,7 +201,7 @@ validate_pkg() {
     fi
   done
   if [[ "$valid" == "false" ]]; then
-    log_err "$file: unknown strategy '$strategy' (valid: ${VALID_STRATEGIES[*]})"
+    log_err "$shown: unknown strategy '$strategy' (valid: ${VALID_STRATEGIES[*]})"
     ((errors++))
     return 1
   fi
@@ -207,26 +215,26 @@ validate_pkg() {
   done
   if ((${#unknown[@]} > 0)); then
     printf -v list '%s, ' "${unknown[@]}"
-    log_err "$file has an unknown key: ${list%, }"
+    log_err "$shown: unknown key: ${list%, }"
     ((errors++))
   fi
 
   if [[ $(pkg_get "$file" '.upstream | tag') =~ ^!!(null|map)$ ]]; then
     mapfile -t keys < <(pkg_get "$file" '.upstream // {} | keys | .[]')
   else
-    log_err "$file: upstream must be a map"
+    log_err "$shown: upstream must be a map"
     return 1
   fi
   if ((${#keys[@]} > 0)) && ! strategy_keys=$(upstream_keys "$strategy"); then
-    log_err "$file: validate-pkg.sh lists no upstream keys for the strategy $strategy"
+    log_err "$shown: validate-pkg.sh lists no upstream keys for the strategy $strategy"
     ((errors++))
   elif ((${#keys[@]} > 0)); then
     for key in "${keys[@]}"; do
       ! in_words "$key" "$strategy_keys" || continue
       if where=$(key_strategies "$key"); then
-        log_err "$file: upstream.$key applies to $where only"
+        log_err "$shown: upstream.$key applies to $where only"
       else
-        log_err "$file: upstream.$key is not a field of any strategy"
+        log_err "$shown: upstream.$key is not a field of any strategy"
       fi
       ((errors++))
     done
@@ -238,7 +246,7 @@ validate_pkg() {
   for flag in allow_downgrade allow_version_jump; do
     flag_tag=$(pkg_get "$file" ".${flag} | tag")
     if [[ "$flag_tag" != "!!null" && "$flag_tag" != "!!bool" ]]; then
-      log_err "$file: $flag must be true or false"
+      log_err "$shown: $flag must be true or false"
       ((errors++))
     fi
   done
@@ -249,7 +257,7 @@ validate_pkg() {
     dash_set=true
     pkgver_dash=$(pkg_get "$file" '.pkgver_dash')
     if [[ "$pkgver_dash" != "_" && "$pkgver_dash" != "." && -n "$pkgver_dash" ]]; then
-      log_err "$file: pkgver_dash must be _, . or ''"
+      log_err "$shown: pkgver_dash must be _, . or ''"
       ((errors++))
     fi
   fi
@@ -259,10 +267,10 @@ validate_pkg() {
     pkgver_format=$(pkg_get "$file" '.pkgver_format')
     formatted=$(pkg_get "$file" '.current // ""')
     if [[ ! "$pkgver_format" =~ ^[A-Za-z0-9._+]*%s[A-Za-z0-9._+]*$ ]]; then
-      log_err "$file: pkgver_format must hold %s once, with only A-Za-z0-9 . _ + around it"
+      log_err "$shown: pkgver_format must hold %s once, with only A-Za-z0-9 . _ + around it"
       ((errors++))
     elif [[ -n "$formatted" && -z "$(_unformat_version "$formatted" "$pkgver_format")" ]]; then
-      log_err "$file: current $formatted does not fit pkgver_format $pkgver_format"
+      log_err "$shown: current $formatted does not fit pkgver_format $pkgver_format"
       ((errors++))
     fi
   fi
@@ -275,7 +283,7 @@ validate_pkg() {
       validate_alert "$file" "$i" "$pkgver_format" || ((errors++))
     done
   elif [[ "$alerts_tag" != "!!null" ]]; then
-    log_err "$file: alerts must be a list"
+    log_err "$shown: alerts must be a list"
     ((errors++))
   fi
 
@@ -284,7 +292,7 @@ validate_pkg() {
     branch=$(pkg_get "$file" '.upstream.branch')
     # git clone would read a name that starts with - as an option
     if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
-      log_err "$file: upstream.branch is not a valid branch name: $branch"
+      log_err "$shown: upstream.branch is not a valid branch name: $branch"
       ((errors++))
     fi
   fi
@@ -293,7 +301,7 @@ validate_pkg() {
   if [[ $(pkg_get "$file" '.upstream.describe | tag') != "!!null" ]]; then
     describe=$(pkg_get "$file" '.upstream.describe')
     if [[ "$describe" != tags && "$describe" != annotated ]]; then
-      log_err "$file: upstream.describe must be tags or annotated: $describe"
+      log_err "$shown: upstream.describe must be tags or annotated: $describe"
       ((errors++))
     fi
   fi
@@ -302,10 +310,10 @@ validate_pkg() {
   if [[ $(pkg_get "$file" '.upstream.tag_prefix | tag') != "!!null" ]]; then
     tag_prefix=$(pkg_get "$file" '.upstream.tag_prefix')
     if [[ -z "$describe" ]]; then
-      log_err "$file: upstream.tag_prefix applies with upstream.describe only"
+      log_err "$shown: upstream.tag_prefix applies with upstream.describe only"
       ((errors++))
     elif [[ ! "$tag_prefix" =~ ^[A-Za-z0-9._+/-]+$ ]]; then
-      log_err "$file: upstream.tag_prefix may hold A-Za-z0-9._+/- only: $tag_prefix"
+      log_err "$shown: upstream.tag_prefix may hold A-Za-z0-9._+/- only: $tag_prefix"
       ((errors++))
     fi
   fi
@@ -314,10 +322,10 @@ validate_pkg() {
   nightly_tag_regex=$(pkg_get "$file" '.upstream.nightly_tag_regex // ""')
   if [[ -n "$nightly_tag_regex" ]]; then
     if [[ $(pkg_get "$file" '.upstream | (has("nightly_tag") or has("channel"))') == true ]]; then
-      log_err "$file: upstream.nightly_tag_regex takes the place of nightly_tag and channel"
+      log_err "$shown: upstream.nightly_tag_regex takes the place of nightly_tag and channel"
       ((errors++))
     elif ! ere_valid "$nightly_tag_regex"; then
-      log_err "$file: upstream.nightly_tag_regex is not valid ERE regex: $nightly_tag_regex"
+      log_err "$shown: upstream.nightly_tag_regex is not valid ERE regex: $nightly_tag_regex"
       ((errors++))
     fi
   fi
@@ -326,11 +334,11 @@ validate_pkg() {
   prerelease=$(pkg_get "$file" '.upstream.prerelease | tag')
   if [[ "$prerelease" != "!!null" ]]; then
     if [[ "$prerelease" != "!!bool" ]]; then
-      log_err "$file: upstream.prerelease must be true or false"
+      log_err "$shown: upstream.prerelease must be true or false"
       ((errors++))
     # A semver pre-release always holds a dash
     elif [[ $(pkg_get "$file" '.upstream.prerelease') == true && "$dash_set" == false ]]; then
-      log_err "$file: upstream.prerelease needs pkgver_dash"
+      log_err "$shown: upstream.prerelease needs pkgver_dash"
       ((errors++))
     fi
   fi
@@ -338,7 +346,7 @@ validate_pkg() {
   local testing
   testing=$(pkg_get "$file" '.upstream.testing | tag')
   if [[ "$testing" != "!!null" && "$testing" != "!!bool" ]]; then
-    log_err "$file: upstream.testing must be true or false"
+    log_err "$shown: upstream.testing must be true or false"
     ((errors++))
   fi
 
@@ -349,15 +357,15 @@ validate_pkg() {
   tag_version_regex=$(pkg_get "$file" '.upstream.tag_version_regex // ""')
   if [[ -n "$tag_version_regex" && "$tag_version_regex" != "null" ]]; then
     if [[ "$strategy" == "github-nightly" && $(pkg_get "$file" '.upstream.version_source // "tag"') != "tag" ]]; then
-      log_err "$file: upstream.tag_version_regex applies to version_source tag only"
+      log_err "$shown: upstream.tag_version_regex applies to version_source tag only"
       ((errors++))
     # Then check the capture group (must have parentheses)
     elif ! echo "$tag_version_regex" | grep -qE '\([^)]*\)'; then
-      log_err "$file: upstream.tag_version_regex must contain a capture group (): $tag_version_regex"
+      log_err "$shown: upstream.tag_version_regex must contain a capture group (): $tag_version_regex"
       ((errors++))
     # Then check that bash compiles it, as tag_versions needs
     elif ! ere_valid "$tag_version_regex"; then
-      log_err "$file: upstream.tag_version_regex is not valid ERE regex: $tag_version_regex"
+      log_err "$shown: upstream.tag_version_regex is not valid ERE regex: $tag_version_regex"
       ((errors++))
     fi
   fi
@@ -366,20 +374,20 @@ validate_pkg() {
   tag_version_replace=$(pkg_get "$file" '.upstream.tag_version_replace // ""')
   if [[ -n "$tag_version_replace" ]]; then
     if [[ "$strategy" == "github-nightly" && $(pkg_get "$file" '.upstream.version_source // "tag"') != "tag" ]]; then
-      log_err "$file: upstream.tag_version_replace applies to version_source tag only"
+      log_err "$shown: upstream.tag_version_replace applies to version_source tag only"
       ((errors++))
     elif [[ -z "$tag_version_regex" ]]; then
-      log_err "$file: upstream.tag_version_replace needs upstream.tag_version_regex"
+      log_err "$shown: upstream.tag_version_replace needs upstream.tag_version_regex"
       ((errors++))
     elif [[ ! "$tag_version_replace" =~ ^([A-Za-z0-9._+]|\\[1-9])+$ ]]; then
-      log_err "$file: upstream.tag_version_replace may hold only A-Za-z0-9 . _ + and \\1 to \\9: $tag_version_replace"
+      log_err "$shown: upstream.tag_version_replace may hold only A-Za-z0-9 . _ + and \\1 to \\9: $tag_version_replace"
       ((errors++))
     # $regex|^ matches the empty string and fills BASH_REMATCH with every
     # group of the regex, so tag_version_fill finds a missing group as it
     # does at run time
     elif ere_valid "$tag_version_regex" &&
       ! { [[ "" =~ $tag_version_regex|^ ]] && tag_version_fill "$tag_version_replace" >/dev/null 2>&1; }; then
-      log_err "$file: upstream.tag_version_replace names a group tag_version_regex does not have: $tag_version_replace"
+      log_err "$shown: upstream.tag_version_replace names a group tag_version_regex does not have: $tag_version_replace"
       ((errors++))
     fi
   fi
@@ -396,10 +404,10 @@ validate_pkg() {
       groups=$((${#BASH_REMATCH[@]} - 1))
     fi
     if [[ "$asset_regex_tag" == "!!null" || "$asset_var_tag" == "!!null" ]]; then
-      log_err "$file: upstream.asset_regex and upstream.asset_var go together"
+      log_err "$shown: upstream.asset_regex and upstream.asset_var go together"
       ((errors++))
     elif ((groups != 1)); then
-      log_err "$file: upstream.asset_regex must be an ERE that bash accepts, with exactly one capture group: $asset_regex"
+      log_err "$shown: upstream.asset_regex must be an ERE that bash accepts, with exactly one capture group: $asset_regex"
       ((errors++))
     fi
     pkg_asset_var "$file" >/dev/null || ((errors++))
@@ -407,10 +415,10 @@ validate_pkg() {
   if [[ $(pkg_get "$file" '.current_asset | tag') != "!!null" ]]; then
     current_asset=$(pkg_get "$file" '.current_asset')
     if [[ "$asset_var_tag" == "!!null" ]]; then
-      log_err "$file: current_asset needs upstream.asset_var"
+      log_err "$shown: current_asset needs upstream.asset_var"
       ((errors++))
     elif ! validate_asset_value "$current_asset" 2>/dev/null; then
-      log_err "$file: current_asset must start with a letter or a digit and hold only A-Za-z0-9 . _ + ~ -: ${current_asset@Q}"
+      log_err "$shown: current_asset must start with a letter or a digit and hold only A-Za-z0-9 . _ + ~ -: ${current_asset@Q}"
       ((errors++))
     fi
   fi
@@ -421,10 +429,10 @@ validate_pkg() {
     version_source=$(pkg_get "$file" '.upstream.version_source // "tag"')
     sample=$(date -u -d 2026-01-02 +"$date_format")
     if [[ "$version_source" != "tag_date" && "$version_source" != "published_date" ]]; then
-      log_err "$file: upstream.date_format applies to version_source tag_date and published_date only"
+      log_err "$shown: upstream.date_format applies to version_source tag_date and published_date only"
       ((errors++))
     elif ! validate_pkgver "$sample" 2>/dev/null; then
-      log_err "$file: upstream.date_format must give a valid version, it gives ${sample@Q}"
+      log_err "$shown: upstream.date_format must give a valid version, it gives ${sample@Q}"
       ((errors++))
     fi
   fi
@@ -434,7 +442,7 @@ validate_pkg() {
       local project
       project=$(pkg_get "$file" '.upstream.project // ""')
       if [[ -z "$project" || "$project" == "null" ]]; then
-        log_err "$file: strategy '$strategy' requires 'upstream.project'"
+        log_err "$shown: strategy '$strategy' requires 'upstream.project'"
         ((errors++))
       fi
       if [[ "$strategy" == github-nightly ]]; then
@@ -442,17 +450,17 @@ validate_pkg() {
         nightly_source=$(pkg_get "$file" '.upstream.version_source // "tag"')
         nightly_pattern=$(pkg_get "$file" '.upstream.version_pattern // ""')
         if [[ ! "$nightly_source" =~ ^(tag|release_body|tag_date|published_date)$ ]]; then
-          log_err "$file: upstream.version_source must be tag, release_body, tag_date or published_date: $nightly_source"
+          log_err "$shown: upstream.version_source must be tag, release_body, tag_date or published_date: $nightly_source"
           ((errors++))
         elif [[ "$nightly_source" == release_body && -z "$nightly_pattern" ]]; then
-          log_err "$file: upstream.version_source release_body needs upstream.version_pattern"
+          log_err "$shown: upstream.version_source release_body needs upstream.version_pattern"
           ((errors++))
         elif [[ "$nightly_source" == release_body ]] && ! pcre_valid "$nightly_pattern"; then
-          log_err "$file: upstream.version_pattern is not valid PCRE regex: $nightly_pattern"
+          log_err "$shown: upstream.version_pattern is not valid PCRE regex: $nightly_pattern"
           ((errors++))
         fi
         if [[ "$nightly_source" != release_body && -n "$nightly_pattern" ]]; then
-          log_err "$file: upstream.version_pattern applies to version_source release_body only"
+          log_err "$shown: upstream.version_pattern applies to version_source release_body only"
           ((errors++))
         fi
         # Pattern A reads one fixed tag, which has no dash and so no
@@ -461,15 +469,15 @@ validate_pkg() {
         nightly_tag=$(pkg_get "$file" '.upstream.nightly_tag // "nightly"')
         nightly_channel=$(pkg_get "$file" '.upstream.channel // ""')
         if [[ "$nightly_source" == tag_date && -z "$nightly_tag_regex" && -z "$nightly_channel" && "$nightly_tag" != latest && "$nightly_tag" != *-* ]]; then
-          log_err "$file: upstream.version_source tag_date reads the date in the tag name, and the fixed tag $nightly_tag has none; use published_date, or a nightly_tag prefix with a dash for dated tags"
+          log_err "$shown: upstream.version_source tag_date reads the date in the tag name, and the fixed tag $nightly_tag has none; use published_date, or a nightly_tag prefix with a dash for dated tags"
           ((errors++))
         fi
         # nightly_tag: latest wins over channel, and channel over any other tag
         if [[ $(pkg_get "$file" '.upstream | (has("nightly_tag") and has("channel"))') == true ]]; then
           if [[ "$nightly_tag" == latest ]]; then
-            log_err "$file: upstream.nightly_tag latest takes the place of channel"
+            log_err "$shown: upstream.nightly_tag latest takes the place of channel"
           else
-            log_err "$file: upstream.channel takes the place of nightly_tag"
+            log_err "$shown: upstream.channel takes the place of nightly_tag"
           fi
           ((errors++))
         fi
@@ -481,15 +489,15 @@ validate_pkg() {
       tag=$(pkg_get "$file" '.upstream.tag // ""')
       assets_type=$(pkg_get "$file" '.upstream.assets | tag')
       if [[ -z "$project" || "$project" == "null" ]]; then
-        log_err "$file: strategy 'github-asset' requires 'upstream.project'"
+        log_err "$shown: strategy 'github-asset' requires 'upstream.project'"
         ((errors++))
       fi
       if [[ -z "$tag" || "$tag" == "null" ]]; then
-        log_err "$file: strategy 'github-asset' requires 'upstream.tag'"
+        log_err "$shown: strategy 'github-asset' requires 'upstream.tag'"
         ((errors++))
       fi
       if [[ "$assets_type" != "!!seq" || $(pkg_get "$file" '.upstream.assets | length') -eq 0 ]]; then
-        log_err "$file: strategy 'github-asset' requires 'upstream.assets' as a non-empty list"
+        log_err "$shown: strategy 'github-asset' requires 'upstream.assets' as a non-empty list"
         ((errors++))
       fi
       ;;
@@ -498,11 +506,11 @@ validate_pkg() {
       host=$(pkg_get "$file" '.upstream.host // ""')
       project=$(pkg_get "$file" '.upstream.project // ""')
       if [[ -z "$host" || "$host" == "null" ]]; then
-        log_err "$file: strategy '$strategy' requires 'upstream.host'"
+        log_err "$shown: strategy '$strategy' requires 'upstream.host'"
         ((errors++))
       fi
       if [[ -z "$project" || "$project" == "null" ]]; then
-        log_err "$file: strategy '$strategy' requires 'upstream.project'"
+        log_err "$shown: strategy '$strategy' requires 'upstream.project'"
         ((errors++))
       fi
       ;;
@@ -510,10 +518,10 @@ validate_pkg() {
       local url
       url=$(pkg_get "$file" '.upstream.url // ""')
       if [[ -z "$url" || "$url" == "null" ]]; then
-        log_err "$file: strategy 'git-tag' requires 'upstream.url'"
+        log_err "$shown: strategy 'git-tag' requires 'upstream.url'"
         ((errors++))
       elif [[ "$url" != https://* ]]; then
-        log_err "$file: upstream.url must use HTTPS: $url"
+        log_err "$shown: upstream.url must use HTTPS: $url"
         ((errors++))
       fi
       ;;
@@ -521,7 +529,7 @@ validate_pkg() {
       local upstream_type
       upstream_type=$(pkg_get "$file" '.upstream.type // ""')
       if [[ -z "$upstream_type" || "$upstream_type" == "null" ]]; then
-        log_err "$file: strategy 'git-latest' requires 'upstream.type'"
+        log_err "$shown: strategy 'git-latest' requires 'upstream.type'"
         ((errors++))
       else
         case "$upstream_type" in
@@ -529,7 +537,7 @@ validate_pkg() {
             local project
             project=$(pkg_get "$file" '.upstream.project // ""')
             if [[ -z "$project" || "$project" == "null" ]]; then
-              log_err "$file: git-latest type 'github' requires 'upstream.project'"
+              log_err "$shown: git-latest type 'github' requires 'upstream.project'"
               ((errors++))
             fi
             ;;
@@ -538,11 +546,11 @@ validate_pkg() {
             host=$(pkg_get "$file" '.upstream.host // ""')
             project=$(pkg_get "$file" '.upstream.project // ""')
             if [[ -z "$host" || "$host" == "null" ]]; then
-              log_err "$file: git-latest type 'gitlab' requires 'upstream.host'"
+              log_err "$shown: git-latest type 'gitlab' requires 'upstream.host'"
               ((errors++))
             fi
             if [[ -z "$project" || "$project" == "null" ]]; then
-              log_err "$file: git-latest type 'gitlab' requires 'upstream.project'"
+              log_err "$shown: git-latest type 'gitlab' requires 'upstream.project'"
               ((errors++))
             fi
             ;;
@@ -550,29 +558,29 @@ validate_pkg() {
             local url
             url=$(pkg_get "$file" '.upstream.url // ""')
             if [[ -z "$url" || "$url" == "null" ]]; then
-              log_err "$file: git-latest type 'git' requires 'upstream.url'"
+              log_err "$shown: git-latest type 'git' requires 'upstream.url'"
               ((errors++))
             elif [[ "$url" != https://* ]]; then
-              log_err "$file: upstream.url must use HTTPS: $url"
+              log_err "$shown: upstream.url must use HTTPS: $url"
               ((errors++))
             fi
             ;;
           *)
-            log_err "$file: git-latest unknown type '$upstream_type' (valid: github, gitlab, git)"
+            log_err "$shown: git-latest unknown type '$upstream_type' (valid: github, gitlab, git)"
             ((errors++))
             ;;
         esac
         # Each type reads its own of host, project and url
         if [[ "$upstream_type" =~ ^(github|git)$ && $(pkg_get "$file" '.upstream | has("host")') == true ]]; then
-          log_err "$file: upstream.host applies to type gitlab only"
+          log_err "$shown: upstream.host applies to type gitlab only"
           ((errors++))
         fi
         if [[ "$upstream_type" == git && $(pkg_get "$file" '.upstream | has("project")') == true ]]; then
-          log_err "$file: upstream.project applies to types github and gitlab only"
+          log_err "$shown: upstream.project applies to types github and gitlab only"
           ((errors++))
         fi
         if [[ "$upstream_type" =~ ^(github|gitlab)$ && $(pkg_get "$file" '.upstream | has("url")') == true ]]; then
-          log_err "$file: upstream.url applies to type git only"
+          log_err "$shown: upstream.url applies to type git only"
           ((errors++))
         fi
       fi
@@ -584,11 +592,11 @@ validate_pkg() {
       current=$(pkg_get "$file" '.current // ""')
       if [[ -n "$describe" ]]; then
         if [[ -n "$current" && ! "$current" =~ ^[A-Za-z0-9._+]+\.r[0-9]+\.g[0-9a-f]+$ ]]; then
-          log_err "$file: current must be <tag>.r<count>.g<hash> for git-latest with upstream.describe, the form the strategy prints: $current"
+          log_err "$shown: current must be <tag>.r<count>.g<hash> for git-latest with upstream.describe, the form the strategy prints: $current"
           ((errors++))
         fi
       elif [[ -n "$current" && ! "$current" =~ ^r[0-9]+\.[0-9a-f]+$ ]]; then
-        log_err "$file: current must be r<count>.<hash> for git-latest, the form the strategy prints: $current"
+        log_err "$shown: current must be r<count>.<hash> for git-latest, the form the strategy prints: $current"
         ((errors++))
       fi
       ;;
@@ -596,7 +604,7 @@ validate_pkg() {
       local registry
       registry=$(pkg_get "$file" '.upstream.registry // ""')
       if [[ -z "$registry" || "$registry" == "null" ]]; then
-        log_err "$file: strategy '$strategy' requires 'upstream.registry'"
+        log_err "$shown: strategy '$strategy' requires 'upstream.registry'"
         ((errors++))
       fi
       ;;
@@ -605,24 +613,24 @@ validate_pkg() {
       url=$(pkg_get "$file" '.upstream.url // ""')
       pattern=$(pkg_get "$file" '.upstream.pattern // ""')
       if [[ -z "$url" || "$url" == "null" ]]; then
-        log_err "$file: strategy 'webpage-scrape' requires 'upstream.url'"
+        log_err "$shown: strategy 'webpage-scrape' requires 'upstream.url'"
         ((errors++))
       elif [[ "$url" != https://* ]]; then
-        log_err "$file: upstream.url must use HTTPS: $url"
+        log_err "$shown: upstream.url must use HTTPS: $url"
         ((errors++))
       fi
       if [[ -z "$pattern" || "$pattern" == "null" ]]; then
-        log_err "$file: strategy 'webpage-scrape' requires 'upstream.pattern'"
+        log_err "$shown: strategy 'webpage-scrape' requires 'upstream.pattern'"
         ((errors++))
       else
         # The strategy runs the pattern through grep and bash, and prints the
         # first group of each match. |^ makes the empty text match, so
         # BASH_REMATCH holds one entry per group.
         if ! ere_valid "$pattern"; then
-          log_err "$file: upstream.pattern is not valid ERE regex: $pattern"
+          log_err "$shown: upstream.pattern is not valid ERE regex: $pattern"
           ((errors++))
         elif [[ "" =~ $pattern|^ ]] && ((${#BASH_REMATCH[@]} < 2)); then
-          log_err "$file: upstream.pattern must contain a capture group: $pattern"
+          log_err "$shown: upstream.pattern must contain a capture group: $pattern"
           ((errors++))
         fi
       fi
@@ -630,7 +638,7 @@ validate_pkg() {
       local user_agent
       user_agent=$(pkg_get "$file" '.upstream.user_agent // ""')
       if [[ -n "$user_agent" ]] && ! (LC_ALL=C && [[ "$user_agent" =~ ^[[:print:]]+$ ]]); then
-        log_err "$file: upstream.user_agent must hold printable ASCII only: ${user_agent@Q}"
+        log_err "$shown: upstream.user_agent must hold printable ASCII only: ${user_agent@Q}"
         ((errors++))
       fi
       ;;
@@ -642,13 +650,13 @@ validate_pkg() {
       project=$(pkg_get "$file" '.upstream.project // ""')
       path=$(pkg_get "$file" '.upstream.path // ""')
       if [[ -n "$project" && ! "$project" =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]*$ ]]; then
-        log_err "$file: upstream.project must be a tarball name of A-Za-z0-9@._+-: $project"
+        log_err "$shown: upstream.project must be a tarball name of A-Za-z0-9@._+-: $project"
         ((errors++))
       fi
       # The path ends up in https://download.kde.org/<path>/. A segment that
       # starts with a dot would allow ..
       if [[ -n "$path" && ! "$path" =~ ^[A-Za-z0-9_+-][A-Za-z0-9._+-]*(/[A-Za-z0-9_+-][A-Za-z0-9._+-]*)*$ ]]; then
-        log_err "$file: upstream.path must be a directory on download.kde.org, such as unstable/alkimia: $path"
+        log_err "$shown: upstream.path must be a directory on download.kde.org, such as unstable/alkimia: $path"
         ((errors++))
       fi
       ;;

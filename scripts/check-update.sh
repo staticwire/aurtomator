@@ -41,7 +41,13 @@ if [[ -z "$latest" ]]; then
 fi
 
 latest=$(to_pkgver "$latest" "$dash" "$format")
-validate_pkgver "$latest" || exit 1
+if ! validate_pkgver "$latest"; then
+  # to_pkgver leaves a dash only without pkgver_dash
+  if [[ "$latest" == *-* ]]; then
+    log_err "The version holds a dash: set pkgver_dash, or tag_version_regex to leave such tags out"
+  fi
+  exit 1
+fi
 
 if [[ "$latest" == "$current" ]]; then
   log_ok "$PKG_NAME is up to date ($current)"

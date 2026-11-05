@@ -249,6 +249,15 @@ EOF
   [[ "$output" != *"clone of aurtomator"* ]]
 }
 
+@test "setup: an option without its value names the option" {
+  local option
+  for option in --git-name --git-email --gpg-key --ssh-key; do
+    run "$TEST_TMPDIR/scripts/setup.sh" identity "$option"
+    [ "$status" -eq 1 ]
+    [ "$output" = "$option needs a value (see $TEST_TMPDIR/scripts/setup.sh --help)" ]
+  done
+}
+
 @test "setup: unknown flag exits 1" {
   run "$TEST_TMPDIR/scripts/setup.sh" --bogus-flag
   [ "$status" -eq 1 ]
@@ -370,6 +379,31 @@ EOF
   [[ "$output" == *"SSH key not found: ~nobody/keys/aur.pem"* ]]
 }
 
+# The scripts run from any directory, so the saved key path does not depend
+# on the one the setup ran in
+@test "setup ssh: saves a relative key path as an absolute one" {
+  cd "$TEST_TMPDIR/ssh"
+  run "$TEST_TMPDIR/scripts/setup.sh" ssh --ssh-key aur.pem --non-interactive
+  [ "$status" -eq 0 ]
+  grep -qx "AUR_SSH_KEY='$TEST_TMPDIR/ssh/aur.pem'" "$TEST_TMPDIR/.aurtomator.conf"
+  rm "$TEST_TMPDIR/.aurtomator.conf"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" ssh <<<"./aur.pem"
+  [ "$status" -eq 0 ]
+  grep -qx "AUR_SSH_KEY='$TEST_TMPDIR/ssh/./aur.pem'" "$TEST_TMPDIR/.aurtomator.conf"
+
+  cd "$TEST_TMPDIR"
+  run "$TEST_TMPDIR/scripts/setup.sh" ssh --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SSH key: $TEST_TMPDIR/ssh/./aur.pem"* ]]
+
+  # The secrets step alone saves the key as well
+  cd "$TEST_TMPDIR/ssh"
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --ssh-key aur.pem --non-interactive
+  [ "$status" -eq 0 ]
+  grep -qx "AUR_SSH_KEY='$TEST_TMPDIR/ssh/aur.pem'" "$TEST_TMPDIR/.aurtomator.conf"
+}
+
 @test "setup ssh: nonexistent key rejected" {
   run "$TEST_TMPDIR/scripts/setup.sh" ssh \
     --ssh-key "/nonexistent/path/key.pem" \
@@ -476,6 +510,24 @@ EOF
   [[ "$output" == *"SSH:"*"accessible"* ]]
   [[ "$output" == *"GPG:"*"signing works"* ]]
   [[ "$output" == *"Ready."* ]]
+}
+
+# CI holds this key alone, so another key in the agent or in the ssh
+# config must not answer for it
+@test "setup verify: offers the AUR the saved key alone" {
+  write_full_config ""
+  cat >"$TEST_TMPDIR/mock-bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$TEST_TMPDIR/ssh.args"
+echo "Welcome to AUR! Your SSH key is working."
+exit 1
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/ssh"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 0 ]
+  run tr '\n' ' ' <"$TEST_TMPDIR/ssh.args"
+  [ "$output" = "-F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o ConnectTimeout=5 -i $TEST_TMPDIR/ssh/aur.pem aur@aur.archlinux.org " ]
 }
 
 @test "setup verify: works without GPG configured" {
@@ -754,7 +806,7 @@ exit 0
 EOF
   chmod +x "$TEST_TMPDIR/mock-bin/gh"
 
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<"y"
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<$'y\ny'
   [ "$status" -eq 0 ]
   [[ "$output" == *"GPG_SIGNING_KEY (passphrase-free copy)"* ]]
   grep -q "mocked-passphrase-free" "$TEST_TMPDIR/secret-GPG_SIGNING_KEY"
@@ -764,7 +816,7 @@ EOF
   mock_gpg_strip_flow
   write_full_config "PASSKEY003"
 
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<"y"
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<$'y\ny'
   [ "$status" -eq 0 ]
   [[ "$output" != *"Set Actions secret"* ]]
   [[ "$output" == *"  ✓ GPG_SIGNING_KEY (passphrase-free copy)"* ]]
@@ -785,7 +837,7 @@ exit 0
 EOF
   chmod +x "$TEST_TMPDIR/mock-bin/gh"
 
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<"y"
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<$'y\ny'
   [ "$status" -eq 0 ]
   [[ "$output" == *"✗ GPG_SIGNING_KEY"* ]]
   [[ "$output" != *"✓ GPG_SIGNING_KEY"* ]]
@@ -1005,10 +1057,63 @@ log_gh_calls() {
   log_gh_calls
   git -C "$TEST_TMPDIR" remote remove origin
 
-  run "$TEST_TMPDIR/scripts/setup.sh" secrets <<<"someone/repo"
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets <<<$'someone/repo\ny'
   [ "$status" -eq 0 ]
   [[ "$output" == *"Target repo: someone/repo"* ]]
   grep -qx 'secret set AUR_SSH_KEY -R someone/repo' "$TEST_TMPDIR/gh.args"
+}
+
+# An origin that is no repository on github.com names no repository for gh
+@test "setup secrets: asks for the repo when origin is not on github.com" {
+  local url
+  write_full_config ""
+  log_gh_calls
+  for url in git@github-work:me/repo.git https://notgithub.com/me/repo; do
+    echo "$url"
+    git -C "$TEST_TMPDIR" remote set-url origin "$url"
+    run "$TEST_TMPDIR/scripts/setup.sh" secrets <<<$'someone/repo\ny'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Target repo: someone/repo"* ]]
+  done
+  grep -qx 'secret set AUR_SSH_KEY -R someone/repo' "$TEST_TMPDIR/gh.args"
+}
+
+@test "setup secrets: reads owner/repo from every form of a github.com origin" {
+  local url
+  write_full_config ""
+  for url in git@github.com:test/repo.git https://github.com/test/repo https://github.com/test/repo.git/ ssh://git@github.com/test/repo.git; do
+    echo "$url"
+    git -C "$TEST_TMPDIR" remote set-url origin "$url"
+    run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Target repo: test/repo"* ]]
+  done
+}
+
+# The secrets hold the key that pushes every package of the user, and the
+# origin of a clone can be a repository other people can read
+@test "setup secrets: asks before it sets the secrets of the repository" {
+  write_full_config ""
+  log_gh_calls
+
+  # read prints a prompt on a terminal only, so check the source
+  grep -qF 'ask "Set the secrets on $gh_repo? (Y/n)"' "$TEST_TMPDIR/scripts/setup.sh"
+  local answer
+  for answer in n N; do
+    run "$TEST_TMPDIR/scripts/setup.sh" secrets <<<"$answer"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"✗ Secrets not set on test/repo"* ]]
+  done
+  run grep -c '^secret set' "$TEST_TMPDIR/gh.args"
+  [ "$output" = "0" ]
+
+  # An empty answer is yes
+  for answer in "" y Y; do
+    : >"$TEST_TMPDIR/gh.args"
+    run "$TEST_TMPDIR/scripts/setup.sh" secrets <<<"$answer"
+    [ "$status" -eq 0 ]
+    grep -qx 'secret set AUR_SSH_KEY -R test/repo' "$TEST_TMPDIR/gh.args"
+  done
 }
 
 # ask runs inside $(...), so a message on stdout went into the variable

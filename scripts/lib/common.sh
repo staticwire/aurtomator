@@ -157,9 +157,11 @@ USER_AGENT="aurtomator/1.0"
 # on the page of its bot check
 HTTP_FAILURE='%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated}'
 
-# Args: $1=URL, the rest: curl options
+# Args: $1=URL, the rest: curl options. curl follows a redirect to plain
+# http by default, where the network can change the answer.
 _curl_get() {
   curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
+    --proto '=https' --proto-redir '=https' \
     -A "$USER_AGENT" -w "$HTTP_FAILURE" "${@:2}" "$1"
 }
 

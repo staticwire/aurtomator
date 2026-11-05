@@ -913,7 +913,7 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
+  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
 }
 
 # Helper: a curl that writes $CURL_STDERR to stderr, as its -w does on a
@@ -1204,7 +1204,7 @@ run_alert_fires() {
 @test "lib.sh: fired_alerts fails on a rule it cannot evaluate" {
   local rule message
   for rule in "hold: true|alerts[0] must hold exactly one of when, from, match" \
-    "when: minor|alerts[0].when must be major" \
+    "when: minor|alerts[0].when must be major, got minor" \
     "match: '(?:29)'|alerts[0].match must be a non-empty ERE that bash accepts"; do
     create_test_package "pkg" "github-release" "alerts:
   - ${rule%%|*}
@@ -1301,7 +1301,7 @@ run_alert_fires() {
   [[ "${lines[0]}" == *"aurtomator 0.6.0" ]]
   [[ "$output" == *"aurtomator 0.7.0 is out, this repository runs 0.6.0"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/_upstream")" = "newer: 0.7.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: records that aurtomator is at its latest release" {
@@ -1317,7 +1317,7 @@ run_alert_fires() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Could not read the latest aurtomator release"* ]]
   [ ! -e "$TEST_TMPDIR/.status/_upstream" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: asks for no release without VERSION" {
@@ -1417,6 +1417,7 @@ EOF
   run "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Version string rejected, it holds no digit: 'latest'"* ]]
+  [[ "$output" != *"holds a dash"* ]]
 }
 
 # npm cli-pride-flags is 1.9.0-1, crates.io pijul 1.0.0-beta.24
@@ -1431,6 +1432,7 @@ EOF
   run "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed: '1.0.0-beta-24'"* ]]
+  [[ "$output" == *"The version holds a dash: set pkgver_dash, or tag_version_regex to leave such tags out"* ]]
 }
 
 @test "check-update: pkgver_dash replaces every dash in the version" {
@@ -1541,15 +1543,15 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/pkg-a")" = "new_version: 2.0.0" ]
 }
 
-@test "check-all: writes error count" {
+@test "check-all: logs the number of errors" {
   create_test_package "pkg-a" "github-release" "upstream:
   type: github
   project: owner/repo
 current: '2.0.0'"
 
-  "$TEST_TMPDIR/scripts/check-all.sh" 2>/dev/null || true
-  [ -f "$TEST_TMPDIR/.status/_error_count" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [[ "$output" == *"Checked: 1, Updated: 0, Errors: 0"* ]]
+  [ ! -e "$TEST_TMPDIR/.status/_error_count" ]
 }
 
 @test "check-all: reports errors for broken packages" {
@@ -2048,7 +2050,7 @@ upstream: {}
 EOF
 
   "$TEST_TMPDIR/scripts/check-all.sh" 2>/dev/null || true
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "2" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "2" ]
 }
 
 # === update-readme.sh: additional coverage ===
@@ -3237,7 +3239,7 @@ current: '3.0.0'"
   [ "$status" -eq 0 ]
   [[ "$output" == *"DOWNGRADE detected 3.0.0 → 2.0.0, skipped: allow_downgrade is not set"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all --update: runs no update to a lower version without allow_downgrade" {
@@ -3352,7 +3354,7 @@ stand_in_strategy() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"version jump 13 → 2026102100, skipped: allow_version_jump is not set"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "jump_skipped: 2026102100" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: writes 'new_version:' for a version jump the package allows" {
@@ -3404,7 +3406,7 @@ alerts:
   [ "$status" -eq 0 ]
   [[ "$output" == *"pkg-hold: update 28+25 → 29+1 held: Raise makedepends java-environment to 28"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-hold")" = "held: 29+1" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: logs the note of an alert without hold and keeps the update" {
@@ -3453,7 +3455,7 @@ alerts:
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'pkg-both\tnotice\tCreate the package for the old major\npkg-both\thold\tRaise makedepends java-environment to 28' ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: writes no _alerts when no alert fires" {
@@ -3511,7 +3513,7 @@ alerts:
 
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [[ "$(cat "$TEST_TMPDIR/.status/pkg-bad")" == "check_failed: "*"alerts[0].match must be a non-empty ERE that bash accepts: (?:29)" ]]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
 @test "check-all: fails the check of a package with an alert note of several lines" {
@@ -3845,7 +3847,7 @@ current_asset: '$2'}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"no asset yet"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
   [ ! -e "$TEST_TMPDIR/.status/_assets" ]
 }
 

@@ -167,6 +167,18 @@ teardown() {
   [ "$(nightly_pages)" = "1 2 3 4 5 6 7 8 9 10 " ]
 }
 
+# GitHub answered [] for a page of ruffle-rs/ruffle that a retry filled, and
+# an empty list says nothing about the regex
+@test "github-release: tag_version_regex names an empty release list" {
+  create_test_package "test-empty" "github-release" "upstream:
+  project: empty-nightly/repo
+  tag_version_regex: '^v(.*)$'"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" "test-empty"
+  [ "$status" -eq 1 ]
+  [ "$output" = "The release list of empty-nightly/repo is empty" ]
+}
+
 @test "github-release: tag_version_regex fails when the list cannot be read" {
   create_test_package "test-pages" "github-release" "upstream:
   project: owner/repo
@@ -1168,6 +1180,19 @@ current: '1.2.0.r1.g0000000000'"
   [ "$output" = "2026.03.26" ]
 }
 
+# date(1) takes one date, and only the user can say which date of the tag
+# is the version
+@test "github-nightly: tag_date refuses a tag that holds two dates" {
+  create_test_package "test-two" "github-nightly" "upstream:
+  project: owner/two-dates
+  nightly_tag: 'build-'
+  version_source: tag_date"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-two"
+  [ "$status" -eq 1 ]
+  [ "$output" = "Tag 'build-2026-11-04-from-2026-11-01' holds more than one date; version_source tag with tag_version_regex picks one" ]
+}
+
 # Helper: the pages of the releases list that curl fetched
 nightly_pages() {
   grep -o 'releases?per_page=100&page=[0-9]*' "$TEST_TMPDIR/curl.args" | cut -d= -f3 | tr '\n' ' '
@@ -1223,7 +1248,7 @@ nightly_pages() {
 
   run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No nightly release found for no-nightly/repo"* ]]
+  [[ "$output" == *"No release among the newest 300 of no-nightly/repo has a tag that nightly_tag_regex '^[0-9]{4}-[0-9]{2}-[0-9]{2}\$' matches"* ]]
   [ "$(nightly_pages)" = "1 2 3 " ]
 }
 
@@ -1261,7 +1286,7 @@ nightly_pages() {
 
   run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No nightly release found for short-nightly/repo"* ]]
+  [[ "$output" == *"No release among the newest 300 of short-nightly/repo has a tag that nightly_tag_regex"* ]]
   [ "$(nightly_pages)" = "1 " ]
 }
 
@@ -1274,7 +1299,7 @@ nightly_pages() {
 
   run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-regex"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No nightly release found for empty-nightly/repo"* ]]
+  [[ "$output" == *"The release list of empty-nightly/repo is empty"* ]]
   [ "$(nightly_pages)" = "1 " ]
 }
 
@@ -1663,6 +1688,16 @@ run_github_strategies() {
   [ "$(grep -c -- '--retry 2 --retry-delay 5 --retry-connrefused' "$TEST_TMPDIR/curl.args")" -eq "$calls" ]
 }
 
+# curl follows a redirect to plain http by default, where the network can
+# change the answer
+@test "github strategies: follow https only, redirects included" {
+  setup_github_strategies
+  run_github_strategies
+  calls=$(wc -l <"$TEST_TMPDIR/curl.args")
+  [ "$calls" -gt 0 ]
+  [ "$(grep -c -- "--proto =https --proto-redir =https" "$TEST_TMPDIR/curl.args")" -eq "$calls" ]
+}
+
 # A request that goes around http_get makes one attempt
 @test "strategies: send every request through http_get" {
   run grep -nE '^[^#]*\bcurl -' "$PROJECT_DIR"/strategies/*.sh
@@ -1795,6 +1830,22 @@ Failed to fetch tags from gitlab.com/gated-group/gated-project" ]
   [ "$status" -eq 1 ]
   [ "$output" = "https://codeberg.org/402.html: the answer is not JSON
 Failed to fetch tags from codeberg.org/gated-owner/gated-repo" ]
+}
+
+# yq reads an HTML page as a string without the fields, which reads as a
+# missing package
+@test "registry strategies: name the page a bot check answers in place of the version" {
+  local entry strategy upstream host
+  for entry in "npm|registry|registry.npmjs.org" "pypi|registry|pypi.org" "crates|registry|crates.io" \
+    "repology|repology|repology.org" "archpkg|archpkg|archlinux.org"; do
+    IFS='|' read -r strategy upstream host <<<"$entry"
+    echo "$strategy"
+    create_test_package "test-gated" "$strategy" "upstream:
+  $upstream: gated-pkg"
+    run "$TEST_TMPDIR/strategies/$strategy.sh" "test-gated"
+    [ "$status" -eq 1 ]
+    [ "${lines[0]}" = "https://$host/402.html: the answer is not JSON" ]
+  done
 }
 
 @test "pypi: fails on null version" {
