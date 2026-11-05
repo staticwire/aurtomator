@@ -135,7 +135,7 @@ if [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgver)" == "$NEW_VERSION" ]] &&
   log_ok "$PKG_NAME already at $NEW_VERSION on AUR, nothing to do"
   if [[ -n "$PREPARE_DIR" ]]; then
     hand_over
-  else
+  elif [[ -z "$DRY_RUN" ]]; then
     pkg_set_current "$PKG_FILE" "$NEW_VERSION" "$ASSET"
   fi
   exit 2
