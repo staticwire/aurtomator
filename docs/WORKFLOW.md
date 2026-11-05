@@ -1212,7 +1212,7 @@ A `git push` from the workflow would show as unverified, so the step commits thr
 3. Create a blob for every changed file, which `builder` reads, a tree on the base tree, and a commit. A link in the work tree reaches nothing that `builder` cannot read.
 4. Move the branch ref with `force=false`.
 
-The step commits to `github.repository` on `github.ref_name`, your repository and the branch of the run, with the `contents: write` that the calling job grants. The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting the workflows that run on a push: the calling `validate.yml` in your repository, `ci.yml` in aurtomator. GitHub marks the commit as verified because the Actions bot creates it through the API.
+The step commits to `github.repository` on `github.ref_name`, your repository and the branch of the run, with the `contents: write` that the calling job grants. A run started by hand from another branch therefore reads the package YAMLs of that branch, pushes their updates to the AUR and commits to that branch, while the schedule runs on the default branch only. The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting the workflows that run on a push: the calling `validate.yml` in your repository, `ci.yml` in aurtomator. GitHub marks the commit as verified because the Actions bot creates it through the API.
 
 ### 5.6 Issues
 
@@ -1350,7 +1350,7 @@ When the package is up to date, stdout stays empty:
 ./aurtomator.sh update-pkg my-package 2.0.0 --dry-run
 ```
 
-It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `.SRCINFO`, prints the PKGBUILD diff and does not push.
+It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `.SRCINFO`, prints the PKGBUILD diff and does not push. Those steps run the PKGBUILD of the AUR on your machine, with your SSH key in reach of its code, so read the PKGBUILD first when someone else can push to the package.
 
 ### 7.4 Push an update
 
@@ -1485,6 +1485,7 @@ echo "$version"
 
 | Function                        | Description                                         |
 |---------------------------------|-----------------------------------------------------|
+| `resolve_data_dir`              | Sets `AURTOMATOR_DATA_DIR` to the absolute path of its value, or of the working directory when it is unset, and exits 1 when that is no directory. `common.sh` runs it when it is sourced |
 | `pkg_file <name>`               | Resolves `packages/<name>.yml`, returns 1 if missing |
 | `pkg_get <file> <yq-query>`     | Reads a field from a YAML file with yq              |
 | `pkg_set <file> <query> <val>`  | Writes a field to a YAML file with yq               |
@@ -1510,6 +1511,7 @@ echo "$version"
 | `latest_tag_version <tags> <ere> [template]` | Prints the highest version among the tags, filtered as the tag strategies filter them |
 | `capture_matches <ere>`         | Prints the first capture group of every match of the ERE in stdin |
 | `ere_valid <ere>`               | Succeeds when bash can compile the ERE              |
+| `pcre_valid <regex>`            | Succeeds when `grep -P` can compile the Perl regex  |
 | `log_ok <msg>`                  | Prints a green check mark and the message to stderr |
 | `log_warn <msg>`                | Prints a yellow `!` and the message to stderr       |
 | `log_err <msg>`                 | Prints a red cross and the message to stderr        |

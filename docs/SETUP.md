@@ -30,8 +30,10 @@ A repository created from the template [staticwire/aurtomator-seed](https://gith
 ### Required
 
 1. **Enable Issues**: Settings > General > Features > Issues. Failures, update alerts and newer aurtomator releases are reported as issues. With Issues off, a run prints a notice instead and opens none.
-2. **Check Actions**: the Actions tab lists `Check AUR Package Updates` and `Validate packages`. A workflow shown as disabled there runs again once you open it and click "Enable workflow". In a fork, GitHub disables the workflows until they are enabled in its Actions tab. GitHub also disables a scheduled workflow of a public repository after 60 days without activity in it. The workflow commits only when a status or a version changes, so a repository whose packages stay the same that long loses its schedule and needs "Enable workflow" again.
-3. **Set the secrets**: `./aurtomator.sh setup`, run in a clone of your repository, sets `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`, as [Quick setup](#quick-setup-with-gh-cli) describes. The calling workflow passes them to aurtomator by name.
+2. **Check Actions**: the Actions tab lists `Check AUR Package Updates` and `Validate packages`. A workflow shown as disabled there runs again once you open it and click "Enable workflow". In a fork, GitHub disables the workflows until they are enabled in its Actions tab. GitHub also disables a scheduled workflow of a public repository after 60 days without activity in it. The workflow commits only when a status or a version changes, so a repository whose packages stay the same that long loses its schedule and needs "Enable workflow" again. A private repository keeps its schedule, and its runs use the Actions minutes of your account instead: GitHub counts each job in whole minutes, rounded up, from three jobs for a run that changes nothing, `image`, `check` and `issues`, to six for a run with an update.
+3. **Set the secrets**: `./aurtomator.sh setup`, run in a clone of your repository, sets `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`, as [Quick setup](#quick-setup-with-gh-cli) describes. The calling workflow passes them to aurtomator by name. `secrets: inherit` would pass none, since it works only between repositories of one organization or enterprise.
+
+The schedule runs from the start, so runs can come before the secrets are set. Such a run needs no key while it pushes nothing to the AUR, and it can still commit the README. A run with a package to push stops in `publish` with `The secret AUR_SSH_KEY is empty`, and the `notify` job opens the issue `❌ Check AUR Package Updates failed`. The first run after `setup secrets` in which no job fails closes that issue.
 
 ### Recommended
 
@@ -125,7 +127,7 @@ Before that fetch, the script warns when no tag of the repository points to the 
 
 `./aurtomator.sh pin vX.Y.Z` moves the pin to a release. It reads the commit of that tag with `git ls-remote`, puts it and `# vX.Y.Z` into every `uses:` line of the pinned repository in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. It fetches nothing. The next run of the script fetches the release, and CI takes it once the two files are committed and pushed.
 
-In CI, the jobs check out your repository and then aurtomator into `aurtomator/` of that checkout, which deletes whatever that path holds. So the script is `aurtomator.sh`, and nothing in the root of your repository may be named `aurtomator`.
+In CI, the jobs check out your repository and then aurtomator into `aurtomator/` of that checkout, which deletes whatever that path holds. So the script is `aurtomator.sh`, and nothing in the root of your repository may be named `aurtomator`. The jobs also make the directories `upload`, `handoff` and `statuses` in that root, so these names are taken as well: a tracked `upload` or `statuses` stops the step that makes the directory, and the files of a tracked `handoff` change in the run, which the commit of the results refuses.
 
 The template holds this block as the file `aurtomator.sh`. A repository created without the template needs it in its root, made executable with `chmod +x aurtomator.sh`:
 
@@ -489,9 +491,11 @@ It runs the strategy and prints the latest upstream version. Without a `current`
 
 It clones the AUR repo, sets `pkgver`, regenerates checksums and `.SRCINFO`, runs `namcap` when it is installed, and shows the PKGBUILD diff **without pushing**.
 
+The dry run runs the PKGBUILD of the AUR on your machine before it stops: the audit and `makepkg --printsrcinfo` source it, as `updpkgsums` and `makepkg --verifysource` do for a package with checksums, and your SSH key is in reach of that code. When someone else can push to the AUR package, read its PKGBUILD first.
+
 ### 6. Push and let CI take over
 
-Commit the package YAML and push to your repository. The push to `main` runs `Validate packages`. `Check AUR Package Updates` runs on the schedule `17 * * * *` of `.github/workflows/check-updates.yml`, and GitHub starts only part of those runs: in October 2026 a repository with this schedule got about five a day, one every five hours. A run can also be started by hand through `workflow_dispatch`.
+Commit the package YAML and push to your repository. The push to `main` runs `Validate packages`. `Check AUR Package Updates` runs on the schedule `17 * * * *` of `.github/workflows/check-updates.yml`, and GitHub starts only part of those runs: in October 2026 a repository with this schedule got about five a day, one every five hours. Actions > Check AUR Package Updates > Run workflow starts a run at once, through `workflow_dispatch`. A run started by hand from a branch other than the default one reads the package YAMLs of that branch, pushes their updates to the AUR, and commits its results to that branch. The schedule runs on the default branch only.
 
 ## Troubleshooting
 
@@ -535,7 +539,7 @@ Without `gh`, set the secrets in the web UI: see [Manual setup](#manual-setup-wi
 
 1. Open Settings > Secrets and variables > Actions in your repository. It lists `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`.
 2. Run `./aurtomator.sh setup secrets` to push them again.
-3. The `check-updates` job of `.github/workflows/check-updates.yml` passes each secret by name, as [The calling workflows](#the-calling-workflows) shows.
+3. The `check-updates` job of `.github/workflows/check-updates.yml` passes each secret by name, as [The calling workflows](#the-calling-workflows) shows. `secrets: inherit` passes none to aurtomator, see [Required](#required).
 
 ### Invalid workflow file: a nested job requests more permissions
 
