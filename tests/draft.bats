@@ -342,14 +342,24 @@ stub_git_latest() {
 }
 
 @test "draft: writes the values of .SRCINFO into the YAML as text and never runs the PKGBUILD" {
-  aur_package demo '1.0.0$(touch pwned)' "source = git+https://git.example.org/~owner/\$(touch pwned)\"x'"
+  aur_package demo 1.0.0 "source = git+https://git.example.org/~owner/\$(touch pwned)\"x'"
   cd "$TEST_TMPDIR"
   run "$TEST_TMPDIR/scripts/draft.sh" demo
   [ "$status" -eq 1 ]
-  [ "$(yq '.current' "$TEST_TMPDIR/packages/demo.yml")" = '1.0.0$(touch pwned)' ]
   [ "$(yq '.upstream.url' "$TEST_TMPDIR/packages/demo.yml")" = "https://git.example.org/~owner/\$(touch pwned)\"x'" ]
   [ ! -e "$TEST_TMPDIR/pwned" ]
   [ ! -e "$TEST_TMPDIR/pkgbuild-ran" ]
+}
+
+@test "draft: writes nothing for a pkgver that is no version" {
+  aur_package demo '1.0.0$(touch pwned)' 'source = https://github.com/o/demo/archive/v1.0.0.tar.gz'
+  cd "$TEST_TMPDIR"
+  run "$TEST_TMPDIR/scripts/draft.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed: '1.0.0\$(touch pwned)'"* ]]
+  [[ "$output" == *"The .SRCINFO of demo has a pkgver that current cannot hold, so no YAML is written"* ]]
+  [ ! -e "$TEST_TMPDIR/packages/demo.yml" ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
 }
 
 @test "draft: warns about an epoch other than 0" {

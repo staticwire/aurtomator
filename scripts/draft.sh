@@ -57,6 +57,10 @@ for line in "${lines[@]}"; do
     source | source_*) SOURCES+=("${BASH_REMATCH[2]}") ;;
   esac
 done
+if [[ -n "$PKGVER" ]] && ! validate_pkgver "$PKGVER"; then
+  log_err "The .SRCINFO of $NAME has a pkgver that current cannot hold, so no YAML is written"
+  exit 1
+fi
 
 STRATEGY="" FIELDS=()
 

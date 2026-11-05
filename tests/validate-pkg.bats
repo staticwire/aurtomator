@@ -96,6 +96,23 @@ current: '$current'"
   done
 }
 
+@test "validate: fails on a current that is no version" {
+  local current
+  for current in '1.0$(touch x)' 1.0-1 'v 1' abc; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+current: '$current'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"current must hold a digit and only A-Za-z0-9 . _ +: ${current@Q}"* ]]
+  done
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+current: ''"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
 @test "validate: git-latest branch passes" {
   local branch
   for branch in feature/x release-0.11; do

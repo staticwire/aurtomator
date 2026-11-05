@@ -263,6 +263,13 @@ validate_pkg() {
     fi
   fi
 
+  local current_value
+  current_value=$(pkg_get "$file" '.current // ""')
+  if [[ -n "$current_value" ]] && ! validate_pkgver "$current_value" 2>/dev/null; then
+    log_err "$shown: current must hold a digit and only A-Za-z0-9 . _ +: ${current_value@Q}"
+    ((errors++))
+  fi
+
   local pkgver_format="" formatted
   if [[ $(pkg_get "$file" '.pkgver_format | tag') != "!!null" ]]; then
     pkgver_format=$(pkg_get "$file" '.pkgver_format')
