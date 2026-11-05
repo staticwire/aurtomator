@@ -281,6 +281,12 @@ Packages with `.patch` or `.diff` files in `source=()`.
 
 **Detection:** `audit_pkgbuild()` warns and does not block. Patches often survive a minor version bump and can break on a major one. The maintainer accepts that risk.
 
+### Packages with an epoch (WARNING)
+
+Packages whose PKGBUILD sets `epoch` to a value other than 0.
+
+**Detection:** `audit_pkgbuild()` warns and does not block. An update sets `pkgver` and `pkgrel` and keeps `epoch` as it is, and `current` in the package YAML holds the version without the epoch. pacman compares the epoch before `pkgver`, so a downgrade that `allow_downgrade: true` publishes keeps the old epoch, and pacman does not install it over the newer version until the maintainer raises `epoch` by hand.
+
 ## Not supported (not detected)
 
 aurtomator cannot detect these cases. The maintainer has to watch for them. When the version that needs the change is known in advance, such as a new major of a JDK that needs a newer boot JDK in `makedepends`, an alert in the package YAML pauses the update at that version or reports it, see [WORKFLOW.md section 4.5](WORKFLOW.md#45-update-alerts).
@@ -306,7 +312,7 @@ aurtomator does not modify `depends`, `makedepends` or `optdepends`. When a new 
 
 ### Packages requiring epoch
 
-When upstream changes its versioning scheme, for example from CalVer to SemVer, and the new version compares lower than the old one, `epoch` is needed. aurtomator does not detect or set `epoch`. Setting it cannot be undone and needs maintainer judgment.
+When upstream changes its versioning scheme, for example from CalVer to SemVer, and the new version compares lower than the old one, `epoch` is needed. aurtomator does not detect that case and does not set `epoch`; it warns about an `epoch` the PKGBUILD already has, see [Packages with an epoch](#packages-with-an-epoch-warning). Setting it cannot be undone and needs maintainer judgment.
 
 ### Packages with version-dependent install scripts
 

@@ -320,6 +320,32 @@ EOF
   [[ "$output" == *"patches"* ]]
 }
 
+# pacman compares the epoch first, and an update leaves it as it is
+@test "audit_pkgbuild: warns on an epoch other than 0" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-epoch
+pkgver=19.7.0
+pkgrel=1
+epoch=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/test-${pkgver}.tar.gz")
+sha256sums=('abc123')
+EOF
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"PKGBUILD sets epoch=1: an update keeps it, and current holds the version without it."* ]]
+  [[ "$output" == *"pacman does not install a downgrade over the newer version unless epoch is raised by hand."* ]]
+
+  sed -i 's/^epoch=1$/epoch=0/' "$TEST_TMPDIR/test.PKGBUILD"
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "audit_pkgbuild: blocks mixed SKIP and real checksums with remote sources" {
   source "$TEST_TMPDIR/scripts/lib.sh"
   cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'

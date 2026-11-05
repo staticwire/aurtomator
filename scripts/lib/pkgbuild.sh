@@ -140,6 +140,15 @@ audit_pkgbuild() {
     warnings=$((warnings + 1))
   fi
 
+  # WARNING: an epoch, which pacman compares before pkgver
+  local epoch
+  epoch=$(bash -c 'source "$1" 2>/dev/null; printf "%s" "${epoch:-}"' -- "$pkgbuild" 2>/dev/null || true)
+  if [[ -n "$epoch" && "$epoch" != 0 ]]; then
+    log_warn "PKGBUILD sets epoch=${epoch}: an update keeps it, and current holds the version without it."
+    log_warn "  pacman does not install a downgrade over the newer version unless epoch is raised by hand."
+    warnings=$((warnings + 1))
+  fi
+
   if [[ "$fatals" -gt 0 ]]; then
     return 1
   fi
