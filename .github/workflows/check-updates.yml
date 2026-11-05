@@ -557,6 +557,7 @@ jobs:
   # secret. No other user runs code in the workspace it checks out, so root
   # writes the bodies with scripts/lib/issue.sh.
   issues:
+    name: status
     needs: [image, check, prepare, verify, publish]
     if: "!cancelled() && needs.check.result == 'success'"
     runs-on: ubuntu-latest

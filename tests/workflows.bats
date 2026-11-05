@@ -1667,6 +1667,12 @@ no_commit() {
   [ "$output" = "false" ]
 }
 
+# The page of the run titles the run summary with the name of the job
+@test "check-updates: the issues job is named status" {
+  run yq '.jobs.issues.name' "$CHECK_UPDATES"
+  [ "$output" = "status" ]
+}
+
 # The image has no git, so gh cannot read the repository from the checkout
 @test "check-updates: the issues job names the repository for gh" {
   run yq '.jobs.issues.env.GH_REPO' "$CHECK_UPDATES"
