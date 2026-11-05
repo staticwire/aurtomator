@@ -521,7 +521,7 @@ run_decide_step() {
   step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
   (cd "$ws" && PATH="$bin:$PATH" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
-    sh -e "$BATS_TEST_TMPDIR/step.sh") >/dev/null
+    bash -e "$BATS_TEST_TMPDIR/step.sh") >/dev/null
   cat "$BATS_TEST_TMPDIR/output"
 }
 
@@ -860,7 +860,7 @@ EOF
   step_run check "Stop builder" >"$BATS_TEST_TMPDIR/step.sh"
   run timeout 20 env -C "$ws" PATH="$bin:$PATH" CALLS="$CALLS" PS_LINES="${PS_LINES:-}" \
     PS_AFTER_KILL="${PS_AFTER_KILL:-}" PS_RC="${PS_RC:-0}" NO_BUILDER="${NO_BUILDER:-}" \
-    sh -e "$BATS_TEST_TMPDIR/step.sh"
+    bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: Stop builder goes on when builder runs nothing" {
@@ -905,6 +905,73 @@ EOF
   PS_RC=1 run_stop_builder_step
   [ "$status" -ne 0 ]
   [[ "$output" == *"::error::"* ]]
+}
+
+# Runs the Hand over step of prepare in $BATS_TEST_TMPDIR/ws, with the
+# commands of $BATS_TEST_TMPDIR/bin first on PATH
+run_hand_over_step() {
+  mkdir -p "$BATS_TEST_TMPDIR/ws" "$BATS_TEST_TMPDIR/bin"
+  step_run prepare "Hand over" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$BATS_TEST_TMPDIR/ws" PATH="$BATS_TEST_TMPDIR/bin:$PATH" bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+# Writes the files that prepare hands over for the package foo
+make_handoff() {
+  local dir="$BATS_TEST_TMPDIR/ws/handoff"
+  mkdir -p "$dir/prepared/foo" "$dir/status"
+  echo pkgbuild >"$dir/prepared/foo/PKGBUILD"
+  echo srcinfo >"$dir/prepared/foo/.SRCINFO"
+  echo base >"$dir/prepared/foo/base"
+  echo "updated: 2.0" >"$dir/status/foo"
+}
+
+@test "check-updates: Hand over copies the prepared files and the statuses, nothing else" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_handoff
+  chmod 0755 "$ws/handoff/prepared/foo/PKGBUILD"
+  echo notes >"$ws/handoff/prepared/foo/notes.txt"
+  mkdir -p "$ws/handoff/prepared/.x"
+  echo hidden >"$ws/handoff/prepared/.x/PKGBUILD"
+  echo other >"$ws/handoff/other"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
+  [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/foo' ]
+  [ "$(stat -c %a "$ws/upload/prepared/foo/PKGBUILD")" = "644" ]
+  [ "$(cat "$ws/upload/status/foo")" = "updated: 2.0" ]
+}
+
+# A link would put a file that root can read into an artifact anyone with
+# read access to the repository can download
+@test "check-updates: Hand over copies no link, also one that find lists" {
+  local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" round
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  for round in real listed; do
+    echo "$round"
+    rm -rf "$ws"
+    make_handoff
+    ln -sf "$BATS_TEST_TMPDIR/secret" "$ws/handoff/prepared/foo/PKGBUILD"
+    if [[ "$round" == listed ]]; then
+      mkdir -p "$bin"
+      # Lists links too, as a link swapped in after the listing would be
+      printf '#!/usr/bin/env bash\nexec %q prepared status -print0\n' "$(command -v find)" >"$bin/find"
+      chmod +x "$bin/find"
+    fi
+    run_hand_over_step
+    [ "$status" -eq 0 ]
+    [ ! -e "$ws/upload/prepared/foo/PKGBUILD" ]
+    [ -f "$ws/upload/prepared/foo/base" ]
+  done
+}
+
+@test "check-updates: Hand over copies nothing from a handoff that is a link" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_handoff
+  mv "$ws/handoff" "$BATS_TEST_TMPDIR/elsewhere"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$ws/handoff"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  [ -z "$(ls -A "$ws/upload")" ]
 }
 
 # Runs the issue step of the issues job in a workspace with the statuses
@@ -969,7 +1036,7 @@ EOF
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GITHUB_REPOSITORY=owner/fork \
-    RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
+    RUN_URL=https://example.invalid/run bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: an open issue of another package holds back no issue" {
@@ -1154,7 +1221,7 @@ EOF
   step_run issues "Close resolved issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" \
-    RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
+    RUN_URL=https://example.invalid/run bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # A git repository at $BATS_TEST_TMPDIR/ws whose HEAD holds README.md,
@@ -1288,6 +1355,24 @@ no_commit() {
   [ "${lines[4]}" = "-u builder base64 -w0 -- README.md" ]
   [ "${lines[5]}" = "-u builder base64 -w0 -- packages/foo.yml" ]
   [ "${#lines[@]}" -eq 6 ]
+}
+
+# The step commits with contents: write, and the job writes only the README
+# and the package YAMLs
+@test "check-updates: the commit step refuses a change to any other tracked file" {
+  local file ws="$BATS_TEST_TMPDIR/ws"
+  for file in aurtomator.sh packages/sub/x.yml .github/workflows/check-updates.yml; do
+    echo "$file"
+    rm -rf "$ws"
+    # make_commit_repo commits every file of the work tree
+    mkdir -p "$(dirname "$ws/$file")"
+    echo old >"$ws/$file"
+    make_commit_repo README.md="new table" "$file=new"
+    run_commit_step
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::Refusing to commit a change to '$file'"* ]]
+    no_commit
+  done
 }
 
 @test "check-updates: the commit step fails when it cannot list the tree of a moved head" {
