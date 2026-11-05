@@ -50,7 +50,7 @@ Each package has a YAML config pointing to an upstream source. Your repository h
    ./aurtomator.sh validate-pkg <name>
    ```
 
-5. Commit and push. The workflows do the rest.
+5. Commit and push. The workflows do the rest. The schedule starts a run a few times a day, and Actions > Check AUR Package Updates > Run workflow starts one at once.
 
 `./aurtomator.sh` runs the scripts of aurtomator at the version your workflows pin, see [docs/SETUP.md](docs/SETUP.md#the-aurtomatorsh-script). Without [gh CLI](https://cli.github.com/), `setup` prints how to set the secrets by hand. GPG signing of the AUR commits is optional.
 
@@ -66,6 +66,7 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 | `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag      |
 | `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                    |
 | `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea            |
+| `gitea-release`    | Gitea/Forgejo API   | Releases on Codeberg or a Gitea host   |
 | `git-tag`          | `git ls-remote`     | Any HTTPS git host, such as sourcehut  |
 | `git-latest`       | `git clone --bare`  | `-git` packages, any HTTPS git repo    |
 | `pypi`             | PyPI JSON API       | Python packages                        |
@@ -111,7 +112,7 @@ The line under the package table in the README of your repository shows the vers
 
 ## Resource usage
 
-All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version, and `publish` for a new version or a change in the package table. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`. A version check is a few API requests per package, or a bare clone for `git-latest`.
+All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version, and `publish` for a new version or a change in the package table. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`, and only when a package goes to the AUR. A version check is a few API requests per package, or a bare clone for `git-latest`.
 
 ## Documentation
 

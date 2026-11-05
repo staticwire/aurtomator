@@ -34,6 +34,7 @@ readonly UPSTREAM_KEYS=(
   "github-asset: project tag assets"
   "gitlab-tag: host project tag_version_regex tag_version_replace"
   "gitea-tag: host project tag_version_regex tag_version_replace"
+  "gitea-release: host project tag_version_regex tag_version_replace"
   "git-tag: url tag_version_regex tag_version_replace"
   "git-latest: type url host project branch describe tag_prefix"
   "pypi: registry"
@@ -501,7 +502,7 @@ validate_pkg() {
         ((errors++))
       fi
       ;;
-    gitlab-tag | gitea-tag)
+    gitlab-tag | gitea-tag | gitea-release)
       local host project
       host=$(pkg_get "$file" '.upstream.host // ""')
       project=$(pkg_get "$file" '.upstream.project // ""')

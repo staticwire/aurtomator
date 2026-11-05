@@ -320,6 +320,32 @@ EOF
   [[ "$output" == *"patches"* ]]
 }
 
+# pacman compares the epoch first, and an update leaves it as it is
+@test "audit_pkgbuild: warns on an epoch other than 0" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
+pkgname=test-epoch
+pkgver=19.7.0
+pkgrel=1
+epoch=1
+pkgdesc="test"
+arch=('x86_64')
+url="https://example.com"
+license=('MIT')
+source=("https://example.com/test-${pkgver}.tar.gz")
+sha256sums=('abc123')
+EOF
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"PKGBUILD sets epoch=1: an update keeps it, and current holds the version without it."* ]]
+  [[ "$output" == *"pacman does not install a downgrade over the newer version unless epoch is raised by hand."* ]]
+
+  sed -i 's/^epoch=1$/epoch=0/' "$TEST_TMPDIR/test.PKGBUILD"
+  run audit_pkgbuild "$TEST_TMPDIR/test.PKGBUILD" "github-release"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "audit_pkgbuild: blocks mixed SKIP and real checksums with remote sources" {
   source "$TEST_TMPDIR/scripts/lib.sh"
   cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
@@ -1844,22 +1870,64 @@ current: '1.0.0'"
   [[ "$output" == *"Required command not found"* ]]
 }
 
-@test "lib.sh: load_config sources variables" {
-  cat >"$TEST_TMPDIR/.aurtomator.conf" <<'EOF'
-GPG_KEY_ID="TESTKEY123"
-MAINTAINER="test user"
-EOF
+# Prints the four values that load_config of lib.sh reads from the
+# .aurtomator.conf of $TEST_TMPDIR, one per line
+load_config_values() {
+  bash -c 'source "$1/scripts/lib.sh" && load_config && printf "%s\n" "$GIT_AUTHOR_NAME" "$GIT_AUTHOR_EMAIL" "$GPG_KEY_ID" "$AUR_SSH_KEY"' _ "$TEST_TMPDIR"
+}
 
-  run bash -c "
-    export AURTOMATOR_DIR='$TEST_TMPDIR'
-    source '$TEST_TMPDIR/scripts/lib.sh'
-    load_config
-    echo \"GPG=\$GPG_KEY_ID\"
-    echo \"MAINT=\$MAINTAINER\"
-  "
+# setup.sh writes ${value@Q}, and before 0.3.0 wrote double quotes
+@test "lib.sh: load_config reads the four values as data" {
+  cat >"$TEST_TMPDIR/.aurtomator.conf" <<'EOF'
+# written by hand
+GIT_AUTHOR_NAME='Jane $(touch PWNED) `id` Doe'
+
+GIT_AUTHOR_EMAIL='it'\''s@example.com'
+GPG_KEY_ID=''
+AUR_SSH_KEY="/srv/keys/aur key"
+EOF
+  run --keep-empty-lines load_config_values
   [ "$status" -eq 0 ]
-  [[ "$output" == *"GPG=TESTKEY123"* ]]
-  [[ "$output" == *"MAINT=test user"* ]]
+  [ "${lines[0]}" = 'Jane $(touch PWNED) `id` Doe' ]
+  [ "${lines[1]}" = "it's@example.com" ]
+  [ "${lines[2]}" = "" ]
+  [ "${lines[3]}" = "/srv/keys/aur key" ]
+  [ ! -e PWNED ]
+
+  # A last line without a newline counts
+  printf "GIT_AUTHOR_NAME='a'\nGIT_AUTHOR_EMAIL='b'\nAUR_SSH_KEY='c'\nGPG_KEY_ID='KEY9'" >"$TEST_TMPDIR/.aurtomator.conf"
+  run --keep-empty-lines load_config_values
+  [ "$status" -eq 0 ]
+  [ "${lines[2]}" = "KEY9" ]
+}
+
+# A .aurtomator.conf that a pull request adds runs nothing
+@test "lib.sh: load_config refuses any other line and runs nothing" {
+  local pwned="$TEST_TMPDIR/pwned" line
+  local -a bad=(
+    "GIT_AUTHOR_NAME=\$(touch $pwned)"
+    "touch $pwned"
+    "MAINTAINER='x'"
+    "GIT_AUTHOR_NAME='a'; touch $pwned"
+    "GIT_AUTHOR_NAME='a''b'"
+    "GIT_AUTHOR_NAME=\"\$(touch $pwned)\""
+    "GIT_AUTHOR_NAME=\"\`touch $pwned\`\""
+    "GIT_AUTHOR_NAME=\"a\\\"b\""
+    "GIT_AUTHOR_NAME=\"a\\\\b\""
+    "GIT_AUTHOR_NAME=x'a'"
+    "GIT_AUTHOR_NAME=\$'a\\nb'"
+    "GIT_AUTHOR_NAME=a"
+    "export GIT_AUTHOR_NAME='a'"
+    " GIT_AUTHOR_NAME='a'"
+  )
+  for line in "${bad[@]}"; do
+    printf '%s\n' "GPG_KEY_ID='KEY1'" "$line" >"$TEST_TMPDIR/.aurtomator.conf"
+    run load_config_values
+    echo "$line: $output"
+    [ "$status" -eq 1 ]
+    [ "$output" = "$TEST_TMPDIR/.aurtomator.conf: line 2 is not NAME='value' for GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GPG_KEY_ID or AUR_SSH_KEY" ]
+  done
+  [ ! -e "$pwned" ]
 }
 
 @test "lib.sh: load_config succeeds when no config file" {

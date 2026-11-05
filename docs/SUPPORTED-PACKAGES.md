@@ -95,7 +95,7 @@ aurtomator does not check the signature. It runs `makepkg --verifysource` with `
 
 ### Non-standard tag formats (tag_version_regex)
 
-`github-release`, `github-tag`, `github-nightly`, `gitlab-tag`, `gitea-tag` and `git-tag` accept `tag_version_regex` for unusual tag names:
+`github-release`, `github-tag`, `github-nightly`, `gitlab-tag`, `gitea-tag`, `gitea-release` and `git-tag` accept `tag_version_regex` for unusual tag names:
 
 ```yaml
 upstream:
@@ -281,6 +281,12 @@ Packages with `.patch` or `.diff` files in `source=()`.
 
 **Detection:** `audit_pkgbuild()` warns and does not block. Patches often survive a minor version bump and can break on a major one. The maintainer accepts that risk.
 
+### Packages with an epoch (WARNING)
+
+Packages whose PKGBUILD sets `epoch` to a value other than 0.
+
+**Detection:** `audit_pkgbuild()` warns and does not block. An update sets `pkgver` and `pkgrel` and keeps `epoch` as it is, and `current` in the package YAML holds the version without the epoch. pacman compares the epoch before `pkgver`, so a downgrade that `allow_downgrade: true` publishes keeps the old epoch, and pacman does not install it over the newer version until the maintainer raises `epoch` by hand.
+
 ## Not supported (not detected)
 
 aurtomator cannot detect these cases. The maintainer has to watch for them. When the version that needs the change is known in advance, such as a new major of a JDK that needs a newer boot JDK in `makedepends`, an alert in the package YAML pauses the update at that version or reports it, see [WORKFLOW.md section 4.5](WORKFLOW.md#45-update-alerts).
@@ -306,7 +312,7 @@ aurtomator does not modify `depends`, `makedepends` or `optdepends`. When a new 
 
 ### Packages requiring epoch
 
-When upstream changes its versioning scheme, for example from CalVer to SemVer, and the new version compares lower than the old one, `epoch` is needed. aurtomator does not detect or set `epoch`. Setting it cannot be undone and needs maintainer judgment.
+When upstream changes its versioning scheme, for example from CalVer to SemVer, and the new version compares lower than the old one, `epoch` is needed. aurtomator does not detect that case and does not set `epoch`; it warns about an `epoch` the PKGBUILD already has, see [Packages with an epoch](#packages-with-an-epoch-warning). Setting it cannot be undone and needs maintainer judgment.
 
 ### Packages with version-dependent install scripts
 
@@ -326,6 +332,7 @@ By where the upstream publishes releases:
 | `github-asset` | GitHub Releases API | Assets re-uploaded on a fixed tag (model zoos) | N/A (fixed tag) |
 | `gitlab-tag` | GitLab Tags API | GitLab.com, invent.kde.org, self-hosted | Auto (`v1.2.3` tags only) |
 | `gitea-tag` | Gitea/Forgejo Tags API | Codeberg, self-hosted Gitea | Auto (`v1.2.3` tags only) |
+| `gitea-release` | Gitea/Forgejo Releases API | Releases on Codeberg or a self-hosted Gitea | Auto (excludes drafts and pre-releases) |
 | `git-tag` | `git ls-remote` | Any HTTPS git host: sourcehut, kernel.org, Savannah | Auto (`v1.2.3` tags only) |
 | `git-latest` | Bare git clone | `-git` packages (commit tracking) | N/A |
 | `pypi` | PyPI JSON API | Python packages | Auto (stable only) |
@@ -341,7 +348,7 @@ By where the upstream publishes releases:
 - **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without a token, the limit is 60 requests per hour. `github-tag` reads the tags with `git ls-remote`, outside this limit.
 - **Retries:** a request that a strategy sends with curl tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. The git calls of `git-latest`, `github-tag` and `git-tag` make one attempt. A check that still fails within its time budget runs once more after the other packages and a pause of 60 seconds. A failure on both tries fails the package for that run.
 - **Tag strategies take only `v1.2.3` and `1.2.3` by default:** without `tag_version_regex`, `github-tag`, `gitlab-tag`, `gitea-tag` and `git-tag` leave out every other tag, `latest`, `1.0.0-rc1` and `1.0.0rc1` included. `tag_version_regex` replaces that filter. They pick the newest version by `vercmp`, the order of pacman, which places `1.0.0rc1` below `1.0.0`. The comparison drops a dash before a letter, so `1.0.0-rc1` is below `1.0.0` as well, and a regex that lets pre-release tags through picks the release once it is out. A plain number is of that form too, so a repository that tags its releases `13` and `14` and its builds `2026102100` gives the build; `check-all.sh` holds such a step as a version jump, see [WORKFLOW.md section 4.3](WORKFLOW.md#43-downgrade-behavior), and `tag_version_regex: '^([0-9]{1,3})$'` keeps the releases.
-- **`gitlab-tag` and `gitea-tag` fetch at most 100 and 50 tags:** there is no pagination. `git-tag` with the `.git` URL of the project reads every tag.
+- **`gitlab-tag` and `gitea-tag` fetch at most 100 and 50 tags:** there is no pagination. `git-tag` with the `.git` URL of the project reads every tag, and `gitea-release` reads the releases, up to 500 with `tag_version_regex`.
 - **`gitlab-tag` has no authentication:** private GitLab projects cannot be queried.
 
 ### Upstreams behind a bot check

@@ -12,6 +12,8 @@ set -euo pipefail
 
 # shellcheck source=lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+# shellcheck source=lib/config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/config.sh"
 # shellcheck source=lib/pkgbuild.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/pkgbuild.sh"
 # shellcheck source=lib/aur.sh
@@ -22,6 +24,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/prepared.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/sums.sh"
 # shellcheck source=lib/issue.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/issue.sh"
+# shellcheck source=lib/status.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/status.sh"
 # shellcheck source=lib/alerts.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/alerts.sh"
 # shellcheck source=lib/version.sh

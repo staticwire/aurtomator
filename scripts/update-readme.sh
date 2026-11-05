@@ -141,59 +141,10 @@ for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   status_file="${STATUS_DIR}/${name}"
   if [[ -f "$status_file" ]]; then
     run_status=$(cat "$status_file")
+    status=$(status_label "$run_status")
     case "$run_status" in
-      up_to_date)
-        status="✅ up to date"
-        ((pkg_ok++)) || true
-        ;;
-      updated:*)
-        status="📦 updated to ${run_status#updated: }"
-        ((pkg_ok++)) || true
-        ;;
-      new_version:*)
-        status="✨ ${run_status#new_version: } available"
-        ((pkg_ok++)) || true
-        ;;
-      downgrade:*)
-        status="🔻 downgraded to ${run_status#downgrade: }"
-        ((pkg_ok++)) || true
-        ;;
-      available_downgrade:*)
-        status="🔻 ${run_status#available_downgrade: } available (downgrade)"
-        ((pkg_ok++)) || true
-        ;;
-      downgrade_skipped:*)
-        status="🔻 ${run_status#downgrade_skipped: } skipped (downgrade)"
-        ((pkg_ok++)) || true
-        ;;
-      jump_skipped:*)
-        status="🔺 ${run_status#jump_skipped: } skipped (version jump)"
-        ((pkg_ok++)) || true
-        ;;
-      held:*)
-        status="✋ ${run_status#held: } held"
-        ((pkg_ok++)) || true
-        ;;
-      new_build:*)
-        status="🔨 ${run_status#new_build: } rebuild available"
-        ((pkg_ok++)) || true
-        ;;
-      rebuilt:*)
-        status="🔨 ${run_status#rebuilt: } rebuilt"
-        ((pkg_ok++)) || true
-        ;;
-      pending:*)
-        status="⏳ ${run_status#pending: } pending"
-        ((pkg_ok++)) || true
-        ;;
-      check_failed:* | update_failed:*)
-        status="❌ failed"
-        ((pkg_fail++)) || true
-        ;;
-      *)
-        status="✅ tracking"
-        ((pkg_ok++)) || true
-        ;;
+      check_failed:* | update_failed:*) ((pkg_fail++)) || true ;;
+      *) ((pkg_ok++)) || true ;;
     esac
   elif [[ "$current" == "-" || "$current" == "null" ]]; then
     status="✨ new"

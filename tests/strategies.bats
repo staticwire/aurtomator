@@ -581,6 +581,89 @@ EOF
   [[ "$output" == *"No tag of the form v1.2.3 or 1.2.3; set upstream.tag_version_regex"* ]]
 }
 
+# === gitea-release ===
+
+# Helper: the package test-gitea-rel of gitea-release on codeberg.org for
+# project $1, with the upstream lines $2
+gitea_release_package() {
+  create_test_package "test-gitea-rel" "gitea-release" "upstream:
+  host: codeberg.org
+  project: $1${2:+
+$2}"
+}
+
+@test "gitea-release: returns the tag of the latest release without a v" {
+  gitea_release_package owner/repo
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.4.0" ]
+}
+
+# /releases/latest answers 404 in both cases, and the list tells them apart
+# from a failed request
+@test "gitea-release: names a project without a release that /releases/latest returns" {
+  gitea_release_package no-releases/repo
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 1 ]
+  [ "${lines[-1]}" = "codeberg.org/no-releases/repo has no releases; gitea-tag reads its tags" ]
+
+  gitea_release_package prerelease-only/repo
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 1 ]
+  [ "${lines[-1]}" = "codeberg.org/prerelease-only/repo has no release outside drafts and pre-releases" ]
+
+  gitea_release_package broken/repo
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 1 ]
+  [ "${lines[-1]}" = "Failed to fetch the latest release of codeberg.org/broken/repo" ]
+}
+
+# /releases/latest can be a release of another product of the repository
+@test "gitea-release: tag_version_regex picks the newest version outside drafts and pre-releases" {
+  gitea_release_package multi-product/repo "  tag_version_regex: '^app-desktop-release-(.+)$'"
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 0 ]
+  [ "$output" = "365.0" ]
+
+  gitea_release_package multi-product/repo "  tag_version_regex: '^app-(desktop)-release-([0-9]+)\\.0$'
+  tag_version_replace: '\\2.\\1'"
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 0 ]
+  [ "$output" = "365.desktop" ]
+}
+
+@test "gitea-release: reads at most 10 pages of releases" {
+  gitea_release_package endless/repo "  tag_version_regex: '^v(.+)$'"
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.10.0" ]
+}
+
+@test "gitea-release: with tag_version_regex, names an empty list, a list of pre-releases and a failed request" {
+  gitea_release_package empty/repo "  tag_version_regex: '^v(.+)$'"
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 1 ]
+  [ "$output" = "The release list of codeberg.org/empty/repo is empty" ]
+
+  gitea_release_package prerelease-only/repo "  tag_version_regex: '^v(.+)$'"
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 1 ]
+  [ "$output" = "codeberg.org/prerelease-only/repo has no release outside drafts and pre-releases" ]
+
+  gitea_release_package broken/repo "  tag_version_regex: '^v(.+)$'"
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 1 ]
+  [ "${lines[-1]}" = "Failed to fetch the releases of codeberg.org/broken/repo" ]
+}
+
+@test "gitea-release: names the page a bot check answers in place of the release" {
+  gitea_release_package gated-owner/gated-repo
+  run "$TEST_TMPDIR/strategies/gitea-release.sh" "test-gitea-rel"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://codeberg.org/402.html: the answer is not JSON"* ]]
+  [ "${lines[-1]}" = "Failed to fetch the latest release of codeberg.org/gated-owner/gated-repo" ]
+}
+
 # === pypi ===
 
 @test "pypi: returns latest version from PyPI" {

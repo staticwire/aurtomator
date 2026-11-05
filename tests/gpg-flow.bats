@@ -370,7 +370,6 @@ stage_aur_update() {
   cat >"$TEST_TMPDIR/.aurtomator.conf" <<EOF
 GIT_AUTHOR_NAME="Test"
 GIT_AUTHOR_EMAIL="test@test.com"
-MAINTAINER="Test <test at test dot com>"
 AUR_SSH_KEY="$TEST_TMPDIR/ssh/aur.pem"
 EOF
 
@@ -385,7 +384,6 @@ EOF
   cat >"$TEST_TMPDIR/.aurtomator.conf" <<EOF
 GIT_AUTHOR_NAME="Test"
 GIT_AUTHOR_EMAIL="test@test.com"
-MAINTAINER="Test <test at test dot com>"
 AUR_SSH_KEY="$TEST_TMPDIR/ssh/aur.pem"
 EOF
 

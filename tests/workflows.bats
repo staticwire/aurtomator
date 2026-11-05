@@ -1680,6 +1680,89 @@ EOF
   [ -f "$ssh_dir/known_hosts" ]
 }
 
+# Prints the index of step $2 in job $1 of check-updates.yml
+step_index() {
+  yq ".jobs.$1.steps | to_entries | map(select(.value.name == \"$2\")) | .[0].key" "$CHECK_UPDATES"
+}
+
+# A run before setup secrets pushes nothing and commits the README
+@test "check-updates: publish sets up SSH and GPG only for a package to push" {
+  local find
+  find=$(step_index publish "Find packages to push")
+  [ "$find" -gt "$(step_index publish "Download verified handoff")" ]
+  [ "$find" -lt "$(step_index publish "Setup AUR SSH")" ]
+  [ "$find" -lt "$(step_index publish "Setup GPG")" ]
+  run yq '.jobs.publish.steps[] | select(.name == "Find packages to push") | .id' "$CHECK_UPDATES"
+  [ "$output" = "handoff" ]
+  run yq -o=json -I=0 '[.jobs.publish.steps[] | select(.name == "Setup AUR SSH" or .name == "Setup GPG") | .if]' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[\"steps.handoff.outputs.packages == 'true'\",\"steps.handoff.outputs.packages == 'true'\"]" ]
+}
+
+# Runs Find packages to push in $BATS_TEST_TMPDIR/ws and prints its outputs
+run_find_packages_step() {
+  mkdir -p "$BATS_TEST_TMPDIR/ws"
+  step_run publish "Find packages to push" >"$BATS_TEST_TMPDIR/step.sh"
+  : >"$BATS_TEST_TMPDIR/output"
+  (cd "$BATS_TEST_TMPDIR/ws" && GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" bash -e "$BATS_TEST_TMPDIR/step.sh")
+  cat "$BATS_TEST_TMPDIR/output"
+}
+
+@test "check-updates: the issues job writes the run summary before it touches an issue" {
+  local write
+  write=$(step_index issues "Write the run summary")
+  [ "$write" -gt "$(step_index issues "Download statuses of publish")" ]
+  [ "$write" -lt "$(step_index issues "Close resolved issues")" ]
+}
+
+# Runs Write the run summary in a workspace with the statuses given as
+# name=status pairs and aurtomator/ linked to this repository; prints the
+# summary
+run_summary_step() {
+  local ws="$BATS_TEST_TMPDIR/ws" pair
+  mkdir -p "$ws"
+  ln -sfn "$BATS_TEST_DIRNAME/.." "$ws/aurtomator"
+  for pair in "$@"; do
+    mkdir -p "$ws/.status"
+    printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
+  done
+  step_run issues "Write the run summary" >"$BATS_TEST_TMPDIR/step.sh"
+  : >"$BATS_TEST_TMPDIR/summary"
+  (cd "$ws" && GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" bash -e "$BATS_TEST_TMPDIR/step.sh")
+  cat "$BATS_TEST_TMPDIR/summary"
+}
+
+@test "check-updates: the summary step writes the summary of the statuses" {
+  run run_summary_step foo="updated: 1.2.0" bar=up_to_date
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "2 packages, 1 up to date." ]
+  [[ "$output" == *'| `foo` | 📦 updated to 1.2.0 |'* ]]
+}
+
+@test "check-updates: the summary step writes nothing without statuses" {
+  run run_summary_step
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "check-updates: Find packages to push counts a prepared package only" {
+  local dir="$BATS_TEST_TMPDIR/ws/handoff"
+  run run_find_packages_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "packages=false" ]
+  mkdir -p "$dir/status" "$dir/prepared"
+  echo "update_failed: bad checksum" >"$dir/status/foo"
+  echo stray >"$dir/prepared/notes.txt"
+  run run_find_packages_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "packages=false" ]
+  mkdir "$dir/prepared/foo"
+  echo pkgbuild >"$dir/prepared/foo/PKGBUILD"
+  run run_find_packages_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "packages=true" ]
+}
+
 NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 
 @test "notify-failure: runs when called, after the caller's condition" {

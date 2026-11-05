@@ -610,6 +610,21 @@ alerts:
   [[ "$output" == *"requires 'upstream.host'"* ]]
 }
 
+@test "validate: gitea-release needs upstream.host and upstream.project" {
+  create_test_package "mypkg" "gitea-release" "upstream:
+  tag_version_regex: '^v(.+)$'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"strategy 'gitea-release' requires 'upstream.host'"* ]]
+  [[ "$output" == *"strategy 'gitea-release' requires 'upstream.project'"* ]]
+
+  create_test_package "mypkg" "gitea-release" "upstream:
+  host: codeberg.org
+  project: owner/repo"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
 @test "validate: git-tag passes" {
   create_test_package "mypkg" "git-tag" "upstream:
   url: https://git.example.org/~owner/repo
@@ -1428,7 +1443,7 @@ pkgver_dash: _"
       [[ "$output" != *"upstream.tag_version_regex applies to"* ]]
     else
       [ "$status" -eq 1 ]
-      [[ "$output" == *"upstream.tag_version_regex applies to the github-release, github-tag, github-nightly, gitlab-tag, gitea-tag and git-tag strategies only"* ]]
+      [[ "$output" == *"upstream.tag_version_regex applies to the github-release, github-tag, github-nightly, gitlab-tag, gitea-tag, gitea-release and git-tag strategies only"* ]]
     fi
   done
 }

@@ -21,6 +21,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AURTOMATOR_DIR="${AURTOMATOR_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+# shellcheck source=lib/version.sh
+source "$SCRIPT_DIR/lib/version.sh"
+# shellcheck source=lib/config.sh
+source "$SCRIPT_DIR/lib/config.sh"
 
 # The command that the printed commands start with. The script
 # aurtomator.sh of the template sets AURTOMATOR_RUNNER to the path it was
@@ -116,17 +120,10 @@ origin_repo() {
 }
 
 # =============================================================================
-# LOAD / SAVE CONFIG
+# SAVE CONFIG
 # =============================================================================
 
-load_config() {
-  if [[ -f "$CONFIG_FILE" ]]; then
-    # shellcheck source=/dev/null
-    source "$CONFIG_FILE"
-  fi
-}
-
-# load_config sources the file, so each value is written shell-quoted
+# load_config of lib/config.sh reads each value in this form
 save_config() {
   {
     printf 'GIT_AUTHOR_NAME=%s\n' "${GIT_AUTHOR_NAME@Q}"
@@ -492,6 +489,59 @@ setup_secrets() {
   fi
 }
 
+# Issues of repository $1, where the runs report failures and alerts
+verify_issues() {
+  local has_issues
+  if ! has_issues=$(gh api "repos/$1" --jq .has_issues 2>/dev/null); then
+    fail "Issues: cannot read the settings of $1"
+    return 1
+  fi
+  if [[ "$has_issues" != true ]]; then
+    fail "Issues: off, turn them on in Settings > General > Features"
+    return 1
+  fi
+  ok "Issues: on"
+}
+
+# Workflow $1 among the paths and states $2 that GitHub lists
+verify_workflow() {
+  local state
+  state=$(awk -v path=".github/workflows/$1" '$1 == path { print $2 }' <<<"$2")
+  case "$state" in
+    active) ok "Workflow $1: active" ;;
+    "")
+      fail "Workflow $1: not in the repository"
+      return 1
+      ;;
+    *)
+      fail "Workflow $1: $state, click Enable workflow on its page in the Actions tab"
+      return 1
+      ;;
+  esac
+}
+
+# The open issue of a failed run in repository $1, which the next run
+# without a failed job closes
+warn_run_issue() {
+  local number
+  number=$(gh issue list -R "$1" --label auto-update --state open --limit 1000 --json number,title --jq '.[] | select(.title == "❌ Check AUR Package Updates failed") | .number' 2>/dev/null) || true
+  [[ -z "$number" ]] || warn "Run issue #${number%%$'\n'*} is open: a run without a failed job closes it"
+}
+
+# The version of this aurtomator against its latest release
+verify_release() {
+  local version latest
+  version=$(aurtomator_version)
+  [[ -n "$version" ]] || return 0
+  if ! latest=$(gh api "repos/$AURTOMATOR_UPSTREAM/releases/latest" --jq .tag_name 2>/dev/null); then
+    warn "aurtomator: cannot read the latest release"
+  elif [[ "$latest" == "v$version" ]]; then
+    ok "aurtomator: $version, the latest release"
+  else
+    warn "aurtomator: $version, and the latest release is ${latest#v}"
+  fi
+}
+
 verify_all() {
   header "verify" "Checking everything works"
 
@@ -528,27 +578,44 @@ verify_all() {
     ok "GPG: skipped (not configured)"
   fi
 
-  # Secrets
+  # The repository on GitHub: its secrets, Issues and the two workflows
   if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
     local gh_repo
     gh_repo=$(origin_repo)
-    local secret_list
-    secret_list=$(gh secret list -R "$gh_repo" 2>/dev/null || true)
-    local secret_count=0
-    local secret_expected=3 # AUR_SSH_KEY + AUR_GIT_NAME + AUR_GIT_EMAIL
-    echo "$secret_list" | grep -q "AUR_SSH_KEY" && ((secret_count++)) || true
-    echo "$secret_list" | grep -q "AUR_GIT_NAME" && ((secret_count++)) || true
-    echo "$secret_list" | grep -q "AUR_GIT_EMAIL" && ((secret_count++)) || true
-    if [[ -n "$GPG_KEY_ID" ]]; then
-      ((secret_expected++))
-      echo "$secret_list" | grep -q "GPG_SIGNING_KEY" && ((secret_count++)) || true
-    fi
-    if [[ "$secret_count" -eq "$secret_expected" ]]; then
-      ok "Secrets: ${secret_count}/${secret_expected} configured"
-    else
-      warn "Secrets: ${secret_count}/${secret_expected} configured"
+    if [[ -z "$gh_repo" ]]; then
+      fail "GitHub: the origin of $AURTOMATOR_DATA_DIR is not a github.com repository"
       errors=$((errors + 1))
+    else
+      local secret_list
+      secret_list=$(gh secret list -R "$gh_repo" 2>/dev/null || true)
+      local secret_count=0
+      local secret_expected=3 # AUR_SSH_KEY + AUR_GIT_NAME + AUR_GIT_EMAIL
+      echo "$secret_list" | grep -q "AUR_SSH_KEY" && ((secret_count++)) || true
+      echo "$secret_list" | grep -q "AUR_GIT_NAME" && ((secret_count++)) || true
+      echo "$secret_list" | grep -q "AUR_GIT_EMAIL" && ((secret_count++)) || true
+      if [[ -n "$GPG_KEY_ID" ]]; then
+        ((secret_expected++))
+        echo "$secret_list" | grep -q "GPG_SIGNING_KEY" && ((secret_count++)) || true
+      fi
+      if [[ "$secret_count" -eq "$secret_expected" ]]; then
+        ok "Secrets: ${secret_count}/${secret_expected} configured"
+      else
+        warn "Secrets: ${secret_count}/${secret_expected} configured"
+        errors=$((errors + 1))
+      fi
+
+      verify_issues "$gh_repo" || errors=$((errors + 1))
+      local workflows
+      if workflows=$(gh api "repos/$gh_repo/actions/workflows" --jq '.workflows[] | "\(.path) \(.state)"' 2>/dev/null); then
+        verify_workflow check-updates.yml "$workflows" || errors=$((errors + 1))
+        verify_workflow validate.yml "$workflows" || errors=$((errors + 1))
+      else
+        fail "Workflows: cannot list the workflows of $gh_repo"
+        errors=$((errors + 1))
+      fi
+      warn_run_issue "$gh_repo"
     fi
+    verify_release
   else
     warn "Secrets: cannot verify (gh not available)"
   fi

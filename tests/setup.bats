@@ -118,7 +118,11 @@ exit 1
 MOCKEOF
   chmod +x "$MOCK_DIR/ssh"
 
-  # Mock gh
+  # Mock gh, logged in. A repository has Issues on unless $GH_HAS_ISSUES
+  # says otherwise, the workflows in $GH_WORKFLOWS (both active by default)
+  # and the secrets in $GH_SECRETS (all four by default); $GH_API_FAIL fails
+  # its reads. The open run issue is $GH_RUN_ISSUE, and the latest release
+  # of aurtomator $GH_LATEST, which fails when empty.
   cat >"$MOCK_DIR/gh" <<'MOCKEOF'
 #!/usr/bin/env bash
 case "$1" in
@@ -127,10 +131,25 @@ case "$1" in
     exit 0
     ;;
   api)
-    if [[ "$*" == *"user"* ]]; then
-      echo "testuser"
-      exit 0
-    fi
+    case "$*" in
+      "api repos/"*" --jq .has_issues")
+        [[ -z "${GH_API_FAIL:-}" ]] || exit 1
+        echo "${GH_HAS_ISSUES-true}"
+        ;;
+      "api repos/"*'/actions/workflows --jq .workflows[] | "\(.path) \(.state)"')
+        [[ -z "${GH_API_FAIL:-}" ]] || exit 1
+        printf '%s\n' "${GH_WORKFLOWS-$'.github/workflows/check-updates.yml active\n.github/workflows/validate.yml active'}"
+        ;;
+      "api repos/staticwire/aurtomator/releases/latest --jq .tag_name")
+        [[ -n "${GH_LATEST:-}" ]] || exit 1
+        echo "$GH_LATEST"
+        ;;
+      *user*) echo "testuser" ;;
+    esac
+    exit 0
+    ;;
+  issue)
+    [[ -z "${GH_RUN_ISSUE:-}" ]] || echo "$GH_RUN_ISSUE"
     exit 0
     ;;
   secret)
@@ -140,10 +159,7 @@ case "$1" in
       exit 0
     fi
     if [[ "$2" == "list" ]]; then
-      echo "AUR_SSH_KEY    Updated 2026-03-26"
-      echo "AUR_GIT_NAME   Updated 2026-03-26"
-      echo "AUR_GIT_EMAIL  Updated 2026-03-26"
-      echo "GPG_SIGNING_KEY    Updated 2026-03-26"
+      printf '%s\n' "${GH_SECRETS-$'AUR_SSH_KEY    Updated 2026-03-26\nAUR_GIT_NAME   Updated 2026-03-26\nAUR_GIT_EMAIL  Updated 2026-03-26\nGPG_SIGNING_KEY    Updated 2026-03-26'}"
       exit 0
     fi
     ;;
@@ -454,14 +470,23 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"Git author: $name <$email>"* ]]
 
-  # lib.sh sources the file the same way
-  run bash -c 'source "$1"; printf "%s\n" "$GIT_AUTHOR_NAME" "$GIT_AUTHOR_EMAIL" "$GPG_KEY_ID" "$AUR_SSH_KEY"' \
-    _ "$TEST_TMPDIR/.aurtomator.conf"
+  # update-pkg.sh and publish-pkg.sh read the file with lib.sh
+  run bash -c 'source "$1/scripts/lib.sh" && load_config && printf "%s\n" "$GIT_AUTHOR_NAME" "$GIT_AUTHOR_EMAIL" "$GPG_KEY_ID" "$AUR_SSH_KEY"' \
+    _ "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "$name" ]
   [ "${lines[1]}" = "$email" ]
   [ "${lines[2]}" = "$gpg_key" ]
   [ "${lines[3]}" = "$ssh_key" ]
+  [ ! -e "$TEST_TMPDIR/injected" ]
+}
+
+@test "setup: stops on a config line that is no saved value and runs nothing" {
+  printf '%s\n' "GPG_KEY_ID='KEY1'" "touch $TEST_TMPDIR/injected" >"$TEST_TMPDIR/.aurtomator.conf"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [ "$output" = "$TEST_TMPDIR/.aurtomator.conf: line 2 is not NAME='value' for GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GPG_KEY_ID or AUR_SSH_KEY" ]
   [ ! -e "$TEST_TMPDIR/injected" ]
 }
 
@@ -556,6 +581,8 @@ EOF
   write_full_config ""
   mkdir -p "$BATS_TEST_TMPDIR/data"
   cp "$TEST_TMPDIR/.aurtomator.conf" "$BATS_TEST_TMPDIR/data/"
+  git -C "$BATS_TEST_TMPDIR/data" init -q
+  git -C "$BATS_TEST_TMPDIR/data" remote add origin "git@github.com:owner/data.git"
 
   AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
   [ "$status" -eq 0 ]
@@ -956,25 +983,8 @@ EOF
 @test "setup verify: shows 3/3 secrets without GPG" {
   write_full_config ""
 
-  # Mock gh to return 3 secrets (no GPG)
-  cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
-#!/usr/bin/env bash
-case "$1" in
-  auth) exit 0 ;;
-  api) echo "testuser"; exit 0 ;;
-  secret)
-    if [[ "$2" == "list" ]]; then
-      echo "AUR_SSH_KEY    Updated 2026-03-26"
-      echo "AUR_GIT_NAME   Updated 2026-03-26"
-      echo "AUR_GIT_EMAIL  Updated 2026-03-26"
-      exit 0
-    fi ;;
-esac
-exit 0
-EOF
-  chmod +x "$TEST_TMPDIR/mock-bin/gh"
-
-  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  GH_SECRETS=$'AUR_SSH_KEY    Updated 2026-03-26\nAUR_GIT_NAME   Updated 2026-03-26\nAUR_GIT_EMAIL  Updated 2026-03-26' \
+    run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"3/3 configured"* ]]
 }
@@ -1021,7 +1031,8 @@ log_gh_calls() {
 @test "setup secrets: refuses a passphrase-protected key from the saved config" {
   mkdir -p "$TEST_TMPDIR/ssh-pass"
   ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
-  printf 'AUR_SSH_KEY=%q\n' "$TEST_TMPDIR/ssh-pass/key" >"$TEST_TMPDIR/.aurtomator.conf"
+  local key="$TEST_TMPDIR/ssh-pass/key"
+  printf 'AUR_SSH_KEY=%s\n' "${key@Q}" >"$TEST_TMPDIR/.aurtomator.conf"
   log_gh_calls
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
@@ -1273,13 +1284,9 @@ EOF
 
 @test "setup verify: a missing secret is an issue" {
   write_full_config ""
-  cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
-#!/usr/bin/env bash
-[[ "$1 $2" == "secret list" ]] && printf '%s\n' "AUR_SSH_KEY    Updated 2026-03-26" "AUR_GIT_NAME   Updated 2026-03-26"
-exit 0
-EOF
 
-  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  GH_SECRETS=$'AUR_SSH_KEY    Updated 2026-03-26\nAUR_GIT_NAME   Updated 2026-03-26' \
+    run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
   [ "$status" -eq 1 ]
   [[ "$output" == *"! Secrets: 2/3 configured"* ]]
   [[ "$output" == *"1 issue(s) found."* ]]
@@ -1332,20 +1339,103 @@ EOF
   mkdir -p "$data"
   git -C "$data" init -q
   git -C "$data" remote add origin "git@github.com:owner/data.git"
-  # Lists the three secrets of owner/data and none of any other repository
-  cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
-#!/usr/bin/env bash
-if [[ "$*" == "secret list -R owner/data" ]]; then
-  printf '%s\n' "AUR_SSH_KEY    Updated 2026-03-26" "AUR_GIT_NAME   Updated 2026-03-26" "AUR_GIT_EMAIL  Updated 2026-03-26"
-fi
-exit 0
-EOF
+  log_gh_calls
 
   AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/setup.sh" verify \
     --git-name "Jane Doe" --git-email "jane@example.com" \
     --ssh-key "$TEST_TMPDIR/ssh/aur.pem" --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"Secrets: 3/3 configured"* ]]
+  grep -qx 'secret list -R owner/data' "$TEST_TMPDIR/gh.args"
+  [[ "$(<"$TEST_TMPDIR/gh.args")" != *"test/repo"* ]]
+}
+
+# The template README asks for Issues and the two workflows by hand
+@test "setup verify: checks Issues and the two workflows of the repository" {
+  write_full_config ""
+  log_gh_calls
+
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"✓ Issues: on"* ]]
+  [[ "$output" == *"✓ Workflow check-updates.yml: active"* ]]
+  [[ "$output" == *"✓ Workflow validate.yml: active"* ]]
+  [[ "$output" != *"Run issue"* ]]
+  grep -qx 'api repos/test/repo --jq .has_issues' "$TEST_TMPDIR/gh.args"
+  grep -qxF 'api repos/test/repo/actions/workflows --jq .workflows[] | "\(.path) \(.state)"' "$TEST_TMPDIR/gh.args"
+  grep -qxF 'issue list -R test/repo --label auto-update --state open --limit 1000 --json number,title --jq .[] | select(.title == "❌ Check AUR Package Updates failed") | .number' "$TEST_TMPDIR/gh.args"
+}
+
+@test "setup verify: Issues turned off is an issue" {
+  write_full_config ""
+
+  GH_HAS_ISSUES=false run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ Issues: off, turn them on in Settings > General > Features"* ]]
+  [[ "$output" == *"1 issue(s) found."* ]]
+}
+
+@test "setup verify: each workflow that is missing or not active is an issue" {
+  write_full_config ""
+
+  GH_WORKFLOWS=".github/workflows/check-updates.yml disabled_inactivity" \
+    run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ Workflow check-updates.yml: disabled_inactivity, click Enable workflow on its page in the Actions tab"* ]]
+  [[ "$output" == *"✗ Workflow validate.yml: not in the repository"* ]]
+  [[ "$output" == *"2 issue(s) found."* ]]
+}
+
+@test "setup verify: a failed read of the repository is an issue" {
+  write_full_config ""
+
+  GH_API_FAIL=1 run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ Issues: cannot read the settings of test/repo"* ]]
+  [[ "$output" != *"Issues: off"* ]]
+  [[ "$output" == *"✗ Workflows: cannot list the workflows of test/repo"* ]]
+  [[ "$output" == *"2 issue(s) found."* ]]
+}
+
+# notify-failure opens it, and a run without a failed job closes it
+@test "setup verify: names an open run issue without counting it" {
+  write_full_config ""
+
+  GH_RUN_ISSUE=$'12\n15' run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"! Run issue #12 is open: a run without a failed job closes it"$'\n'* ]]
+  [[ "$output" == *"Ready."* ]]
+}
+
+@test "setup verify: compares aurtomator with its latest release" {
+  write_full_config ""
+  echo 0.8.3 >"$TEST_TMPDIR/VERSION"
+  log_gh_calls
+
+  GH_LATEST=v0.8.3 run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"✓ aurtomator: 0.8.3, the latest release"* ]]
+  grep -qx 'api repos/staticwire/aurtomator/releases/latest --jq .tag_name' "$TEST_TMPDIR/gh.args"
+  GH_LATEST=v0.9.0 run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"! aurtomator: 0.8.3, and the latest release is 0.9.0"* ]]
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"! aurtomator: cannot read the latest release"* ]]
+  rm "$TEST_TMPDIR/VERSION"
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [[ "$output" != *"aurtomator:"* ]]
+}
+
+@test "setup verify: an origin outside github.com is an issue" {
+  write_full_config ""
+  git -C "$TEST_TMPDIR" remote set-url origin https://notgithub.com/me/repo
+
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ GitHub: the origin of $TEST_TMPDIR is not a github.com repository"* ]]
+  [[ "$output" != *"Secrets:"* ]]
+  [[ "$output" == *"1 issue(s) found."* ]]
 }
 
 # setup_test_env exports AURTOMATOR_DATA_DIR, so env -u removes it

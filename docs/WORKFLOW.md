@@ -122,7 +122,7 @@ current: "4.4215"
 
 ## 3. Strategies
 
-aurtomator ships 15 strategies. A strategy is a bash script in `strategies/`. It takes the package name, reads its settings from the package YAML, queries the upstream, and prints one version string on stdout. On failure it prints an error to stderr and exits non-zero. The HTTP-based strategies use `curl` with a 30-second timeout, and the tag-based ones strip a leading `v`.
+aurtomator ships 16 strategies. A strategy is a bash script in `strategies/`. It takes the package name, reads its settings from the package YAML, queries the upstream, and prints one version string on stdout. On failure it prints an error to stderr and exits non-zero. The HTTP-based strategies use `curl` with a 30-second timeout, and the tag-based ones strip a leading `v`.
 
 ### 3.1 github-release
 
@@ -762,6 +762,33 @@ upstream:
   url: https://gitlab.gnome.org/GNOME/gtk.git
 ```
 
+### 3.16 gitea-release
+
+**Upstream:** Gitea/Forgejo Releases API (`/api/v1/repos/{owner}/{repo}/releases/latest`, and `/releases` with `tag_version_regex`).
+
+**When to use:** a project on Codeberg or another Gitea or Forgejo host that publishes releases and also pushes tags that are no release, which [gitea-tag](#36-gitea-tag) reads as well.
+
+**YAML fields:**
+
+| Field                  | Required | Description                              |
+|------------------------|----------|------------------------------------------|
+| `upstream.host`        | yes      | Instance hostname (e.g. `codeberg.org`)  |
+| `upstream.project`     | yes      | `owner/repo` format                      |
+| `upstream.tag_version_regex` | no | ERE whose first capture group is the version; the release list replaces `/releases/latest`, see [3.1](#31-github-release) |
+| `upstream.tag_version_replace` | no | The version built from the groups of `tag_version_regex`, see [3.1](#31-github-release) |
+
+**Version:** without `tag_version_regex`, it takes the tag of `/releases/latest`, the newest release by date that is neither a draft nor a pre-release, and strips a leading `v`. Gitea answers 404 when there is no such release, and the check then reads the release list to say whether the project has no release at all or pre-releases only. With `tag_version_regex`, it reads the release list, up to 10 pages of 50 releases and up to the first empty page, leaves out drafts and pre-releases, and returns the newest version by `vercmp` among the tags that the regex matches, as [gitea-tag](#36-gitea-tag) does. This fits a repository that publishes the releases of several products. An answer that is not JSON, such as the page of a bot check, fails the check with the URL of that page, see [Upstreams behind a bot check](SUPPORTED-PACKAGES.md#upstreams-behind-a-bot-check).
+
+**Example YAML:**
+
+```yaml
+name: my-package
+strategy: gitea-release
+upstream:
+  host: codeberg.org
+  project: owner/repo
+```
+
 ## 4. Update Process
 
 `check-all.sh --update` calls `update-pkg.sh` for every package with a new version. `--prepare`, `--verify` and `--publish` split the same update into three runs, see [4.4](#44-prepare-and-publish).
@@ -782,11 +809,11 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--
 
 ### 4.2 Step-by-step
 
-1. Load `.aurtomator.conf` when it exists. In CI, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GPG_KEY_ID` come from the workflow environment.
+1. Read `.aurtomator.conf` when it exists, as data, see [SETUP.md](SETUP.md#configuration-file). In CI, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GPG_KEY_ID` come from the workflow environment.
 2. Wait 2 seconds, then clone `ssh://aur@aur.archlinux.org/<package-name>.git` into a temporary directory, with up to 3 attempts 5 seconds apart. A clone without a PKGBUILD stops the update.
 3. When the clone lands on a detached `HEAD`, reset `master` to `origin/master`, so the push is a fast-forward.
 4. Warn when the PKGBUILD has no `# Maintainer:` line.
-5. Audit the PKGBUILD. `pkgver()` with the wrong strategy and mixed checksums block the update. Patches only warn. See [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md).
+5. Audit the PKGBUILD. `pkgver()` with the wrong strategy and mixed checksums block the update. Patches and an `epoch` other than 0 only warn. See [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md).
 6. Set `pkgver` with `sed` and `pkgrel` to 1, or to the `pkgrel` of the AUR when the AUR has this version already, as for a package added without `current`. For a package with `upstream.asset_var`, also write the value of `--asset` to its line and set `pkgrel` as [4.6](#46-values-from-release-asset-names) says. When the PKGBUILD does not change, the AUR already has this version: the script writes it to `current`, and the value to `current_asset`, and exits with code 2.
 7. Validate every `http` and `https` source URL, whatever its checksum. Unless a checksum array holds a `SKIP` other than that of a signature and no remote source has a real hash, run `updpkgsums`, and verify the result with `makepkg --verifysource --skippgpcheck`. A signature is a source whose file name ends in `.sig`, `.sign` or `.asc`, and makepkg gives it `SKIP` itself, as it does for a VCS source without a `#commit=`, `#tag=` or `#revision=` pin. Step 5 allows a real remote hash only next to such a `SKIP`, and `makepkg` clones the repository of a VCS source to run `updpkgsums`. Any failure stops the update.
 8. Run `namcap` when it is installed. Errors stop the update. Warnings are printed.
@@ -1014,7 +1041,7 @@ A download saved under a name without the value, as in `${pkgname}-${pkgver}-amd
 
 ### 5.1 Trigger
 
-`check-updates.yml` of aurtomator runs only when another workflow calls it: its trigger is `on: workflow_call`. It takes no inputs and declares the secrets `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME` and `AUR_GIT_EMAIL`, each with `required: false`. Only `publish` reads them, and it stops on an empty `AUR_SSH_KEY`, see [5.3](#53-steps).
+`check-updates.yml` of aurtomator runs only when another workflow calls it: its trigger is `on: workflow_call`. It takes no inputs and declares the secrets `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME` and `AUR_GIT_EMAIL`, each with `required: false`. Only `publish` reads them, and it stops on an empty `AUR_SSH_KEY` when a package goes to the AUR, see [5.3](#53-steps).
 
 The calling workflow `.github/workflows/check-updates.yml` of your repository, which [SETUP.md](SETUP.md#the-calling-workflows) shows in full, carries the trigger: the schedule `cron: "17 * * * *"` and `workflow_dispatch` for a run by hand. GitHub delays scheduled runs at the start of an hour, when its load is highest, so the schedule avoids minute 0. GitHub starts only part of the scheduled runs: in October 2026 a repository with this schedule got about five a day, one every five hours. Its job `check-updates` calls the reusable file at the pinned SHA and passes the four secrets by name. The concurrency group `check-updates`, with `cancel-in-progress: false`, serializes runs: a new run waits for the running one. The calling workflow sets the group at its workflow level, so it covers the `notify` job of [5.7](#57-failed-runs) too.
 
@@ -1098,18 +1125,19 @@ Root runs no git in the workspace that `builder` owns. `builder` can write `.git
 3. **Checkout aurtomator:** into `aurtomator/`.
 4. **Download statuses:** the `checked` artifact to `.status/`.
 5. **Download verified handoff:** the `verified` artifact to `handoff/`, when `verify` ran.
-6. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
-7. **Setup AUR SSH:** fails with `The secret AUR_SSH_KEY is empty` when the secret is empty or the calling workflow does not pass it. Otherwise it writes `AUR_SSH_KEY` to `/home/builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. The host key is part of `check-updates.yml` of aurtomator, so a new host key of the AUR reaches a run through a release and a move of the pin.
-8. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the step is skipped.
-9. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
-10. **Update README package table:** runs `./aurtomator/scripts/update-readme.sh` as `builder`.
-11. **Commit changes via API:** see [5.5](#55-verified-commit).
-12. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
-13. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
-14. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
-15. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
+6. **Find packages to push:** sets the output `packages` to `true` when `handoff/prepared/` holds a directory, a package that `verify` passed, and to `false` otherwise. Steps 8 and 9 run only with `true`, so a run that pushes nothing to the AUR, such as a run before `setup secrets` or a run that only changes the package table, needs neither key and still commits the README.
+7. **Setup workspace:** git identity for `builder` from the `AUR_GIT_NAME` and `AUR_GIT_EMAIL` secrets, default `aurtomator`.
+8. **Setup AUR SSH:** fails with `The secret AUR_SSH_KEY is empty` when the secret is empty or the calling workflow does not pass it. Otherwise it writes `AUR_SSH_KEY` to `~builder/.ssh/aur`, writes the Ed25519 host key that <https://aur.archlinux.org> publishes to `known_hosts`, and writes an SSH config with `StrictHostKeyChecking yes` and connection multiplexing. A host that answers with another key fails with `Host key verification failed`. The host key is part of `check-updates.yml` of aurtomator, so a new host key of the AUR reaches a run through a release and a move of the pin.
+9. **Setup GPG:** with `GPG_SIGNING_KEY` set, imports the key for `builder`, passes `GPG_KEY_ID` to the later steps and enables commit signing. Without it, the AUR commits are not signed.
+10. **Publish updates:** runs `check-all.sh --publish handoff` as `builder`, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
+11. **Update README package table:** runs `./aurtomator/scripts/update-readme.sh` as `builder`.
+12. **Commit changes via API:** see [5.5](#55-verified-commit).
+13. **Hand over statuses:** also after a failed step, copies the regular files of `.status/` whose names fit a package name, `_alerts` and `_upstream` included, to `statuses/`. A link does not reach the artifact. `builder` reads each file and root writes the copy into its own directory, so a link swapped in after the test reaches nothing that `builder` cannot read.
+14. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day.
+15. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
+16. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
-Step 11 runs as root with `GH_TOKEN` set to the workflow token, `github.token`, and runs git and reads the files as `builder`. Steps 12 to 15 run as root without it.
+Step 12 runs as root with `GH_TOKEN` set to the workflow token, `github.token`, and runs git and reads the files as `builder`. Steps 13 to 16 run as root without it.
 
 `issues`:
 
@@ -1117,10 +1145,11 @@ Step 11 runs as root with `GH_TOKEN` set to the workflow token, `github.token`, 
 2. **Checkout aurtomator:** into `aurtomator/`. The job reads no file of your repository, so it does not check it out. Without git in the image, `actions/checkout` downloads the files through the REST API.
 3. **Download statuses of check:** the `checked` artifact to `.status/`, when `publish` was skipped.
 4. **Download statuses of publish:** the `published` artifact to `.status/`, when `publish` ran.
-5. **Close resolved issues:** see [5.6](#56-issues).
-6. **Create issues:** see [5.6](#56-issues).
+5. **Write the run summary:** see [5.6](#56-issues).
+6. **Close resolved issues:** see [5.6](#56-issues).
+7. **Create issues:** see [5.6](#56-issues).
 
-Steps 5 and 6 run as root with `GH_TOKEN` set to the workflow token. No other user runs code in the workspace of this job, so root writes the bodies with `scripts/lib/issue.sh` of `aurtomator/`.
+Steps 6 and 7 run as root with `GH_TOKEN` set to the workflow token. No other user runs code in the workspace of this job, so root writes the bodies with `scripts/lib/issue.sh` of `aurtomator/`.
 
 ### 5.4 README update
 
@@ -1183,11 +1212,15 @@ A `git push` from the workflow would show as unverified, so the step commits thr
 3. Create a blob for every changed file, which `builder` reads, a tree on the base tree, and a commit. A link in the work tree reaches nothing that `builder` cannot read.
 4. Move the branch ref with `force=false`.
 
-The step commits to `github.repository` on `github.ref_name`, your repository and the branch of the run, with the `contents: write` that the calling job grants. The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting the workflows that run on a push: the calling `validate.yml` in your repository, `ci.yml` in aurtomator. GitHub marks the commit as verified because the Actions bot creates it through the API.
+The step commits to `github.repository` on `github.ref_name`, your repository and the branch of the run, with the `contents: write` that the calling job grants. A run started by hand from another branch therefore reads the package YAMLs of that branch, pushes their updates to the AUR and commits to that branch, while the schedule runs on the default branch only. The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting the workflows that run on a push: the calling `validate.yml` in your repository, `ci.yml` in aurtomator. GitHub marks the commit as verified because the Actions bot creates it through the API.
 
 ### 5.6 Issues
 
-The job `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs. It reads the final statuses: those of `publish` when it ran, and those of `check` otherwise. Its step `Create issues` runs with `if: always()`. When a package failed, is held or has an alert in `.status/_alerts`, or a newer aurtomator release is out, it first reads `has_issues` of the repository. `gh issue list` fails in a repository with Issues turned off, so when GitHub answers `false`, the step prints a notice and opens no issue. Any other answer goes on, and a failure to read the answer or to list the issues fails the step.
+The job `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs. It reads the final statuses: those of `publish` when it ran, and those of `check` otherwise.
+
+Before it touches an issue, the job writes the summary of the run to `$GITHUB_STEP_SUMMARY`, and the page of the run shows it. The summary counts the packages and the ones up to date, lists every other package in a table with the label of the package table of the README, and shows the error of each failed package in a code block, as its issue does. `run_summary` and `status_label` in `scripts/lib/status.sh` write it, and `update-readme.sh` takes its labels from `status_label` too.
+
+The step `Create issues` runs with `if: always()`. When a package failed, is held or has an alert in `.status/_alerts`, or a newer aurtomator release is out, it first reads `has_issues` of the repository. `gh issue list` fails in a repository with Issues turned off, so when GitHub answers `false`, the step prints a notice and opens no issue. Any other answer goes on, and a failure to read the answer or to list the issues fails the step.
 
 For every `.status/` entry with `check_failed:` or `update_failed:`, the step:
 
@@ -1317,7 +1350,7 @@ When the package is up to date, stdout stays empty:
 ./aurtomator.sh update-pkg my-package 2.0.0 --dry-run
 ```
 
-It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `.SRCINFO`, prints the PKGBUILD diff and does not push.
+It runs the steps of [4.2](#42-step-by-step) up to the check of `PKGBUILD` and `.SRCINFO`, prints the PKGBUILD diff and does not push. Those steps run the PKGBUILD of the AUR on your machine, with your SSH key in reach of its code, so read the PKGBUILD first when someone else can push to the package.
 
 ### 7.4 Push an update
 
@@ -1452,6 +1485,7 @@ echo "$version"
 
 | Function                        | Description                                         |
 |---------------------------------|-----------------------------------------------------|
+| `resolve_data_dir`              | Sets `AURTOMATOR_DATA_DIR` to the absolute path of its value, or of the working directory when it is unset, and exits 1 when that is no directory. `common.sh` runs it when it is sourced |
 | `pkg_file <name>`               | Resolves `packages/<name>.yml`, returns 1 if missing |
 | `pkg_get <file> <yq-query>`     | Reads a field from a YAML file with yq              |
 | `pkg_set <file> <query> <val>`  | Writes a field to a YAML file with yq               |
@@ -1460,7 +1494,6 @@ echo "$version"
 | `to_pkgver <version> [dash] [format]` | Prints the pkgver of an upstream version, with `pkgver_dash` and `pkgver_format` applied |
 | `pkg_asset_var <file>`          | Prints the `upstream.asset_var` of a package or nothing, returns 1 for a name that is not a variable name starting with `_` |
 | `require_cmd <cmd>`             | Exits 1 if the command is not in `PATH`             |
-| `load_config`                   | Sources `.aurtomator.conf` if present               |
 | `http_get <url> [curl option]...` | Fetches a URL with `curl`, see 8.3                |
 | `http_get_json <url> [curl option]...` | `http_get` for an API that answers JSON, see 8.3 |
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
@@ -1478,6 +1511,7 @@ echo "$version"
 | `latest_tag_version <tags> <ere> [template]` | Prints the highest version among the tags, filtered as the tag strategies filter them |
 | `capture_matches <ere>`         | Prints the first capture group of every match of the ERE in stdin |
 | `ere_valid <ere>`               | Succeeds when bash can compile the ERE              |
+| `pcre_valid <regex>`            | Succeeds when `grep -P` can compile the Perl regex  |
 | `log_ok <msg>`                  | Prints a green check mark and the message to stderr |
 | `log_warn <msg>`                | Prints a yellow `!` and the message to stderr       |
 | `log_err <msg>`                 | Prints a red cross and the message to stderr        |
