@@ -526,7 +526,7 @@ run_decide_step() {
 }
 
 @test "check-updates: Decide prepares when a package is outdated" {
-  run run_decide_step pkg="new_version: 2.0.0" other=up_to_date _error_count=0
+  run run_decide_step pkg="new_version: 2.0.0" other=up_to_date
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=true\nwork=true' ]
   run run_decide_step pkg="available_downgrade: 1.0.0"
@@ -550,7 +550,7 @@ run_decide_step() {
 }
 
 @test "check-updates: Decide does nothing when nothing changed" {
-  run run_decide_step pkg=up_to_date _error_count=0
+  run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=false\nwork=false' ]
 }
@@ -1499,7 +1499,7 @@ EOF
 
 @test "check-updates: closes the check issue of a package whose check passed" {
   GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' \
-    run_close_step foo=up_to_date bar="new_version: 2.0.0" _error_count=0
+    run_close_step foo=up_to_date bar="new_version: 2.0.0"
   [ "$status" -eq 0 ]
   grep -qx 'issue close 12 --comment comment' "$GH_LOG"
   grep -qx 'issue close 13 --comment comment' "$GH_LOG"

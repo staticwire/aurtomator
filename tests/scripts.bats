@@ -1301,7 +1301,7 @@ run_alert_fires() {
   [[ "${lines[0]}" == *"aurtomator 0.6.0" ]]
   [[ "$output" == *"aurtomator 0.7.0 is out, this repository runs 0.6.0"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/_upstream")" = "newer: 0.7.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: records that aurtomator is at its latest release" {
@@ -1317,7 +1317,7 @@ run_alert_fires() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Could not read the latest aurtomator release"* ]]
   [ ! -e "$TEST_TMPDIR/.status/_upstream" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: asks for no release without VERSION" {
@@ -1543,15 +1543,15 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/pkg-a")" = "new_version: 2.0.0" ]
 }
 
-@test "check-all: writes error count" {
+@test "check-all: logs the number of errors" {
   create_test_package "pkg-a" "github-release" "upstream:
   type: github
   project: owner/repo
 current: '2.0.0'"
 
-  "$TEST_TMPDIR/scripts/check-all.sh" 2>/dev/null || true
-  [ -f "$TEST_TMPDIR/.status/_error_count" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [[ "$output" == *"Checked: 1, Updated: 0, Errors: 0"* ]]
+  [ ! -e "$TEST_TMPDIR/.status/_error_count" ]
 }
 
 @test "check-all: reports errors for broken packages" {
@@ -2050,7 +2050,7 @@ upstream: {}
 EOF
 
   "$TEST_TMPDIR/scripts/check-all.sh" 2>/dev/null || true
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "2" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "2" ]
 }
 
 # === update-readme.sh: additional coverage ===
@@ -3239,7 +3239,7 @@ current: '3.0.0'"
   [ "$status" -eq 0 ]
   [[ "$output" == *"DOWNGRADE detected 3.0.0 → 2.0.0, skipped: allow_downgrade is not set"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all --update: runs no update to a lower version without allow_downgrade" {
@@ -3354,7 +3354,7 @@ stand_in_strategy() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"version jump 13 → 2026102100, skipped: allow_version_jump is not set"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "jump_skipped: 2026102100" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: writes 'new_version:' for a version jump the package allows" {
@@ -3406,7 +3406,7 @@ alerts:
   [ "$status" -eq 0 ]
   [[ "$output" == *"pkg-hold: update 28+25 → 29+1 held: Raise makedepends java-environment to 28"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-hold")" = "held: 29+1" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: logs the note of an alert without hold and keeps the update" {
@@ -3455,7 +3455,7 @@ alerts:
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'pkg-both\tnotice\tCreate the package for the old major\npkg-both\thold\tRaise makedepends java-environment to 28' ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all: writes no _alerts when no alert fires" {
@@ -3513,7 +3513,7 @@ alerts:
 
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [[ "$(cat "$TEST_TMPDIR/.status/pkg-bad")" == "check_failed: "*"alerts[0].match must be a non-empty ERE that bash accepts: (?:29)" ]]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
 @test "check-all: fails the check of a package with an alert note of several lines" {
@@ -3847,7 +3847,7 @@ current_asset: '$2'}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"no asset yet"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
   [ ! -e "$TEST_TMPDIR/.status/_assets" ]
 }
 

@@ -1245,7 +1245,7 @@ allow_downgrade: true"
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.1.0" ]
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.1.0" ]
   [ "$(cat "$TEST_TMPDIR/out/status/older")" = "available_downgrade: 0.9.0" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "0" ]
 }
 
 @test "check-all --prepare: keeps the other statuses of the check run" {
@@ -1267,7 +1267,7 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/out/status/fine")" = "up_to_date" ]
   [ "$(cat "$TEST_TMPDIR/out/status/broken")" = "check_failed: API down" ]
   [ "$(cat "$TEST_TMPDIR/out/status/unchecked")" = "check_failed: not checked before --prepare" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "2" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "2" ]
 }
 
 @test "check-all --prepare: prepares no downgrade the check run skipped" {
@@ -1280,7 +1280,7 @@ current: '1.0.0'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/out/status/older")" = "downgrade_skipped: 0.9.0" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "0" ]
 }
 
 @test "check-all --prepare: prepares no version jump the check run skipped" {
@@ -1293,7 +1293,7 @@ current: '13'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/out/status/jumpy")" = "jump_skipped: 2026102100" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "0" ]
 }
 
 @test "check-all --prepare: prepares no update the check run held" {
@@ -1310,7 +1310,7 @@ alerts:
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/out/status/held")" = "held: 29+1" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "0" ]
 }
 
 @test "check-all --prepare: records a failed preparation" {
@@ -1357,7 +1357,7 @@ current: '2.0.0'"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: API down" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
 @test "check-all --publish: keeps a skipped downgrade and publishes nothing" {
@@ -1370,7 +1370,7 @@ current: '1.0.0'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/older")" = "downgrade_skipped: 0.9.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all --publish: publishes no downgrade of a package that does not allow it" {
@@ -1396,7 +1396,7 @@ current: '13'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/jumpy")" = "jump_skipped: 2026102100" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all --publish: publishes no version jump of a package that does not allow it" {
@@ -1446,7 +1446,7 @@ current: 28+25"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all --publish: keeps a held update and records the notes of its alerts again" {
@@ -1561,7 +1561,7 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
 @test "check-all --publish: keeps the update failure the prepare run recorded" {
@@ -1601,7 +1601,7 @@ current: '1.0.0'"
   stub_script publish-pkg.sh 3
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all --publish: records a refused publish" {
@@ -1613,7 +1613,7 @@ current: '1.0.0'"
   stub_script publish-pkg.sh 1 "changes lines outside pkgver"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: changes lines outside pkgver" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
 @test "check-all --publish: ignores prepared directories of unknown packages" {
@@ -1676,14 +1676,11 @@ current: '1.0.0'"
   checked_status other "new_version: 2.0.0"
   mkdir -p "$TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/out/status"
   echo "update_failed: from a link" >"$TEST_TMPDIR/target-status"
-  echo "keep" >"$TEST_TMPDIR/target-count"
   ln -s "$TEST_TMPDIR/target-status" "$TEST_TMPDIR/out/status/pkg"
   ln -s "$TEST_TMPDIR/target-status" "$TEST_TMPDIR/out/status/other"
-  ln -s "$TEST_TMPDIR/target-count" "$TEST_TMPDIR/out/status/_error_count"
   stub_script publish-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/target-status")" = "update_failed: from a link" ]
-  [ "$(cat "$TEST_TMPDIR/target-count")" = "keep" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
   [ "$(cat "$TEST_TMPDIR/.status/other")" = "update_failed: prepare and verify handed over no update" ]
 }
@@ -1714,24 +1711,6 @@ current: '2.0.0'"
   [ ! -L "$TEST_TMPDIR/.status" ]
   [ -d "$TEST_TMPDIR/.status" ]
   [ -z "$(ls -A "$TEST_TMPDIR/elsewhere")" ]
-}
-
-@test "check-all --publish: counts the errors itself" {
-  create_test_package "pkg" "github-release" "upstream:
-  project: owner/repo
-current: '1.0.0'"
-  create_test_package "broken" "github-release" "upstream:
-  project: owner/repo
-current: '1.0.0'"
-  checked_status pkg "new_version: 2.0.0"
-  checked_status broken "check_failed: API down"
-  echo 7 >"$TEST_TMPDIR/.status/_error_count"
-  mkdir -p "$TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/out/status"
-  echo 'a[$(touch '"$TEST_TMPDIR"'/pwned)]' >"$TEST_TMPDIR/out/status/_error_count"
-  stub_script publish-pkg.sh 0
-  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
-  [ ! -f "$TEST_TMPDIR/pwned" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
 }
 
 # === check-all.sh time budgets ===
@@ -1874,7 +1853,7 @@ EOF
   [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady\nflaky' ]
   [ "$(cat "$TEST_TMPDIR/sleeps")" = "9" ]
   [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "up_to_date" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
   [[ "$output" == *"Checking 1 failed package(s) again in 9 s"* ]]
   [[ "$output" == *"Checked: 2, Updated: 0, Errors: 0"* ]]
 }
@@ -1885,7 +1864,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady\nflaky' ]
   [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "check_failed: API down" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "1" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
 # Without network every check runs out of its budget, and a second pass
@@ -1934,7 +1913,6 @@ setup_check_verify() {
 current: '1.0.0'"
   mkdir -p "$TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/out/status"
   echo "new_version: 2.0.0" >"$TEST_TMPDIR/out/status/pkg"
-  echo 1 >"$TEST_TMPDIR/out/status/_error_count"
 }
 
 @test "check-all --verify: keeps a verified update and runs no strategy" {
@@ -1947,7 +1925,6 @@ current: '1.0.0'"
   grep -qx "pkg $TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/verify-pkg.sh.args"
   [ -d "$TEST_TMPDIR/out/prepared/pkg" ]
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "1" ]
 }
 
 @test "check-all --verify: takes out an update that fails, with update_failed" {
@@ -1957,7 +1934,7 @@ current: '1.0.0'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/out/prepared/pkg" ]
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: checksum mismatch" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "2" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "1" ]
 }
 
 # The prepare run writes the base of every package, so a moved AUR repo and
@@ -3717,7 +3694,7 @@ current_asset: '$1-a'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "pending: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "0" ]
 }
 
 @test "check-all --prepare: fails a package without an asset value from the check run" {
@@ -3756,7 +3733,7 @@ current_asset: '$1-a'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_error_count")" = "0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
 }
 
 @test "check-all --publish: refuses an asset value of the check run that a PKGBUILD must not hold" {
