@@ -2117,7 +2117,8 @@ NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 # Runs the step of notify-failure for run 7 of owner/fork. gh lists the
 # titles in $GH_TITLES as the open issues, answers has_issues with
 # $GH_HAS_ISSUES (true by default), lists the jobs in $GH_JOBS as the failed
-# ones (an empty $GH_JOBS lists no failed job) or fails that when
+# ones (an empty $GH_JOBS lists no failed job), applies the filter of the
+# step to the jobs in $GH_JOBS_JSON when it is set, or fails that when
 # $GH_JOBS_FAIL is set, fails the list of issues when $GH_FAIL is set and
 # logs every call to $GH_LOG.
 run_notify_step() {
@@ -2130,7 +2131,11 @@ case "$1 $2" in
   "api repos/owner/fork") echo "${GH_HAS_ISSUES:-true}" ;;
   "api repos/owner/fork/actions/runs/7/jobs")
     [[ -z "${GH_JOBS_FAIL:-}" ]] || exit 1
-    echo "$GH_JOBS"
+    if [[ -n "${GH_JOBS_JSON:-}" ]]; then
+      jq -r "$4" <<<"$GH_JOBS_JSON"
+    else
+      echo "$GH_JOBS"
+    fi
     ;;
   "issue list")
     [[ -z "${GH_FAIL:-}" ]] || exit 1
@@ -2143,7 +2148,7 @@ EOF
   : >"$GH_LOG"
   yq '.jobs.notify.steps[0].run' "$NOTIFY" >"$BATS_TEST_TMPDIR/step.sh"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_TITLES="${GH_TITLES:-}" GH_FAIL="${GH_FAIL:-}" \
-    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_JOBS="${GH_JOBS:-}" GH_JOBS_FAIL="${GH_JOBS_FAIL:-}" \
+    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_JOBS="${GH_JOBS:-}" GH_JOBS_FAIL="${GH_JOBS_FAIL:-}" GH_JOBS_JSON="${GH_JOBS_JSON:-}" \
     GH_REPO=owner/fork RUN_ID=7 \
     RUN_URL=https://example.invalid/runs/7 RUN_BRANCH="${RUN_BRANCH:-main}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
@@ -2163,6 +2168,13 @@ EOF
   grep -q 'https://example.invalid/runs/7' "$GH_LOG"
   grep -q 'failed in check, publish' "$GH_LOG"
   grep -q 'until a run succeeds, and that run closes this issue\.$' "$GH_LOG"
+}
+
+# A job that runs into timeout-minutes concludes timed_out
+@test "notify-failure: names the jobs that failed or timed out" {
+  GH_JOBS_JSON='{"jobs":[{"name":"check","conclusion":"failure"},{"name":"verify","conclusion":"timed_out"},{"name":"publish","conclusion":"skipped"},{"name":"status","conclusion":"success"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  grep -q 'failed in check, verify' "$GH_LOG"
 }
 
 @test "notify-failure: opens the issue when the jobs cannot be listed" {
