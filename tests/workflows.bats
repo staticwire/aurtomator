@@ -1593,7 +1593,8 @@ moved_tree() {
 # answers the head of main with $GH_HEAD (HEAD of the repository by
 # default), lists the tree of that head from $GH_TREE as "path sha" lines
 # (the tree of HEAD by default) or fails the listing when $GH_TREE_FAIL is
-# set, and logs every call to $GH_LOG.
+# set, and logs every call to $GH_LOG. For a new tree it logs the number of
+# --input options and keeps the body of the last one in $GH_LOG.tree.
 run_commit_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
@@ -1615,7 +1616,18 @@ case "$2" in
     printf '%s\n' "$GH_TREE"
     ;;
   repos/owner/fork/git/blobs) echo "blob" ;;
-  repos/owner/fork/git/trees) cat >/dev/null && echo "tree" ;;
+  repos/owner/fork/git/trees)
+    inputs=0
+    while [[ $# -gt 0 ]]; do
+      if [[ "$1" == --input ]]; then
+        inputs=$((inputs + 1))
+        cat -- "$2" >"$GH_LOG.tree"
+      fi
+      shift
+    done
+    echo "inputs: $inputs" >>"$GH_LOG"
+    echo "tree"
+    ;;
   repos/owner/fork/git/commits) echo "commit" ;;
   repos/owner/fork/git/refs/heads/main) echo "{}" ;;
   *) exit 1 ;;
@@ -1653,6 +1665,16 @@ no_commit() {
   # Without force=false a push during the run would be overwritten
   grep -qx "api repos/owner/fork/git/refs/heads/main -f sha=commit -F force=false --method PATCH" "$GH_LOG"
   no_call "recursive"
+}
+
+# gh sends the body of the last --input and puts a -f field in the query
+@test "check-updates: the commit step sends one body for the new tree" {
+  make_commit_repo README.md="new table"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  grep -qx "inputs: 1" "$GH_LOG"
+  no_call "base_tree="
+  jq -e '.base_tree == "tree-of-head" and .tree == [{"path": "README.md", "mode": "100644", "type": "blob", "sha": "blob"}]' "$GH_LOG.tree"
 }
 
 @test "check-updates: the commit step commits on a moved head that left its files alone" {
