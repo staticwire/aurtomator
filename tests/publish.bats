@@ -956,6 +956,15 @@ current: '0.9.0'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
 }
 
+@test "publish-pkg: --dry-run shows the PKGBUILD diff" {
+  setup_publish
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[DRY RUN] Would push demo 1.1.0 to AUR"* ]]
+  [[ "$output" == *"-pkgver=1.0.0"*"+pkgver=1.1.0"* ]]
+  [[ "$output" != *"fatal:"* ]]
+}
+
 # === verify-pkg.sh ===
 
 # Helper: a curl that logs its arguments to curl.args and writes

@@ -115,7 +115,7 @@ done
 if [[ "$DRY_RUN" == "--dry-run" ]]; then
   log_warn "[DRY RUN] Would push $PKG_NAME $VERSION to AUR"
   log_info "PKGBUILD diff:"
-  git -C "$aur_dir" diff --cached PKGBUILD || true
+  git -C "$aur_dir" diff --cached -- PKGBUILD || true
   exit 0
 fi
 
