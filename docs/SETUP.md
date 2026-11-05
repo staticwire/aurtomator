@@ -529,7 +529,7 @@ It runs the strategy and prints the latest upstream version. Without a `current`
 
 It clones the AUR repo, sets `pkgver`, regenerates checksums and `.SRCINFO`, runs `namcap` when it is installed, and shows the PKGBUILD diff **without pushing**. It changes no file of your repository: when the AUR already has the version, it says so and stops.
 
-The dry run runs the PKGBUILD of the AUR on your machine before it stops: the audit and `makepkg --printsrcinfo` source it, as `updpkgsums` and `makepkg --verifysource` do for a package with checksums, and your SSH key is in reach of that code. When someone else can push to the AUR package, read its PKGBUILD first.
+The dry run runs the PKGBUILD of the AUR on your machine before it stops: the audit, the check of the source URLs, `namcap` and `makepkg --printsrcinfo` source it, as `updpkgsums` and `makepkg --verifysource` do for a package with checksums, and your SSH key is in reach of that code. When someone else can push to the AUR package, read its PKGBUILD first.
 
 ### 6. Push and let CI take over
 
