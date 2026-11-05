@@ -547,6 +547,14 @@ Commit the package YAML and push to your repository. The push to `main` runs `Va
 2. SSH picks the wrong key. Offer that key alone: `ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org`
 3. The key file permissions are too open. Fix them with `chmod 600 ~/.ssh/aur_ed25519`.
 
+### SSH: Host key verification failed
+
+**Symptom:** `./aurtomator.sh setup verify` prints `Host key verification failed.` under `SSH: cannot connect to aur.archlinux.org`.
+
+**Cause:** no known hosts file holds a key of aur.archlinux.org. The check runs ssh as CI does, with `-F /dev/null` and `BatchMode=yes`: it reads `~/.ssh/known_hosts`, `~/.ssh/known_hosts2`, `/etc/ssh/ssh_known_hosts` and `/etc/ssh/ssh_known_hosts2` alone, never a `UserKnownHostsFile` of `~/.ssh/config`, and it accepts no new host key.
+
+**Fix:** run the command of [step 3](#3-test-ssh-access) once. ssh shows the fingerprint of the host key: compare it with the fingerprints under "Submitting Packages" on the home page of <https://aur.archlinux.org>, and answer `yes` only when they match. ssh then saves the key to `~/.ssh/known_hosts`.
+
 ### GPG: No secret key / unusable secret key
 
 **Symptom:** `gpg --sign` fails with "No secret key" or "Unusable secret key".

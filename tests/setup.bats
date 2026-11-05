@@ -577,6 +577,22 @@ EOF
   [[ "$output" == *"$TEST_TMPDIR/scripts/setup.sh verify"* ]]
 }
 
+# An unknown host key, a refused key and the network fail the same check
+@test "setup verify: shows why ssh failed" {
+  write_full_config "VALIDKEY123"
+  cat >"$TEST_TMPDIR/mock-bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+echo "No ED25519 host key is known for aur.archlinux.org and you have requested strict checking." >&2
+echo "Host key verification failed." >&2
+exit 255
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/ssh"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ SSH: cannot connect to aur.archlinux.org"$'\n'"    Host key verification failed."$'\n'* ]]
+}
+
 @test "setup verify: names draft.sh of the clone with AURTOMATOR_DATA_DIR" {
   write_full_config ""
   mkdir -p "$BATS_TEST_TMPDIR/data"

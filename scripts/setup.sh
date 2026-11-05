@@ -567,6 +567,8 @@ verify_all() {
     ok "SSH: aur.archlinux.org accessible"
   else
     fail "SSH: cannot connect to aur.archlinux.org"
+    # The last line of ssh names the cause: a host key, the key or the network
+    [[ -z "$ssh_out" ]] || printf "    %s\n" "$(tail -n 1 <<<"$ssh_out")"
     errors=$((errors + 1))
   fi
 
