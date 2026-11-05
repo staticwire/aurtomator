@@ -1354,6 +1354,7 @@ run_alert_fires() {
 }
 
 @test "update-readme: writes the version under the package table" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   echo "0.6.0" >"$TEST_TMPDIR/VERSION"
   cat >"$TEST_TMPDIR/README.md" <<'EOF'
 <!-- PACKAGES:START -->
@@ -1368,6 +1369,7 @@ EOF
 }
 
 @test "update-readme: links a newer release of aurtomator" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   echo "0.6.0" >"$TEST_TMPDIR/VERSION"
   echo "newer: 0.7.0" >"$TEST_TMPDIR/.status/_upstream"
   cat >"$TEST_TMPDIR/README.md" <<'EOF'
@@ -1382,6 +1384,7 @@ EOF
 
 @test "update-readme: links no release for aurtomator at its release or for another _upstream" {
   local upstream
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   echo "0.6.0" >"$TEST_TMPDIR/VERSION"
   git -C "$TEST_TMPDIR" init -q
   for upstream in "current: 0.7.0" "xnewer: 0.7.0" "newer: 0.7.0 x"; do
@@ -1396,6 +1399,7 @@ EOF
 }
 
 @test "update-readme: writes no version line without VERSION" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   echo "current: 0.6.0" >"$TEST_TMPDIR/.status/_upstream"
   cat >"$TEST_TMPDIR/README.md" <<'EOF'
 <!-- PACKAGES:START -->
@@ -1404,6 +1408,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
+  grep -qx '</table>' "$TEST_TMPDIR/README.md"
   run grep -c 'aurtomator ' "$TEST_TMPDIR/README.md"
   [ "$output" = "0" ]
 }
@@ -1758,6 +1763,7 @@ EOF
 @test "update-readme: the badge block names the two calling workflows of the repository" {
   local data="$BATS_TEST_TMPDIR/data"
   mkdir -p "$data/packages" "$data/.status"
+  printf '%s\n' 'name: pkg-a' 'strategy: github-release' 'upstream:' '  project: owner/repo' >"$data/packages/pkg-a.yml"
   git -C "$data" init -q
   git -C "$data" remote add origin "https://github.com/owner/data.git"
   printf '%s\n' '# test' '<!-- BADGES:START -->' 'old badges' '<!-- BADGES:END -->' \
@@ -1769,10 +1775,11 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(sed -n '3p' "$data/README.md")" = '[![Validate packages](https://github.com/owner/data/actions/workflows/validate.yml/badge.svg)](https://github.com/owner/data/actions/workflows/validate.yml) [![Check AUR Package Updates](https://github.com/owner/data/actions/workflows/check-updates.yml/badge.svg)](https://github.com/owner/data/actions/workflows/check-updates.yml) [![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
   [ "$(sed -n '4p' "$data/README.md")" = '<!-- BADGES:END -->' ]
-  local pattern
+  local badges pattern
+  badges=$(sed -n '/^<!-- BADGES:START -->$/,/^<!-- BADGES:END -->$/p' "$data/README.md")
   for pattern in codecov ci.yml shields.io/badge/bash aur.archlinux.org; do
     echo "$pattern"
-    run ! grep -qF -- "$pattern" "$data/README.md"
+    [[ "$badges" != *"$pattern"* ]]
   done
 }
 
@@ -2132,6 +2139,7 @@ EOF
 }
 
 @test "update-readme: fails if START_MARKER missing" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   cat >"$TEST_TMPDIR/README.md" <<'EOF'
 # test
 no markers here
@@ -2146,6 +2154,7 @@ EOF
 # sed prints nothing from a marker that is missing, so the text after the
 # start marker would be lost
 @test "update-readme: fails and keeps the README without the end marker of the table" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   printf '%s\n' '# test' '<!-- BADGES:START -->' '<!-- BADGES:END -->' '<!-- PACKAGES:START -->' \
     'old table' '## License' >"$TEST_TMPDIR/README.md"
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
@@ -2163,7 +2172,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"README.md has no package table and there are no packages to show"* ]]
+  [[ "$output" == *"packages/ holds no package, README.md stays as it is"* ]]
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
 
@@ -2178,16 +2187,33 @@ EOF
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
 
-@test "update-readme: writes the badges of a README without the table markers and without packages" {
-  printf '%s\n' '# test' '<!-- BADGES:START -->' 'old badges' '<!-- BADGES:END -->' '## License' >"$TEST_TMPDIR/README.md"
+# A repository made from the template keeps its setup steps until its first
+# package, whatever runs before it
+@test "update-readme: a README with both blocks stays as it is while there are no packages" {
+  printf '%s\n' '# test' '<!-- BADGES:START -->' 'setup steps' '<!-- BADGES:END -->' '## Packages' \
+    '<!-- PACKAGES:START -->' 'table text' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+  touch "$TEST_TMPDIR/packages/.gitkeep"
+  echo "0.9.0" >"$TEST_TMPDIR/VERSION"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  run cat "$TEST_TMPDIR/README.md"
-  [ "$output" = "$(printf '%s\n' '# test' '<!-- BADGES:START -->' '[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' '<!-- BADGES:END -->' '## License')" ]
+  [[ "$output" == *"packages/ holds no package, README.md stays as it is"* ]]
+  cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: a directory named like a package YAML is no package" {
+  printf '%s\n' '<!-- PACKAGES:START -->' 'table text' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+  mkdir "$TEST_TMPDIR/packages/sub.yml"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: fails and keeps the README without the end marker of the badges" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   printf '%s\n' '# test' '<!-- BADGES:START -->' 'old badges' '## Intro' \
     '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
@@ -2201,6 +2227,7 @@ EOF
 # A section is written up to its start marker and from its end marker, so a
 # swapped or second marker would copy the README into itself on every run
 @test "update-readme: fails and keeps the README with the table markers swapped" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   printf '%s\n' '# test' '<!-- PACKAGES:END -->' 'text' '<!-- PACKAGES:START -->' 'old table' >"$TEST_TMPDIR/README.md"
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
   git -C "$TEST_TMPDIR" init -q
@@ -2211,6 +2238,7 @@ EOF
 }
 
 @test "update-readme: fails and keeps the README with a second start marker" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   printf '%s\n' '# test' '<!-- PACKAGES:START -->' 'text' '<!-- PACKAGES:START -->' 'old table' \
     '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
@@ -2222,6 +2250,7 @@ EOF
 }
 
 @test "update-readme: fails and keeps the README with the badge markers swapped" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   printf '%s\n' '# test' '<!-- BADGES:END -->' '<!-- BADGES:START -->' '<!-- PACKAGES:START -->' \
     '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
@@ -2307,22 +2336,6 @@ EOF
   grep -q "red" "$TEST_TMPDIR/README.md"
 }
 
-@test "update-readme: shows 'No packages' row when empty" {
-  rm -f "$TEST_TMPDIR/packages/"*.yml
-
-  cat >"$TEST_TMPDIR/README.md" <<'EOF'
-<!-- PACKAGES:START -->
-<!-- PACKAGES:END -->
-EOF
-  git -C "$TEST_TMPDIR" init -q
-  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  [ "$(sed -n '/<table>/,$p' "$TEST_TMPDIR/README.md")" = '<table>
-<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>
-<tr><td><em>No packages configured</em></td><td>-</td><td nowrap>-</td><td nowrap>-</td><td nowrap>-</td></tr>
-</table>
-<!-- PACKAGES:END -->' ]
-}
-
 @test "update-readme: preserves content outside markers" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
@@ -2401,11 +2414,6 @@ EOF
   git -C "$TEST_TMPDIR" remote add origin "https://github.com/owner/data.git"
   printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
   local block
-
-  run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 0 ]
-  mapfile -t block < <(sed -n '/^<!-- PACKAGES:START -->$/,/^<!-- PACKAGES:END -->$/p' "$TEST_TMPDIR/README.md")
-  [ "${block[1]}" = '<table>' ]
 
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo

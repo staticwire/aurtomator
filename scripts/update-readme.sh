@@ -16,6 +16,8 @@
 #
 # Reads per-package status from .status/ directory (written by check-all.sh).
 #
+# With no package in packages/, the script writes nothing.
+#
 # Usage: ./scripts/update-readme.sh
 
 set -euo pipefail
@@ -39,8 +41,7 @@ readonly PKG_END="<!-- PACKAGES:END -->"
 # Each section is written up to its start marker and from its end marker,
 # each a line of its own. A missing end marker would drop the rest of the
 # README, and a second marker or an end marker above the start would copy
-# the README into itself on every run. The badges are optional, and so is
-# the table while there are no packages to show.
+# the README into itself on every run. The badges are optional.
 # Args: $1=start marker, $2=end marker
 # Returns: 1 when the README does not hold each marker once, start first
 check_markers() {
@@ -61,13 +62,19 @@ check_markers() {
   fi
 }
 
-# The README of aurtomator itself has no table, and aurtomator has no packages
-has_table=true
-if ! compgen -G "${AURTOMATOR_DATA_DIR}/packages/*.yml" >/dev/null && ! grep -qxF -e "$PKG_START" -e "$PKG_END" "$README"; then
-  has_table=false
-else
-  check_markers "$PKG_START" "$PKG_END" || exit 1
+pkg_files=()
+for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
+  [[ -f "$pkg_file" ]] || continue
+  pkg_files+=("$pkg_file")
+done
+# A repository made from the template keeps its setup steps until its first
+# package, and the README of aurtomator stays as it is
+if ((${#pkg_files[@]} == 0)); then
+  log_info "packages/ holds no package, README.md stays as it is"
+  exit 0
 fi
+
+check_markers "$PKG_START" "$PKG_END" || exit 1
 has_badges=false
 if grep -qxF -- "$BADGES_START" "$README"; then
   check_markers "$BADGES_START" "$BADGES_END" || exit 1
@@ -107,11 +114,6 @@ if [[ "$has_badges" == true ]]; then
   log_ok "Badges updated (repo: ${repo_url:-unknown})"
 fi
 
-if [[ "$has_table" == false ]]; then
-  log_info "README.md has no package table and there are no packages to show"
-  exit 0
-fi
-
 # =============================================================================
 # PACKAGES SECTION
 # =============================================================================
@@ -129,9 +131,7 @@ table_header=$'<table>\n<tr><th>Package</th><th>Version</th><th>Strategy</th><th
 pkg_count=0
 pkg_ok=0
 pkg_fail=0
-for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-  [[ -f "$pkg_file" ]] || continue
-
+for pkg_file in "${pkg_files[@]}"; do
   name=$(pkg_get "$pkg_file" .name)
   current=$(pkg_get "$pkg_file" '.current // "-"')
   strategy=$(pkg_get "$pkg_file" .strategy)
@@ -161,31 +161,16 @@ for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
 done
 
 # Build badge: green if all ok, red otherwise
-if [[ "$pkg_count" -gt 0 ]]; then
-  if [[ "$pkg_fail" -eq 0 ]]; then
-    badge_color="brightgreen"
-  else
-    badge_color="red"
-  fi
-  badge_text="${pkg_ok}%2F${pkg_count}"
-  pkg_badge="![packages](https://img.shields.io/badge/packages-${badge_text}-${badge_color})"
+if [[ "$pkg_fail" -eq 0 ]]; then
+  badge_color="brightgreen"
 else
-  pkg_badge=""
+  badge_color="red"
 fi
+badge_text="${pkg_ok}%2F${pkg_count}"
+pkg_badge="![packages](https://img.shields.io/badge/packages-${badge_text}-${badge_color})"
 
 # Assemble full table
-table=""
-if [[ -n "$pkg_badge" ]]; then
-  table+="${pkg_badge}"$'\n\n'
-fi
-table+="$table_header"
-
-if [[ "$pkg_count" -eq 0 ]]; then
-  table+=$(table_row "<em>No packages configured</em>" - - - -)
-else
-  table+="$table_rows"
-fi
-table+=$'\n</table>'
+table="${pkg_badge}"$'\n\n'"${table_header}${table_rows}"$'\n</table>'
 
 # The version of aurtomator, and the newer release the check run found
 version=$(aurtomator_version)
