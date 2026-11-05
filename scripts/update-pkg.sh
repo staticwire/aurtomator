@@ -126,13 +126,12 @@ log_info "Updating pkgver to $NEW_VERSION"
 pkgrel=$(_update_pkgrel "${aur_dir}/PKGBUILD" "$NEW_VERSION")
 if [[ -n "$ASSET_VAR" ]]; then
   pkgrel=$(_asset_pkgrel "${aur_dir}/PKGBUILD" "$ASSET_VAR" "$NEW_VERSION" "$ASSET") || exit 1
-  sed -i "s/^${ASSET_VAR}=.*/${ASSET_VAR}=${ASSET}/" "${aur_dir}/PKGBUILD"
 fi
-sed -i "s/^pkgver=.*/pkgver=${NEW_VERSION}/" "${aur_dir}/PKGBUILD"
-sed -i "s/^pkgrel=.*/pkgrel=${pkgrel}/" "${aur_dir}/PKGBUILD"
 
-# An unchanged PKGBUILD means the AUR already has this version
-if git -C "$aur_dir" diff --quiet PKGBUILD; then
+# The AUR has this version when pkgver and pkgrel hold the values of the
+# update, as bash reads them; a new asset value raises pkgrel
+if [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgver)" == "$NEW_VERSION" ]] &&
+  [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgrel)" == "$pkgrel" ]]; then
   log_ok "$PKG_NAME already at $NEW_VERSION on AUR, nothing to do"
   if [[ -n "$PREPARE_DIR" ]]; then
     hand_over
@@ -141,6 +140,12 @@ if git -C "$aur_dir" diff --quiet PKGBUILD; then
   fi
   exit 2
 fi
+
+if [[ -n "$ASSET_VAR" ]]; then
+  sed -i "s/^${ASSET_VAR}=.*/${ASSET_VAR}=${ASSET}/" "${aur_dir}/PKGBUILD"
+fi
+sed -i "s/^pkgver=.*/pkgver=${NEW_VERSION}/" "${aur_dir}/PKGBUILD"
+sed -i "s/^pkgrel=.*/pkgrel=${pkgrel}/" "${aur_dir}/PKGBUILD"
 
 # =============================================================================
 # UPDATE CHECKSUMS

@@ -184,6 +184,34 @@ current: '0.9.0'"
   cmp "$OLD" "$TEST_TMPDIR/out/demo/PKGBUILD"
 }
 
+@test "update-pkg --prepare: hands over the AUR files when the AUR has the version in quotes" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '0.9.0'"
+  write_pkgbuild "$OLD" '"1.0.0"' 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.0.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"demo already at 1.0.0 on AUR, nothing to do"* ]]
+  cmp "$OLD" "$TEST_TMPDIR/out/demo/PKGBUILD"
+}
+
+@test "update-pkg --prepare: keeps the AUR pkgrel of a version with a comment after it" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo"
+  write_pkgbuild "$OLD" '1.0.0 # stable' 3 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 3 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.0.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  cmp "$OLD" "$TEST_TMPDIR/out/demo/PKGBUILD"
+}
+
 @test "update-pkg: commits the updated PKGBUILD and .SRCINFO" {
   create_test_package "demo" "github-nightly" "upstream:
   project: owner/repo
@@ -848,6 +876,48 @@ current: '0.9.0'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
 }
 
+@test "publish-pkg: syncs the YAML when the AUR has the version in quotes" {
+  create_test_package "demo" "github-release" "upstream:
+  project: owner/repo
+current: '0.9.0'"
+  write_pkgbuild "$OLD" '"1.0.0"' 1 "sha256sums=('$H1' '$H2')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 "$H1" "$H2"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  PREPARED="$TEST_TMPDIR/out/demo"
+  mkdir -p "$PREPARED"
+  cp "$OLD" "$PREPARED/PKGBUILD"
+  cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  echo "$AUR_BASE" >"$PREPARED/base"
+
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"demo already at 1.0.0 on AUR, nothing to do"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+}
+
+@test "publish-pkg: refuses the files of the AUR for another version" {
+  setup_publish
+  cp "$OLD" "$PREPARED/PKGBUILD"
+  cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD has pkgver=1.0.0, expected 1.1.0"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+}
+
+@test "publish-pkg: checks a prepared .SRCINFO beside the PKGBUILD of the AUR" {
+  setup_publish
+  cp "$OLD" "$PREPARED/PKGBUILD"
+  cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  sed -i 's/^\tpkgdesc = demo$/\tpkgdesc = changed/' "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 2 changes more than the version"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
 @test "publish-pkg: --dry-run pushes nothing" {
   setup_publish
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED" --dry-run
@@ -925,6 +995,28 @@ commit_aur_state() {
   [ "$status" -eq 0 ]
   grep -qx 'https://aur.archlinux.org/demo.git' "$TEST_TMPDIR/clone-urls"
   grep -q -- '--proto =http,https,ftp --proto-redir =http,https,ftp .* https://example.com/demo-1.1.0.tar.gz$' "$TEST_TMPDIR/curl.args"
+}
+
+@test "verify-pkg: has nothing to verify when the prepared files are those of the AUR" {
+  setup_verify
+  local work="$TEST_TMPDIR/aur-work-demo"
+  sed -i 's/^pkgver=.*/pkgver="1.0.0"/' "$work/PKGBUILD"
+  commit_aur_state "quote pkgver"
+  cp "$work/PKGBUILD" "$work/.SRCINFO" "$PREPARED/"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"The prepared files of demo are those of the AUR, nothing to verify"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+@test "verify-pkg: checks a prepared .SRCINFO beside the PKGBUILD of the AUR" {
+  setup_verify
+  cp "$OLD" "$PREPARED/PKGBUILD"
+  cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  sed -i 's/^\tpkgdesc = demo$/\tpkgdesc = changed/' "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 2 changes more than the version"* ]]
 }
 
 # makepkg runs curl with -b "", so a cookie set on a redirect goes with the
@@ -2519,6 +2611,21 @@ make_unpushable_repo() {
   [ "$(cat "$TEST_TMPDIR/sleeps")" = $'2\n5\n5\n5\n5' ]
 }
 
+# === _plain_value ===
+
+@test "_plain_value: reads a value in quotes or before a comment as bash does" {
+  printf '%s\n' 'pkgver="1.0"' "pkgrel='2' # rebuild" 'epoch=1  # x' '_bin=a.b  ' >"$OLD"
+  [ "$(_plain_value "$OLD" pkgver)" = "1.0" ]
+  [ "$(_plain_value "$OLD" pkgrel)" = "2" ]
+  [ "$(_plain_value "$OLD" epoch)" = "1" ]
+  [ "$(_plain_value "$OLD" _bin)" = "a.b" ]
+}
+
+@test "_plain_value: keeps a hash sign inside a word" {
+  printf '%s\n' 'pkgver=1.0#2' >"$OLD"
+  [ "$(_plain_value "$OLD" pkgver)" = "1.0#2" ]
+}
+
 # === check_prepared_pkgbuild ===
 
 @test "check_prepared_pkgbuild: accepts new pkgver, pkgrel and checksums" {
@@ -3966,6 +4073,19 @@ pkgver_dash: ''"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 2.4.6 "$TEST_TMPDIR/out/demo" --asset "$V246_3"
   [ "$status" -eq 2 ]
   [ "$(yq -r .current_asset "$TEST_TMPDIR/packages/demo.yml")" = "$V246_3" ]
+}
+
+@test "publish-pkg: refuses the files of the AUR for a rebuild" {
+  setup_asset_package 2.4.6 "$V246_2" 1 2.4.6 "$V246_3" 2
+  PREPARED="$TEST_TMPDIR/out/demo"
+  mkdir -p "$PREPARED"
+  cp "$OLD" "$PREPARED/PKGBUILD"
+  cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  echo "$AUR_BASE" >"$PREPARED/base"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 2.4.6 "$PREPARED" --asset "$V246_3"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD has pkgrel=1, expected 2"* ]]
+  [ "$(yq -r .current_asset "$TEST_TMPDIR/packages/demo.yml")" = "$V246_2" ]
 }
 
 @test "publish-pkg: a package with asset_var needs --asset" {

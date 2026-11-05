@@ -192,13 +192,14 @@ _asset_line_value() {
   printf '%s\n' "${values[0]}"
 }
 
-# Print the value of the first line of a PKGBUILD that sets the variable,
-# without the double or single quotes around it, as bash reads it
+# Print the value of the first line of a PKGBUILD that sets the variable as
+# bash reads it, without the quotes around it and a comment after it
 # Args: $1=PKGBUILD, $2=variable name
 _plain_value() {
-  local value dq='^"(.*)"$' sq="^'(.*)'$"
+  local value end='([[:space:]]+#.*|[[:space:]]*)$'
+  local dq="^\"([^\"]*)\"$end" sq="^'([^']*)'$end" bare="^([^[:space:]]*)$end"
   value=$(sed -n "s/^$2=//p" "$1" | head -1)
-  if [[ "$value" =~ $dq || "$value" =~ $sq ]]; then
+  if [[ "$value" =~ $dq || "$value" =~ $sq || "$value" =~ $bare ]]; then
     value="${BASH_REMATCH[1]}"
   fi
   printf '%s\n' "$value"
