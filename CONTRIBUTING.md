@@ -11,7 +11,7 @@ A general-purpose build bot, a CI-hosted package build service or a multi-user o
 ## Development setup
 
 ```sh
-sudo pacman -S --needed git bash shellcheck shfmt bats go-yq
+sudo pacman -S --needed git bash shellcheck shfmt actionlint bats go-yq jq openssh
 git clone https://github.com/staticwire/aurtomator.git
 cd aurtomator
 bats tests/ --recursive

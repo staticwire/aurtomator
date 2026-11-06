@@ -559,7 +559,7 @@ verify_all() {
     errors=$((errors + 1))
   fi
 
-  # SSH with that key alone, as CI has it: no ssh config and no agent. AUR
+  # The key alone, without the ssh config of this machine or an agent. AUR
   # returns exit 1 even on success, so check output for "Welcome".
   local ssh_out
   ssh_out=$(ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o ConnectTimeout=5 -i "$AUR_SSH_KEY" aur@aur.archlinux.org 2>&1 || true)
