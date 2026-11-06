@@ -1118,7 +1118,8 @@ log_gh_calls() {
   local url
   write_full_config ""
   log_gh_calls
-  for url in git@github-work:me/repo.git https://notgithub.com/me/repo; do
+  for url in git@github-work:me/repo.git git@github-com:me/repo.git https://notgithub.com/me/repo \
+    https://ghproxy.example/https://github.com/me/repo https://github.com/me/repo/tree/main; do
     echo "$url"
     git -C "$TEST_TMPDIR" remote set-url origin "$url"
     run "$TEST_TMPDIR/scripts/setup.sh" secrets <<<$'someone/repo\ny'
