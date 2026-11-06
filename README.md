@@ -1,6 +1,6 @@
 # aurtomator
 
-[![Lint & Test](https://github.com/staticwire/aurtomator/actions/workflows/ci.yml/badge.svg)](https://github.com/staticwire/aurtomator/actions/workflows/ci.yml) [![codecov](https://codecov.io/github/staticwire/aurtomator/graph/badge.svg)](https://codecov.io/github/staticwire/aurtomator) [![Bash](https://img.shields.io/badge/bash-5%2B-green)](https://www.gnu.org/software/bash/) [![AUR](https://img.shields.io/badge/AUR-automation-orange)](https://aur.archlinux.org/) [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
+[![Lint & Test](https://github.com/staticwire/aurtomator/actions/workflows/ci.yml/badge.svg)](https://github.com/staticwire/aurtomator/actions/workflows/ci.yml) [![codecov](https://codecov.io/github/staticwire/aurtomator/graph/badge.svg)](https://codecov.io/github/staticwire/aurtomator) [![Bash](https://img.shields.io/badge/bash-5%2B-green?logo=gnubash&logoColor=white)](https://www.gnu.org/software/bash/) [![AUR](https://img.shields.io/badge/AUR-automation-1793d1?logo=archlinux&logoColor=white)](https://aur.archlinux.org/) [![License](https://img.shields.io/badge/license-BSD--3--Clause-lightgrey?logo=opensourceinitiative&logoColor=white)](LICENSE)
 
 Automated AUR package updates from a single GitHub repo.  
 Create a repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) and drop in your packages. Its workflows call the pipeline of aurtomator at a pinned commit.
