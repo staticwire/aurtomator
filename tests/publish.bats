@@ -2455,6 +2455,11 @@ EOF
   [ "$status" -eq 0 ]
   [ "${lines[5]}" = "[first 4 characters cut]" ]
   [ "${lines[6]}" = "$tail" ]
+
+  # An error of exactly 4000 characters stays whole
+  echo "update_failed: ${tail}" >"$TEST_TMPDIR/demo"
+  run --keep-empty-lines failure_issue_body "$TEST_TMPDIR/demo" https://example.invalid/run
+  [ "${lines[5]}" = "$tail" ]
 }
 
 @test "failure_issue_body: cuts a long error by characters in the C locale" {
@@ -2521,9 +2526,9 @@ EOF
 }
 
 @test "failure_host: names the host of the first URL, in lower case and without the port" {
-  printf '%s\n' 'check_failed: https://Git.Example.ORG:8443/o/demo.git: error: 404' 'https://api.github.com/x: error: 503' >"$TEST_TMPDIR/demo"
+  printf '%s\n' 'check_failed: https://Git-Mirror.Example.ORG:8443/o/demo.git: error: 404' 'https://api.github.com/x: error: 503' >"$TEST_TMPDIR/demo"
   run failure_host "$TEST_TMPDIR/demo"
-  [ "$output" = "git.example.org" ]
+  [ "$output" = "git-mirror.example.org" ]
   echo "check_failed: http://example.org/demo: Protocol \"http\" disabled" >"$TEST_TMPDIR/demo"
   run failure_host "$TEST_TMPDIR/demo"
   [ "$output" = "example.org" ]
