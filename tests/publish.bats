@@ -434,6 +434,26 @@ current: '6.00.3091'"
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
+@test "update-pkg: refuses a line that keeps the old version the PKGBUILD derives" {
+  create_test_package "demo" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  # shellcheck disable=SC2016
+  sed -i 's/^license=.*/&\nprovides=("demo=${pkgver}")/' "$OLD"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 SKIP SKIP
+  sed -i 's/^\tlicense = MIT$/&\n\tprovides = demo=1.0.0/' "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"line 8 does not follow the version as the PKGBUILD does"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
 # Helper: split PKGBUILD in the shape of liblinear, with the checksum <sum>
 # Usage: write_split_pkgbuild <path> <pkgver> <pkgrel> <sum>
 write_split_pkgbuild() {
@@ -945,8 +965,40 @@ current: '0.9.0'"
   sed -i 's/^\tpkgdesc = demo$/\tpkgdesc = changed/' "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO line 2 changes more than the version"* ]]
+  [[ "$output" == *"Prepared .SRCINFO line 2 changes a value the PKGBUILD holds as text: pkgdesc = changed, expected pkgdesc = demo"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+# Helper: give the AUR copy and the prepared files of demo a provides line,
+# derived from pkgver, and hand the new AUR commit to the prepared update
+# Usage: provides_from_pkgver <provides of the prepared .SRCINFO>
+provides_from_pkgver() {
+  local work="$TEST_TMPDIR/aur-work-demo"
+  # shellcheck disable=SC2016
+  sed -i 's/^license=.*/&\nprovides=("demo=${pkgver}")/' "$work/PKGBUILD" "$PREPARED/PKGBUILD"
+  sed -i 's/^\tlicense = MIT$/&\n\tprovides = demo=1.0.0/' "$work/.SRCINFO"
+  sed -i "s/^\tlicense = MIT\$/&\n\tprovides = $1/" "$PREPARED/.SRCINFO"
+  commit_aur_state "provides"
+}
+
+@test "publish-pkg: refuses a line that keeps the old version the PKGBUILD derives" {
+  setup_publish
+  provides_from_pkgver demo=1.0.0
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 8 does not follow the version as the PKGBUILD does: provides = demo=1.0.0, expected provides = demo=1.1.0"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$(<"$PREPARED/base")" ]
+}
+
+@test "publish-pkg: pushes a line the PKGBUILD holds as text with the old version" {
+  setup_publish
+  local work="$TEST_TMPDIR/aur-work-demo"
+  sed -i "s/^license=.*/&\nconflicts=('demo-legacy<1.0.0')/" "$work/PKGBUILD" "$PREPARED/PKGBUILD"
+  sed -i 's/^\tlicense = MIT$/&\n\tconflicts = demo-legacy<1.0.0/' "$work/.SRCINFO" "$PREPARED/.SRCINFO"
+  commit_aur_state "conflicts"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:.SRCINFO | grep -qx $'\tconflicts = demo-legacy<1.0.0'
 }
 
 @test "publish-pkg: --dry-run pushes nothing" {
@@ -1111,7 +1163,16 @@ commit_aur_state() {
   sed -i 's/^\tpkgdesc = demo$/\tpkgdesc = changed/' "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO line 2 changes more than the version"* ]]
+  [[ "$output" == *"Prepared .SRCINFO line 2 changes a value the PKGBUILD holds as text: pkgdesc = changed, expected pkgdesc = demo"* ]]
+}
+
+@test "verify-pkg: refuses a line that keeps the old version the PKGBUILD derives" {
+  setup_verify
+  provides_from_pkgver demo=1.0.0
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 8 does not follow the version as the PKGBUILD does"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
 # makepkg runs curl with -b "", so a cookie set on a redirect goes with the
@@ -3169,7 +3230,7 @@ sha256sums=('SKIP' '$H4')"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
   sed -i $'s/^\tlicense = MIT$/\tlicense = MIT\\x00 extra/' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO holds a NUL byte"* ]]
 }
@@ -3181,12 +3242,52 @@ sha256sums=('SKIP' '$H4')"
   [[ "$output" == *"Could not read"* ]]
 }
 
+# === _pkgbuild_text ===
+
+@test "_pkgbuild_text: drops pkgver, pkgrel, the asset_var line, the checksum arrays and comments" {
+  cat >"$OLD" <<'EOF'
+pkgname=demo
+pkgver=2.0
+pkgrel=1
+_bin=demo-2.0-x86_64
+pkgdesc="A GPL-2.0 licensed tool"
+# provides=("tool=2.0")
+  # depends=('old')
+provides=("tool=${pkgver}")
+sha256sums=('1111'
+            'SKIP')
+b2sums_x86_64=('2222')
+
+package() {
+  # install the binary
+  install -Dm755 demo "$pkgdir/usr/bin/demo"
+}
+EOF
+  run _pkgbuild_text "$OLD" _bin
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pkgname=demo\npkgdesc="A GPL-2.0 licensed tool"\nprovides=("tool=${pkgver}")\n\npackage() {\n  install -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
+}
+
+@test "_pkgbuild_text: drops a comment indented with a tab" {
+  printf '%s\n' 'package() {' $'\t# provides=("tool=2.0")' $'\tinstall -Dm755 demo "$pkgdir/usr/bin/demo"' '}' >"$OLD"
+  run _pkgbuild_text "$OLD"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'package() {\n\tinstall -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
+}
+
+@test "_pkgbuild_text: keeps the line of a variable that is no asset_var" {
+  printf '%s\n' 'pkgver=2.0' '_bin=demo-2.0' >"$OLD"
+  run _pkgbuild_text "$OLD"
+  [ "$status" -eq 0 ]
+  [ "$output" = "_bin=demo-2.0" ]
+}
+
 # === check_prepared_srcinfo ===
 
 @test "check_prepared_srcinfo: accepts the new version and checksums" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 0 ]
 }
 
@@ -3199,21 +3300,21 @@ write_srcinfo_line() {
 @test "check_prepared_srcinfo: accepts the version without its last component" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 6.19.0 "source = https://download.kde.org/stable/frameworks/6.19/kio-6.19.0.tar.xz"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 6.20.0 "source = https://download.kde.org/stable/frameworks/6.20/kio-6.20.0.tar.xz"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 6.20.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 6.20.0
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: accepts the version cut at the first plus sign" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 0.13.0+dev+1853+g6edb38ca98 "provides = neovim=0.13.0"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 0.14.0+dev+5+gabcdef0 "provides = neovim=0.14.0"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.14.0+dev+5+gabcdef0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.14.0+dev+5+gabcdef0
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: accepts the version with underscores for dots" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 1.86.0 "source = https://example.com/boost_1_86_0.tar.gz"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 1.87.0 "source = https://example.com/boost_1_87_0.tar.gz"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.87.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.87.0
   [ "$status" -eq 0 ]
 }
 
@@ -3227,24 +3328,24 @@ temurin_source() {
 @test "check_prepared_srcinfo: accepts the version with underscores for plus signs" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 28+21 "$(temurin_source 28+21)"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 28+22 "$(temurin_source 28+22)"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 28+22
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 28+22
   [ "$status" -eq 0 ]
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 29+1 "$(temurin_source 29+1)"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 29+1
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 29+1
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: replaces each version form once" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 5.1.0 "source = https://example.com/5.1/demo-5.1.0.tar.gz"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 5.10.0 "source = https://example.com/5.10/demo-5.10.0.tar.gz"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 5.10.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 5.10.0
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: keeps a major version alone" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.50 "license = GPL-2"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 3.0 "license = GPL-3"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 3.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 3.0
   [ "$status" -eq 1 ]
 }
 
@@ -3269,16 +3370,20 @@ write_srcinfo_lookalike() {
 }
 
 @test "check_prepared_srcinfo: keeps text that only looks like the old version" {
+  local text
+  # shellcheck disable=SC2016
+  text=$(printf '%s\n' 'pkgdesc="A GPL-2.0 licensed tool"' "license=('GPL-2.0-or-later')" \
+    "depends=('glibc>=2.0.1')" 'provides=("tool=${pkgver}")')
   write_srcinfo_lookalike "$TEST_TMPDIR/old.SRCINFO" 2.0
   write_srcinfo_lookalike "$TEST_TMPDIR/new.SRCINFO" 2.1
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: rejects a source that keeps the old version" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.0 "source = https://example.com/demo-2.0.tar.gz"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1 "source = https://example.com/demo-2.0.tar.gz"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
 }
@@ -3286,7 +3391,7 @@ write_srcinfo_lookalike() {
 @test "check_prepared_srcinfo: rejects an arch source that keeps the old version" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.0 "source_x86_64 = https://example.com/demo-2.0-x86_64.tar.gz"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1 "source_x86_64 = https://example.com/demo-2.0-x86_64.tar.gz"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
 }
@@ -3294,9 +3399,63 @@ write_srcinfo_lookalike() {
 @test "check_prepared_srcinfo: rejects a line changed beyond the version" {
   write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.0 "depends = glibc>=2.0.1"
   write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1 "depends = glibc>=2.9"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  run check_prepared_srcinfo "depends=('glibc>=2.0.1')" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
   [ "$status" -eq 1 ]
-  [[ "$output" == *"changes more than the version"* ]]
+  [[ "$output" == *"changes a value the PKGBUILD holds as text: depends = glibc>=2.9, expected depends = glibc>=2.0.1"* ]]
+}
+
+@test "check_prepared_srcinfo: keeps a line the PKGBUILD holds as text" {
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.0.1 "license = Apache-2.0"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1.0 "license = Apache-2.0"
+  run check_prepared_srcinfo "license=('Apache-2.0')" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1.0
+  [ "$status" -eq 0 ]
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1.0 "license = Apache-2.1"
+  run check_prepared_srcinfo "license=('Apache-2.0')" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 changes a value the PKGBUILD holds as text: license = Apache-2.1, expected license = Apache-2.0"* ]]
+}
+
+@test "check_prepared_srcinfo: a line the PKGBUILD derives follows the version" {
+  # shellcheck disable=SC2016
+  local text='provides=("tool=${pkgver}")'
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.0 "provides = tool=2.0"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1 "provides = tool=2.1"
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  [ "$status" -eq 0 ]
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1 "provides = tool=2.0"
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO line 4 does not follow the version as the PKGBUILD does: provides = tool=2.0, expected provides = tool=2.1"* ]]
+}
+
+@test "check_prepared_srcinfo: a commented out line does not make a derived line literal" {
+  # shellcheck disable=SC2016
+  printf '%s\n' 'pkgver=2.0' '# provides=("tool=2.0")' 'provides=("tool=${pkgver}")' >"$OLD"
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 2.0 "provides = tool=2.0"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 2.1 "provides = tool=2.0"
+  run check_prepared_srcinfo "$(_pkgbuild_text "$OLD")" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"does not follow the version as the PKGBUILD does"* ]]
+}
+
+@test "check_prepared_srcinfo: a line of a split package follows the version" {
+  write_split_pkgbuild "$OLD" 1.0.0 2 "$H1"
+  write_split_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1"
+  write_split_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H2"
+  sed -i 's/^\tdepends = demo=1.1.0$/\tdepends = demo=1.0.0/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$(_pkgbuild_text "$OLD")" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"line 15 does not follow the version as the PKGBUILD does: depends = demo=1.0.0, expected depends = demo=1.1.0"* ]]
+}
+
+@test "check_prepared_srcinfo: a pkgdesc from a major version derived from pkgver follows it" {
+  # shellcheck disable=SC2016
+  printf '%s\n' 'pkgver=28+22' '_major=${pkgver%%+*}' 'pkgdesc="Temurin ${_major} early access build"' >"$OLD"
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 28+22 "pkgdesc = Temurin 28 early access build"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 29+1 "pkgdesc = Temurin 28 early access build"
+  run check_prepared_srcinfo "$(_pkgbuild_text "$OLD")" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 29+1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"expected pkgdesc = Temurin 29 early access build"* ]]
 }
 
 # Helper: .SRCINFO with the given pkgver and sources, each with its sha256sum
@@ -3321,7 +3480,7 @@ write_srcinfo_sources() {
   local src="demo-2025-04-03.tar.gz::https://example.com/archive/2025-04-03.tar.gz"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2025.04.03 "$src" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2026.09.10 "$src" "$H1"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2026.09.10
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2026.09.10
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
 }
@@ -3330,7 +3489,7 @@ write_srcinfo_sources() {
   local src="https://example.com/download/latest/player-x86_64.tar.zst"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 6.00.3091 "$src" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 6.00.3092 "$src" "$H1"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 6.00.3092
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 6.00.3092
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
 }
@@ -3339,7 +3498,7 @@ write_srcinfo_sources() {
 @test "check_prepared_srcinfo: rejects a bump that changes only the name a download is saved under" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0 "demo-1.0.0.zip::https://example.com/archive/363e794.zip" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.1.0 "demo-1.1.0.zip::https://example.com/archive/363e794.zip" "$H1"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
 }
@@ -3347,7 +3506,7 @@ write_srcinfo_sources() {
 @test "check_prepared_srcinfo: accepts a bump that changes the name and the URL of a download" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0 "demo-1.0.0.zip::https://example.com/archive/v1.0.0.zip" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.1.0 "demo-1.1.0.zip::https://example.com/archive/v1.1.0.zip" "$H1"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 0 ]
 }
 
@@ -3355,7 +3514,7 @@ write_srcinfo_sources() {
 @test "check_prepared_srcinfo: accepts the AUR copy itself" {
   local src="https://example.com/download/latest/player-x86_64.tar.zst"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 6.00.3091 "$src" "$H1"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/old.SRCINFO" 6.00.3091
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/old.SRCINFO" 6.00.3091
   [ "$status" -eq 0 ]
 }
 
@@ -3363,14 +3522,14 @@ write_srcinfo_sources() {
   local src="https://example.com/download/latest/player-x86_64.tar.zst"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 6.00.3091 "$src" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 6.00.3092 "$src" "$H3"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 6.00.3092
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 6.00.3092
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: accepts a new source with the same checksum" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.0 "https://example.com/demo-2.0.tar.gz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.1 "https://example.com/demo-2.1.tar.gz" "$H1"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
   [ "$status" -eq 0 ]
 }
 
@@ -3380,7 +3539,7 @@ write_srcinfo_sources() {
     "demo::git+https://example.com/demo.git" SKIP demo.desktop "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" r101.def5678 \
     "demo::git+https://example.com/demo.git" SKIP demo.desktop "$H1"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" r101.def5678
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" r101.def5678
   [ "$status" -eq 0 ]
 }
 
@@ -3388,7 +3547,7 @@ write_srcinfo_sources() {
   local src="https://example.com/releases/download/nightly/demo-linux.tar.gz"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0 "$src" SKIP
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.1.0 "$src" SKIP
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 0 ]
 }
 
@@ -3397,7 +3556,7 @@ write_srcinfo_sources() {
   local src="git+https://example.com/demo.git?signed#commit=a2d30b96fbb026621ec11692272f0117f35a00fd"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.11.0 "$src" SKIP
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.12.0 "$src" SKIP
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum"* ]]
 }
@@ -3413,7 +3572,7 @@ write_srcinfo_sources() {
       "hg+https://example.com/demo#tag=stable"; do
       write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0 "$src" "$sum"
       write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.1 "$src" "$sum"
-      run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1
+      run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1
       [ "$status" -eq 1 ] || {
         echo "accepted: $src $sum"
         return 1
@@ -3426,7 +3585,7 @@ write_srcinfo_sources() {
 @test "check_prepared_srcinfo: accepts a VCS pin that follows the version" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.11.0 "git+https://example.com/demo.git#tag=v1.11.0" SKIP
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.12.0 "git+https://example.com/demo.git#tag=v1.12.0" SKIP
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
   [ "$status" -eq 0 ]
 }
 
@@ -3434,7 +3593,7 @@ write_srcinfo_sources() {
   local src="git+https://example.com/demo.git#branch=main"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.11.0 "$src" SKIP
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.12.0 "$src" SKIP
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.12.0
   [ "$status" -eq 0 ]
 }
 
@@ -3445,7 +3604,7 @@ write_srcinfo_sources() {
     "git+https://example.com/demo.git#tag=49.0" SKIP "$sub" SKIP
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 51.1 \
     "git+https://example.com/demo.git#tag=51.1" SKIP "$sub" SKIP
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 51.1
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 51.1
   [ "$status" -eq 0 ]
 }
 
@@ -3458,7 +3617,7 @@ write_srcinfo_sources() {
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.5.0 \
     "player-1.5.0.zip::https://example.com/archive/0123abc.zip" "$H1" \
     "player.desktop::https://example.com/raw/v1.5.0/player.desktop" "$H3"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 saves the download of the old version under a new name: player-1.5.0.zip::https://example.com/archive/0123abc.zip"* ]]
 }
@@ -3468,7 +3627,7 @@ write_srcinfo_sources() {
     "player-1.4.0.tar.gz::https://example.com/latest/player.tar.gz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.5.0 \
     "player-1.5.0.tar.gz::https://example.com/latest/player.tar.gz" "$H3"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
   [ "$status" -eq 0 ]
 }
 
@@ -3479,7 +3638,7 @@ write_srcinfo_sources() {
     "demo-1.4.0::$pin" "$H1" "demo.desktop::https://example.com/raw/v1.4.0/demo.desktop" "$H2"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.5.0 \
     "demo-1.5.0::$pin" "$H1" "demo.desktop::https://example.com/raw/v1.5.0/demo.desktop" "$H3"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
   [ "$status" -eq 0 ]
 }
 
@@ -3493,7 +3652,7 @@ write_srcinfo_sources() {
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 0.2 "https://example.com/demo-0.2.tar.gz" "$H3" \
     "https://example.com/deps/libbar-10.1.tar.gz" "$H2" "https://example.com/deps/libbaz-0.12.tar.gz" "$H2" \
     "https://example.com/deps/libqux-1.0.1.tar.gz" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.2
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.2
   [ "$status" -eq 0 ]
 }
 
@@ -3503,7 +3662,7 @@ write_srcinfo_sources() {
     "https://example.com/demo-2.0.1.tar.gz" "$H1" "https://example.com/game-data-2.0.tar.gz" "$H2"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.1.0 \
     "https://example.com/demo-2.1.0.tar.gz" "$H3" "https://example.com/game-data-2.0.tar.gz" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 5 is not the AUR source with the new version: source = https://example.com/game-data-2.0.tar.gz, expected source = https://example.com/game-data-2.1.tar.gz"* ]]
 }
@@ -3513,7 +3672,7 @@ write_srcinfo_sources() {
     "https://example.com/demo-1.4.0.tar.gz" "$H1" "https://example.com/deps/libbar-3.2.tar.gz" "$H2"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.5.0 \
     "https://example.com/demo-1.5.0.tar.gz" "$H3" "https://example.com/deps/libbar-3.2.tar.gz" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.5.0
   [ "$status" -eq 0 ]
 }
 
@@ -3550,7 +3709,7 @@ write_srcinfo_archs() {
     x86_64 "https://example.com/dl/v2.3.0/tool-2.3.0-x86_64.tar.gz" "$H1" aarch64 "$arm" "$H2"
   write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "" "" \
     x86_64 "https://example.com/dl/v2.4.0/tool-2.4.0-x86_64.tar.gz" "$H3" aarch64 "$arm" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for aarch64, so the new version would hold the files of the old one"* ]]
 }
@@ -3562,7 +3721,7 @@ write_srcinfo_archs() {
     x86_64 "https://example.com/dl/v2.3.0/tool-2.3.0-x86_64.tar.gz" "$H1" aarch64 "" ""
   write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "$common" "$H2" \
     x86_64 "https://example.com/dl/v2.4.0/tool-2.4.0-x86_64.tar.gz" "$H3" aarch64 "" ""
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for aarch64"* ]]
 }
@@ -3575,7 +3734,7 @@ write_srcinfo_archs() {
   write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "https://example.com/dl/tool-2.4.0.tar.gz" "$H3" \
     x86_64 "https://example.com/deps/helper-3.2-x86_64.tar.gz" "$H2" \
     aarch64 "https://example.com/deps/helper-3.2-aarch64.tar.gz" "$H4"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
   [ "$status" -eq 0 ]
 }
 
@@ -3586,7 +3745,7 @@ write_srcinfo_archs() {
   write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "https://example.com/deps/libbar-3.2.tar.gz" "$H2" \
     x86_64 "https://example.com/dl/v2.4.0/tool-2.4.0-x86_64.tar.gz" "$H3" \
     aarch64 "https://example.com/dl/v2.4.0/tool-2.4.0-aarch64.tar.gz" "$H1"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
   [ "$status" -eq 0 ]
 }
 
@@ -3595,9 +3754,9 @@ write_srcinfo_archs() {
   local url=https://static.crates.io/crates/pijul/pijul
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0.beta.11 "pijul-1.0.0.beta.11.tar.gz::$url-1.0.0-beta.11.crate" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 "pijul-1.0.0.beta.24.tar.gz::$url-1.0.0-beta.24.crate" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 .
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 .
   [ "$status" -eq 0 ]
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
@@ -3609,7 +3768,7 @@ write_srcinfo_archs() {
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 0.0.4 "$url-0.0.4.tgz" "$H2"
   sed -i $'/^\tsource = /a \tnoextract = inshellisense-0.0.1-rc.20.tgz' "$TEST_TMPDIR/old.SRCINFO"
   sed -i $'/^\tsource = /a \tnoextract = inshellisense-0.0.4.tgz' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.0.4 _
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.0.4 _
   [ "$status" -eq 0 ]
 }
 
@@ -3618,9 +3777,9 @@ write_srcinfo_archs() {
   local url=https://example.com/releases/download
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.5.0rc1 "$url/v2.5.0-rc1/demo-2.5.0-rc1.tgz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.5.0 "$url/v2.5.0/demo-2.5.0.tgz" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0 drop
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0 drop
   [ "$status" -eq 0 ]
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
@@ -3628,7 +3787,7 @@ write_srcinfo_archs() {
 @test "check_prepared_srcinfo: rejects a dash dropped before the version with pkgver_dash ''" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.5.0rc1 "https://example.com/demo-2.5.0-rc1.tgz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 "https://example.com/demo2.5.0-rc2.tgz" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 drop
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 drop
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
@@ -3636,7 +3795,7 @@ write_srcinfo_archs() {
 @test "check_prepared_srcinfo: rejects a dash outside the version with pkgver_dash ''" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.5.0rc1 "https://example.com/demo-2.5.0-rc1.tgz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 "https://example-com/demo-2.5.0-rc2.tgz" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 drop
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc2 drop
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
@@ -3644,7 +3803,7 @@ write_srcinfo_archs() {
 @test "check_prepared_srcinfo: rejects another character in place of a dot with pkgver_dash" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 0.0.1_rc.20 "https://example.com/0.0.1-rc.20/demo.tgz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 0.0.4 "https://example.com/0x0x4/demo.tgz" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.0.4 _
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 0.0.4 _
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
@@ -3659,7 +3818,7 @@ write_srcinfo_archs() {
 @test "check_prepared_srcinfo: rejects a dash outside the version with pkgver_dash" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.0.0.beta.11 "https://static.crates.io/pijul-1.0.0-beta.11.crate" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 "https://static-crates.io/pijul-1.0.0-beta.24.crate" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 .
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0.beta.24 .
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
@@ -3670,9 +3829,9 @@ write_srcinfo_archs() {
   local url=https://example.com/app_build
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 4.4215 "app_4_4215.tar.xz::${url}_4215_x64.tar.xz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 4.4216 "app_4_4216.tar.xz::${url}_4216_x64.tar.xz" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216 "" '4.%s'
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216 "" '4.%s'
   [ "$status" -eq 0 ]
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
@@ -3681,7 +3840,7 @@ write_srcinfo_archs() {
   local url=https://example.com/app_build
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 4.4215 "${url}_4215_x64.tar.xz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 4.4216 "${url}_4217_x64.tar.xz" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216 "" '4.%s'
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216 "" '4.%s'
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
@@ -3711,7 +3870,7 @@ write_srcinfo_archs() {
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 4.4216 "${url}_4216_x64.tar.xz" "$H2"
   sed -i $'/^\tsource = /a \tnoextract = app_build_4215_x64.tar.xz' "$TEST_TMPDIR/old.SRCINFO"
   sed -i $'/^\tsource = /a \tnoextract = app_build_4216_x64.tar.xz' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216 "" '4.%s'
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 4.4216 "" '4.%s'
   [ "$status" -eq 0 ]
 }
 
@@ -3725,7 +3884,7 @@ write_srcinfo_archs() {
 @test "check_prepared_srcinfo: accepts the AUR copy of a package with a VCS pin" {
   local src="git+https://example.com/demo.git#commit=abc123"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.11.0 "$src" SKIP
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/old.SRCINFO" 1.11.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/old.SRCINFO" 1.11.0
   [ "$status" -eq 0 ]
 }
 
@@ -3749,14 +3908,14 @@ write_srcinfo_nightly() {
 @test "check_prepared_srcinfo: accepts new digits in the name of a SKIP source" {
   write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz b2sums=SKIP
   write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz b2sums=SKIP
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: rejects new letters in the name of a SKIP source" {
   write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz b2sums=SKIP
   write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-oct16.tar.gz b2sums=SKIP
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
 }
@@ -3765,7 +3924,7 @@ write_srcinfo_nightly() {
   write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz b2sums=SKIP
   write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz b2sums=SKIP \
     https://evil.example/demo-linux.tar.gz
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
 }
@@ -3773,7 +3932,7 @@ write_srcinfo_nightly() {
 @test "check_prepared_srcinfo: rejects new digits in the name of a hashed source" {
   write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz "b2sums=$H1"
   write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz "b2sums=$H3"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
 }
@@ -3781,7 +3940,7 @@ write_srcinfo_nightly() {
 @test "check_prepared_srcinfo: rejects new digits when another checksum array has a hash" {
   write_srcinfo_nightly "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz "b2sums=SKIP sha256sums=$H1"
   write_srcinfo_nightly "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz "b2sums=SKIP sha256sums=$H3"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
 }
@@ -3799,14 +3958,14 @@ write_srcinfo_arch() {
 @test "check_prepared_srcinfo: accepts new digits in the name of a SKIP arch source" {
   write_srcinfo_arch "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz "$H1" SKIP
   write_srcinfo_arch "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz "$H1" SKIP
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: pairs an arch source with the checksums of its arch" {
   write_srcinfo_arch "$TEST_TMPDIR/old.SRCINFO" 1.0.0 demo-20261014.tar.gz SKIP "$H1"
   write_srcinfo_arch "$TEST_TMPDIR/new.SRCINFO" 1.1.0 demo-20261016.tar.gz SKIP "$H3"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
 }
 
@@ -3814,7 +3973,7 @@ write_srcinfo_arch() {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
   sed -i $'s/^\tlicense = MIT$/\tlicense = MIT\\n\tdepends = evil-pkg/' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO adds or removes lines"* ]]
 }
@@ -3824,7 +3983,7 @@ write_srcinfo_arch() {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   echo >>"$TEST_TMPDIR/old.SRCINFO"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 0 ]
 }
 
@@ -3832,7 +3991,7 @@ write_srcinfo_arch() {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
   printf '\n\n' >>"$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 0 ]
 }
 
@@ -3840,7 +3999,7 @@ write_srcinfo_arch() {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
   sed -i $'s/^\tlicense = MIT$/\tlicense = MIT\\n/' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO adds or removes lines"* ]]
 }
@@ -3849,7 +4008,7 @@ write_srcinfo_arch() {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
   sed -i $'s/^\tsha256sums = '"$H4"'$/\tb2sums = '"$H4"'/' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 11 has another key than the AUR copy: "$'\t'"b2sums = $H4"* ]]
 }
@@ -3866,16 +4025,16 @@ write_srcinfo_arch() {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
   sed -i $'s/^\tlicense = MIT$/\tlicensesums = abc/' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "license=('MIT')" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"line 7 changes more than the version"* ]]
+  [[ "$output" == *"line 7 changes a value the PKGBUILD holds as text: licensesums = abc, expected license = MIT"* ]]
 }
 
 @test "check_prepared_srcinfo: rejects a source change beyond the version" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
   sed -i 's|https://example.com/demo|https://evil.example/demo|' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 8 is not the AUR source with the new version"* ]]
 }
@@ -3883,13 +4042,13 @@ write_srcinfo_arch() {
 @test "check_prepared_srcinfo: rejects a SKIP where the AUR had a hash" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "SKIP" "$H4"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 10 is not a checksum matching the AUR copy"* ]]
 }
 
 @test "check_prepared_srcinfo: rejects when the files cannot be read" {
-  run check_prepared_srcinfo "$TEST_TMPDIR/missing-old.SRCINFO" "$TEST_TMPDIR/missing-new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/missing-old.SRCINFO" "$TEST_TMPDIR/missing-new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Could not read"* ]]
 }
@@ -3897,7 +4056,7 @@ write_srcinfo_arch() {
 @test "check_prepared_srcinfo: rejects a pkgver other than the expected version" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.2.0 1 "$H3" "$H4"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO has pkgver = 1.2.0, expected 1.1.0"* ]]
 }
@@ -3905,7 +4064,7 @@ write_srcinfo_arch() {
 @test "check_prepared_srcinfo: rejects a pkgrel other than 1" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 2 "$H3" "$H4"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO has pkgrel = 2, expected 1"* ]]
 }
@@ -4025,14 +4184,14 @@ write_asset_srcinfo() {
 @test "check_prepared_srcinfo: accepts a source with the new asset value" {
   write_asset_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.4.6 1 "$V246_3" "$H1"
   write_asset_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.5.0 1 "$V250" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0 "" "" 1 "$V246_3" "$V250"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0 "" "" 1 "$V246_3" "$V250"
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: rejects a source with another asset value" {
   write_asset_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.4.6 1 "$V246_3" "$H1"
   write_asset_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.5.0 1 "${V250%-1}-2" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0 "" "" 1 "$V246_3" "$V250"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0 "" "" 1 "$V246_3" "$V250"
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
 }
@@ -4041,14 +4200,14 @@ write_asset_srcinfo() {
 @test "check_prepared_srcinfo: accepts the asset value of an rc with pkgver_dash ''" {
   write_asset_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.4.6 1 "$V246_3" "$H1"
   write_asset_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 1 "$V250" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 drop "" 1 "$V246_3" "$V250"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 drop "" 1 "$V246_3" "$V250"
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: accepts an asset value that holds the version with a dash" {
   write_asset_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.4.6 1 2.4.6-build3 "$H1"
   write_asset_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 1 2.5.0-rc1-build1 "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 drop "" 1 2.4.6-build3 2.5.0-rc1-build1
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 drop "" 1 2.4.6-build3 2.5.0-rc1-build1
   [ "$status" -eq 0 ]
 }
 
@@ -4056,7 +4215,7 @@ write_asset_srcinfo() {
   write_asset_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.4.6 1 2.4.6-build3 "$H1"
   write_asset_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 1 2.5.0-rc1-build1 "$H2"
   sed -i 's|_amd64.deb$|_amd64.deb/2.5.0-rc1-build1|' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 drop "" 1 2.4.6-build3 2.5.0-rc1-build1
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 drop "" 1 2.4.6-build3 2.5.0-rc1-build1
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
 }
@@ -4066,21 +4225,21 @@ write_asset_srcinfo() {
   write_asset_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 1 "$V250" "$H2"
   sed -i $'/^\tsource = /a \tnoextract = demo_'"${V246_3}"'_amd64.deb' "$TEST_TMPDIR/old.SRCINFO"
   sed -i $'/^\tsource = /a \tnoextract = demo_'"${V250}"'_amd64.deb' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 drop "" 1 "$V246_3" "$V250"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0rc1 drop "" 1 "$V246_3" "$V250"
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: accepts the pkgrel it is given" {
   write_asset_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.4.6 1 "$V246_2" "$H1"
   write_asset_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.4.6 2 "$V246_3" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.6 "" "" 2 "$V246_2" "$V246_3"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.6 "" "" 2 "$V246_2" "$V246_3"
   [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: rejects a pkgrel other than the one it is given" {
   write_asset_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.4.6 1 "$V246_2" "$H1"
   write_asset_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.4.6 1 "$V246_3" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.6 "" "" 2 "$V246_2" "$V246_3"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.6 "" "" 2 "$V246_2" "$V246_3"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO has pkgrel = 1, expected 2"* ]]
 }
@@ -4088,14 +4247,14 @@ write_asset_srcinfo() {
 @test "check_prepared_srcinfo: rejects a new asset value that reaches no source" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 "$H1" "$H2"
   write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.0.0 2 "$H1" "$H2"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0 "" "" 2 "$V246_2" "$V246_3"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0.0 "" "" 2 "$V246_2" "$V246_3"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum, so the new asset value reaches no source"* ]]
 }
 
 @test "check_prepared_srcinfo: accepts the AUR copy with its asset value" {
   write_asset_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.4.6 2 "$V246_3" "$H1"
-  run check_prepared_srcinfo "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/old.SRCINFO" 2.4.6 "" "" 2 "$V246_3" "$V246_3"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/old.SRCINFO" 2.4.6 "" "" 2 "$V246_3" "$V246_3"
   [ "$status" -eq 0 ]
 }
 
@@ -4139,6 +4298,16 @@ write_asset_dirs() {
 
 @test "check_prepared_files: keeps the AUR pkgrel when the AUR has the asset value" {
   write_asset_dirs 2.4.6 "$V246_3" 2 2.4.6 "$V246_3" 2
+  run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 2.4.6 drop "" _deb "$V246_3"
+  [ "$status" -eq 0 ]
+}
+
+@test "check_prepared_files: a line that holds the asset value takes the new one" {
+  write_asset_dirs 2.4.6 "$V246_2" 1 2.4.6 "$V246_3" 2
+  # shellcheck disable=SC2016
+  sed -i 's/^license=.*/&\nnoextract=("${_deb}")/' "$TEST_TMPDIR/aur/PKGBUILD" "$TEST_TMPDIR/prepared/PKGBUILD"
+  sed -i $'/^\tsource = /i \tnoextract = '"$V246_2" "$TEST_TMPDIR/aur/.SRCINFO"
+  sed -i $'/^\tsource = /i \tnoextract = '"$V246_3" "$TEST_TMPDIR/prepared/.SRCINFO"
   run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 2.4.6 drop "" _deb "$V246_3"
   [ "$status" -eq 0 ]
 }

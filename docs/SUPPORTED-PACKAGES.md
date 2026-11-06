@@ -188,7 +188,7 @@ pkgver=2.50
 source=("https://www.csie.ntu.edu.tw/~cjlin/$pkgbase/$pkgbase-$pkgver.tar.gz")
 ```
 
-`pkgver`, `pkgrel`, the sources and the checksums belong to the `pkgbase`, so the update is the same as for a single package. The AUR keeps a split package in one git repository named after the `pkgbase`, and the `name` in the package YAML is that `pkgbase`. A line in the section of one package in `.SRCINFO`, such as `depends = foo=1.2.3` from `depends=("foo=$pkgver")`, may change only by the version, as every other line.
+`pkgver`, `pkgrel`, the sources and the checksums belong to the `pkgbase`, so the update is the same as for a single package. The AUR keeps a split package in one git repository named after the `pkgbase`, and the `name` in the package YAML is that `pkgbase`. A line in the section of one package in `.SRCINFO` follows the same rule as every other line: `depends = foo=1.2.3` from `depends=("foo=$pkgver")` must take the new version, since the PKGBUILD does not hold `foo=1.2.3` as text.
 
 A change of the `pkgname` array upstream, a new package or a dropped one, is not detected, as with `depends`. See [Packages with changing dependencies](#packages-with-changing-dependencies).
 
@@ -266,6 +266,21 @@ pkgver_dash: .
 ```
 
 The `.SRCINFO` check accepts a derived variable whose text is one of the forms of the version listed in step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish). A source that needs data the version does not hold, such as a commit hash or a build number, cannot be derived from `pkgver` and needs a manual update.
+
+### Lines the check cannot read from the PKGBUILD (BLOCKED)
+
+A line of `.SRCINFO` other than `pkgver`, `pkgrel`, `source` and the checksums that holds the version, where the PKGBUILD writes the value with an escaped character, `{a,b}` or `$'...'`, takes the version from a variable that does not follow `pkgver`, or derives the value from `pkgver` and also writes its text elsewhere outside a comment.
+
+**Detection:** the `.SRCINFO` check looks up the value of each such line, the part after ` = `, in the text of the AUR PKGBUILD without its `pkgver=` and `pkgrel=` lines, the line of `upstream.asset_var`, its checksum arrays and its comment lines. A line whose value that text holds must stay as it is, and any other line must take the new version. A prepared line that differs stops the update, and the message names the line the check expected. Publish and verify run it, and `update-pkg.sh` runs it before the commit. See step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
+
+Verify and publish never run the PKGBUILD, so the check reads only its text. In these forms the text leads it to expect another line than makepkg writes, and a correct update stops.
+
+**Correct approach:** write a value that holds the version as plain text when it stays, and derive it from `pkgver` when it follows the version:
+
+```bash
+license=('Apache-2.0')
+provides=("demo=${pkgver}")
+```
 
 ### Source URL returns HTML (BLOCKED)
 
