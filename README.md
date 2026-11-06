@@ -20,7 +20,7 @@ graph LR
     C --> D
 ```
 
-Each package has a YAML config pointing to an upstream source. Your repository holds these configs and calls the pipeline of aurtomator. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so these steps run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs or modify anything else. A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow. When the checks of 5 or more packages fail on one host in a run, those packages share one issue.
+Each package has a YAML config pointing to an upstream source. Your repository holds these configs and calls the pipeline of aurtomator. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so the steps before the push run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs, and in a PKGBUILD it changes nothing but `pkgver`, `pkgrel`, the checksums and a value from a release asset name, see [Limitations](#limitations). A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow. When the checks of 5 or more packages fail on one host in a run, those packages share one issue.
 
 ## Quick start
 
@@ -57,7 +57,7 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 
 ## Strategies
 
-15 built-in version detection strategies:
+16 built-in version detection strategies:
 
 | Strategy           | Source              | Use for                                |
 |--------------------|---------------------|----------------------------------------|
@@ -89,6 +89,7 @@ aurtomator only sets `pkgver` and `pkgrel`, updates checksums and `.SRCINFO`, an
 - **Sources that do not follow `pkgver`**: when a download has a real checksum or a VCS source is pinned, a bump has to change a source URL or a checksum for each architecture, or the new version would hold the old files. Make `pkgver` the literal and derive the other variable from it
 - **Lines the check cannot read from the PKGBUILD**: a line of `.SRCINFO` that holds the version must keep a value the PKGBUILD writes as text and take the new version where the PKGBUILD derives it. A value written with an escaped character, `{a,b}` or `$'...'`, or taken from a variable that does not follow `pkgver`, stops the update. Write such a value as plain text or derive it from `pkgver`
 - **Source URLs returning HTML** or an error status: a HEAD request checks every `http` and `https` source, also one with a `SKIP` checksum
+- **Checksums verify cannot compute**: a real checksum of a download over `http` or `ftp`, of a git source over another protocol than `https`, of an `hg` or `bzr` source at a pin makepkg hashes, or of a `fossil` source stops the update, see [docs/SUPPORTED-PACKAGES.md](docs/SUPPORTED-PACKAGES.md#checksums-verify-cannot-compute-blocked)
 
 Patches in `source=()` trigger a warning and are not blocked.
 
@@ -122,7 +123,7 @@ Your repository keeps a journal of every change of state of its packages in `sta
 
 ## Resource usage
 
-All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version, and `publish` for a new version, a change in the package table, and once a day for the statistics card. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`, and only when a package goes to the AUR. A version check is a few API requests per package, or a bare clone for `git-latest`.
+All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version or a rebuild, and `publish` for those, a change in the README, and once a day for the statistics card. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`, and only when a package goes to the AUR. A version check is a few API requests per package, or a bare clone for `git-latest`.
 
 ## Documentation
 
