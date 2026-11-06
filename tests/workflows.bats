@@ -601,6 +601,15 @@ run_decide_step() {
   [ "$output" = $'prepare=false\nwork=true' ]
 }
 
+@test "check-updates: Decide prepares nothing while an update waits for its cooldown" {
+  README_CHANGED=1 run run_decide_step pkg="cooldown: 2026-11-12"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=true' ]
+  run run_decide_step pkg="cooldown: 2026-11-12"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false' ]
+}
+
 @test "check-updates: Decide publishes only a change of the package table" {
   README_CHANGED=1 run run_decide_step pkg="check_failed: API down"
   [ "$status" -eq 0 ]
@@ -1632,6 +1641,12 @@ EOF
   [ ! -s "$GH_LOG" ]
 }
 
+@test "check-updates: the issue step asks GitHub nothing for an update in its cooldown" {
+  run_issue_step foo="cooldown: 2026-11-12"
+  [ "$status" -eq 0 ]
+  [ ! -s "$GH_LOG" ]
+}
+
 @test "check-updates: the issue step opens an issue for a held update" {
   run_issue_step foo="held: 29+1" _alerts=$'foo\thold\tRaise makedepends'
   [ "$status" -eq 0 ]
@@ -2184,6 +2199,15 @@ no_commit() {
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+@test "check-updates: an update in its cooldown closes the check issue and keeps the others" {
+  GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: update failed\n14 ✋ baz: update held' \
+    run_close_step foo="cooldown: 2026-11-12" bar="cooldown: 2026-11-12" baz="cooldown: 2026-11-12"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 12 --comment comment' "$GH_LOG"
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "1" ]
 }
 
 @test "check-updates: keeps the issues of a package whose check still fails" {
