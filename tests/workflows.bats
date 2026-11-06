@@ -237,6 +237,16 @@ run_blocks() {
   [[ "$output" != *"|| true"* ]]
 }
 
+# gem resolves a dependency to its newest release, so the test job names
+# every gem with its version and resolves none
+@test "ci: the test job installs each gem at a fixed version and no other gem" {
+  run yq '.jobs.test.steps[] | select(has("run")) | .run' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  run grep 'gem install' <<<"$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "gem install --no-document --ignore-dependencies bashcov:4.0.0 simplecov-cobertura:4.0.0 simplecov:1.3.2 rexml:3.4.4" ]
+}
+
 @test "ci: the test job runs no validate step and the validate job calls the reusable workflow" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs.test.steps[] | select(has("run")) | .run' "$ci"
