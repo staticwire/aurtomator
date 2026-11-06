@@ -440,9 +440,10 @@ _drop_trailing_blank() {
 # the AUR file, with these changes: pkgver is the new version, pkgrel is 1,
 # a checksum keeps its key and stays a SKIP or a hash, a source has the old
 # version replaced by the new one (see _bump_version), and any other line
-# either stays or has the version replaced in the same way. A license, a
-# dependency or a pkgdesc can hold the old version without deriving it
-# from pkgver. A source that is SKIP in every checksum array may also change
+# stays when the text of the AUR PKGBUILD holds its value, as a license or
+# a dependency can hold the old version without deriving it from pkgver,
+# and has the version replaced in the same way otherwise. A source that is
+# SKIP in every checksum array may also change
 # the digits in the name of its file, as a nightly package names its
 # download by the date: verify_prepared_sums never fetches it, and makepkg
 # takes the sources from the PKGBUILD. When pkgver changes and a download
@@ -462,12 +463,15 @@ _drop_trailing_blank() {
 # package with asset_var, the old asset value is replaced by the new one
 # as well, and pkgrel is the one check_prepared_files works out. A new
 # asset value has to change some source URL or checksum.
-# Args: $1=AUR .SRCINFO, $2=prepared .SRCINFO, $3=expected version,
-#       $4=pkgver_dash character of the package or drop, if any,
-#       $5=pkgver_format of the package, if any, $6=expected pkgrel
-#       (default 1), $7=old asset value, $8=new asset value
+# Args: $1=text of the AUR PKGBUILD that the .SRCINFO comes from, as
+#       _pkgbuild_text prints it, $2=AUR .SRCINFO, $3=prepared .SRCINFO,
+#       $4=expected version, $5=pkgver_dash character of the package or
+#       drop, if any, $6=pkgver_format of the package, if any, $7=expected
+#       pkgrel (default 1), $8=old asset value, $9=new asset value
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
+  local text="$1"
+  shift
   local version="$3" dash="${4:-}" format="${5:-}" rel="${6:-1}" old_asset="${7:-}" new_asset="${8:-}"
   if [[ ! -r "$1" || ! -r "$2" ]]; then
     log_err "Could not read the .SRCINFO to compare"
@@ -586,9 +590,14 @@ check_prepared_srcinfo() {
         ;;
       *)
         [[ "$key" != arch ]] || arches["$new_val"]=1
-        if [[ "$new" != "$old" ]] &&
-          ! _bumped_line "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset"; then
-          log_err "Prepared .SRCINFO line $((i + 1)) changes more than the version: $new"
+        if [[ "$text" == *"$old_val"* ]]; then
+          if [[ "$new" != "$old" ]]; then
+            log_err "Prepared .SRCINFO line $((i + 1)) changes a value the PKGBUILD holds as text: ${new#"${new%%[![:space:]]*}"}, expected ${old#"${old%%[![:space:]]*}"}"
+            return 1
+          fi
+        elif ! _bumped_line "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset"; then
+          expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
+          log_err "Prepared .SRCINFO line $((i + 1)) does not follow the version as the PKGBUILD does: ${new#"${new%%[![:space:]]*}"}, expected ${expected#"${expected%%[![:space:]]*}"}"
           return 1
         fi
         ;;
@@ -672,5 +681,5 @@ check_prepared_files() {
     old_asset=$(_asset_line_value "$1/PKGBUILD" "$6" "AUR PKGBUILD")
   fi
   check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" "$rel" "${6:-}" "${7:-}" &&
-    check_prepared_srcinfo "$1/.SRCINFO" "$2/.SRCINFO" "$3" "${4:-}" "${5:-}" "$rel" "$old_asset" "${7:-}"
+    check_prepared_srcinfo "$(_pkgbuild_text "$1/PKGBUILD" "${6:-}")" "$1/.SRCINFO" "$2/.SRCINFO" "$3" "${4:-}" "${5:-}" "$rel" "$old_asset" "${7:-}"
 }
