@@ -22,7 +22,7 @@ aurtomator bumps the version of AUR packages you already maintain. It does **not
 
 ### End-to-end flow
 
-A run involves two repositories. Your repository, created from the template `staticwire/aurtomator-seed`, holds the package YAMLs, the README with the package table and two calling workflows, `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`. aurtomator holds the scripts, the strategies and the reusable workflows `check-updates.yml`, `notify-failure.yml` and `validate.yml`, and the calling workflows run them at the SHA they pin, see [5.1](#51-trigger). A run pushes the new versions to the AUR and commits the changed package YAMLs and README to your repository.
+A run involves two repositories. Your repository, created from the template `staticwire/aurtomator-seed`, holds the package YAMLs, the README with the package table and two calling workflows, `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`. aurtomator holds the scripts, the strategies and the reusable workflows `check-updates.yml`, `notify-failure.yml` and `validate.yml`, and the calling workflows run them at the SHA they pin, see [5.1](#51-trigger). A run pushes the new versions to the AUR and commits the changed package YAMLs, the README and the files of `stats/` to your repository.
 
 ```mermaid
 flowchart TD
@@ -35,15 +35,15 @@ flowchart TD
     E --> F{version changed?}
     F -->|same| G[write up_to_date]
     F -->|new version| G2[write new_version]
-    C -->|all done| W{new version or package table changed?}
+    C -->|all done| W{new version, README or statistics changed?}
     W -->|no| I
     W -->|new version| P[prepare job: no secrets, no token]
-    W -->|package table only| Q
+    W -->|README or statistics only| Q
     P --> B2[check-all.sh --prepare]
     B2 --> H[update-pkg.sh --prepare for each new_version]
     H --> H1[clone AUR repo over HTTPS]
     H1 --> H2[audit PKGBUILD]
-    H2 --> H3[sed pkgver, reset pkgrel=1]
+    H2 --> H3[sed pkgver and pkgrel]
     H3 --> H4[validate URLs, updpkgsums, verify sources]
     H4 --> H5[namcap, makepkg --printsrcinfo]
     H5 --> H6[hand over PKGBUILD, .SRCINFO, AUR commit]
@@ -59,7 +59,8 @@ flowchart TD
     R --> R2[publish-pkg.sh: check the prepared files against the AUR copy]
     R2 --> R3[git commit + push to AUR]
     R3 --> U[update-readme.sh]
-    U --> L[commit to your repository via GitHub API]
+    U --> S[record-events.sh, stats-card.sh]
+    S --> L[commit to your repository via GitHub API]
     L --> I[issues job: issues token, no secrets, every run]
     I --> N[close resolved issues, open new ones]
     N --> O[done]
@@ -70,7 +71,7 @@ flowchart TD
 - **One YAML per package.** Adding or removing a package is one file.
 - **Strategy-based version detection.** Each type of upstream source has its own script. A new source is a new script plus the checks of its fields in `scripts/validate-pkg.sh`.
 - **Patch, do not generate.** aurtomator trusts your PKGBUILD and changes only `pkgver`, `pkgrel`, checksums and `.SRCINFO`. Build steps, dependencies and install files stay untouched.
-- **Five jobs, one with secrets.** A PKGBUILD is code that every step reading it executes. `check` runs the strategies with the read-only workflow token, executes no PKGBUILD and decides what the run does. The jobs after it take the status of every package from `check`. `prepare` runs the PKGBUILD steps without secrets and without a token, and hands over only prepared files and update failures, because code from one PKGBUILD can write the files of every package there. `verify` downloads the sources of each prepared update and checks its checksums, without secrets and as an unprivileged user, so code from one PKGBUILD cannot forge the checksums of another package. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD, runs no strategy and never downloads a source, and checks what `verify` passes on before it pushes. See [4.4](#44-prepare-and-publish). `issues` opens and closes the issues in every run, with a token that writes issues and nothing else, see [5.6](#56-issues).
+- **Five jobs, one with secrets.** A PKGBUILD is code, and an update executes it from the audit to `makepkg --printsrcinfo`. `check` runs the strategies with the read-only workflow token, executes no PKGBUILD and decides what the run does. The jobs after it take the status of every package from `check`. `prepare` runs the PKGBUILD steps without secrets and without a token, and hands over only prepared files and update failures, because code from one PKGBUILD can write the files of every package there. `verify` downloads the sources of each prepared update and checks its checksums, without secrets and as an unprivileged user, so code from one PKGBUILD cannot forge the checksums of another package. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD, runs no strategy and never downloads a source, and checks what `verify` passes on before it pushes. See [4.4](#44-prepare-and-publish). `issues` opens and closes the issues in every run, with a token that writes issues and nothing else, see [5.6](#56-issues).
 - **Failure isolation.** A broken package does not block the others. Each failure is logged for its package, and a package that starts failing gets a GitHub Issue, see [5.6](#56-issues). Each package has a time budget, so one that hangs does not hold up the run either.
 
 ## 2. Package YAML Format

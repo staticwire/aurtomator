@@ -209,7 +209,7 @@ jobs:
           RESULTS: /results
         run: |
           # prepare runs for an outdated package, publish also for a change
-          # in the package table
+          # in the README
           prepare=false
           if grep -qsE '^(new_version|available_downgrade|new_build): ' statuses/*; then
             prepare=true
@@ -387,10 +387,11 @@ jobs:
       - *drop-checkouts
 
   # Pushes what verify passed on and records the statuses of the check job.
-  # Runs also when prepare is skipped, for a change in the package table, and
-  # when prepare or verify failed: then it publishes nothing, and every
-  # package with a new version gets update_failed. Nothing here executes a
-  # PKGBUILD: publish-pkg.sh checks the prepared files against the AUR copy.
+  # Runs also when prepare is skipped, for a change in the README or the
+  # statistics, and when prepare or verify failed: then it publishes nothing,
+  # and every package with a new version gets update_failed. Nothing here
+  # executes a PKGBUILD: publish-pkg.sh checks the prepared files against the
+  # AUR copy.
   publish:
     needs: [image, check, prepare, verify]
     if: "!cancelled() && needs.check.outputs.work == 'true'"

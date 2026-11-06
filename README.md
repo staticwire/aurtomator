@@ -14,7 +14,7 @@ graph LR
     K -->|new version| B[prepare job, no secrets<br/>clone AUR repo<br/>sed pkgver<br/>updpkgsums<br/>makepkg --printsrcinfo]
     B --> V[verify job, no secrets<br/>download the sources<br/>check the checksums]
     V --> C[publish job<br/>check the prepared files<br/>git push to AUR]
-    K -->|status change only| C
+    K -->|README or statistics change only| C
     C --> E[update-readme.sh, record-events.sh<br/>commit badges, statistics + package table]
     K -->|every run| D[issues job<br/>open and close GitHub Issues]
     C --> D
