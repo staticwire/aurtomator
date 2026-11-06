@@ -1200,12 +1200,12 @@ The package block starts with the cards that **Record statistics** of `publish` 
 <a href="stats/events.csv">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">
-  <img alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">
+  <img width="100%" alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">
 </picture>
 </a>
 ```
 
-GitHub shows `card-dark.svg` in its dark theme and `card.svg` in its light one, and a click on the card opens the journal. The block is the same in every run, so new numbers change the files in `stats/` and leave the README as it is.
+GitHub shows `card-dark.svg` in its dark theme and `card.svg` in its light one, and a click on the card opens the journal. The card takes the width of the README, and the SVG scales with it. The block is the same in every run, so new numbers change the files in `stats/` and leave the README as it is.
 
 #### Package table
 
