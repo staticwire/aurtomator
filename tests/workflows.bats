@@ -41,6 +41,29 @@ run_blocks() {
   [ "$status" -eq 0 ]
 }
 
+# The image job is the same in every workflow, so the step of ci.yml stands
+# for all of them
+@test "ci-image: the image job takes only a digest pin of archlinux:base-devel" {
+  local step="$BATS_TEST_TMPDIR/read-image.sh" work="$BATS_TEST_TMPDIR/work" digest from
+  digest=$(printf 'a%.0s' {1..64})
+  yq '.jobs.image.steps[] | select(.name == "Read image") | .run' "$GITHUB_DIR/workflows/ci.yml" >"$step"
+  mkdir -p "$work/.github/ci-image"
+  for from in archlinux:base-devel "archlinux:base-devel@sha256:${digest:1}" "archlinux:base-devel@sha256:${digest}a" \
+    "archlinux:base-devel@sha256:${digest^^}" "archlinux:base@sha256:$digest" "evil/archlinux:base-devel@sha256:$digest"; do
+    echo "FROM $from" >"$work/.github/ci-image/Dockerfile"
+    : >"$work/out"
+    run env -C "$work" GITHUB_OUTPUT="$work/out" bash --noprofile --norc -eo pipefail "$step"
+    echo "$from: $output"
+    [ "$status" -eq 1 ]
+    [ "$output" = "::error::.github/ci-image/Dockerfile must pin archlinux:base-devel by digest" ]
+    [ ! -s "$work/out" ]
+  done
+  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:base-devel@sha256:$digest" >"$work/.github/ci-image/Dockerfile"
+  run env -C "$work" GITHUB_OUTPUT="$work/out" bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$work/out")" = "ref=archlinux:base-devel@sha256:$digest" ]
+}
+
 @test "ci-image: Dependabot updates the Dockerfile" {
   run yq '.updates[] | select(.["package-ecosystem"] == "docker") | .directory' "$GITHUB_DIR/dependabot.yml"
   [ "$status" -eq 0 ]

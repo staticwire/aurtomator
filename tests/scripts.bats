@@ -1929,6 +1929,7 @@ EOF
     "touch $pwned"
     "MAINTAINER='x'"
     "GIT_AUTHOR_NAME='a'; touch $pwned"
+    "GIT_AUTHOR_NAME=\"a\"; touch $pwned"
     "GIT_AUTHOR_NAME='a''b'"
     "GIT_AUTHOR_NAME=\"\$(touch $pwned)\""
     "GIT_AUTHOR_NAME=\"\`touch $pwned\`\""

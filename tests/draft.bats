@@ -332,6 +332,22 @@ stub_git_latest() {
   [[ "$output" == *"The .SRCINFO of demo is no regular file"* ]]
 }
 
+@test "draft: reads no .SRCINFO that is a directory" {
+  aur_package demo 1.0.0 'source = https://github.com/o/demo/archive/v1.0.0.tar.gz'
+  local work="$TEST_TMPDIR/aur-work/demo"
+  git -C "$work" rm -q .SRCINFO
+  mkdir "$work/.SRCINFO"
+  echo x >"$work/.SRCINFO/file"
+  git -C "$work" add -A
+  git -C "$work" -c user.name=t -c user.email=t@example.invalid commit -qm directory
+  rm -rf "$TEST_TMPDIR/aur/demo.git"
+  git clone -q --bare "$work" "$TEST_TMPDIR/aur/demo.git"
+  run "$TEST_TMPDIR/scripts/draft.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The .SRCINFO of demo is no regular file"* ]]
+  [ ! -e "$TEST_TMPDIR/packages/demo.yml" ]
+}
+
 # A checkout would apply the attributes of the AUR repository with the git
 # config of the user
 @test "draft: reads .SRCINFO without a checkout of the AUR repository" {
