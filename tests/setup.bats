@@ -144,7 +144,7 @@ case "$1" in
         [[ -n "${GH_LATEST:-}" ]] || exit 1
         echo "$GH_LATEST"
         ;;
-      *user*) echo "testuser" ;;
+      "api user --jq "*) jq -r "${*: -1}" <<<'{"login": "testuser"}' ;;
     esac
     exit 0
     ;;
@@ -651,6 +651,7 @@ EOF
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
+  [[ "$output" == *"gh CLI authenticated (testuser)"* ]]
   [[ "$output" == *"AUR_GIT_NAME"* ]]
   [[ "$output" == *"AUR_GIT_EMAIL"* ]]
   [[ "$output" == *"AUR_SSH_KEY"* ]]
