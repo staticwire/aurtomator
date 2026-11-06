@@ -56,7 +56,7 @@ upstream:
   project: group/project
 ```
 
-`git-latest` makes a bare clone and computes `r{count}.{hash}`, for example `r435.abc1234`, the usual AUR format for `-git` versions. aurtomator writes this value to `pkgver=`, skips `SKIP` checksums and pushes. A source pinned to `#branch=` needs `upstream.branch` with the same branch, or the count and the hash come from the default branch.
+`git-latest` makes a bare clone and computes `r{count}.{hash}`, for example `r435.abc1234`, the usual AUR format for `-git` versions. aurtomator writes this value to `pkgver=`, skips `SKIP` checksums and pushes. By default, a push waits 7 days after the last one, see [WORKFLOW.md section 4.7](WORKFLOW.md#47-cooldown). A source pinned to `#branch=` needs `upstream.branch` with the same branch, or the count and the hash come from the default branch.
 
 A `pkgver()` function in the PKGBUILD is fine when it produces the same format. The hash takes as many characters as the hash in `current`. A `pkgver()` that follows the `git describe` recipe of the Arch package guidelines, such as `1.4.0.r47.g0bbf5ad`, needs `upstream.describe`: `tags` for `git describe --long --tags`, `annotated` without `--tags`, and `upstream.tag_prefix` for a prefix the recipe cuts off the tag, as `sed 's/^v//'`. `vercmp` reads that form as newer than every `r{count}.{hash}`, so `validate-pkg.sh` refuses a `current` of the other form. A `pkgver()` that counts the commits in another way, as hyprland-git does with `git rev-list --count --cherry-pick`, gives a count the strategy does not reproduce. A user who builds the package later gets a newer value when upstream has moved on, as with every `-git` package on the AUR.
 

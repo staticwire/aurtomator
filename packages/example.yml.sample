@@ -12,6 +12,9 @@
 #   allow_downgrade - true publishes a version lower than current
 #   allow_version_jump - true publishes a version whose first number has
 #                     at least two digits more than that of current
+#   cooldown_days   - the days a push waits after the last one, 0 to 365;
+#                     without it 7 for git-latest and 0 for the others,
+#                     see docs/WORKFLOW.md 4.7
 #   pkgver_dash     - _ or ., stands for each - of the upstream version,
 #                     which pkgver cannot hold; the PKGBUILD turns it back
 #                     where a URL needs the dash, as in ${pkgver//_/-}.
@@ -28,7 +31,8 @@
 # version the AUR has: for a new package, as the git-latest example of
 # docs/WORKFLOW.md 3.7 does, and after a hand publish of a held update (4.5).
 #   current      - last pushed version
-#   last_updated - date of the last push, YYYY-MM-DD
+#   last_updated - date of the last push, YYYY-MM-DD; the cooldown counts
+#                  from it
 #   current_asset - value from a release asset name of the last push, for a
 #                   package with upstream.asset_var
 #
@@ -233,6 +237,8 @@ upstream:
 #                                          # default: the default branch
 #   describe: tags                         # optional: tags|annotated
 #   tag_prefix: v                          # optional, cut from the tag
+# cooldown_days: 14                        # optional, days a push waits
+#                                          # after the last one; default 7
 
 # --- pypi / npm / crates ----------------------------------------------------
 # Language registries. PyPI returns stable releases only, and crates too
