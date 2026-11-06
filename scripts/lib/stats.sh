@@ -47,7 +47,7 @@ stats_event() {
   local LC_ALL=C
   [[ "$current" =~ ^[A-Za-z0-9._+]+$ ]] || current=""
   case "$status" in
-    up_to_date) event=up_to_date version="$current" ;;
+    up_to_date | "cooldown: "*) event=up_to_date version="$current" ;;
     check_failed:* | update_failed:*) event="${status%%:*}" version="$current" ;;
     "updated: "* | "downgrade: "* | "rebuilt: "* | "held: "* | "jump_skipped: "* | "downgrade_skipped: "* | "pending: "*)
       event="${status%%: *}" version="${status#*: }"

@@ -1564,6 +1564,20 @@ alerts:
   [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "0" ]
 }
 
+@test "check-all --prepare: prepares no update the check run left in its cooldown" {
+  create_test_package "pkg-git" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+current: r2378.06ea49d"
+  echo "cooldown: 2026-11-12" >"$TEST_TMPDIR/.status/pkg-git"
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg-git")" = "cooldown: 2026-11-12" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "0" ]
+}
+
 @test "check-all --prepare: records a failed preparation" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
@@ -1698,6 +1712,57 @@ current: 28+25"
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+}
+
+@test "check-all --publish: keeps an update in its cooldown and publishes nothing" {
+  create_test_package "pkg-git" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+current: r2378.06ea49d"
+  checked_status pkg-git "cooldown: 2026-11-12"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-git")" = "cooldown: 2026-11-12" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+}
+
+@test "check-all --prepare and --publish: fail a cooldown without a date" {
+  create_test_package "pkg-git" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+current: r2378.06ea49d"
+  checked_status pkg-git "cooldown: soon"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg-git")" = "check_failed: invalid status from the check run" ]
+  # The prepare run wrote .status/ anew
+  checked_status pkg-git "cooldown: soon"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-git")" = "check_failed: invalid status from the check run" ]
+}
+
+@test "check-all --prepare and --publish: hold an update that is in its cooldown" {
+  create_test_package "pkg-git" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+current: r2378.06ea49d
+last_updated: '$(date -u +%F)'"
+  checked_status pkg-git "new_version: r2391.1f3c2a7"
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg-git")" = "cooldown: $(date -u -d '7 days' +%F)" ]
+  checked_status pkg-git "new_version: r2391.1f3c2a7"
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg-git"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-git")" = "cooldown: $(date -u -d '7 days' +%F)" ]
 }
 
 @test "check-all --publish: keeps a held update and records the notes of its alerts again" {
@@ -2607,6 +2672,8 @@ EOF
   [ "$output" = "❌ failed" ]
   run status_label "update_failed: boom"
   [ "$output" = "❌ failed" ]
+  run status_label "cooldown: 2026-11-12"
+  [ "$output" = "💤 next update 2026-11-12" ]
   run status_label "unknown: 1.0"
   [ "$output" = "✅ tracking" ]
 }
@@ -2661,6 +2728,13 @@ c
 EOF
   )
   [ "$output" = "$expected" ]
+}
+
+@test "run_summary: lists an update in its cooldown, not among the errors" {
+  make_statuses foo=up_to_date bar="cooldown: 2026-11-12"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'2 packages, 1 up to date.\n\n| Package | Status |\n|---|---|\n| `bar` | 💤 next update 2026-11-12 |' ]
 }
 
 @test "run_summary: prints nothing without the status of a package" {

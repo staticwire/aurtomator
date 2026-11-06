@@ -37,6 +37,9 @@ UPDATE_TIMEOUT="${AURTOMATOR_UPDATE_TIMEOUT:-300}"
 # Pause, in seconds, before a package whose check failed is checked again
 RECHECK_DELAY="${AURTOMATOR_RECHECK_DELAY:-60}"
 
+# The UTC day of the run, for the cooldown
+TODAY=$(date -u +%F)
+
 # Runs a per-package script within a budget. timeout runs it in a process
 # group of its own and ends the whole group, makepkg, git and curl below it
 # included. Such a group cannot read the terminal, where git and ssh may ask
@@ -278,8 +281,17 @@ find_asset() {
 run_package() {
   local pkg_file="$1" pass="$2"
   local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex
-  local is_downgrade cmp alerts fired line held action note available pushed cmd update_rc update_err
+  local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
   pkg_name=$(pkg_get "$pkg_file" .name)
+  # --prepare and --publish keep a wait for the cooldown from the check run
+  if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ "${CHECKED[$pkg_name]:-}" == "cooldown: "* ]]; then
+    if valid_date "${CHECKED[$pkg_name]#cooldown: }"; then
+      printf '%s\n' "${CHECKED[$pkg_name]}" >"${STATUS_DIR}/${pkg_name}"
+    else
+      echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
+    fi
+    return
+  fi
   # --publish keeps the status of the check run and publishes only a package
   # that run found outdated. Only package names from packages/ reach a path,
   # never a name from WORK_DIR.
@@ -411,6 +423,23 @@ run_package() {
   done
   if [[ "$held" == true ]]; then
     echo "held: ${latest}" >"${STATUS_DIR}/${pkg_name}"
+    return
+  fi
+
+  # The cooldown holds every push until some days after the last one
+  err_file=$(mktemp)
+  check_rc=0
+  push_day=$(cooldown_until "$pkg_file" 2>"$err_file") || check_rc=$?
+  check_err=$(<"$err_file")
+  rm -f "$err_file"
+  if ((check_rc != 0)); then
+    log_err "Failed to check $pkg_name: $check_err"
+    echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
+    return
+  fi
+  if [[ -n "$push_day" && "$TODAY" < "$push_day" ]]; then
+    log_info "$pkg_name: ${current:-none} → $latest waits until $push_day"
+    echo "cooldown: ${push_day}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
 

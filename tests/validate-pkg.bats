@@ -1094,6 +1094,75 @@ allow_version_jump: $value"
   done
 }
 
+@test "validate: cooldown_days from 0 to 365 passes" {
+  local value
+  for value in 0 7 365; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+cooldown_days: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $value"
+      return 1
+    }
+  done
+}
+
+@test "validate: cooldown_days that is not a whole number from 0 to 365 rejected" {
+  local value
+  for value in -1 366 7.5 "'7'" 007 abc; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+cooldown_days: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"packages/mypkg.yml: cooldown_days must be a whole number from 0 to 365"* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+}
+
+@test "validate: last_updated of today or before passes, quoted or not" {
+  local value
+  for value in "'$(date -u +%F)'" "$(date -u +%F)" 2026-11-05; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+last_updated: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $value"
+      return 1
+    }
+  done
+}
+
+@test "validate: last_updated that is not a date or is later than today rejected" {
+  local value
+  for value in "'2026-02-30'" "'yesterday'" 20261106 2026-11-06T10:00:00Z; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+last_updated: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"packages/mypkg.yml: last_updated must be a date YYYY-MM-DD: '"* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+last_updated: '$(date -u -d '1 day' +%F)'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"packages/mypkg.yml: last_updated is later than today: $(date -u -d '1 day' +%F)"* ]]
+}
+
 @test "validate: alerts with when, from and match pass" {
   create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo

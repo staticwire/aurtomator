@@ -23,7 +23,7 @@ done
 readonly VALID_STRATEGIES
 
 # The top-level keys that the scripts read
-readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump alerts upstream"
+readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump cooldown_days alerts upstream"
 
 # The upstream keys that each strategy reads, in the order of the strategy
 # table of README.md. A test compares them with the keys the scripts name.
@@ -252,6 +252,16 @@ validate_pkg() {
     fi
   done
 
+  local cooldown_tag cooldown_days
+  cooldown_tag=$(pkg_get "$file" '.cooldown_days | tag')
+  if [[ "$cooldown_tag" != "!!null" ]]; then
+    cooldown_days=$(pkg_get "$file" '.cooldown_days')
+    if [[ "$cooldown_tag" != "!!int" || ! "$cooldown_days" =~ ^(0|[1-9][0-9]{0,2})$ ]] || ((cooldown_days > 365)); then
+      log_err "$shown: cooldown_days must be a whole number from 0 to 365"
+      ((errors++))
+    fi
+  fi
+
   # '' drops the dash, so pkgver_dash counts as set when it is empty
   local pkgver_dash="" dash_set=false
   if [[ $(pkg_get "$file" '.pkgver_dash | tag') != "!!null" ]]; then
@@ -267,6 +277,17 @@ validate_pkg() {
   current_value=$(pkg_get "$file" '.current // ""')
   if [[ -n "$current_value" ]] && ! validate_pkgver "$current_value" 2>/dev/null; then
     log_err "$shown: current must hold a digit and only A-Za-z0-9 . _ +: ${current_value@Q}"
+    ((errors++))
+  fi
+
+  # A date in the future holds the cooldown of the package until it passes
+  local last_updated
+  last_updated=$(pkg_get "$file" '.last_updated // ""')
+  if [[ -n "$last_updated" ]] && ! valid_date "$last_updated"; then
+    log_err "$shown: last_updated must be a date YYYY-MM-DD: ${last_updated@Q}"
+    ((errors++))
+  elif [[ "$last_updated" > "$(date -u +%F)" ]]; then
+    log_err "$shown: last_updated is later than today: $last_updated"
     ((errors++))
   fi
 

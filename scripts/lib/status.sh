@@ -18,6 +18,7 @@ status_label() {
     new_build:*) echo "🔨 ${1#new_build: } rebuild available" ;;
     rebuilt:*) echo "🔨 ${1#rebuilt: } rebuilt" ;;
     pending:*) echo "⏳ ${1#pending: } pending" ;;
+    cooldown:*) echo "💤 next update ${1#cooldown: }" ;;
     check_failed:* | update_failed:*) echo "❌ failed" ;;
     *) echo "✅ tracking" ;;
   esac

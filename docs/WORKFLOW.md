@@ -83,10 +83,11 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 | `strategy`     | yes      | Version detection strategy: a script name in `strategies/` without `.sh`    |
 | `upstream`     | depends  | Strategy-specific settings. `archpkg`, `repology` and `kde-tarball` need none. |
 | `current`      | no       | Currently tracked version. Written after every push.                        |
-| `last_updated` | no       | Date of the last push, `YYYY-MM-DD`. Written after every push.              |
+| `last_updated` | no       | Date of the last push, `YYYY-MM-DD`. Written after every push. The cooldown counts from it, see [4.7](#47-cooldown). |
 | `current_asset` | no      | The value from a release asset name that the AUR has, for a package with `upstream.asset_var`. Written after every push, see [4.6](#46-values-from-release-asset-names) |
 | `allow_downgrade` | no    | `true` publishes an upstream version lower than `current`. Default `false`, see [4.3](#43-downgrade-behavior). |
 | `allow_version_jump` | no | `true` publishes a version whose first number has at least two digits more than the first number of `current`. Default `false`, see [4.3](#43-downgrade-behavior). |
+| `cooldown_days` | no      | The days a push waits after the last one, from 0 to 365. Default 7 for `git-latest` and 0 for the other strategies, and `0` turns the wait off, see [4.7](#47-cooldown). |
 | `pkgver_dash`  | no       | `_`, `.` or `''`: the character that stands for each `-` of the upstream version, or none, see below |
 | `pkgver_format` | no      | The upstream version with a fixed text around it, `%s` in its place, as `4.%s`, see below |
 | `alerts`       | no       | Rules for steps of upstream that need a hand edit: each pauses the update or reports a note, see [4.5](#45-update-alerts) |
@@ -435,6 +436,8 @@ Each type reads only its own of `host`, `project` and `url`, and `validate-pkg.s
 With `upstream.describe`, the strategy prints what the `git describe` recipes of the [Arch package guidelines for VCS packages](https://manual.archlinux.page/package-guidelines/vcs/) print: `git describe --long --abbrev=<n>`, with `--tags` for `describe: tags` and without it for `describe: annotated`, which takes annotated tags only. `upstream.tag_prefix` is cut from the start of the tag first, as `sed 's/^v//'` does, and then `sed 's/\([^-]*-g\)/r\1/;s/-/./g'` turns `v1.2.0-rc1-47-g0bbf5ad` into `1.2.0.rc1.r47.g0bbf5ad`. On a tagged commit, `--long` still gives `r0` and the hash. The hash takes as many characters as the hash after `.g` in `current`, and 7 when `current` is empty. A repository without a tag reachable from `HEAD` fails with `git describe finds no tag reachable from HEAD of <url>`. `validate-pkg.sh` refuses a `describe` other than `tags` or `annotated`, a `tag_prefix` without `describe`, and a `tag_prefix` with a character outside `A-Za-z0-9._+/-`.
 
 `current` must be empty or of the form the strategy prints: `r<count>.<hash>`, or `<tag>.r<count>.g<hash>` with `upstream.describe`. `validate-pkg.sh` refuses any other. `vercmp` reads `1.4.0.r47.g0bbf5ad` as newer than every `r<count>.<hash>`, so a `current` of the other form would make each check a downgrade, and the package would never update.
+
+Every new commit upstream is a new version. A push of a `git-latest` package waits 7 days after the last one, unless `cooldown_days` sets other days, see [4.7](#47-cooldown).
 
 The clone runs with `GIT_ALLOW_PROTOCOL=http:https`. A URL in a package YAML that comes with a pull request therefore cannot read a local repository or connect to an ssh host with the SSH key of the machine that runs the check.
 
@@ -917,11 +920,11 @@ A PKGBUILD is a bash script, and every step that reads it executes it: the audit
 
 Step 5 accepts both forms of a line other than `pkgver`, `pkgrel`, `source` and the checksums, because only running the PKGBUILD shows which form it yields. Code that runs in prepare can therefore pick the form of each such line in the `.SRCINFO` of any package updated in the same run, and keep `depends = foo>=1.2` where the PKGBUILD derives `foo>=${pkgver}` for version `1.3`. makepkg reads only the PKGBUILD. The AUR stores the description, the URL, the dependencies, the relations and the licenses from `.SRCINFO` and serves them on the package page and through its RPC interface, and yay parses the `.SRCINFO` of every package it clones. That code comes from whoever can push to the AUR repo of a tracked package, as the first paragraph of this section says.
 
-`check-all.sh --prepare <dir>` runs no strategy and needs no `GITHUB_TOKEN`. It takes the versions from the statuses that a check run, `check-all.sh` without a mode, wrote to `.status/` before it, and reads them before the first PKGBUILD runs. It prepares every package with `new_version`, `available_downgrade` or `new_build` into `<dir>/prepared/` and copies the statuses to `<dir>/status/`. A package with `upstream.asset_regex` takes its asset value from `.status/_assets`, keeps `pending`, and becomes `check_failed` without a value, see [4.6](#46-values-from-release-asset-names). A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped` instead, and a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, see [4.3](#43-downgrade-behavior). An update that an alert with `hold: true` fires on gets `held`, see [4.5](#45-update-alerts). A failed preparation becomes `update_failed`, and a package without a status from the check run becomes `check_failed`. The other statuses stay as the check run wrote them.
+`check-all.sh --prepare <dir>` runs no strategy and needs no `GITHUB_TOKEN`. It takes the versions from the statuses that a check run, `check-all.sh` without a mode, wrote to `.status/` before it, and reads them before the first PKGBUILD runs. It prepares every package with `new_version`, `available_downgrade` or `new_build` into `<dir>/prepared/` and copies the statuses to `<dir>/status/`. A package with `upstream.asset_regex` takes its asset value from `.status/_assets`, keeps `pending`, and becomes `check_failed` without a value, see [4.6](#46-values-from-release-asset-names). A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped` instead, and a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, see [4.3](#43-downgrade-behavior). An update that an alert with `hold: true` fires on gets `held`, see [4.5](#45-update-alerts), and an update in the cooldown of its package gets `cooldown`, see [4.7](#47-cooldown). A failed preparation becomes `update_failed`, and a package without a status from the check run becomes `check_failed`. The other statuses stay as the check run wrote them.
 
 `check-all.sh --verify <dir>` runs `verify-pkg.sh` for every package in `packages/` that has a directory in `<dir>/prepared/`, and runs no strategy. It takes the version and the asset value from the statuses of the check run in `.status/`, as `--publish` does: the version of `new_version`, `available_downgrade` or `new_build`, and for a package with `upstream.asset_regex` its value in `.status/_assets`. Without them `verify-pkg.sh` does not run, and the package gets `update_failed: no new version from the check run` or `update_failed: no asset value from the check run`. An update that fails is removed from `<dir>/prepared/`, and its status in `<dir>/status/` becomes `update_failed`. Exit code 3 counts as a failure as well: the prepare run writes `base` for every package, so a moved AUR repo looks the same as a wrong `base`. The next run prepares the package again.
 
-`check-all.sh --publish <dir>` takes the statuses of the check run from `.status/`, as `--prepare` does, and writes `.status/` anew. `up_to_date`, `check_failed`, `downgrade_skipped`, `jump_skipped`, `held` and `pending` stay as they are, and the alerts of a held update are evaluated again to record their notes in `.status/_alerts`. A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped`, a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, an update that an alert with `hold: true` fires on gets `held`, and none of them is published. A missing status, and one the check run does not write, become `check_failed`. For a package with `new_version`, `available_downgrade` or `new_build` and a directory in `<dir>/prepared/`, it publishes the version in that status, with the asset value from `.status/_assets` for a package with `upstream.asset_regex`, and runs no strategy, so nothing contacts an upstream host while the AUR and GPG keys are in place. Exit code 3, an AUR repo that moved, leaves the status at `new_version`, `available_downgrade` or `new_build` without an error, and the next run prepares the package again. A package with one of these statuses and no prepared directory gets the `update_failed` status that the prepare or the verify run wrote for it to `<dir>/status/`, or `update_failed: prepare and verify handed over no update`. Nothing else is taken from `<dir>/status/`, and only a regular file without a NUL byte: the prepare run executes PKGBUILDs, and code from one of them can write the files of every package.
+`check-all.sh --publish <dir>` takes the statuses of the check run from `.status/`, as `--prepare` does, and writes `.status/` anew. `up_to_date`, `check_failed`, `downgrade_skipped`, `jump_skipped`, `held`, `pending` and `cooldown` stay as they are, and the alerts of a held update are evaluated again to record their notes in `.status/_alerts`. A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped`, a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, an update that an alert with `hold: true` fires on gets `held`, an update in the cooldown of its package gets `cooldown`, and none of them is published. A missing status, and one the check run does not write, become `check_failed`. For a package with `new_version`, `available_downgrade` or `new_build` and a directory in `<dir>/prepared/`, it publishes the version in that status, with the asset value from `.status/_assets` for a package with `upstream.asset_regex`, and runs no strategy, so nothing contacts an upstream host while the AUR and GPG keys are in place. Exit code 3, an AUR repo that moved, leaves the status at `new_version`, `available_downgrade` or `new_build` without an error, and the next run prepares the package again. A package with one of these statuses and no prepared directory gets the `update_failed` status that the prepare or the verify run wrote for it to `<dir>/status/`, or `update_failed: prepare and verify handed over no update`. Nothing else is taken from `<dir>/status/`, and only a regular file without a NUL byte: the prepare run executes PKGBUILDs, and code from one of them can write the files of every package.
 
 ### 4.5 Update alerts
 
@@ -1037,6 +1040,41 @@ The saved name holds `pkgver` because v4.0.0 and v4.0.1 publish different files 
 A rebuild commits to the AUR as `<version>-<pkgrel> release from <strategy>`, as in `2.4.6-2 release from github-tag`. `current_asset` in the package YAML gets the value together with `current`, also when the AUR already has it.
 
 A download saved under a name without the value, as in `${pkgname}-${pkgver}-amd64.deb::<url>`, keeps that name through a rebuild. makepkg takes a file of that name from the build directory or from `SRCDEST` and fails on its checksum. The file name therefore holds the value, as the upstream name `liquidsoap_${_deb}_amd64.deb` does.
+
+### 4.7 Cooldown
+
+A `-git` package gets a new version with every upstream commit, and each push makes the AUR helpers of its users build the package again at their next upgrade. The cooldown holds the next push of a package until some days after the last one. The AUR does not expect a VCS package to follow every commit: its form to flag a package out of date asks users not to flag a `-git` package whose version lags the latest commit, and to flag it only when the sources moved or the PKGBUILD needs a change.
+
+`cooldown_days` in the package YAML sets the days, a whole number from 0 to 365. Without it, a package of the `git-latest` strategy waits 7 days, and a package of any other strategy does not wait. `cooldown_days: 0` turns the cooldown off, and a package of any strategy can set days of its own:
+
+```yaml
+name: my-package-git
+strategy: git-latest
+upstream:
+  type: github
+  project: owner/repo
+cooldown_days: 14
+```
+
+The days count from `last_updated`, the UTC date that a push writes to the package YAML, see step 14 of [4.2](#42-step-by-step). The next push goes out with the first run on the day `last_updated` plus `cooldown_days`: after a push on 2026-11-05, with 7 days, the next one goes out with the first run on 2026-11-12. A run that finds the version in the AUR already writes `current` and leaves `last_updated` as it is. A package without `last_updated` has no cooldown, so a new package is pushed at once, and that push writes the date.
+
+The cooldown holds every push: a new version, a downgrade that the package allows, and a rebuild for a new asset value. `check-all.sh` applies it after the checks of [4.3](#43-downgrade-behavior) and [4.5](#45-update-alerts), so a skipped downgrade or version jump and a held update keep their statuses. It applies it before it looks up the asset value of a new version, so a waiting package sends no request for that value. The strategy runs in every run, and an upstream repository that was deleted fails the check in the next run, as before. Only the push waits.
+
+A waiting package gets the status `cooldown: <date>`, with the day its push goes out, and `check-all.sh` logs:
+
+```text
+→ my-package-git: r2378.06ea49d → r2391.1f3c2a7 waits until 2026-11-12
+```
+
+`update-readme.sh` renders `cooldown: 2026-11-12` as `💤 next update 2026-11-12`. A package in its cooldown without a newer version is `up_to_date`, as before. The status holds no version, so the package table changes when a wait starts and at the push, and new upstream commits during the wait leave it as it is.
+
+Nothing about a wait counts as a failure. The run summary lists the package with its label and shows no error for it, and no issue opens. An open `❌ <package>: check failed` closes, because the check passed, while `❌ <package>: update failed` and `✋ <package>: update held` stay open until the version is in the AUR, see [5.6](#56-issues). The journal counts a wait as `up_to_date` at the version of the package and writes the push as `updated`, see [5.9](#59-statistics), so the statistics card counts no wait among the failing packages.
+
+A waiting update goes out with the next run once the `last_updated` line of its package is deleted, and that push writes the date again. A run started by hand follows the cooldown as a scheduled run does.
+
+`--prepare` and `--publish` keep a `cooldown` of the check run, as they keep `held`, and apply the cooldown again to `new_version`, `available_downgrade` and `new_build`, see [4.4](#44-prepare-and-publish). A `cooldown` status without a valid date becomes `check_failed: invalid status from the check run`.
+
+`validate-pkg.sh` refuses a `cooldown_days` that is not a whole number from 0 to 365, a `last_updated` that is not a date `YYYY-MM-DD`, and a `last_updated` later than the current UTC date, since a typo in the year would hold the package for years. A package with a new version fails its check when its `cooldown_days` is not valid, or when its `last_updated` is not a date while the cooldown is on. The status then is `check_failed: cooldown_days must be a whole number from 0 to 365: <value>` or `check_failed: last_updated must be a date YYYY-MM-DD: <value>`.
 
 ## 5. CI Workflow: check-updates.yml
 
@@ -1183,6 +1221,7 @@ While `packages/` holds no package, the script writes nothing. A repository made
 | `.status/<name>`       | `downgrade_skipped: 1.2.0`       | Downgrade found, not allowed by the YAML |
 | `.status/<name>`       | `jump_skipped: 2026102100`       | Version jump found, not allowed by the YAML |
 | `.status/<name>`       | `held: 29+1`                     | Update paused by an alert with `hold: true` |
+| `.status/<name>`       | `cooldown: 2026-11-12`           | Update found, waits for the cooldown until that day, see [4.7](#47-cooldown) |
 | `.status/<name>`       | `pending: 2.5.0rc1`              | The release asset of the version is not out yet, see [4.6](#46-values-from-release-asset-names) |
 | `.status/<name>`       | `new_build: 2.4.6`               | Rebuild of the version the AUR has found, not pushed yet |
 | `.status/<name>`       | `rebuilt: 2.4.6`                 | Rebuild pushed to the AUR                |
@@ -1319,7 +1358,7 @@ The rows hold no free text. The error of a failure stays in its issue and in the
 | `added` | A package whose YAML is new |
 | `removed` | A package whose YAML is gone |
 
-The statuses of an update that is not out yet, `new_version`, `available_downgrade` and `new_build`, write no row.
+The statuses of an update that is not out yet, `new_version`, `available_downgrade` and `new_build`, write no row. A wait for the cooldown, `cooldown: <date>`, counts as `up_to_date` at the version of the package, see [4.7](#47-cooldown).
 
 `record-events.sh` compares the final status of each package with the last row of the package:
 
