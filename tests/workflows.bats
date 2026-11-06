@@ -562,10 +562,11 @@ id_of() {
 # Hand over wrote, given as name=status pairs, beside the README of the
 # checkout. The copy of the README in $RESULTS differs from it when
 # $README_CHANGED is set and is missing when $NO_README_COPY is set. sudo and
-# git fail. Prints the step outputs.
+# git fail. The day of the card is 2026-11-10. Prints the step outputs.
 run_decide_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" results="$BATS_TEST_TMPDIR/results" pair
   mkdir -p "$ws/statuses" "$bin" "$results"
+  ln -sfn "$BATS_TEST_DIRNAME/.." "$ws/aurtomator"
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/statuses/${pair%%=*}"
   done
@@ -579,7 +580,8 @@ run_decide_step() {
   step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
   (cd "$ws" && PATH="$bin:$PATH" RESULTS="$results" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
-    bash -e "$BATS_TEST_TMPDIR/step.sh") >/dev/null
+    GITHUB_REPOSITORY=owner/aur-packages AURTOMATOR_STATS_DATE=2026-11-10 bash -e "$BATS_TEST_TMPDIR/step.sh") \
+    >/dev/null 2>"$BATS_TEST_TMPDIR/decide.log"
   cat "$BATS_TEST_TMPDIR/output"
 }
 
@@ -619,11 +621,57 @@ run_decide_step() {
   [ "$output" = $'prepare=false\nwork=false' ]
 }
 
-# Decide and the commit step read the copies of Hand over
-@test "check-updates: Hand over, Decide and the commit step name the same directory of root" {
+# Puts package a, its journal and the card of day $1 into the workspace of
+# run_decide_step
+decide_stats() {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws/packages" "$ws/stats"
+  echo "name: a" >"$ws/packages/a.yml"
+  printf '%s\n' 'time,package,event,version,previous,run' '2026-11-08T05:17:41Z,a,tracked,1.0,,6' >"$ws/stats/events.csv"
+  AURTOMATOR_STATS_DATE="$1" "$BATS_TEST_DIRNAME/../scripts/stats-card.sh" --journal "$ws/stats/events.csv" \
+    --packages "$ws/packages" --name aur-packages --out "$ws/stats" 2>/dev/null
+}
+
+@test "check-updates: Decide publishes when the journal or the card is missing" {
+  mkdir -p "$BATS_TEST_TMPDIR/ws/packages"
+  echo "name: a" >"$BATS_TEST_TMPDIR/ws/packages/a.yml"
+  run run_decide_step a=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=true' ]
+  decide_stats 2026-11-10
+  rm "$BATS_TEST_TMPDIR/ws/stats/card.svg"
+  run run_decide_step a=up_to_date
+  [ "$output" = $'prepare=false\nwork=true' ]
+  decide_stats 2026-11-10
+  rm "$BATS_TEST_TMPDIR/ws/stats/events.csv"
+  run run_decide_step a=up_to_date
+  [ "$output" = $'prepare=false\nwork=true' ]
+}
+
+@test "check-updates: Decide publishes once the windows of the card moved" {
+  decide_stats 2026-11-09
+  run run_decide_step a=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=true' ]
+  decide_stats 2026-11-10
+  run run_decide_step a=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false' ]
+}
+
+@test "check-updates: Decide leaves the run alone when it cannot draw the card" {
+  decide_stats 2026-11-09
+  echo 'time,package' >"$BATS_TEST_TMPDIR/ws/stats/events.csv"
+  run run_decide_step a=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false' ]
+}
+
+# Decide, Record statistics and the commit step read the copies of Hand over
+@test "check-updates: the steps that read the copies of Hand over name the same directory of root" {
   run yq '[.jobs[].steps[] | select(.env.RESULTS) | .name + " " + .env.RESULTS] | sort | unique | join(",")' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = "Commit changes via API /results,Decide /results,Hand over /results" ]
+  [ "$output" = "Commit changes via API /results,Decide /results,Hand over /results,Record statistics /results" ]
 }
 
 @test "check-updates: update-readme.sh runs as builder after check-all.sh, in check and publish" {
@@ -1383,6 +1431,78 @@ make_handoff() {
   [ ! -s "$SUDO_LOG" ]
 }
 
+# A workspace with aurtomator linked in, package a at 1.0 before the run and
+# at $1 after it, its status $2, and a journal of one run before
+make_stats_ws() {
+  local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results"
+  mkdir -p "$ws/packages" "$ws/statuses" "$ws/stats" "$results/packages"
+  ln -sfn "$BATS_TEST_DIRNAME/.." "$ws/aurtomator"
+  printf 'name: a\nstrategy: github-release\nupstream:\n  project: o/a\ncurrent: 1.0\n' >"$ws/packages/a.yml"
+  sed "s/^current: .*/current: $1/" "$ws/packages/a.yml" >"$results/packages/a.yml"
+  printf '%s\n' "$2" >"$ws/statuses/a"
+  printf '%s\n' 'time,package,event,version,previous,run' '2026-11-08T05:17:41Z,a,tracked,1.0,,6' >"$ws/stats/events.csv"
+}
+
+# Runs Record statistics in that workspace for the repository $REPO, by
+# default owner/aur-packages, at a fixed time and run
+run_stats_step() {
+  step_run publish "Record statistics" >"$BATS_TEST_TMPDIR/stats-step.sh"
+  (cd "$BATS_TEST_TMPDIR/ws" && RESULTS="$BATS_TEST_TMPDIR/results" GITHUB_REPOSITORY="${REPO-owner/aur-packages}" \
+    GITHUB_RUN_ID=7 AURTOMATOR_STATS_TIME=2026-11-10T05:17:22Z AURTOMATOR_STATS_DATE=2026-11-10 \
+    bash -e "$BATS_TEST_TMPDIR/stats-step.sh")
+}
+
+@test "check-updates: Record statistics runs as root between Hand over and the commit step" {
+  local at
+  at=$(step_index publish "Record statistics")
+  [ "$at" = "$(($(step_index publish "Hand over") + 1))" ]
+  [ "$(step_index publish "Commit changes via API")" = "$((at + 1))" ]
+  run step_run publish "Record statistics"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"./aurtomator/scripts/record-events.sh "* ]]
+  [[ "$output" != *sudo* ]]
+}
+
+@test "check-updates: Record statistics writes the journal and both cards for the commit step" {
+  local stats="$BATS_TEST_TMPDIR/results/stats"
+  make_stats_ws 1.1 "updated: 1.1"
+  run run_stats_step
+  [ "$status" -eq 0 ]
+  [ "$(tail -n 1 "$stats/events.csv")" = '2026-11-10T05:17:22Z,a,updated,1.1,1.0,7' ]
+  grep -q '>aur-packages</text>' "$stats/card.svg"
+  grep -q '>aur-packages</text>' "$stats/card-dark.svg"
+  [ "$(ls "$stats")" = $'card-dark.svg\ncard.svg\nevents.csv' ]
+}
+
+@test "check-updates: Record statistics warns and leaves stats/ empty when a script fails" {
+  local stats="$BATS_TEST_TMPDIR/results/stats"
+  make_stats_ws 1.1 "updated: 1.1"
+  echo 'time,package' >"$BATS_TEST_TMPDIR/ws/stats/events.csv"
+  run run_stats_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::The statistics of this run were not recorded"* ]]
+  [ -z "$(ls -A "$stats")" ]
+  make_stats_ws 1.1 "updated: 1.1"
+  REPO=owner/ run run_stats_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::The statistics of this run were not recorded"* ]]
+  [ -z "$(ls -A "$stats")" ]
+}
+
+@test "check-updates: Record statistics writes nothing without a package or a hand over" {
+  local results="$BATS_TEST_TMPDIR/results"
+  make_stats_ws 1.0 up_to_date
+  rm "$BATS_TEST_TMPDIR/ws/packages/a.yml"
+  run run_stats_step
+  [ "$status" -eq 0 ]
+  [ ! -e "$results/stats" ]
+  make_stats_ws 1.0 up_to_date
+  rm -r "$results/packages"
+  run run_stats_step
+  [ "$status" -eq 0 ]
+  [ ! -e "$results/stats" ]
+}
+
 # Runs the issue step of the issues job in a workspace with the statuses
 # given as name=status pairs. gh lists the titles in $GH_TITLES, one per
 # line, that start with the emoji of the --label it asks for, the first 30
@@ -1920,6 +2040,53 @@ no_commit() {
   GH_HEAD=$MOVED GH_TREE_FAIL=1 run_commit_step
   [ "$status" -ne 0 ]
   no_commit
+}
+
+@test "check-updates: the commit step adds the files of stats/ the checkout does not have yet" {
+  make_commit_repo README.md="new table" stats/events.csv=journal stats/card.svg=card stats/card-dark.svg=dark \
+    stats/other.svg=other
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["README.md", "stats/events.csv", "stats/card.svg", "stats/card-dark.svg"]' "$GH_LOG.tree"
+  grep -qF -- "-f message=chore: update package versions [skip ci] " "$GH_LOG"
+}
+
+@test "check-updates: a commit of stats/ alone is a commit of the statistics" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_commit_repo stats/card.svg="new card"
+  mkdir "$ws/stats"
+  echo card >"$ws/stats/card.svg"
+  echo journal >"$ws/stats/events.csv"
+  git -C "$ws" add stats
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m stats
+  cp "$ws/stats/events.csv" "$BATS_TEST_TMPDIR/results/stats/events.csv"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["stats/card.svg"]' "$GH_LOG.tree"
+  grep -qF -- "-f message=chore: update package statistics [skip ci] " "$GH_LOG"
+}
+
+@test "check-updates: the commit step stops when a new file of stats/ appeared on the moved head" {
+  make_commit_repo README.md="new table" stats/card.svg=card
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/bar.yml)" run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["README.md", "stats/card.svg"]' "$GH_LOG.tree"
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/bar.yml && echo "stats/card.svg 0123456789012345678901234567890123456789")" \
+    run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::stats/card.svg changed on main during the run"* ]]
+  no_commit
+}
+
+@test "check-updates: the commit step leaves stats/ alone when it is a tracked link" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_commit_repo stats/card.svg=card
+  ln -s packages "$ws/stats"
+  git -C "$ws" add stats
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m link
+  run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No changes to commit"* ]]
 }
 
 @test "check-updates: the close step runs before the issue step, and not after a failed step or publish" {

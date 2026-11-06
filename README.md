@@ -15,7 +15,7 @@ graph LR
     B --> V[verify job, no secrets<br/>download the sources<br/>check the checksums]
     V --> C[publish job<br/>check the prepared files<br/>git push to AUR]
     K -->|status change only| C
-    C --> E[update-readme.sh<br/>commit badges + package table]
+    C --> E[update-readme.sh, record-events.sh<br/>commit badges, statistics + package table]
     K -->|every run| D[issues job<br/>open and close GitHub Issues]
     C --> D
 ```
@@ -95,7 +95,7 @@ Patches in `source=()` trigger a warning and are not blocked.
 
 ## Downgrades
 
-aurtomator publishes a version older than the tracked one only when the package YAML sets `allow_downgrade: true`. Without it, the downgrade is skipped: the latest release of a GitHub project can be a maintenance release of an older line. A downgrade is logged with the literal keyword `DOWNGRADE` and shown in the package table with a `🔻` icon. It counts as a successful run, so the badge stays green. Details are in [docs/WORKFLOW.md section 4.3](docs/WORKFLOW.md#43-downgrade-behavior).
+aurtomator publishes a version older than the tracked one only when the package YAML sets `allow_downgrade: true`. Without it, the downgrade is skipped: the latest release of a GitHub project can be a maintenance release of an older line. A downgrade is logged with the literal keyword `DOWNGRADE` and shown in the package table with a `🔻` icon. The statistics card counts it as a push. Details are in [docs/WORKFLOW.md section 4.3](docs/WORKFLOW.md#43-downgrade-behavior).
 
 An update whose first number has at least two digits more than that of the tracked version, such as `13 → 2026102100`, is skipped the same way unless the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the upstream, as build tags next to release tags, than a release. It is shown with a `🔺` icon.
 
@@ -111,9 +111,13 @@ Some upstreams name a release asset with more than the version and rebuild a rel
 
 The line under the package table in the README of your repository shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin to a new release at its next check. "Check for updates" under Insights > Dependency graph > Dependabot runs a check at once. A newer release also gets an issue that says how to update, and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
 
+## Statistics
+
+Your repository keeps a journal of every change of state of its packages in `stats/events.csv`: pushes, waits, failures, recoveries, and packages added and removed. Its README shows a card drawn from the journal above the package table, with the packages updated, the pushes to the AUR, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The card names the day it was drawn, and a click on it opens the journal. Google Sheets and Grafana read the journal from its URL. Details are in [docs/WORKFLOW.md section 5.9](docs/WORKFLOW.md#59-statistics).
+
 ## Resource usage
 
-All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version, and `publish` for a new version or a change in the package table. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`, and only when a package goes to the AUR. A version check is a few API requests per package, or a bare clone for `git-latest`.
+All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version, and `publish` for a new version, a change in the package table, and once a day for the statistics card. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`, and only when a package goes to the AUR. A version check is a few API requests per package, or a bare clone for `git-latest`.
 
 ## Documentation
 

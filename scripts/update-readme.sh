@@ -11,7 +11,7 @@
 # workflow badges take the repo from the git origin. Without a GitHub origin
 # the block holds the badge of aurtomator alone.
 #
-# The package block holds the packages badge, the table and the version
+# The package block holds the statistics card, the table and the version
 # line of aurtomator.
 #
 # Reads per-package status from .status/ directory (written by check-all.sh).
@@ -129,13 +129,19 @@ table_row() {
   printf '\n<tr><td>%s</td><td>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td></tr>' "$@"
 }
 
-# Badge and table header are assembled after the loop (need counts)
+# The cards stats-card.sh draws in stats/, as a link to the journal. GitHub
+# shows the dark card in its dark theme.
+readonly CARD='<a href="stats/events.csv">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">
+  <img width="100%" alt="Packages updated, pushes to AUR, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">
+</picture>
+</a>'
+
 table_rows=""
 table_header=$'<table>\n<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>'
 
 pkg_count=0
-pkg_ok=0
-pkg_fail=0
 for pkg_file in "${pkg_files[@]}"; do
   name=$(pkg_get "$pkg_file" .name)
   current=$(pkg_get "$pkg_file" '.current // "-"')
@@ -145,19 +151,12 @@ for pkg_file in "${pkg_files[@]}"; do
   # Determine status from .status/ dir or YAML
   status_file="${STATUS_DIR}/${name}"
   if [[ -f "$status_file" ]]; then
-    run_status=$(cat "$status_file")
-    status=$(status_label "$run_status")
-    case "$run_status" in
-      check_failed:* | update_failed:*) ((pkg_fail++)) || true ;;
-      *) ((pkg_ok++)) || true ;;
-    esac
+    status=$(status_label "$(cat "$status_file")")
   elif [[ "$current" == "-" || "$current" == "null" ]]; then
     status="✨ new"
     current="-"
-    ((pkg_ok++)) || true
   else
     status="✅ tracking"
-    ((pkg_ok++)) || true
   fi
 
   link="<a href=\"https://aur.archlinux.org/pkgbase/${name}\">${name}</a>"
@@ -165,17 +164,7 @@ for pkg_file in "${pkg_files[@]}"; do
   ((pkg_count++)) || true
 done
 
-# Build badge: green if all ok, red otherwise
-if [[ "$pkg_fail" -eq 0 ]]; then
-  badge_color="brightgreen"
-else
-  badge_color="red"
-fi
-badge_text="${pkg_ok}%2F${pkg_count}"
-pkg_badge="![packages](https://img.shields.io/badge/packages-${badge_text}-${badge_color})"
-
-# Assemble full table
-table="${pkg_badge}"$'\n\n'"${table_header}${table_rows}"$'\n</table>'
+table="${CARD}"$'\n\n'"${table_header}${table_rows}"$'\n</table>'
 
 # The version of aurtomator, and the newer release the check run found
 version=$(aurtomator_version)

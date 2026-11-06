@@ -26,6 +26,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/sums.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/issue.sh"
 # shellcheck source=lib/status.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/status.sh"
+# shellcheck source=lib/stats.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/stats.sh"
 # shellcheck source=lib/alerts.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/alerts.sh"
 # shellcheck source=lib/version.sh
