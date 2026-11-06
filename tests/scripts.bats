@@ -4072,7 +4072,7 @@ cooldown_days: 0"
 @test "lib.sh: cooldown_until refuses a cooldown_days or a last_updated that is not valid" {
   source "$TEST_TMPDIR/scripts/lib.sh"
   local value
-  for value in -1 366 7.5 "'7 days'" "'x[\$(touch $TEST_TMPDIR/ran)]'"; do
+  for value in -1 366 7.5 010 "'7 days'" "'x[\$(touch $TEST_TMPDIR/ran)]'"; do
     create_test_package "pkg-git" "git-latest" "last_updated: '2026-11-05'
 cooldown_days: $value"
     run --separate-stderr cooldown_until "$TEST_TMPDIR/packages/pkg-git.yml"
