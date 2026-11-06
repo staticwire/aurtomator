@@ -4291,6 +4291,16 @@ write_asset_dirs() {
   [ "$status" -eq 0 ]
 }
 
+@test "check_prepared_files: a line that holds the asset value takes the new one" {
+  write_asset_dirs 2.4.6 "$V246_2" 1 2.4.6 "$V246_3" 2
+  # shellcheck disable=SC2016
+  sed -i 's/^license=.*/&\nnoextract=("${_deb}")/' "$TEST_TMPDIR/aur/PKGBUILD" "$TEST_TMPDIR/prepared/PKGBUILD"
+  sed -i $'/^\tsource = /i \tnoextract = '"$V246_2" "$TEST_TMPDIR/aur/.SRCINFO"
+  sed -i $'/^\tsource = /i \tnoextract = '"$V246_3" "$TEST_TMPDIR/prepared/.SRCINFO"
+  run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 2.4.6 drop "" _deb "$V246_3"
+  [ "$status" -eq 0 ]
+}
+
 @test "check_prepared_files: takes pkgrel 1 for a new version" {
   write_asset_dirs 2.4.6 "$V246_3" 2 2.5.0rc1 "$V250" 3
   run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 2.5.0rc1 drop "" _deb "$V250"
