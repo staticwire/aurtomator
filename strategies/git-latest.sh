@@ -98,8 +98,8 @@ hash=$(git -C "$tmp_dir/repo" rev-parse HEAD 2>/dev/null) || {
 }
 
 # The hash takes as many characters as the hash in current. rev-parse
-# --short in a PKGBUILD grows with the repository, and a shorter hash of the
-# same commit reads as an older version.
+# --short in a PKGBUILD grows with the repository, and vercmp reads a shorter
+# hash of the same commit as another version.
 hash_len=7
 if [[ "$current" =~ ^r[0-9]+\.([0-9a-f]+)$ ]]; then
   hash_len=${#BASH_REMATCH[1]}

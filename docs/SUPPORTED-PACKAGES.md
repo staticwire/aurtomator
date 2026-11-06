@@ -4,18 +4,21 @@ What aurtomator can automate, what it cannot, and how to avoid breaking things.
 
 ## How aurtomator updates packages
 
-For every update, aurtomator does exactly this:
+For every update, aurtomator does this:
 
 1. Clone the existing AUR git repo
 2. **Audit the PKGBUILD** for unsupported features (blocks or warns)
-3. `sed` replaces `pkgver=` with the new version
-4. Reset `pkgrel=1`
+3. `sed` replaces `pkgver=` with the new version, and the line of `upstream.asset_var`, for a package that sets it, with the value from the release asset name
+4. Set `pkgrel=1`, or the AUR `pkgrel` plus one for a rebuild with a new asset value
 5. **Validate source URLs** (HEAD request, HTTP status and `Content-Type` check)
 6. Run `updpkgsums`
 7. Run `makepkg --verifysource` to verify checksums
 8. **Lint with `namcap`**
 9. Run `makepkg --printsrcinfo` to regenerate `.SRCINFO`
-10. Commit and push to the AUR
+10. **Check the prepared files** against the AUR copy
+11. Commit and push to the AUR
+
+In the workflow, the prepare job runs steps 1 to 9. The verify job runs step 10, downloads the sources again and compares every checksum. The publish job runs step 10 once more and then step 11.
 
 Steps 6 and 7 are skipped when a checksum array holds a `SKIP` other than that of a signature and no remote source has a real checksum, see [Packages with VCS checksums](#packages-with-vcs-checksums-skip) and [Sources with a signature](#sources-with-a-signature).
 
@@ -200,7 +203,7 @@ aurtomator detects these cases and blocks the update or warns.
 
 A PKGBUILD with a `pkgver()` function and a strategy other than `git-latest` or `github-nightly`, for example `github-release`.
 
-**Detection:** `audit_pkgbuild()` checks for a `pkgver()` function and the strategy. Release and tag strategies report release versions, which do not match what `pkgver()` computes at build time. A `pkgver()` that only prints `pkgver` passes: `cd` lines and one `printf` or `echo` of `$pkgver`, `${pkgver}` or `${pkgver//-/.}`, as streamrip has `cd streamrip` and `printf "${pkgver//-/.}"`. `pkgver` holds no dash, so such a function prints the `pkgver` that `sed` sets.
+**Detection:** `audit_pkgbuild()` checks for a `pkgver()` function and the strategy. Release and tag strategies report release versions, which do not match what `pkgver()` computes at build time. A `pkgver()` that only prints `pkgver` passes: `cd` lines and one `printf` or `echo` of `$pkgver`, `${pkgver}` or `pkgver` with its dash replaced, such as `${pkgver//-/.}` or `${pkgver/-/_}`, as streamrip has `cd streamrip` and `printf "${pkgver//-/.}"`. `pkgver` holds no dash, so such a function prints the `pkgver` that `sed` sets.
 
 **Correct approach:** a package built from a git checkout uses `strategy: git-latest`. A binary from a release tag that never moves drops `pkgver()` and sets `pkgver` to a date, which `github-asset` takes from the `updated_at` of the newest listed asset. The URLs name the tag as text:
 
@@ -242,7 +245,7 @@ sha256sums=('SKIP'
 
 A PKGBUILD whose sources take the version from another variable, as with `_pkgver=2025-04-03` and `pkgver="${_pkgver//-/.}"`, a download URL without the version, such as `https://example.org/download/latest/player.tar.zst`, whose file has not changed, or a VCS source pinned to a commit the version does not set, as with `source=("git+https://example.org/player.git#commit=$_commit")`. The version in the name a download is saved under does not count, as in `"player-$pkgver.zip::https://example.org/archive/$_commit.zip"`.
 
-**Detection:** the `.SRCINFO` check refuses a new `pkgver` when no source URL, the part after `::`, and no checksum changed and a download over `http`, `https` or `ftp` has a real checksum, or a VCS source is pinned by `#commit=`, `#tag=` or `#revision=`. It checks this for each architecture, the common sources counting for all of them, so a `source_aarch64` built from its own `_armver` is refused while `source_x86_64` follows `pkgver`. A download saved under the new version from the URL and the checksum of the old one is refused even when another source changes. A VCS pin that stays counts only when nothing else changes: a pin next to a LICENSE fetched from the tag passes. Publish runs it, and `update-pkg.sh` runs it before the commit. See step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
+**Detection:** the `.SRCINFO` check refuses a new `pkgver` when no source URL, the part after `::`, and no checksum changed and a download over `http`, `https` or `ftp` has a real checksum, or a VCS source is pinned by `#commit=`, `#tag=` or `#revision=`. It checks this for each architecture, the common sources counting for all of them, so a `source_aarch64` built from its own `_armver` is refused while `source_x86_64` follows `pkgver`. A download saved under the new version from the URL and the checksum of the old one is refused even when another source changes. A VCS pin that stays counts only when nothing else changes: a pin next to a LICENSE fetched from the tag passes. Verify and publish run it, and `update-pkg.sh` runs it before the commit. See step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
 
 `sed` sets only `pkgver`. When the sources stay the same, `updpkgsums` hashes the old files again, and makepkg checks out the same pin, so the new version would hold the old files.
 
@@ -290,6 +293,14 @@ Upstream moves or renames a release, and the old URL now redirects to an HTML er
 
 Without this check, `updpkgsums` would hash the HTML page. The checksums would match and the package would fail to install.
 
+### Checksums verify cannot compute (BLOCKED)
+
+A real checksum for a download over `http` or `ftp`, for a git source over another protocol than `https`, for an `hg` or `bzr` source at a pin makepkg hashes, or for a `fossil` source.
+
+**Detection:** the verify job computes every checksum other than `SKIP` again from its source, as makepkg does. It downloads over `https` only and clones git sources over `https` only, so any other checksum stops the update. See step 5 of verify in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
+
+**Correct approach:** use the `https` URL of the download where the host serves one. A package that needs one of the other sources needs a manual update.
+
 ### Packages with patches (WARNING)
 
 Packages with `.patch` or `.diff` files in `source=()`.
@@ -327,7 +338,7 @@ aurtomator does not modify `depends`, `makedepends` or `optdepends`. When a new 
 
 ### Packages requiring epoch
 
-When upstream changes its versioning scheme, for example from CalVer to SemVer, and the new version compares lower than the old one, `epoch` is needed. aurtomator does not detect that case and does not set `epoch`; it warns about an `epoch` the PKGBUILD already has, see [Packages with an epoch](#packages-with-an-epoch-warning). Setting it cannot be undone and needs maintainer judgment.
+When upstream changes its versioning scheme, for example from CalVer to SemVer, and the new version compares lower than the old one, `epoch` is needed. aurtomator cannot tell such a version from a downgrade. It skips the version unless the package YAML sets `allow_downgrade: true`, see [WORKFLOW.md section 4.3](WORKFLOW.md#43-downgrade-behavior), and it never sets `epoch`. It warns about an `epoch` the PKGBUILD already has, see [Packages with an epoch](#packages-with-an-epoch-warning). Setting it cannot be undone and needs maintainer judgment.
 
 ### Packages with version-dependent install scripts
 
@@ -335,7 +346,7 @@ aurtomator does not touch `.install` files. When a new version needs migration s
 
 ## Version detection strategies
 
-aurtomator includes 15 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree. The streamrip PKGBUILD builds the git tag `v2.2.0` from GitHub, while PyPI still holds `2.1.0`, so `pypi` reports a downgrade on every run. A vendor page can sit behind a bot check that its download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
+aurtomator includes 16 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree. The streamrip PKGBUILD builds the git tag `v2.2.0` from GitHub, while PyPI still holds `2.1.0`, so `pypi` reports a downgrade on every run. A vendor page can sit behind a bot check that its download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
 
 By where the upstream publishes releases:
 
@@ -384,17 +395,13 @@ Some sites answer a client without a browser with a check page in place of the d
 
 ### Upstream sources not covered
 
-These need `webpage-scrape` or a custom strategy:
-
-- Go module proxy (proxy.golang.org)
-- Private registries (GitLab, npm, PyPI)
-- FTP servers
+The Go module proxy (proxy.golang.org) needs `webpage-scrape` or a custom strategy. Private registries (GitLab, npm, PyPI) and FTP servers need a custom strategy: `webpage-scrape` reads public HTTPS pages only and sends no credentials.
 
 ## Comparison with other tools
 
 | Tool | Detection | Update | Push | Approach |
 |---|---|---|---|---|
-| **aurtomator** | 15 built-in strategies | pkgver sed + updpkgsums | Auto push to AUR | Fully automated, self-hosted |
+| **aurtomator** | 16 built-in strategies | pkgver sed + updpkgsums | Auto push to AUR | Fully automated, self-hosted |
 | **nvchecker** | 40+ sources, TOML config | No | No | Detection only |
 | **aurpublish** | No | No | git subtree push | Workflow tool for maintainers |
 | **aur-auto-update** | nvchecker | pkgver bump | Auto push | Centralized bot (add as co-maintainer) |

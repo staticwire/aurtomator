@@ -27,9 +27,10 @@
 #   alerts          - rules for steps of upstream that need a hand edit,
 #                     see the example below and docs/WORKFLOW.md 4.5
 #
-# Written by update-pkg.sh after every push. Set current by hand only to the
-# version the AUR has: for a new package, as the git-latest example of
-# docs/WORKFLOW.md 3.7 does, and after a hand publish of a held update (4.5).
+# Written by update-pkg.sh or publish-pkg.sh after every push. Set current by
+# hand only to the version the AUR has: for a new package, as the git-latest
+# example of docs/WORKFLOW.md 3.7 does, and after a hand publish of a held
+# update (4.5).
 #   current      - last pushed version
 #   last_updated - date of the last push, YYYY-MM-DD; the cooldown counts
 #                  from it
@@ -105,8 +106,8 @@ upstream:
 # --- github-release ---------------------------------------------------------
 # Reads /repos/{project}/releases/latest, which skips pre-releases. With
 # tag_version_regex, reads the release list, up to 10 pages of 100, and takes
-# the matching release published last, pre-releases left out: one product of
-# a repository that releases several.
+# the matching release with the newest version, pre-releases left out: one
+# product of a repository that releases several.
 #
 # strategy: github-release
 # upstream:
@@ -236,7 +237,8 @@ upstream:
 #   branch: develop                        # optional, as #branch= in source;
 #                                          # default: the default branch
 #   describe: tags                         # optional: tags|annotated
-#   tag_prefix: v                          # optional, cut from the tag
+#   tag_prefix: v                          # optional, with describe only, cut
+#                                          # from the start of the tag
 # cooldown_days: 14                        # optional, days a push waits
 #                                          # after the last one; default 7
 

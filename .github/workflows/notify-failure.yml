@@ -1,9 +1,9 @@
 name: Notify Failed Runs
 
-# The issues of the packages come from the publish job. A run that fails
-# before it, or in it, opens this one issue instead. A job of the calling
-# workflow runs this workflow after the update call ended with a result
-# other than success.
+# The issues of the packages come from the issues job of check-updates.yml,
+# which runs once check passed. A run with a failed job gets this one issue.
+# A job of the calling workflow runs this workflow after the update call
+# ended with a result other than success.
 on:
   workflow_call:
 
@@ -34,7 +34,7 @@ jobs:
             exit 0
           fi
 
-          # Exact titles, as in the issue step of publish
+          # Exact titles, as in the Create issues step of check-updates.yml
           titles=$(gh issue list --label auto-update --state open --limit 1000 --json title --jq '.[].title')
           if grep -qxF -e "$title" <<<"$titles"; then
             echo "Issue already open, skipping"

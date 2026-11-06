@@ -1,11 +1,12 @@
 name: Run check-all.sh as builder
 description: >-
   Copies the inputs of builder into a directory of its own, runs
-  scripts/check-all.sh there as builder with workflow commands stopped, and
-  exits with its status.
+  scripts/check-all.sh there as builder with workflow commands stopped,
+  then scripts/update-readme.sh when readme is true and check-all.sh
+  succeeded, and exits with the status of the last script that ran.
 
-# builder writes only into its own directory. The workspace and aurtomator/
-# stay root's, and the Hand over step of the job takes the results as data.
+# builder writes its results only into its own directory. The workspace and
+# aurtomator/ stay root's, and the Hand over step takes the results as data.
 
 inputs:
   args:

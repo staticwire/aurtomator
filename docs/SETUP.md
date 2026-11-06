@@ -30,10 +30,10 @@ A repository created from the template [staticwire/aurtomator-seed](https://gith
 ### Required
 
 1. **Enable Issues**: Settings > General > Features > Issues. Failures, update alerts and newer aurtomator releases are reported as issues. With Issues off, a run prints a notice instead and opens none.
-2. **Check Actions**: the Actions tab lists `Check AUR Package Updates` and `Validate packages`. A workflow shown as disabled there runs again once you open it and click "Enable workflow". In a fork, GitHub disables the workflows until they are enabled in its Actions tab. GitHub also disables a scheduled workflow of a public repository after 60 days without activity in it. The workflow commits only when a status or a version changes, so a repository whose packages stay the same that long loses its schedule and needs "Enable workflow" again. A private repository keeps its schedule, and its runs use the Actions minutes of your account instead: GitHub counts each job in whole minutes, rounded up, from three jobs for a run that changes nothing, `image`, `check` and `issues`, to six for a run with an update.
+2. **Check Actions**: the Actions tab lists `Check AUR Package Updates` and `Validate packages`. A workflow shown as disabled there runs again once you open it and click "Enable workflow". In a fork, GitHub disables the workflows until they are enabled in its Actions tab. GitHub also disables a scheduled workflow of a public repository after 60 days without activity in it, and the workflow then needs "Enable workflow" again. Once `packages/` holds a package, the first run of each day commits the statistics card, see [Statistics](#statistics). Before the first package, a run commits nothing. A private repository keeps its schedule, and its runs use the Actions minutes of your account instead: GitHub counts each job in whole minutes, rounded up, from three jobs for a run that changes nothing, `image`, `check` and `status`, to six for a run with an update.
 3. **Set the secrets**: `./aurtomator.sh setup`, run in a clone of your repository, sets `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`, as [Quick setup](#quick-setup-with-gh-cli) describes. The calling workflow passes them to aurtomator by name. `secrets: inherit` would pass none, since it works only between repositories of one organization or enterprise.
 
-The schedule runs from the start, so runs can come before the secrets are set. Such a run needs no key while it pushes nothing to the AUR, and it can still commit the README. A run with a package to push stops in `publish` with `The secret AUR_SSH_KEY is empty`, and the `notify` job opens the issue `❌ Check AUR Package Updates failed`. The first run after `setup secrets` in which no job fails closes that issue.
+The schedule runs from the start, so runs can come before the secrets are set. Such a run needs no key while it pushes nothing to the AUR, and it can still commit the README. A run with a package to push stops in `publish` with `The secret AUR_SSH_KEY is empty`, and the `notify` job opens the issue `❌ Check AUR Package Updates failed`. The first run after `./aurtomator.sh setup secrets` in which no job fails closes that issue.
 
 ### Recommended
 
@@ -281,7 +281,7 @@ It runs five steps in order:
 4. **secrets**: pushes `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY` to your GitHub repo. It checks the SSH key as the ssh step does, so a key that is missing or has a passphrase stops it before any secret is set.
 5. **verify**: checks identity, SSH access to the AUR with the saved key alone, as CI has it, GPG signing, and the secrets, Issues and the two calling workflows of your GitHub repo
 
-The setup works on the repository that holds `aurtomator.sh`, whatever directory you run it from, and the `identity` step prints it as `Data directory:`. The `secrets` step sets the secrets of the GitHub repo of its `origin` remote and prints that repo as `Target repo:`. It asks for `owner/repo` when `origin` is missing or is not a repository on github.com. The secrets hold the key that pushes all of your AUR packages, so an interactive run asks before it sets them. The setup saves your answers to `.aurtomator.conf` after each step, so a step that fails, and a `verify` that finds a problem, leave the answers given so far for the next run.
+The setup works on the repository that holds `aurtomator.sh`, whatever directory you run it from, and the `identity` step prints it as `Data directory:`. The `secrets` step sets the secrets of the GitHub repo of its `origin` remote and prints that repo as `Target repo:`. It asks for `owner/repo` when `origin` is missing or is not a repository on github.com. The secrets hold the key that pushes all of your AUR packages, so an interactive run asks before it sets them. The setup saves your answers to `.aurtomator.conf` after each step. A step that fails stops the setup and keeps the answers of the steps before it. A `verify` that finds a problem keeps every answer of the run.
 
 ## Identity
 
@@ -338,14 +338,14 @@ That output works in CI only for a key without a passphrase. For a key with one,
 ### 5. Run verify
 
 ```bash
-./aurtomator.sh setup verify
+./aurtomator.sh setup verify --git-name "Jane Doe" --git-email "jane@example.com" --ssh-key ~/.ssh/aur_ed25519
 ```
 
-It checks identity, SSH access, and GPG signing when configured. With `gh` available, it also checks the GitHub repo of `origin`: its secrets, that Issues are on, and that `check-updates.yml` and `validate.yml` are active workflows, as [Required](#required) asks. An `origin` that is not a repository on github.com counts as a failed check. Two findings are warnings and count as no failure: an open `❌ Check AUR Package Updates failed` issue, which the next run without a failed job closes, and a pin to a version of aurtomator other than its latest release. When a check fails, the others still run, and `verify` then prints how many failed and exits with status 1.
+The steps above write no `.aurtomator.conf`, so `verify` takes your name, your email and the key from these options and saves them for the next run. With GPG signing, add `--gpg-key <subkey-id>`. It checks identity, SSH access, and GPG signing when configured. With `gh` available, it also checks the GitHub repo of `origin`: its secrets, that Issues are on, and that `check-updates.yml` and `validate.yml` are active workflows, as [Required](#required) asks. An `origin` that is not a repository on github.com counts as a failed check. Two findings are warnings and count as no failure: an open `❌ Check AUR Package Updates failed` issue, which the next run without a failed job closes, and a pin to a version of aurtomator other than its latest release. When a check fails, the others still run, and `verify` then prints how many failed and exits with status 1.
 
 ## GPG signing (optional)
 
-aurtomator works without GPG. With it, every AUR commit is signed with your key, and AUR users can check the signature with `git log --show-signature`. The signing key is stored as a CI secret, so a leak of the CI secrets exposes it as well. A dedicated subkey limits the damage: you revoke the subkey and keep your master key. The setup script accepts only a signing subkey and refuses a master key, which certifies the others and stays on your machine.
+aurtomator works without GPG. With it, every AUR commit is signed with your key, and AUR users can check the signature with `git log --show-signature`. The signing key is stored as a CI secret, so a leak of the CI secrets exposes it as well. A dedicated subkey limits the damage: you revoke the subkey and keep your master key. The setup script refuses a master key, which certifies the others and stays on your machine, so pass the ID of the subkey marked `[S]`.
 
 ### Create a dedicated signing subkey
 
@@ -438,7 +438,7 @@ Steps can be combined:
 | `--git-email <email>`  | Git author email for AUR commits                      |
 | `--gpg-key <id>`       | Use this GPG key ID, skip the GPG prompt              |
 | `--ssh-key <path>`     | Use this SSH private key, skip the SSH prompt         |
-| `--non-interactive`    | No prompts. A missing required value is an error, and GPG is skipped without `--gpg-key`. |
+| `--non-interactive`    | No prompts. The name and the email default to `user.name` and `user.email` of your global git config, and the SSH key to `~/.ssh/aur_ed25519`. A value without a default is an error, and GPG is skipped without `--gpg-key`. |
 | `-h`, `--help`         | Print a usage summary                                 |
 
 ### Examples
@@ -480,7 +480,7 @@ AUR_SSH_KEY='/home/<user>/.ssh/aur_ed25519'
 
 A re-run of `./aurtomator.sh setup` loads this file first and does not ask again for the values it holds. A command line option overrides the saved value, and the new value is saved. The `.gitignore` of the template lists the file, because it holds local paths.
 
-The scripts stop when git tracks `.aurtomator.conf`. A tracked file takes the place of the ignored one at a checkout or a merge, so a pull request that adds it would choose the key the `secrets` step uploads and the name and email of your AUR commits. Check the values of such a file, then `git rm --cached .aurtomator.conf` takes it out of the repository and keeps it on disk. Before the `secrets` step sets the secrets, it prints each value and the file of the SSH key.
+The scripts that read the file, `setup.sh`, `update-pkg.sh` and `publish-pkg.sh`, stop when git tracks `.aurtomator.conf`. A tracked file takes the place of the ignored one at a checkout or a merge, so a pull request that adds it would choose the key the `secrets` step uploads and the name and email of your AUR commits. Check the values of such a file, then `git rm --cached .aurtomator.conf` takes it out of the repository and keeps it on disk. Before the `secrets` step sets the secrets, it prints each value and the file of the SSH key.
 
 ## Adding your first package
 
@@ -541,7 +541,7 @@ Commit the package YAML and push to your repository. The push to `main` runs `Va
 
 ## Pull requests to your repository
 
-`Validate packages` runs `validate-pkg.sh --all` on a pull request, so it checks the YAMLs of `packages/` and no other file. A pull request that changes `aurtomator.sh` runs its code on your machine at the next `./aurtomator.sh` command after you check it out or merge it. One that changes a calling workflow changes what CI runs with your secrets after the merge: the `uses:` line of `check-updates.yml` names the workflow that gets `AUR_SSH_KEY` and `GPG_SIGNING_KEY`. Read these files in the diff before you merge, and check a new pin as [The aurtomator.sh script](#the-aurtomatorsh-script) describes. The scripts stop on a `.aurtomator.conf` that git tracks, see [Configuration file](#configuration-file).
+`Validate packages` runs `validate-pkg.sh --all` on a pull request, so it checks the YAMLs of `packages/` and no other file. A pull request that changes `aurtomator.sh` runs its code on your machine at the next `./aurtomator.sh` command after you check it out or merge it. One that changes a calling workflow changes what CI runs with your secrets after the merge: the `uses:` line of `check-updates.yml` names the workflow that gets `AUR_SSH_KEY` and `GPG_SIGNING_KEY`. Read these files in the diff before you merge, and check a new pin as [The aurtomator.sh script](#the-aurtomatorsh-script) describes. `setup.sh`, `update-pkg.sh` and `publish-pkg.sh` stop on a `.aurtomator.conf` that git tracks, see [Configuration file](#configuration-file).
 
 ## Troubleshooting
 
@@ -559,7 +559,7 @@ Commit the package YAML and push to your repository. The push to `main` runs `Va
 
 **Symptom:** `./aurtomator.sh setup verify` prints `Host key verification failed.` under `SSH: cannot connect to aur.archlinux.org`.
 
-**Cause:** no known hosts file holds a key of aur.archlinux.org. The check runs ssh as CI does, with `-F /dev/null` and `BatchMode=yes`: it reads `~/.ssh/known_hosts`, `~/.ssh/known_hosts2`, `/etc/ssh/ssh_known_hosts` and `/etc/ssh/ssh_known_hosts2` alone, never a `UserKnownHostsFile` of `~/.ssh/config`, and it accepts no new host key.
+**Cause:** no known hosts file holds a key of aur.archlinux.org. The check runs ssh with `-F /dev/null` and `BatchMode=yes`: it reads `~/.ssh/known_hosts`, `~/.ssh/known_hosts2`, `/etc/ssh/ssh_known_hosts` and `/etc/ssh/ssh_known_hosts2` alone, never a `UserKnownHostsFile` of `~/.ssh/config`, and it accepts no new host key. CI accepts none either: it brings the host key of the AUR in its own `known_hosts`.
 
 **Fix:** run the command of [step 3](#3-test-ssh-access) once. ssh shows the fingerprint of the host key: compare it with the fingerprints under "Submitting Packages" on the home page of <https://aur.archlinux.org>, and answer `yes` only when they match. ssh then saves the key to `~/.ssh/known_hosts`.
 
@@ -570,7 +570,7 @@ Commit the package YAML and push to your repository. The push to `main` runs `Va
 **Causes:**
 
 1. The key ID is wrong. List your keys: `gpg --list-secret-keys --keyid-format long`
-2. The subkey expired. Check with `gpg --list-keys <key-id>` and extend with `gpg --quick-set-expire <fpr> 1y`.
+2. The subkey expired. Check with `gpg --list-keys <key-id>` and extend it with `gpg --quick-set-expire <master-key-fingerprint> 1y <subkey-fingerprint>`. CI holds the copy of the key made before, so `./aurtomator.sh setup gpg secrets` sets the secret again.
 3. The key is in another keyring, for example under a different `GNUPGHOME`.
 
 ### gh: not logged in / authentication failed
@@ -629,4 +629,4 @@ The nested job '<job>' is requesting '<permissions>', but is only allowed '<perm
 **Causes:**
 
 1. `updpkgsums` is not installed. Install it with `sudo pacman -S --needed pacman-contrib`.
-2. A source URL in the PKGBUILD uses variables that do not resolve after the version bump. Check the `source=()` array.
+2. A download fails that the URL check before `updpkgsums` does not cover: a source that is not an `http` or `https` URL, or a server that answers a `HEAD` request and refuses the download. A source URL that does not resolve after the version bump stops the update earlier, with `Source URL validation failed, aborting`. Check the `source=()` array.

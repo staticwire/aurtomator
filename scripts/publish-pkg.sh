@@ -3,8 +3,8 @@
 # publish-pkg.sh - Push an update that update-pkg.sh --prepare made
 #
 # Clones the AUR repo over SSH, checks the prepared PKGBUILD and .SRCINFO
-# against it, then commits, signs and pushes them. Never sources the
-# PKGBUILD and never runs makepkg: the prepared files are untrusted.
+# against it, then commits, signs when GPG_KEY_ID is set, and pushes them.
+# Never sources the PKGBUILD and never runs makepkg: the files are untrusted.
 #
 # With --asset <value>: the value from the name of a release asset that the
 # check run found, which the line of upstream.asset_var must hold

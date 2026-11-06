@@ -2,7 +2,7 @@
 #
 # version.sh - The version of aurtomator in VERSION and its latest release
 #
-# Sourced by lib.sh.
+# Sourced by lib.sh and by setup.sh.
 
 # The repository whose releases VERSION counts. VERSION is the version of
 # aurtomator in a fork, a fork of a fork and a template copy alike.

@@ -611,46 +611,46 @@ run_decide_step() {
 @test "check-updates: Decide prepares when a package is outdated" {
   run run_decide_step pkg="new_version: 2.0.0" other=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=false' ]
   run run_decide_step pkg="available_downgrade: 1.0.0"
-  [ "$output" = $'prepare=true\nwork=true' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=false' ]
   run run_decide_step pkg="new_build: 1.0.0" _assets=$'pkg\t1.0.0-b'
-  [ "$output" = $'prepare=true\nwork=true' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=false' ]
 }
 
 @test "check-updates: Decide prepares nothing while an asset is pending" {
   README_CHANGED=1 run run_decide_step pkg="pending: 2.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false' ]
 }
 
 @test "check-updates: Decide prepares nothing while an update waits for its cooldown" {
   README_CHANGED=1 run run_decide_step pkg="cooldown: 2026-11-12"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false' ]
   run run_decide_step pkg="cooldown: 2026-11-12"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false' ]
 }
 
-@test "check-updates: Decide publishes only a change of the package table" {
+@test "check-updates: Decide publishes only a change of the README" {
   README_CHANGED=1 run run_decide_step pkg="check_failed: API down"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false' ]
   README_CHANGED=1 run run_decide_step pkg="downgrade_skipped: 1.0.0"
-  [ "$output" = $'prepare=false\nwork=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false' ]
 }
 
 @test "check-updates: Decide does nothing when nothing changed" {
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false' ]
 }
 
 @test "check-updates: Decide counts a missing copy of the README as unchanged" {
   NO_README_COPY=1 run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false' ]
 }
 
 # Puts package a, its journal and the card of day $1 into the workspace of
@@ -669,26 +669,26 @@ decide_stats() {
   echo "name: a" >"$BATS_TEST_TMPDIR/ws/packages/a.yml"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true' ]
   decide_stats 2026-11-10
   rm "$BATS_TEST_TMPDIR/ws/stats/card.svg"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true' ]
   decide_stats 2026-11-10
   rm "$BATS_TEST_TMPDIR/ws/stats/events.csv"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true' ]
 }
 
 @test "check-updates: Decide publishes once the windows of the card moved" {
   decide_stats 2026-11-09
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true' ]
   decide_stats 2026-11-10
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
 }
 
 @test "check-updates: Decide leaves the run alone when it cannot draw the card" {
@@ -696,7 +696,7 @@ decide_stats() {
   echo 'time,package' >"$BATS_TEST_TMPDIR/ws/stats/events.csv"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
 }
 
 # Decide, Record statistics and the commit step read the copies of Hand over
@@ -2198,14 +2198,38 @@ no_commit() {
 }
 
 @test "check-updates: the issues job reads the statuses of publish when it ran, else those of check" {
+  local upload="\${{ steps.decide.outputs.packages == 'true' && 'error' || 'ignore' }}"
   run yq -o=json -I=0 '[.jobs.issues.steps[] | select(.uses | test("^actions/download-artifact@")) | [.with["artifact-ids"], .with.path, .if]]' "$CHECK_UPDATES"
-  [ "$output" = "[[\"$(id_of check checked)\",\".status\",\"needs.publish.result == 'skipped'\"],[\"$(id_of publish published)\",\".status\",\"needs.publish.result != 'skipped'\"]]" ]
+  [ "$output" = "[[\"$(id_of check checked)\",\".status\",\"needs.publish.result == 'skipped' && needs.check.outputs.checked-id != ''\"],[\"$(id_of publish published)\",\".status\",\"needs.publish.result != 'skipped'\"]]" ]
   run yq -o=json -I=0 '.jobs.publish.steps[] | select(.with.name == "published") | [.with.path, .if, .with["if-no-files-found"]]' "$CHECK_UPDATES"
   [ "$output" = '["statuses/","always()","error"]' ]
   run yq '.jobs.publish.steps[] | select(.name == "Hand over") | .if' "$CHECK_UPDATES"
   [ "$output" = "always() && steps.stop.outcome == 'success'" ]
   run yq -o=json -I=0 '.jobs.check.steps[] | select(.name == "Upload statuses") | [.with.name, .with.path, .with["if-no-files-found"]]' "$CHECK_UPDATES"
-  [ "$output" = '["checked","statuses/","error"]' ]
+  [ "$output" = "[\"checked\",\"statuses/\",\"$upload\"]" ]
+}
+
+# Runs step $1 of the issues job in a workspace without .status/, as after a
+# check that uploaded no status, with a gh that logs its calls
+run_bare_issues_step() {
+  local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$ws" "$bin"
+  ln -sfn "$BATS_TEST_DIRNAME/.." "$ws/aurtomator"
+  printf '#!/bin/sh\necho "$*" >>"$GH_LOG"\n' >"$bin/gh"
+  chmod +x "$bin/gh"
+  step_run issues "$1" >"$BATS_TEST_TMPDIR/step.sh"
+  (cd "$ws" && PATH="$bin:$PATH" GH_LOG="$BATS_TEST_TMPDIR/gh.log" GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" \
+    bash -e "$BATS_TEST_TMPDIR/step.sh")
+}
+
+@test "check-updates: the issues job runs on without statuses" {
+  local step
+  for step in "Write the run summary" "Close resolved issues" "Create issues"; do
+    run run_bare_issues_step "$step"
+    [ "$status" -eq 0 ]
+  done
+  [ ! -s "$BATS_TEST_TMPDIR/summary" ]
+  [ ! -e "$BATS_TEST_TMPDIR/gh.log" ]
 }
 
 @test "check-updates: the issue step writes each body with its function of scripts/lib/issue.sh" {
