@@ -70,6 +70,7 @@ jobs:
     outputs:
       prepare: ${{ steps.decide.outputs.prepare }}
       work: ${{ steps.decide.outputs.work }}
+      checked-id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
       - name: Install dependencies
@@ -222,6 +223,7 @@ jobs:
 
       # The issues job reads them in every run
       - name: Upload statuses
+        id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: checked
@@ -246,6 +248,8 @@ jobs:
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
+    outputs:
+      handoff-id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
       - name: Install dependencies
@@ -269,10 +273,12 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
+      # By the id of the upload, never by name. No artifact has the id 0, and
+      # an empty id would download every artifact of the run.
       - name: Download statuses
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: checked
+          artifact-ids: ${{ needs.check.outputs.checked-id || '0' }}
           path: .status
 
       - name: Prepare updates
@@ -285,6 +291,7 @@ jobs:
       - *hand-over
 
       - name: Upload handoff
+        id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: handoff
@@ -305,6 +312,8 @@ jobs:
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
+    outputs:
+      verified-id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
       - name: Install dependencies
@@ -331,7 +340,7 @@ jobs:
       - name: Download handoff
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: handoff
+          artifact-ids: ${{ needs.prepare.outputs.handoff-id || '0' }}
           path: handoff
 
       # git and curl read the AUR repo and the sources here, as builder,
@@ -346,6 +355,7 @@ jobs:
       - *hand-over
 
       - name: Upload verified handoff
+        id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verified
@@ -370,6 +380,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+    outputs:
+      published-id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
       - name: Install dependencies
@@ -396,14 +408,14 @@ jobs:
       - name: Download statuses
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: checked
+          artifact-ids: ${{ needs.check.outputs.checked-id || '0' }}
           path: .status
 
       - name: Download verified handoff
         if: needs.verify.result == 'success'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: verified
+          artifact-ids: ${{ needs.verify.outputs.verified-id || '0' }}
           path: handoff
 
       # Only a package to push needs the SSH and GPG keys, so a run before
@@ -563,6 +575,7 @@ jobs:
       # The issues job reads the statuses of this job, also after a failed
       # step
       - name: Upload statuses
+        id: upload
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -611,14 +624,14 @@ jobs:
         if: needs.publish.result == 'skipped'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: checked
+          artifact-ids: ${{ needs.check.outputs.checked-id || '0' }}
           path: .status
 
       - name: Download statuses of publish
         if: needs.publish.result != 'skipped'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: published
+          artifact-ids: ${{ needs.publish.outputs.published-id || '0' }}
           path: .status
 
       - name: Write the run summary
