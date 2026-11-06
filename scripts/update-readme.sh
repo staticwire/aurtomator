@@ -105,8 +105,9 @@ if [[ "$has_badges" == true ]]; then
     badges+="[![Check AUR Package Updates](https://github.com/${repo_url}/actions/workflows/check-updates.yml/badge.svg)](https://github.com/${repo_url}/actions/workflows/check-updates.yml) "
   fi
 
-  # Names the project itself, so it does not follow AURTOMATOR_UPSTREAM
-  badges+="[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)"
+  # Names the project itself, so it does not follow AURTOMATOR_UPSTREAM;
+  # 1793d1 is the blue of the Arch Linux logo
+  badges+="[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-1793d1)](https://github.com/staticwire/aurtomator)"
 
   # Replace between badge markers
   {

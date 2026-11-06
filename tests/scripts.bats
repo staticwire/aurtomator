@@ -1773,7 +1773,7 @@ EOF
 
   AURTOMATOR_DATA_DIR="$data" run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  [ "$(sed -n '3p' "$data/README.md")" = '[![Validate packages](https://github.com/owner/data/actions/workflows/validate.yml/badge.svg)](https://github.com/owner/data/actions/workflows/validate.yml) [![Check AUR Package Updates](https://github.com/owner/data/actions/workflows/check-updates.yml/badge.svg)](https://github.com/owner/data/actions/workflows/check-updates.yml) [![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
+  [ "$(sed -n '3p' "$data/README.md")" = '[![Validate packages](https://github.com/owner/data/actions/workflows/validate.yml/badge.svg)](https://github.com/owner/data/actions/workflows/validate.yml) [![Check AUR Package Updates](https://github.com/owner/data/actions/workflows/check-updates.yml/badge.svg)](https://github.com/owner/data/actions/workflows/check-updates.yml) [![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-1793d1)](https://github.com/staticwire/aurtomator)' ]
   [ "$(sed -n '4p' "$data/README.md")" = '<!-- BADGES:END -->' ]
   local badges pattern
   badges=$(sed -n '/^<!-- BADGES:START -->$/,/^<!-- BADGES:END -->$/p' "$data/README.md")
@@ -2455,7 +2455,7 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Badges updated (repo: unknown)"* ]]
-  [ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" = '[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
+  [ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" = '[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-1793d1)](https://github.com/staticwire/aurtomator)' ]
 }
 
 @test "update-readme: an origin outside GitHub, or a local path, gives only the badge of aurtomator" {
@@ -2474,7 +2474,7 @@ current: '1.0.0'"
     [[ "$output" == *"Badges updated (repo: unknown)"* ]]
     run grep -cF -e 'someone/fork' -e "$TEST_TMPDIR" "$TEST_TMPDIR/README.md"
     [ "$output" = "0" ]
-    [ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" = '[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
+    [ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" = '[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-1793d1)](https://github.com/staticwire/aurtomator)' ]
   done
 }
 
@@ -2487,7 +2487,7 @@ current: '1.0.0'"
   GITHUB_REPOSITORY=owner/ci run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Badges updated (repo: owner/ci)"* ]]
-  [ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" = '[![Validate packages](https://github.com/owner/ci/actions/workflows/validate.yml/badge.svg)](https://github.com/owner/ci/actions/workflows/validate.yml) [![Check AUR Package Updates](https://github.com/owner/ci/actions/workflows/check-updates.yml/badge.svg)](https://github.com/owner/ci/actions/workflows/check-updates.yml) [![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-orange)](https://github.com/staticwire/aurtomator)' ]
+  [ "$(sed -n '3p' "$TEST_TMPDIR/README.md")" = '[![Validate packages](https://github.com/owner/ci/actions/workflows/validate.yml/badge.svg)](https://github.com/owner/ci/actions/workflows/validate.yml) [![Check AUR Package Updates](https://github.com/owner/ci/actions/workflows/check-updates.yml/badge.svg)](https://github.com/owner/ci/actions/workflows/check-updates.yml) [![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-1793d1)](https://github.com/staticwire/aurtomator)' ]
 }
 
 @test "update-readme: a GITHUB_REPOSITORY that is not owner/repo leaves the origin" {
