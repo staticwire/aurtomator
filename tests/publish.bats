@@ -1037,6 +1037,15 @@ commit_aur_state() {
   grep -q -- '--proto =https --proto-redir =https .* https://example.com/demo-1.1.0.tar.gz$' "$TEST_TMPDIR/curl.args"
 }
 
+# The AUR copy picks the URL, so curl stops a download past 600 MiB and an
+# attempt that stays below 100 KiB/s for 60 s
+@test "verify-pkg: bounds the size and the speed of a download" {
+  setup_verify
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 0 ]
+  grep -q -- ' --max-filesize 600M --speed-limit 102400 --speed-time 60 -o ' "$TEST_TMPDIR/curl.args"
+}
+
 # Over http or ftp, the checksum is whatever the network path serves, in
 # prepare as in verify
 @test "verify-pkg: refuses a checksum of a download over http" {

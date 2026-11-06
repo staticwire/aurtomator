@@ -38,11 +38,12 @@ _source_file() {
     return 1
   else
     file="${3}/$(printf '%s' "$url" | sha256sum | cut -d' ' -f1)"
-    # Retried and with the cookie engine on, as makepkg does, so a cookie set
-    # on a redirect goes with the next request; redirects stay on https
+    # Retried and with the cookie engine on, as makepkg does. The AUR copy
+    # picks the URL, so redirects stay on https and size and stalls are bounded.
     if [[ ! -f "$file" ]] &&
       ! curl -qgfsSL -b '' --retry 3 --retry-delay 3 --proto '=https' \
-        --proto-redir '=https' -o "$file" "$url"; then
+        --proto-redir '=https' --max-filesize 600M --speed-limit 102400 \
+        --speed-time 60 -o "$file" "$url"; then
       rm -f "$file"
       log_err "Could not download $url"
       return 1
