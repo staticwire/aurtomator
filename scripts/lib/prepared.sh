@@ -109,6 +109,17 @@ _sum_arrays() {
   grep -E $'^(SKEL\tSUMS |SUM\t)' <<<"$1" | sort -s -t $'\t' -k2,2
 }
 
+# Print the lines of PKGBUILD $1 that a prepared update keeps as they are:
+# all but pkgver=, pkgrel=, the $2= line, checksum arrays and comments
+_pkgbuild_text() {
+  _pkgbuild_parts "$1" "${2:-}" | awk '
+    !/^SKEL\t/ { next }
+    { line = substr($0, 6) }
+    line ~ /^(PKGVER|PKGREL|ASSET|SUMS .*)$/ || line ~ /^[ \t]*#/ { next }
+    { print line }
+  '
+}
+
 # Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=expected version,
 #       $4=expected pkgrel (default 1), $5=asset_var of the package, if
 #       any, $6=expected asset value

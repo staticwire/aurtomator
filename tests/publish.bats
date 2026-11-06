@@ -3170,6 +3170,46 @@ sha256sums=('SKIP' '$H4')"
   [[ "$output" == *"Could not read"* ]]
 }
 
+# === _pkgbuild_text ===
+
+@test "_pkgbuild_text: drops pkgver, pkgrel, the asset_var line, the checksum arrays and comments" {
+  cat >"$OLD" <<'EOF'
+pkgname=demo
+pkgver=2.0
+pkgrel=1
+_bin=demo-2.0-x86_64
+pkgdesc="A GPL-2.0 licensed tool"
+# provides=("tool=2.0")
+  # depends=('old')
+provides=("tool=${pkgver}")
+sha256sums=('1111'
+            'SKIP')
+b2sums_x86_64=('2222')
+
+package() {
+  # install the binary
+  install -Dm755 demo "$pkgdir/usr/bin/demo"
+}
+EOF
+  run _pkgbuild_text "$OLD" _bin
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pkgname=demo\npkgdesc="A GPL-2.0 licensed tool"\nprovides=("tool=${pkgver}")\n\npackage() {\n  install -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
+}
+
+@test "_pkgbuild_text: drops a comment indented with a tab" {
+  printf '%s\n' 'package() {' $'\t# provides=("tool=2.0")' $'\tinstall -Dm755 demo "$pkgdir/usr/bin/demo"' '}' >"$OLD"
+  run _pkgbuild_text "$OLD"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'package() {\n\tinstall -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
+}
+
+@test "_pkgbuild_text: keeps the line of a variable that is no asset_var" {
+  printf '%s\n' 'pkgver=2.0' '_bin=demo-2.0' >"$OLD"
+  run _pkgbuild_text "$OLD"
+  [ "$status" -eq 0 ]
+  [ "$output" = "_bin=demo-2.0" ]
+}
+
 # === check_prepared_srcinfo ===
 
 @test "check_prepared_srcinfo: accepts the new version and checksums" {
