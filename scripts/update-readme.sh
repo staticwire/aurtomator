@@ -129,12 +129,14 @@ table_row() {
   printf '\n<tr><td>%s</td><td>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td></tr>' "$@"
 }
 
-# The cards stats-card.sh draws in stats/; GitHub shows the dark one in its
-# dark theme
-readonly CARD='<picture>
+# The cards stats-card.sh draws in stats/, as a link to the journal. GitHub
+# shows the dark card in its dark theme.
+readonly CARD='<a href="stats/events.csv">
+<picture>
   <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">
   <img alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">
-</picture>'
+</picture>
+</a>'
 
 table_rows=""
 table_header=$'<table>\n<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>'

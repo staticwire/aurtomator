@@ -1706,7 +1706,7 @@ last_updated: '2026-10-22'"
 
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  [ "$(sed -n '/PACKAGES:START/,/PACKAGES:END/p' "$TEST_TMPDIR/README.md" | sed '1,5d')" = '
+  [ "$(sed -n '/PACKAGES:START/,/PACKAGES:END/p' "$TEST_TMPDIR/README.md" | sed '1,7d')" = '
 <table>
 <tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>
 <tr><td><a href="https://aur.archlinux.org/pkgbase/pkg-a">pkg-a</a></td><td>1.0.0</td><td nowrap>github-release</td><td nowrap>2026-10-22</td><td nowrap>✅ up to date</td></tr>
@@ -2403,13 +2403,15 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   mapfile -t block < <(sed -n '/^<!-- PACKAGES:START -->$/,/^<!-- PACKAGES:END -->$/p' "$TEST_TMPDIR/README.md")
-  [ "${block[1]}" = '<picture>' ]
-  [ "${block[2]}" = '  <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">' ]
-  [ "${block[3]}" = '  <img alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">' ]
-  [ "${block[4]}" = '</picture>' ]
-  [ "${block[5]}" = '' ]
-  [ "${block[6]}" = '<table>' ]
-  ! grep -q 'img.shields.io/badge/packages' "$TEST_TMPDIR/README.md"
+  [ "${block[1]}" = '<a href="stats/events.csv">' ]
+  [ "${block[2]}" = '<picture>' ]
+  [ "${block[3]}" = '  <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">' ]
+  [ "${block[4]}" = '  <img alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">' ]
+  [ "${block[5]}" = '</picture>' ]
+  [ "${block[6]}" = '</a>' ]
+  [ "${block[7]}" = '' ]
+  [ "${block[8]}" = '<table>' ]
+  run ! grep -q 'img.shields.io/badge/packages' "$TEST_TMPDIR/README.md"
 }
 
 # Helper: a README with both marker pairs and a line between them
