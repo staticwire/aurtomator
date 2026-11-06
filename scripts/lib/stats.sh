@@ -21,3 +21,40 @@ stats_rows() {
   done < <(LC_ALL=C awk -v re="$STATS_ROW_RE" 'NR > 1 && $0 !~ re { print NR }' "$file")
   LC_ALL=C awk -v re="$STATS_ROW_RE" 'NR > 1 && $0 ~ re' "$file"
 }
+
+# Print the package, event and version of the last row of each package in
+# journal $1, and the version of its last row that is not a wait, by name
+stats_last_states() {
+  stats_rows "$1" | LC_ALL=C awk -F, '
+    { event[$2] = $3; version[$2] = $4 }
+    $3 !~ /^(held|jump_skipped|downgrade_skipped|pending)$/ { current[$2] = $4 }
+    END { for (p in event) print p "\t" event[p] "\t" version[p] "\t" current[p] }' | LC_ALL=C sort
+}
+
+# Print the class of event $1: ok, or the event itself for a wait, a
+# failure and removed
+stats_class() {
+  case "$1" in
+    tracked | added | up_to_date | updated | downgrade | rebuilt) echo ok ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# Print the event and version of final status $1 of a package at version $2,
+# nothing for a status a run publishes later. Returns: 1 for another status
+stats_event() {
+  local status="$1" current="$2" event version
+  local LC_ALL=C
+  [[ "$current" =~ ^[A-Za-z0-9._+]+$ ]] || current=""
+  case "$status" in
+    up_to_date) event=up_to_date version="$current" ;;
+    check_failed:* | update_failed:*) event="${status%%:*}" version="$current" ;;
+    "updated: "* | "downgrade: "* | "rebuilt: "* | "held: "* | "jump_skipped: "* | "downgrade_skipped: "* | "pending: "*)
+      event="${status%%: *}" version="${status#*: }"
+      [[ "$version" =~ ^[A-Za-z0-9._+]+$ ]] || return 1
+      ;;
+    "new_version: "* | "available_downgrade: "* | "new_build: "*) return 0 ;;
+    *) return 1 ;;
+  esac
+  printf '%s\t%s\n' "$event" "$version"
+}
