@@ -86,7 +86,9 @@ jobs:
         run: |
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed bash bats git go-yq jq curl openssh namcap ruby ruby-erb
-          gem install bashcov:4.0.0 simplecov-cobertura:4.0.0 --no-document
+          # gem would resolve a dependency to its newest release, so every gem
+          # the two need is named here at its version
+          gem install --no-document --ignore-dependencies bashcov:4.0.0 simplecov-cobertura:4.0.0 simplecov:1.3.2 rexml:3.4.4
           echo "$(ruby -e 'puts Gem.user_dir')/bin" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

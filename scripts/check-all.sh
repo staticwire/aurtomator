@@ -91,12 +91,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# --verify checks every update in <dir>/prepared with verify-pkg.sh and takes
-# out an update that fails, with an update_failed status, so --publish skips
-# it. An AUR repo that moved counts as a failure: the prepare run writes the
-# base of every package, so a move looks the same as a wrong base. The next
-# run prepares the package again. Only package names from packages/ reach a
-# path.
+# Status directory for per-package results
+STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
+
+# --prepare, --verify and --publish run no strategy and take the statuses of
+# the check run, read here before anything else runs
+declare -A CHECKED=()
+if [[ "$MODE" == "prepare" || "$MODE" == "verify" || "$MODE" == "publish" ]] && [[ ! -L "$STATUS_DIR" ]]; then
+  for status_file in "$STATUS_DIR"/*; do
+    [[ -f "$status_file" && ! -L "$status_file" ]] || continue
+    CHECKED["${status_file##*/}"]=$(<"$status_file")
+  done
+fi
+
+# A failed verify, exit code 3 of a moved AUR repo included, takes the update
+# out with update_failed. Only package names from packages/ reach a path.
 if [[ "$MODE" == "verify" ]]; then
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     [[ -f "$pkg_file" ]] || continue
@@ -106,11 +115,30 @@ if [[ "$MODE" == "verify" ]]; then
       continue
     fi
 
-    err_file=$(mktemp)
+    # The version and the asset value come from the check run, as for
+    # --publish, so the prepared files cannot pick what verify downloads
+    found="${CHECKED[$pkg_name]:-}"
+    version=""
+    case "$found" in
+      "new_version: "* | "available_downgrade: "* | "new_build: "*) version="${found#*: }" ;;
+    esac
+    asset_regex=$(pkg_get "$pkg_file" '.upstream.asset_regex // ""')
+    asset=""
+    [[ -z "$asset_regex" ]] || asset=$(awk -F'\t' -v p="$pkg_name" '$1 == p { v = $2 } END { print v }' <<<"${CHECKED[_assets]:-}")
     verify_rc=0
-    bounded "$UPDATE_TIMEOUT" "${AURTOMATOR_DIR}/scripts/verify-pkg.sh" "$pkg_name" "$prepared" 2>"$err_file" || verify_rc=$?
-    verify_err=$(script_error "$verify_rc" "$err_file" "$UPDATE_TIMEOUT")
-    rm -f "$err_file"
+    if ! validate_pkgver "$version" 2>/dev/null; then
+      verify_rc=1
+      verify_err="no new version from the check run"
+    elif [[ -n "$asset_regex" ]] && ! validate_asset_value "$asset" 2>/dev/null; then
+      verify_rc=1
+      verify_err="no asset value from the check run"
+    else
+      err_file=$(mktemp)
+      bounded "$UPDATE_TIMEOUT" "${AURTOMATOR_DIR}/scripts/verify-pkg.sh" "$pkg_name" "$version" "$prepared" \
+        ${asset:+--asset} ${asset:+"$asset"} 2>"$err_file" || verify_rc=$?
+      verify_err=$(script_error "$verify_rc" "$err_file" "$UPDATE_TIMEOUT")
+      rm -f "$err_file"
+    fi
     [[ -z "$verify_err" ]] || printf '%s\n' "$verify_err" >&2
 
     case "$verify_rc" in
@@ -125,21 +153,6 @@ if [[ "$MODE" == "verify" ]]; then
     esac
   done
   exit 0
-fi
-
-# Status directory for per-package results
-STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
-
-# --prepare and --publish take the statuses of the check run before them,
-# read here before anything else runs, and run no strategy: --prepare runs
-# code from PKGBUILDs without GITHUB_TOKEN, and --publish holds the AUR and
-# GPG keys.
-declare -A CHECKED=()
-if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ ! -L "$STATUS_DIR" ]]; then
-  for status_file in "$STATUS_DIR"/*; do
-    [[ -f "$status_file" && ! -L "$status_file" ]] || continue
-    CHECKED["${status_file##*/}"]=$(<"$status_file")
-  done
 fi
 
 rm -rf "$STATUS_DIR"

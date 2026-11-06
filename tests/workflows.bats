@@ -237,6 +237,16 @@ run_blocks() {
   [[ "$output" != *"|| true"* ]]
 }
 
+# gem resolves a dependency to its newest release, so the test job names
+# every gem with its version and resolves none
+@test "ci: the test job installs each gem at a fixed version and no other gem" {
+  run yq '.jobs.test.steps[] | select(has("run")) | .run' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  run grep 'gem install' <<<"$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "gem install --no-document --ignore-dependencies bashcov:4.0.0 simplecov-cobertura:4.0.0 simplecov:1.3.2 rexml:3.4.4" ]
+}
+
 @test "ci: the test job runs no validate step and the validate job calls the reusable workflow" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs.test.steps[] | select(has("run")) | .run' "$ci"
@@ -502,7 +512,50 @@ step_run() {
   [[ "$output" != *"--prepare"* ]]
   [[ "$output" != *"update-pkg.sh"* ]]
   run yq '.jobs.check.outputs | keys | join(" ")' "$CHECK_UPDATES"
-  [ "$output" = "prepare work" ]
+  [ "$output" = "prepare work checked-id" ]
+}
+
+# Prints the artifact-ids of a download of the artifact that job $1 uploads
+# as $2
+id_of() {
+  printf "\${{ needs.%s.outputs.%s-id || '0' }}" "$1" "$2"
+}
+
+@test "check-updates: each job gives the id of its upload as an output" {
+  local pair job artifact
+  for pair in check=checked prepare=handoff verify=verified publish=published; do
+    job=${pair%%=*} artifact=${pair#*=}
+    echo "$job"
+    run yq -o=json -I=0 "[.jobs.$job.steps[] | select(.uses | test(\"^actions/upload-artifact@\")) | [.id, .with.name]]" "$CHECK_UPDATES"
+    [ "$status" -eq 0 ]
+    [ "$output" = "[[\"upload\",\"$artifact\"]]" ]
+    run yq ".jobs.$job.outputs[\"$artifact-id\"]" "$CHECK_UPDATES"
+    [ "$output" = '${{ steps.upload.outputs.artifact-id }}' ]
+  done
+}
+
+# A name takes whichever artifact of that name the run holds, and a job of
+# the run can upload one. An empty id would download every artifact of the
+# run, so 0, which no artifact has, stands in for it.
+@test "check-updates: each job downloads an artifact by the id the job of its upload gave" {
+  run yq '.jobs | to_entries[] | .key as $job | .value.steps[] | select(.uses | test("^actions/download-artifact@")) |
+    $job + " " + .with.path + " " + .with["artifact-ids"] + " " + (.with | has("name") | tostring)' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 7 ]
+  [ "${lines[0]}" = "prepare .status $(id_of check checked) false" ]
+  [ "${lines[1]}" = "verify .status $(id_of check checked) false" ]
+  [ "${lines[2]}" = "verify handoff $(id_of prepare handoff) false" ]
+  [ "${lines[3]}" = "publish .status $(id_of check checked) false" ]
+  [ "${lines[4]}" = "publish handoff $(id_of verify verified) false" ]
+  [ "${lines[5]}" = "issues .status $(id_of check checked) false" ]
+  [ "${lines[6]}" = "issues .status $(id_of publish published) false" ]
+}
+
+# verify-pkg.sh takes the version and the asset value of the check run
+@test "check-updates: verify downloads the statuses of the check job before it runs as builder" {
+  run yq -o=json -I=0 '.jobs.verify.needs' "$CHECK_UPDATES"
+  [ "$output" = '["image","check","prepare"]' ]
+  [ "$(step_index verify "Download statuses")" -lt "$(step_index verify "Verify checksums")" ]
 }
 
 # Runs the Decide step in a workspace whose statuses/ holds the statuses that
@@ -586,8 +639,8 @@ run_decide_step() {
 @test "check-updates: prepare runs only for outdated packages and decides nothing" {
   run yq '.jobs.prepare.if' "$CHECK_UPDATES"
   [ "$output" = "needs.check.outputs.prepare == 'true'" ]
-  run yq '.jobs.prepare.outputs' "$CHECK_UPDATES"
-  [ "$output" = "null" ]
+  run yq -o=json -I=0 '.jobs.prepare.outputs' "$CHECK_UPDATES"
+  [ "$output" = '{"handoff-id":"${{ steps.upload.outputs.artifact-id }}"}' ]
 }
 
 @test "check-updates: Stop builder, Hand over and Drop the checkouts run nothing from the workspace" {
@@ -1915,8 +1968,8 @@ no_commit() {
 }
 
 @test "check-updates: the issues job reads the statuses of publish when it ran, else those of check" {
-  run yq -o=json -I=0 '[.jobs.issues.steps[] | select(.uses | test("^actions/download-artifact@")) | [.with.name, .with.path, .if]]' "$CHECK_UPDATES"
-  [ "$output" = "[[\"checked\",\".status\",\"needs.publish.result == 'skipped'\"],[\"published\",\".status\",\"needs.publish.result != 'skipped'\"]]" ]
+  run yq -o=json -I=0 '[.jobs.issues.steps[] | select(.uses | test("^actions/download-artifact@")) | [.with["artifact-ids"], .with.path, .if]]' "$CHECK_UPDATES"
+  [ "$output" = "[[\"$(id_of check checked)\",\".status\",\"needs.publish.result == 'skipped'\"],[\"$(id_of publish published)\",\".status\",\"needs.publish.result != 'skipped'\"]]" ]
   run yq -o=json -I=0 '.jobs.publish.steps[] | select(.with.name == "published") | [.with.path, .if, .with["if-no-files-found"]]' "$CHECK_UPDATES"
   [ "$output" = '["statuses/","always()","error"]' ]
   run yq '.jobs.publish.steps[] | select(.name == "Hand over") | .if' "$CHECK_UPDATES"
@@ -2110,9 +2163,9 @@ no_commit() {
 }
 
 @test "check-updates: publish takes the statuses from the check job" {
-  run yq '.jobs.publish.steps[] | select(.with.name == "checked") | .with.path' "$CHECK_UPDATES"
-  [ "$output" = ".status" ]
-  run yq '.jobs.publish.steps[] | select(.with.name == "verified") | .if' "$CHECK_UPDATES"
+  run yq '.jobs.publish.steps[] | select(.name == "Download statuses") | .with["artifact-ids"] + " " + .with.path' "$CHECK_UPDATES"
+  [ "$output" = "$(id_of check checked) .status" ]
+  run yq '.jobs.publish.steps[] | select(.name == "Download verified handoff") | .if' "$CHECK_UPDATES"
   [ "$output" = "needs.verify.result == 'success'" ]
 }
 
