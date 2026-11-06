@@ -58,3 +58,32 @@ stats_event() {
   esac
   printf '%s,%s\n' "$event" "$version"
 }
+
+# Print the numbers of the card from journal $1 on day $2, YYYY-MM-DD, by
+# the days back from $2 that a row is dated: 0 for $2, rows after it unread
+stats_numbers() {
+  stats_rows "$1" | LC_ALL=C gawk -F, -v date="$2" '
+    function day(d) { return mktime(substr(d, 1, 4) " " substr(d, 6, 2) " " substr(d, 9, 2) " 0 0 0", 1) / 86400 }
+    function count(name, i) { for (i = 1; i <= 3; i++) if (age < window[i]) n[name, i]++ }
+    BEGIN { today = day(date); split("7 30 365", window, " ") }
+    {
+      age = today - day($1)
+      if (age < 0) next
+      if (!(first > age)) first = age
+      last[$2] = $3
+      if ($3 ~ /^(updated|downgrade|rebuilt)$/) {
+        count("pushes")
+        pushes[age]++
+        for (i = 1; i <= 3; i++) if (age < window[i] && !((i, $2) in pushed)) { pushed[i, $2]; n["packages", i]++ }
+      } else if ($3 == "added") count("added")
+      else if ($3 ~ /_failed$/) count("failed")
+    }
+    END {
+      split("pushes packages added failed", names, " ")
+      for (j = 1; j <= 4; j++) printf "%s %d %d %d\n", names[j], n[names[j], 1], n[names[j], 2], n[names[j], 3]
+      for (p in last) failing += last[p] ~ /_failed$/
+      printf "failing %d\n", failing
+      if (first != "") printf "first %d\n", first
+      for (age = 0; age <= 370; age++) if (age in pushes) printf "day %d %d\n", age, pushes[age]
+    }'
+}

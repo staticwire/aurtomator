@@ -419,3 +419,51 @@ added_rows() {
   grep -qx 'a hand edit' "$TEST_TMPDIR/out.csv"
   [[ "$stderr" == *"line 3 of $J is not a journal row"* ]]
 }
+
+@test "stats_numbers: the windows count days back from the date, the date included" {
+  journal '2025-11-08T10:00:00Z,d,updated,1.1,1.0,1' '2025-11-09T10:00:00Z,c,updated,1.1,1.0,1' \
+    '2026-10-09T10:00:00Z,c,downgrade,1.0,1.1,1' '2026-10-10T10:00:00Z,b,updated,1.1,1.0,1' \
+    '2026-11-01T23:59:59Z,b,rebuilt,1.1,1.1,1' '2026-11-02T00:00:00Z,a,updated,1.1,1.0,1' \
+    '2026-11-08T23:59:59Z,a,updated,1.2,1.1,1' '2026-11-09T00:00:00Z,e,updated,1.1,1.0,1'
+  run --separate-stderr lib stats_numbers "$J" 2026-11-08
+  [ "$status" -eq 0 ]
+  [ "$output" = "pushes 2 4 6
+packages 1 2 3
+added 0 0 0
+failed 0 0 0
+failing 0
+first 365
+day 0 1
+day 6 1
+day 7 1
+day 29 1
+day 30 1
+day 364 1
+day 365 1" ]
+}
+
+@test "stats_numbers: new packages, moves into a failure and packages failing now" {
+  journal '2026-10-01T10:00:00Z,c,added,1.0,,1' '2026-11-01T10:00:00Z,a,tracked,1.0,,1' \
+    '2026-11-02T10:00:00Z,b,added,1.0,,1' '2026-11-03T10:00:00Z,a,check_failed,1.0,,1' \
+    '2026-11-04T10:00:00Z,a,up_to_date,1.0,,1' '2026-11-05T10:00:00Z,a,update_failed,1.0,,1' \
+    '2026-11-06T10:00:00Z,c,check_failed,1.0,,1' '2026-11-07T10:00:00Z,c,removed,1.0,,1' \
+    '2026-11-07T10:00:00Z,d,tracked,1.0,,1' '2026-11-07T11:00:00Z,d,update_failed,1.0,,1' \
+    '2026-11-08T10:00:00Z,a,updated,1.1,1.0,1' '2026-11-08T11:00:00Z,a,check_failed,1.1,,1' \
+    '2026-11-09T10:00:00Z,b,check_failed,1.0,,1'
+  run --separate-stderr lib stats_numbers "$J" 2026-11-08
+  [ "$status" -eq 0 ]
+  [ "$output" = "pushes 1 1 1
+packages 1 1 1
+added 1 1 2
+failed 5 5 5
+failing 2
+first 38
+day 0 1" ]
+}
+
+@test "stats_numbers: a journal without rows has no first day" {
+  journal
+  run --separate-stderr lib stats_numbers "$J" 2026-11-08
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pushes 0 0 0\npackages 0 0 0\nadded 0 0 0\nfailed 0 0 0\nfailing 0' ]
+}
