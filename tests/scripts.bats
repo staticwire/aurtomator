@@ -3402,9 +3402,11 @@ EOF
 
 # === version jumps ===
 
-# Helper: a strategy that prints the given version
+# Helper: a strategy that prints the given version, in place of the link to
+# the strategy of that name in the project
 # Usage: stand_in_strategy <name> <version>
 stand_in_strategy() {
+  rm -f "$TEST_TMPDIR/strategies/$1.sh"
   printf '#!/usr/bin/env bash\necho %s\n' "$2" >"$TEST_TMPDIR/strategies/$1.sh"
   chmod +x "$TEST_TMPDIR/strategies/$1.sh"
 }
@@ -4082,4 +4084,131 @@ cooldown_days: $value"
   run --separate-stderr cooldown_until "$TEST_TMPDIR/packages/pkg-git.yml"
   [ "$status" -eq 1 ]
   [ "$stderr" = "last_updated must be a date YYYY-MM-DD: 2026-02-30" ]
+}
+
+@test "check-all: an update of git-latest waits 7 days after the last push" {
+  stand_in_strategy git-latest r2391.1f3c2a7
+  create_test_package "pkg-git" "git-latest" "current: r2378.06ea49d
+last_updated: '$(utc_day -6)'"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-git")" = "cooldown: $(utc_day 1)" ]
+  [[ "$output" == *"pkg-git: r2378.06ea49d → r2391.1f3c2a7 waits until $(utc_day 1)"* ]]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+}
+
+@test "check-all: an update of git-latest goes out 7 days after the last push" {
+  stand_in_strategy git-latest r2391.1f3c2a7
+  create_test_package "pkg-git" "git-latest" "current: r2378.06ea49d
+last_updated: '$(utc_day -7)'"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-git")" = "new_version: r2391.1f3c2a7" ]
+}
+
+@test "check-all: a package in its cooldown without a newer version is up to date" {
+  stand_in_strategy git-latest r2378.06ea49d
+  create_test_package "pkg-git" "git-latest" "current: r2378.06ea49d
+last_updated: '$(utc_day 0)'"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-git")" = "up_to_date" ]
+}
+
+@test "check-all: cooldown_days holds the update of another strategy" {
+  stand_in_strategy step 1.1
+  create_test_package "pkg-slow" "step" "current: '1.0'
+last_updated: '$(utc_day -13)'
+cooldown_days: 14"
+  create_test_package "pkg-fast" "step" "current: '1.0'
+last_updated: '$(utc_day 0)'"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-slow")" = "cooldown: $(utc_day 1)" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-fast")" = "new_version: 1.1" ]
+}
+
+@test "check-all: cooldown_days: 0 and a missing last_updated let an update of git-latest out" {
+  stand_in_strategy git-latest r2391.1f3c2a7
+  create_test_package "pkg-off" "git-latest" "current: r2378.06ea49d
+last_updated: '$(utc_day 0)'
+cooldown_days: 0"
+  create_test_package "pkg-new" "git-latest" "current: r2378.06ea49d"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-off")" = "new_version: r2391.1f3c2a7" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-new")" = "new_version: r2391.1f3c2a7" ]
+}
+
+@test "check-all: a skipped version jump or downgrade and a hold win over the cooldown" {
+  stand_in_strategy jump 2026102100
+  create_test_package "pkg-jump" "jump" "current: '13'
+last_updated: '$(utc_day 0)'
+cooldown_days: 7"
+  stand_in_strategy older 1.0
+  create_test_package "pkg-down" "older" "current: '2.0'
+last_updated: '$(utc_day 0)'
+cooldown_days: 7"
+  stand_in_strategy step 29+1
+  create_test_package "pkg-hold" "step" "current: 28+25
+last_updated: '$(utc_day 0)'
+cooldown_days: 7
+alerts:
+  - when: major
+    hold: true
+    note: Raise makedepends java-environment to 28"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "jump_skipped: 2026102100" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 1.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-hold")" = "held: 29+1" ]
+}
+
+@test "check-all: holds a rebuild and an allowed downgrade in the cooldown" {
+  stand_in_strategy step 1.0.0
+  asset_package 1.0.0 1.0.0-a
+  printf "last_updated: '%s'\ncooldown_days: 7\n" "$(utc_day 0)" >>"$TEST_TMPDIR/packages/pkg.yml"
+  stand_in_asset 1.0.0-b
+  stand_in_strategy older 1.0
+  create_test_package "pkg-down" "older" "current: '2.0'
+allow_downgrade: true
+last_updated: '$(utc_day 0)'
+cooldown_days: 7"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "cooldown: $(utc_day 7)" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "cooldown: $(utc_day 7)" ]
+}
+
+@test "check-all: asks no asset value for an update in its cooldown" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  printf "last_updated: '%s'\ncooldown_days: 7\n" "$(utc_day 0)" >>"$TEST_TMPDIR/packages/pkg.yml"
+  stand_in_asset 2.0.0-a
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "cooldown: $(utc_day 7)" ]
+  [ ! -e "$TEST_TMPDIR/check-asset.args" ]
+}
+
+@test "check-all: fails the check of an update with a last_updated that is not a date" {
+  stand_in_strategy git-latest r2391.1f3c2a7
+  create_test_package "pkg-git" "git-latest" "current: r2378.06ea49d
+last_updated: '2026-02-30'"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-git")" = "check_failed: last_updated must be a date YYYY-MM-DD: 2026-02-30" ]
+}
+
+@test "update-readme: renders an update in its cooldown" {
+  create_test_package "pkg-git" "git-latest" "upstream:
+  type: github
+  project: owner/repo
+current: r2378.06ea49d"
+  echo "cooldown: 2026-11-12" >"$TEST_TMPDIR/.status/pkg-git"
+  printf '%s\n' "<!-- PACKAGES:START -->" "<!-- PACKAGES:END -->" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '<td nowrap>💤 next update 2026-11-12</td>' "$TEST_TMPDIR/README.md"
 }

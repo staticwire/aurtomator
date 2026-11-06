@@ -2607,6 +2607,8 @@ EOF
   [ "$output" = "❌ failed" ]
   run status_label "update_failed: boom"
   [ "$output" = "❌ failed" ]
+  run status_label "cooldown: 2026-11-12"
+  [ "$output" = "💤 next update 2026-11-12" ]
   run status_label "unknown: 1.0"
   [ "$output" = "✅ tracking" ]
 }
@@ -2661,6 +2663,13 @@ c
 EOF
   )
   [ "$output" = "$expected" ]
+}
+
+@test "run_summary: lists an update in its cooldown, not among the errors" {
+  make_statuses foo=up_to_date bar="cooldown: 2026-11-12"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'2 packages, 1 up to date.\n\n| Package | Status |\n|---|---|\n| `bar` | 💤 next update 2026-11-12 |' ]
 }
 
 @test "run_summary: prints nothing without the status of a package" {
