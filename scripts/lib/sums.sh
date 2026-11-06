@@ -16,11 +16,12 @@ _source_file() {
   else
     name="${entry##*/}"
   fi
-  # makepkg reads lp: without :// as a bzr source
+  # makepkg reads lp: without :// as a bzr source. Over http or ftp the
+  # network path would pick the file, and with it the checksum.
   if [[ -z "$name" || "$name" == */* || "$name" == . || "$name" == .. ]] ||
-    [[ "$entry" == *://* && ! "${url%%://*}" =~ ^(http|https|ftp)$ ]] ||
+    [[ "$entry" == *://* && "${url%%://*}" != https ]] ||
     [[ "$entry" != *://* && "$entry" == *lp:* ]]; then
-    log_err "Cannot check the checksum of $entry: only local files, http, https and ftp downloads and git sources are checked"
+    log_err "Cannot check the checksum of $entry: only local files, https downloads and git sources over https are checked"
     return 1
   fi
 
@@ -37,12 +38,12 @@ _source_file() {
     return 1
   else
     file="${3}/$(printf '%s' "$url" | sha256sum | cut -d' ' -f1)"
-    # Retried and with the cookie engine on, as makepkg does, so a cookie set
-    # on a redirect goes with the next request. Redirects may only lead to
-    # the protocols above.
+    # Retried and with the cookie engine on, as makepkg does. The AUR copy
+    # picks the URL, so redirects stay on https and size and stalls are bounded.
     if [[ ! -f "$file" ]] &&
-      ! curl -qgfsSL -b '' --retry 3 --retry-delay 3 --proto '=http,https,ftp' \
-        --proto-redir '=http,https,ftp' -o "$file" "$url"; then
+      ! curl -qgfsSL -b '' --retry 3 --retry-delay 3 --proto '=https' \
+        --proto-redir '=https' --max-filesize 600M --speed-limit 102400 \
+        --speed-time 60 -o "$file" "$url"; then
       rm -f "$file"
       log_err "Could not download $url"
       return 1
@@ -76,8 +77,8 @@ _git_source_sum() {
     name="${name%%.git*}"
   fi
 
-  if [[ ! "${url%%://*}" =~ ^(http|https)$ ]]; then
-    log_err "Cannot check the checksum of $entry: git sources are cloned over https or http only"
+  if [[ "${url%%://*}" != https ]]; then
+    log_err "Cannot check the checksum of $entry: git sources are cloned over https only"
     return 1
   fi
   if [[ ! "${fragment%%=*}" =~ ^(tag|commit)$ || -z "$ref" || "$ref" == -* ]]; then
@@ -95,7 +96,7 @@ _git_source_sum() {
 
   dir="${4}/$(printf '%s' "$url" | sha256sum | cut -d' ' -f1).git"
   if [[ ! -d "$dir" ]]; then
-    if ! GIT_ALLOW_PROTOCOL=http:https git clone -q --origin=origin --mirror "$url" "$dir"; then
+    if ! GIT_ALLOW_PROTOCOL=https git clone -q --origin=origin --mirror "$url" "$dir"; then
       rm -rf "$dir"
       log_err "Could not clone $url"
       return 1

@@ -83,6 +83,7 @@ make_aur_remote() {
 #!/usr/bin/env bash
 if [[ "\$1" == "clone" && " \$* " == *" --mirror "* ]]; then
   echo "\${@: -2:1}" >>"$TEST_TMPDIR/git-clone-urls"
+  echo "\${GIT_ALLOW_PROTOCOL:-unset}" >>"$TEST_TMPDIR/git-allow"
   exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git clone -q --mirror "$TEST_TMPDIR/upstream.git" "\${@: -1}"
 fi
 if [[ "\$1" == "clone" ]]; then
@@ -1033,7 +1034,34 @@ commit_aur_state() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
   [ "$status" -eq 0 ]
   grep -qx 'https://aur.archlinux.org/demo.git' "$TEST_TMPDIR/clone-urls"
-  grep -q -- '--proto =http,https,ftp --proto-redir =http,https,ftp .* https://example.com/demo-1.1.0.tar.gz$' "$TEST_TMPDIR/curl.args"
+  grep -q -- '--proto =https --proto-redir =https .* https://example.com/demo-1.1.0.tar.gz$' "$TEST_TMPDIR/curl.args"
+}
+
+# The AUR copy picks the URL, so curl stops a download past 600 MiB and an
+# attempt that stays below 100 KiB/s for 60 s
+@test "verify-pkg: bounds the size and the speed of a download" {
+  setup_verify
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 0 ]
+  grep -q -- ' --max-filesize 600M --speed-limit 102400 --speed-time 60 -o ' "$TEST_TMPDIR/curl.args"
+}
+
+# Over http or ftp, the checksum is whatever the network path serves, in
+# prepare as in verify
+@test "verify-pkg: refuses a checksum of a download over http" {
+  setup_verify "http://example.com"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Cannot check the checksum of http://example.com/demo-1.1.0.tar.gz: only local files, https downloads and git sources over https are checked"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+@test "verify-pkg: refuses a checksum of a download over ftp" {
+  setup_verify "ftp://example.com"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Cannot check the checksum of ftp://example.com/demo-1.1.0.tar.gz: only local files, https downloads"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
 @test "verify-pkg: has nothing to verify when the prepared files are those of the AUR" {
@@ -1244,6 +1272,8 @@ use_source() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
   [ "$status" -eq 0 ]
   grep -qx 'https://example.com/demo.git' "$TEST_TMPDIR/git-clone-urls"
+  # git follows a redirect only to a protocol it allows
+  [ "$(cat "$TEST_TMPDIR/git-allow")" = "https" ]
 }
 
 @test "verify-pkg: checks a git source at a commit as makepkg does" {
@@ -1292,13 +1322,23 @@ use_source() {
   [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
 }
 
-@test "verify-pkg: refuses a git source over a protocol other than https or http" {
+@test "verify-pkg: refuses a git source over a protocol other than https" {
   setup_verify
   make_upstream
   use_source "demo::git+ssh://example.com/demo.git#tag=vVER"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"git sources are cloned over https or http only"* ]]
+  [[ "$output" == *"git sources are cloned over https only"* ]]
+  [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
+}
+
+@test "verify-pkg: refuses a git source over http" {
+  setup_verify
+  make_upstream
+  use_source "demo::git+http://example.com/demo.git#tag=vVER"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Cannot check the checksum of demo::git+http://example.com/demo.git#tag=v1.1.0: git sources are cloned over https only"* ]]
   [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
 }
 
