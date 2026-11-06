@@ -599,7 +599,8 @@ run_decide_step() {
     [ -n "$output" ]
     [[ "$output" != *"./scripts/"* ]]
     [[ "$output" != *"GITHUB_OUTPUT"* ]]
-    # Hand over only reads files as builder
+    # As builder, Stop builder only signals and Hand over only reads files
+    output=${output//"sudo -u builder kill -KILL -1 "/}
     [[ "${output//"sudo -u builder cat -- "/}" != *"sudo"* ]]
   done
 }
@@ -616,15 +617,18 @@ step_index() {
   for job in check prepare verify publish; do
     echo "$job"
     builder=$(yq ".jobs.$job.steps | to_entries | map(select(.value.uses == \"./aurtomator/.github/actions/run-as-builder\")) | .[0].key" "$CHECK_UPDATES")
-    run yq -o=json -I=0 "[.jobs.$job.steps[$((builder + 1))], .jobs.$job.steps[$((builder + 2))], .jobs.$job.steps[-1]] | map([.name, .if])" "$CHECK_UPDATES"
+    # Hand over reads nothing while a process of builder may still run
+    run yq -o=json -I=0 "[.jobs.$job.steps[$((builder + 1))], .jobs.$job.steps[$((builder + 2))], .jobs.$job.steps[-1]] | map([.name, .if, .id])" "$CHECK_UPDATES"
     [ "$status" -eq 0 ]
-    [ "$output" = '[["Stop builder","always()"],["Hand over","always()"],["Drop the checkouts","always()"]]' ]
+    [ "$output" = "[[\"Stop builder\",\"always()\",\"stop\"],[\"Hand over\",\"always() && steps.stop.outcome == 'success'\",null],[\"Drop the checkouts\",\"always()\",null]]" ]
     [ "$(step_run "$job" "Stop builder")" = "$(step_run check "Stop builder")" ]
     [ "$(step_run "$job" "Hand over")" = "$(step_run check "Hand over")" ]
     [ "$(step_run "$job" "Drop the checkouts")" = "$(step_run check "Drop the checkouts")" ]
-    # Nothing after the stop runs as builder, but the reads of Hand over
+    # Nothing after the step of builder runs as builder, but the kill of
+    # Stop builder and the reads of Hand over
     run yq ".jobs.$job.steps[$((builder + 1)):] | .[] | select(has(\"run\")) | .run" "$CHECK_UPDATES"
     [ "$status" -eq 0 ]
+    output=${output//"sudo -u builder kill -KILL -1 "/}
     [[ "${output//"sudo -u builder cat -- "/}" != *"sudo -u builder"* ]]
     run yq ".jobs.$job.steps[$((builder + 1)):] | .[] | .uses // \"\"" "$CHECK_UPDATES"
     [[ "$output" != *run-as-builder* ]]
@@ -977,32 +981,39 @@ make_builder_inputs() {
 
 # Runs the Stop builder step in an empty workspace. builder has uid 1000,
 # and no uid when $NO_BUILDER is set. ps lists the processes in $PS_LINES
-# until pkill ran and those in $PS_AFTER_KILL after it, as
-# "<uid> <ruid> <state>" separated by commas, with the uid of ps itself,
-# and exits with $PS_RC. pgrep matches any process of builder, zombies
-# included, as the real one does. pkill and sleep only log their calls. A
-# step still running after 20 s fails.
+# until pkill ran, or sudo when $KILL_ENDS is set, and those in
+# $PS_AFTER_KILL after it, as "<uid> <ruid> <state>" separated by commas,
+# with the uid of ps itself, and exits with $PS_RC. pgrep matches any
+# process of builder, zombies included, as the real one does. sudo, pkill
+# and sleep only log their calls, sudo and pkill also in their order to
+# $CALLS/seq, and sudo exits with $SUDO_RC. A step still running after 20 s
+# fails.
 run_stop_builder_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$ws" "$bin"
   cat >"$bin/ps" <<'EOF'
 #!/usr/bin/env bash
-if [[ -e "$CALLS/pkill" ]]; then lines="$PS_AFTER_KILL"; else lines="$PS_LINES"; fi
+if [[ -e "$CALLS/pkill" || (-n "$KILL_ENDS" && -e "$CALLS/sudo") ]]; then
+  lines="$PS_AFTER_KILL"
+else
+  lines="$PS_LINES"
+fi
 [[ "${PS_RC:-0}" -eq 0 ]] || exit "$PS_RC"
 echo "0 0 R"
 [[ -z "$lines" ]] || tr ',' '\n' <<<"$lines"
 EOF
   printf '#!/bin/sh\nps | grep -q " 1000 \\| 1000 "\n' >"$bin/pgrep"
   printf '#!/bin/sh\n[ "$*" = "-u builder" ] && [ -z "$NO_BUILDER" ] && echo 1000\n' >"$bin/id"
-  printf '#!/bin/sh\necho "$*" >>"$CALLS/pkill"\n' >"$bin/pkill"
+  printf '#!/bin/sh\necho "$*" >>"$CALLS/sudo"\necho "sudo $*" >>"$CALLS/seq"\nexit "$SUDO_RC"\n' >"$bin/sudo"
+  printf '#!/bin/sh\necho "$*" >>"$CALLS/pkill"\necho "pkill $*" >>"$CALLS/seq"\n' >"$bin/pkill"
   printf '#!/bin/sh\necho x >>"$CALLS/sleep"\n' >"$bin/sleep"
-  chmod +x "$bin/ps" "$bin/pgrep" "$bin/id" "$bin/pkill" "$bin/sleep"
+  chmod +x "$bin/ps" "$bin/pgrep" "$bin/id" "$bin/sudo" "$bin/pkill" "$bin/sleep"
   CALLS="$BATS_TEST_TMPDIR/calls"
   mkdir -p "$CALLS"
   step_run check "Stop builder" >"$BATS_TEST_TMPDIR/step.sh"
   run timeout 20 env -C "$ws" PATH="$bin:$PATH" CALLS="$CALLS" PS_LINES="${PS_LINES:-}" \
     PS_AFTER_KILL="${PS_AFTER_KILL:-}" PS_RC="${PS_RC:-0}" NO_BUILDER="${NO_BUILDER:-}" \
-    bash -e "$BATS_TEST_TMPDIR/step.sh"
+    KILL_ENDS="${KILL_ENDS:-}" SUDO_RC="${SUDO_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: Stop builder goes on when builder runs nothing" {
@@ -1016,6 +1027,22 @@ EOF
   NO_BUILDER=1 PS_RC=1 run_stop_builder_step
   [ "$status" -eq 0 ]
   [ ! -e "$CALLS/pkill" ]
+  [ ! -e "$CALLS/sudo" ]
+}
+
+# kill -1 as builder reaches every process builder may signal in one call,
+# also one that forks while pkill lists the processes
+@test "check-updates: Stop builder first signals every process of builder in one call" {
+  KILL_ENDS=1 PS_LINES="1000 1000 S,1000 1000 R" PS_AFTER_KILL="" run_stop_builder_step
+  [ "$status" -eq 0 ]
+  [ "$(cat "$CALLS/sudo")" = "-u builder kill -KILL -1" ]
+  [ ! -e "$CALLS/pkill" ]
+}
+
+@test "check-updates: Stop builder goes on when the kill of builder fails" {
+  SUDO_RC=1 PS_LINES="0 0 S" run_stop_builder_step
+  [ "$status" -eq 0 ]
+  [ "$(cat "$CALLS/sudo")" = "-u builder kill -KILL -1" ]
 }
 
 @test "check-updates: Stop builder kills builder and goes on when its processes end" {
@@ -1023,6 +1050,9 @@ EOF
   [ "$status" -eq 0 ]
   grep -qx -- "-KILL -u builder" "$CALLS/pkill"
   grep -qx -- "-KILL -U builder" "$CALLS/pkill"
+  # The one kill -1 comes before the rounds of pkill
+  [ "$(head -n 1 "$CALLS/seq")" = "sudo -u builder kill -KILL -1" ]
+  [ "$(grep -c '^sudo ' "$CALLS/seq")" -eq 1 ]
 }
 
 @test "check-updates: Stop builder does not wait for zombies" {
@@ -1816,7 +1846,7 @@ no_commit() {
   run yq -o=json -I=0 '.jobs.publish.steps[] | select(.with.name == "published") | [.with.path, .if, .with["if-no-files-found"]]' "$CHECK_UPDATES"
   [ "$output" = '["statuses/","always()","error"]' ]
   run yq '.jobs.publish.steps[] | select(.name == "Hand over") | .if' "$CHECK_UPDATES"
-  [ "$output" = "always()" ]
+  [ "$output" = "always() && steps.stop.outcome == 'success'" ]
   run yq -o=json -I=0 '.jobs.check.steps[] | select(.name == "Upload statuses") | [.with.name, .with.path, .with["if-no-files-found"]]' "$CHECK_UPDATES"
   [ "$output" = '["checked","statuses/","error"]' ]
 }
