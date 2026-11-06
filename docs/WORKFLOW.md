@@ -802,7 +802,7 @@ Without a mode and with `--update`, a package whose check failed within its budg
 
 ```text
 update-pkg.sh <package-name> <new-version> [--asset <value>] [--dry-run] [--prepare <dir>]
-verify-pkg.sh <package-name> <prepared-dir>
+verify-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>]
 publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]
 check-asset.sh <package-name> <pkgver>
 check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--dry-run]
@@ -897,11 +897,11 @@ A PKGBUILD is a bash script, and every step that reads it executes it: the audit
 2. Run steps 3 to 9 of [4.2](#42-step-by-step).
 3. Copy `PKGBUILD`, `.SRCINFO` and the commit id of the clone's `HEAD` to `<dir>/<package-name>/` as `PKGBUILD`, `.SRCINFO` and `base`. Nothing is committed and the package YAML does not change. Exit code 2 still means the AUR already has the version.
 
-**Verify**, `verify-pkg.sh <package-name> <dir>/<package-name>`, needs no secrets, never sources the PKGBUILD and never runs `makepkg`:
+**Verify**, `verify-pkg.sh <package-name> <version> <dir>/<package-name>`, needs no secrets, never sources the PKGBUILD and never runs `makepkg`:
 
 1. The prepared directory must pass step 1 of publish below.
 2. Clone `https://aur.archlinux.org/<package-name>.git` anonymously with `--no-checkout`. When `HEAD` is not `base`, the AUR repo moved after the update was prepared: exit code 3. The entries at the top of `HEAD` are written to a separate directory with `git ls-tree` and `git cat-file`, so git applies none of the links, attributes or filters of the repo: a regular file with its content, a symlink as a link to nowhere, anything else as an empty directory. The steps below read the AUR copy there. Prepared `PKGBUILD` and `.SRCINFO` that equal those of the AUR copy change nothing, and the verify ends there with exit code 0.
-3. `PKGBUILD` and `.SRCINFO` in the AUR copy must be regular files. The prepared files must hold no NUL byte and pass steps 4 and 5 of publish below, with the prepared `pkgver` as `<version>` and, for a package with `upstream.asset_var`, the value of its line in the prepared `PKGBUILD` as the asset value. From here on, every source URL in the prepared `.SRCINFO` follows from the AUR copy.
+3. `PKGBUILD` and `.SRCINFO` in the AUR copy must be regular files. The prepared files must hold no NUL byte and pass steps 4 and 5 of publish below, with `<version>` and, for a package with `upstream.asset_var`, the value of `--asset` as the asset value. Such a package needs `--asset`, and any other package refuses it. `check-all.sh --verify` passes the version and the asset value that the check run found, so a prepared update with another `pkgver` or asset value stops before anything is downloaded. From here on, every source URL in the prepared `.SRCINFO` follows from the AUR copy.
 4. Each checksum array of the prepared `PKGBUILD` must hold the same values as the same key in the prepared `.SRCINFO`.
 5. Every checksum other than `SKIP` must match its source, computed as makepkg does with `<algorithm>sum`. The file is the one makepkg uses. A file in the AUR repo with the name of the source comes first and must be a regular file. Otherwise a remote source is downloaded with curl, retried and with the cookie engine on as makepkg does, over `https` only, redirects included. The AUR copy picks the URL, so curl stops a download past 600 MiB and an attempt that stays below 100 KiB/s for 60 seconds. A checksum of a download over `http` or `ftp` stops the verify: there the network path would pick the file, and with it the checksum, in prepare as in verify. A git source at `#tag=` or `#commit=` is cloned as a mirror over `https` only, and git follows a redirect only to `https`. Its checksum is that of `git archive --format tar` of the tag or commit, with `export-subst` and `export-ignore` turned off, as makepkg computes it. A checksum for any other source, another VCS for example, cannot be checked and stops the verify.
 6. Any mismatch stops the verify with exit code 1. Otherwise the exit code is 0.
@@ -919,7 +919,7 @@ Step 5 accepts both forms of a line other than `pkgver`, `pkgrel`, `source` and 
 
 `check-all.sh --prepare <dir>` runs no strategy and needs no `GITHUB_TOKEN`. It takes the versions from the statuses that a check run, `check-all.sh` without a mode, wrote to `.status/` before it, and reads them before the first PKGBUILD runs. It prepares every package with `new_version`, `available_downgrade` or `new_build` into `<dir>/prepared/` and copies the statuses to `<dir>/status/`. A package with `upstream.asset_regex` takes its asset value from `.status/_assets`, keeps `pending`, and becomes `check_failed` without a value, see [4.6](#46-values-from-release-asset-names). A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped` instead, and a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, see [4.3](#43-downgrade-behavior). An update that an alert with `hold: true` fires on gets `held`, see [4.5](#45-update-alerts). A failed preparation becomes `update_failed`, and a package without a status from the check run becomes `check_failed`. The other statuses stay as the check run wrote them.
 
-`check-all.sh --verify <dir>` runs `verify-pkg.sh` for every package in `packages/` that has a directory in `<dir>/prepared/`, and runs no strategy. An update that fails is removed from `<dir>/prepared/`, and its status in `<dir>/status/` becomes `update_failed`. Exit code 3 counts as a failure as well: the prepare run writes `base` for every package, so a moved AUR repo looks the same as a wrong `base`. The next run prepares the package again.
+`check-all.sh --verify <dir>` runs `verify-pkg.sh` for every package in `packages/` that has a directory in `<dir>/prepared/`, and runs no strategy. It takes the version and the asset value from the statuses of the check run in `.status/`, as `--publish` does: the version of `new_version`, `available_downgrade` or `new_build`, and for a package with `upstream.asset_regex` its value in `.status/_assets`. Without them `verify-pkg.sh` does not run, and the package gets `update_failed: no new version from the check run` or `update_failed: no asset value from the check run`. An update that fails is removed from `<dir>/prepared/`, and its status in `<dir>/status/` becomes `update_failed`. Exit code 3 counts as a failure as well: the prepare run writes `base` for every package, so a moved AUR repo looks the same as a wrong `base`. The next run prepares the package again.
 
 `check-all.sh --publish <dir>` takes the statuses of the check run from `.status/`, as `--prepare` does, and writes `.status/` anew. `up_to_date`, `check_failed`, `downgrade_skipped`, `jump_skipped`, `held` and `pending` stay as they are, and the alerts of a held update are evaluated again to record their notes in `.status/_alerts`. A downgrade of a package without `allow_downgrade: true` gets `downgrade_skipped`, a version jump of a package without `allow_version_jump: true` gets `jump_skipped`, an update that an alert with `hold: true` fires on gets `held`, and none of them is published. A missing status, and one the check run does not write, become `check_failed`. For a package with `new_version`, `available_downgrade` or `new_build` and a directory in `<dir>/prepared/`, it publishes the version in that status, with the asset value from `.status/_assets` for a package with `upstream.asset_regex`, and runs no strategy, so nothing contacts an upstream host while the AUR and GPG keys are in place. Exit code 3, an AUR repo that moved, leaves the status at `new_version`, `available_downgrade` or `new_build` without an error, and the next run prepares the package again. A package with one of these statuses and no prepared directory gets the `update_failed` status that the prepare or the verify run wrote for it to `<dir>/status/`, or `update_failed: prepare and verify handed over no update`. Nothing else is taken from `<dir>/status/`, and only a regular file without a NUL byte: the prepare run executes PKGBUILDs, and code from one of them can write the files of every package.
 
@@ -1001,7 +1001,7 @@ A tag appears before its release. liquidsoap uploads the assets of a release to 
 
 All three count toward `pkg_ok`.
 
-`update-pkg.sh` and `publish-pkg.sh` take the value with `--asset <value>`, and `check-all.sh` passes it. A package with `upstream.asset_var` needs it, and any other package refuses it. The value starts with a letter or a digit and holds only `A-Za-z0-9 . _ + ~ -`, because bash expands a tilde at the start of an assignment: `_deb=~root` gives the home directory of `root`. `update-pkg.sh` writes the value to the line of `upstream.asset_var`. `verify-pkg.sh` reads it from that line of the prepared `PKGBUILD`, as it reads `pkgver`, and `publish-pkg.sh` refuses a prepared line with another value than its `--asset`.
+`update-pkg.sh`, `verify-pkg.sh` and `publish-pkg.sh` take the value with `--asset <value>`, and `check-all.sh` passes it. A package with `upstream.asset_var` needs it, and any other package refuses it. The value starts with a letter or a digit and holds only `A-Za-z0-9 . _ + ~ -`, because bash expands a tilde at the start of an assignment: `_deb=~root` gives the home directory of `root`. `update-pkg.sh` writes the value to the line of `upstream.asset_var`. `verify-pkg.sh` reads it from that line of the prepared `PKGBUILD`, as it reads `pkgver`, and `publish-pkg.sh` refuses a prepared line with another value than its `--asset`.
 
 The AUR `PKGBUILD` must hold exactly one line of `upstream.asset_var`, and its value is the old value. `pkgrel` follows from the version and the value:
 
@@ -1118,12 +1118,13 @@ The jobs pass files to each other as artifacts. A job takes an artifact by the `
 2. **Add builder:** the step of `check`, through the alias `*add-builder`.
 3. **Checkout:** your repository.
 4. **Checkout aurtomator:** into `aurtomator/`.
-5. **Download handoff:** the `handoff` artifact to `handoff/`.
-6. **Verify checksums:** runs `check-all.sh --verify handoff` as `builder` in its directory, on the handoff it downloaded, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
-7. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
-8. **Hand over:** the step of `check`, through the alias `*hand-over`.
-9. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
-10. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
+5. **Download statuses:** the `checked` artifact to `.status/`.
+6. **Download handoff:** the `handoff` artifact to `handoff/`.
+7. **Verify checksums:** runs `check-all.sh --verify handoff` as `builder` in its directory, on the handoff it downloaded and with the versions and asset values of the statuses of `check`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
+8. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
+9. **Hand over:** the step of `check`, through the alias `*hand-over`.
+10. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
+11. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
 `publish`:
 

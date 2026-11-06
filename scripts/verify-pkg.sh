@@ -7,7 +7,7 @@
 # sources and compares every checksum with its source. Never sources the
 # PKGBUILD and never runs makepkg: the prepared files are untrusted.
 #
-# Usage: ./scripts/verify-pkg.sh <package-name> <prepared-dir>
+# Usage: ./scripts/verify-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>]
 #
 # Exit codes: 0 verified, 1 failed,
 #             3 the AUR moved since the update was prepared
@@ -18,10 +18,34 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 require_cmd curl
 
-readonly PKG_NAME="${1:?Usage: verify-pkg.sh <package-name> <prepared-dir>}"
-readonly PREPARED="${2:?Usage: verify-pkg.sh <package-name> <prepared-dir>}"
+readonly PKG_NAME="${1:?Usage: verify-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>]}"
+readonly VERSION="${2:?Usage: verify-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>]}"
+readonly PREPARED="${3:?Usage: verify-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>]}"
+shift 3
+ASSET=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --asset)
+      if [[ -z "${2:-}" ]]; then
+        log_err "--asset needs a value"
+        exit 1
+      fi
+      ASSET="$2"
+      shift 2
+      ;;
+    *)
+      log_err "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
+readonly ASSET
+validate_pkgver "$VERSION" || exit 1
 PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
+ASSET_VAR=$(pkg_asset_var "$PKG_FILE") || exit 1
+readonly ASSET_VAR
+check_asset_option "$ASSET_VAR" "$ASSET" || exit 1
 
 base=$(prepared_base "$PREPARED") || exit 1
 
@@ -48,17 +72,8 @@ if cmp -s "${aur_files}/PKGBUILD" "${PREPARED}/PKGBUILD" && cmp -s "${aur_files}
   exit 0
 fi
 
-version=$(sed -n 's/^pkgver=//p' "${PREPARED}/PKGBUILD" | head -1)
-validate_pkgver "$version" || exit 1
-# The asset value is read from the prepared PKGBUILD, as the version is.
-# publish-pkg.sh checks it against the value the check run found.
-asset_var=$(pkg_asset_var "$PKG_FILE") || exit 1
-asset=""
-if [[ -n "$asset_var" ]]; then
-  asset=$(_asset_line_value "${PREPARED}/PKGBUILD" "$asset_var" "Prepared PKGBUILD") || exit 1
-fi
-check_prepared_files "$aur_files" "$PREPARED" "$version" "$(pkgver_dash "$PKG_FILE")" \
-  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$asset_var" "$asset" || exit 1
+check_prepared_files "$aur_files" "$PREPARED" "$VERSION" "$(pkgver_dash "$PKG_FILE")" \
+  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" || exit 1
 mkdir "${tmp_dir}/downloads"
 verify_prepared_sums "$aur_files" "$PREPARED" "${tmp_dir}/downloads" || exit 1
-log_ok "Checksums of $PKG_NAME $version match the sources"
+log_ok "Checksums of $PKG_NAME $VERSION match the sources"

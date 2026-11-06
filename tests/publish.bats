@@ -500,7 +500,7 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   mock_downloads
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$TEST_TMPDIR/out/demo"
   [ "$status" -eq 0 ]
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$TEST_TMPDIR/out/demo"
   [ "$status" -eq 0 ]
@@ -551,7 +551,7 @@ EOF
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 0.0.4 --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   mock_downloads
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 0.0.4 "$TEST_TMPDIR/out/demo"
   [ "$status" -eq 0 ]
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 0.0.4 "$TEST_TMPDIR/out/demo"
   [ "$status" -eq 0 ]
@@ -565,7 +565,7 @@ EOF
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 2.5.0rc2 --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   mock_downloads
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 2.5.0rc2 "$TEST_TMPDIR/out/demo"
   [ "$status" -eq 0 ]
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 2.5.0rc2 "$TEST_TMPDIR/out/demo"
   [ "$status" -eq 0 ]
@@ -628,7 +628,7 @@ EOF
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 4.4216 --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   mock_downloads
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 4.4216 "$TEST_TMPDIR/out/demo"
   [ "$status" -eq 0 ]
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 4.4216 "$TEST_TMPDIR/out/demo"
   [ "$status" -eq 0 ]
@@ -1024,24 +1024,52 @@ commit_aur_state() {
 
 @test "verify-pkg: clones the AUR repo without a checkout" {
   setup_verify
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
   grep -qx -- '--no-checkout' "$TEST_TMPDIR/clone-opts"
 }
 
 @test "verify-pkg: accepts checksums that match the sources" {
   setup_verify
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
   grep -qx 'https://aur.archlinux.org/demo.git' "$TEST_TMPDIR/clone-urls"
   grep -q -- '--proto =https --proto-redir =https .* https://example.com/demo-1.1.0.tar.gz$' "$TEST_TMPDIR/curl.args"
+}
+
+# check-all.sh --verify passes the version of the check run, so a prepared
+# update cannot name the version whose sources verify downloads
+@test "verify-pkg: refuses prepared files of another version than it is given, before any download" {
+  setup_verify
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.2.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD has pkgver=1.1.0, expected 1.2.0"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+@test "verify-pkg: refuses an empty --asset and an unknown option" {
+  setup_verify
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED" --asset ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--asset needs a value"* ]]
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED" --dry-run
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unknown option: --dry-run"* ]]
+  [ ! -e "$TEST_TMPDIR/clone-urls" ]
+}
+
+@test "verify-pkg: refuses a version that pkgver cannot hold, before the clone" {
+  setup_verify
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo '1.1.0;x' "$PREPARED"
+  [ "$status" -eq 1 ]
+  [ ! -e "$TEST_TMPDIR/clone-urls" ]
 }
 
 # The AUR copy picks the URL, so curl stops a download past 600 MiB and an
 # attempt that stays below 100 KiB/s for 60 s
 @test "verify-pkg: bounds the size and the speed of a download" {
   setup_verify
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
   grep -q -- ' --max-filesize 600M --speed-limit 102400 --speed-time 60 -o ' "$TEST_TMPDIR/curl.args"
 }
@@ -1050,7 +1078,7 @@ commit_aur_state() {
 # prepare as in verify
 @test "verify-pkg: refuses a checksum of a download over http" {
   setup_verify "http://example.com"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Cannot check the checksum of http://example.com/demo-1.1.0.tar.gz: only local files, https downloads and git sources over https are checked"* ]]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
@@ -1058,7 +1086,7 @@ commit_aur_state() {
 
 @test "verify-pkg: refuses a checksum of a download over ftp" {
   setup_verify "ftp://example.com"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Cannot check the checksum of ftp://example.com/demo-1.1.0.tar.gz: only local files, https downloads"* ]]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
@@ -1070,7 +1098,7 @@ commit_aur_state() {
   sed -i 's/^pkgver=.*/pkgver="1.0.0"/' "$work/PKGBUILD"
   commit_aur_state "quote pkgver"
   cp "$work/PKGBUILD" "$work/.SRCINFO" "$PREPARED/"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
   [[ "$output" == *"The prepared files of demo are those of the AUR, nothing to verify"* ]]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
@@ -1081,7 +1109,7 @@ commit_aur_state() {
   cp "$OLD" "$PREPARED/PKGBUILD"
   cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
   sed -i 's/^\tpkgdesc = demo$/\tpkgdesc = changed/' "$PREPARED/.SRCINFO"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO line 2 changes more than the version"* ]]
 }
@@ -1090,7 +1118,7 @@ commit_aur_state() {
 # next request
 @test "verify-pkg: downloads with the cookie engine on, as makepkg does" {
   setup_verify
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
   grep -qF -- ' -b  --retry 3 ' "$TEST_TMPDIR/curl.args"
 }
@@ -1099,7 +1127,7 @@ commit_aur_state() {
   setup_verify
   write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$H3' '$SUM_LOCAL')"
   write_srcinfo "$PREPARED/.SRCINFO" 1.1.0 1 "$H3" "$SUM_LOCAL"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"demo-1.1.0.tar.gz"* ]]
 }
@@ -1108,7 +1136,7 @@ commit_aur_state() {
   setup_verify
   write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$SUM_REMOTE' '$H4')"
   write_srcinfo "$PREPARED/.SRCINFO" 1.1.0 1 "$SUM_REMOTE" "$H4"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"local.patch"* ]]
 }
@@ -1116,7 +1144,7 @@ commit_aur_state() {
 @test "verify-pkg: refuses PKGBUILD checksums that differ from the .SRCINFO" {
   setup_verify
   write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$H3' '$H4')"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"differ in sha256sums"* ]]
 }
@@ -1124,7 +1152,7 @@ commit_aur_state() {
 @test "verify-pkg: refuses a source it cannot download" {
   setup_verify
   touch "$TEST_TMPDIR/curl.fail"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Could not download"* ]]
 }
@@ -1133,7 +1161,7 @@ commit_aur_state() {
   setup_verify
   ln -sf /etc/hostname "$TEST_TMPDIR/aur-work-demo/local.patch"
   commit_aur_state "local.patch as a symlink"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Source local.patch is a symlink or not a regular file in the AUR repo"* ]]
 }
@@ -1151,7 +1179,7 @@ commit_aur_state() {
 
 @test "verify-pkg: refuses a checksum of a source it does not download" {
   setup_verify "file:///etc"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Cannot check the checksum of file:"* ]]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
@@ -1165,7 +1193,7 @@ commit_aur_state() {
   commit_aur_state "skip"
   write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('SKIP' '$SUM_LOCAL')"
   write_srcinfo "$PREPARED/.SRCINFO" 1.1.0 1 SKIP "$SUM_LOCAL"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
@@ -1176,7 +1204,7 @@ commit_aur_state() {
   sed -i 's/"local.patch"/"local.patch::upstream.patch"/' "$work/PKGBUILD" "$PREPARED/PKGBUILD"
   sed -i 's/= local.patch$/= local.patch::upstream.patch/' "$work/.SRCINFO" "$PREPARED/.SRCINFO"
   commit_aur_state "renamed source"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
 }
 
@@ -1184,7 +1212,7 @@ commit_aur_state() {
   setup_verify
   git -C "$TEST_TMPDIR/aur-work-demo" rm -q local.patch
   commit_aur_state "no patch"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Local source local.patch is missing"* ]]
 }
@@ -1195,7 +1223,7 @@ commit_aur_state() {
   sed -i 's/"local.patch"/"lp:demo"/' "$work/PKGBUILD" "$PREPARED/PKGBUILD"
   sed -i 's/= local.patch$/= lp:demo/' "$work/.SRCINFO" "$PREPARED/.SRCINFO"
   commit_aur_state "bzr source"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Cannot check the checksum of lp:demo"* ]]
 }
@@ -1208,7 +1236,7 @@ commit_aur_state() {
   sum=$(sha256sum <"$TEST_TMPDIR/aur-work-demo/demo-1.1.0.tar.gz" | cut -d' ' -f1)
   write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$sum' '$SUM_LOCAL')"
   write_srcinfo "$PREPARED/.SRCINFO" 1.1.0 1 "$sum" "$SUM_LOCAL"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
@@ -1219,7 +1247,7 @@ commit_aur_state() {
   git -C "$work" rm -q local.patch
   ln -s /etc/hostname "$work/local.patch"
   commit_aur_state "symlink"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"symlink"* ]]
 }
@@ -1269,7 +1297,7 @@ use_source() {
   make_upstream
   use_source "demo::git+https://example.com/demo.git#tag=vVER"
   sed -i "s/$SUM_REMOTE/$GIT_SUM/" "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
   grep -qx 'https://example.com/demo.git' "$TEST_TMPDIR/git-clone-urls"
   # git follows a redirect only to a protocol it allows
@@ -1281,7 +1309,7 @@ use_source() {
   make_upstream
   use_source "git+https://example.com/demo.git#commit=$GIT_COMMIT"
   sed -i "s/$SUM_REMOTE/$GIT_SUM/" "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
 }
 
@@ -1289,7 +1317,7 @@ use_source() {
   setup_verify
   make_upstream
   use_source "demo::git+https://example.com/demo.git#tag=vVER"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"demo.git#tag=v1.1.0"* ]]
 }
@@ -1298,7 +1326,7 @@ use_source() {
   setup_verify
   # No make_upstream, so the mirror clone finds no repository
   use_source "demo::git+https://example.com/demo.git#tag=vVER"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Could not clone https://example.com/demo.git"* ]]
 }
@@ -1307,7 +1335,7 @@ use_source() {
   setup_verify
   make_upstream
   use_source "demo::git+https://example.com/demo.git#tag=releaseVER"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Could not archive release1.1.0 of https://example.com/demo.git"* ]]
 }
@@ -1316,7 +1344,7 @@ use_source() {
   setup_verify
   make_upstream
   use_source "demo::git+https://example.com/demo.git#branch=main"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"tag or commit"* ]]
   [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
@@ -1326,7 +1354,7 @@ use_source() {
   setup_verify
   make_upstream
   use_source "demo::git+ssh://example.com/demo.git#tag=vVER"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"git sources are cloned over https only"* ]]
   [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
@@ -1336,7 +1364,7 @@ use_source() {
   setup_verify
   make_upstream
   use_source "demo::git+http://example.com/demo.git#tag=vVER"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Cannot check the checksum of demo::git+http://example.com/demo.git#tag=v1.1.0: git sources are cloned over https only"* ]]
   [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
@@ -1346,7 +1374,7 @@ use_source() {
   setup_verify
   make_upstream
   use_source "demo::git+https://example.com/demo.git#tag=-vVER"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"tag=-v1.1.0: makepkg hashes a git source only at a tag or commit"* ]]
   [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
@@ -1357,7 +1385,7 @@ use_source() {
   make_upstream
   echo "not a repo" >"$TEST_TMPDIR/aur-work-demo/demo"
   use_source "demo::git+https://example.com/demo.git#tag=vVER"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"takes the place of the clone"* ]]
 }
@@ -1379,7 +1407,7 @@ use_source() {
   sed -i "s/^\tlicense = MIT\$/&\n\tb2sums = $H1/" "$work/.SRCINFO"
   sed -i "s/^\tlicense = MIT\$/&\n\tb2sums = $H3/" "$PREPARED/.SRCINFO"
   commit_aur_state "b2sums"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"lists b2sums, the PKGBUILD does not"* ]]
 }
@@ -1392,7 +1420,7 @@ use_source() {
   commit_aur_state "three checksums"
   write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$SUM_REMOTE' '$SUM_LOCAL' '$H3')"
   sed -i "s/^\tsha256sums = $SUM_LOCAL\$/&\n\tsha256sums = $H3/" "$PREPARED/.SRCINFO"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"has 3 sha256sums for 2 sources"* ]]
 }
@@ -1400,7 +1428,7 @@ use_source() {
 @test "verify-pkg: refuses a base that is not a commit id" {
   setup_verify
   echo master >"$PREPARED/base"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"not a commit id"* ]]
   [ ! -e "$TEST_TMPDIR/clone-urls" ]
@@ -1409,7 +1437,7 @@ use_source() {
 @test "verify-pkg: refuses a prepared PKGBUILD that changes other lines, before any download" {
   setup_verify
   sed -i 's|https://example.com/demo|https://evil.example/demo|' "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"changes lines outside"* ]]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
@@ -1418,7 +1446,7 @@ use_source() {
 @test "verify-pkg: defers when the AUR moved since the update was prepared" {
   setup_verify
   printf '0%.0s' {1..40} >"$PREPARED/base"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 3 ]
 }
 
@@ -1426,7 +1454,7 @@ use_source() {
   setup_verify
   mv "$PREPARED" "$TEST_TMPDIR/real-prepared"
   ln -s "$TEST_TMPDIR/real-prepared" "$PREPARED"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared directory is missing or a symlink"* ]]
   [ ! -e "$TEST_TMPDIR/clone-urls" ]
@@ -2129,13 +2157,15 @@ EOF
 
 # === check-all.sh --verify ===
 
-# Helper: one package with a prepared update and its handed over status
+# Helper: one package with a prepared update, its handed over status and the
+# status of the check run
 setup_check_verify() {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
   mkdir -p "$TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/out/status"
   echo "new_version: 2.0.0" >"$TEST_TMPDIR/out/status/pkg"
+  checked_status pkg "new_version: 2.0.0"
 }
 
 @test "check-all --verify: keeps a verified update and runs no strategy" {
@@ -2145,7 +2175,7 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/check-update.sh.args" ]
-  grep -qx "pkg $TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/verify-pkg.sh.args"
+  grep -qx "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/verify-pkg.sh.args"
   [ -d "$TEST_TMPDIR/out/prepared/pkg" ]
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
 }
@@ -2180,16 +2210,73 @@ current: '1.0.0'"
   stub_script verify-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
-  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg $TEST_TMPDIR/out/prepared/pkg" ]
+  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" ]
 }
 
 @test "check-all --verify: verifies the packages of AURTOMATOR_DATA_DIR" {
-  mkdir -p "$BATS_TEST_TMPDIR/data/packages" "$TEST_TMPDIR/out/prepared/pkg"
+  mkdir -p "$BATS_TEST_TMPDIR/data/packages" "$BATS_TEST_TMPDIR/data/.status" "$TEST_TMPDIR/out/prepared/pkg"
   printf '%s\n' 'name: pkg' 'strategy: github-release' 'upstream:' '  project: owner/repo' "current: '1.0.0'" >"$BATS_TEST_TMPDIR/data/packages/pkg.yml"
+  echo "new_version: 2.0.0" >"$BATS_TEST_TMPDIR/data/.status/pkg"
   stub_script verify-pkg.sh 0
   AURTOMATOR_DATA_DIR="$BATS_TEST_TMPDIR/data" run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
-  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg $TEST_TMPDIR/out/prepared/pkg" ]
+  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" ]
+}
+
+@test "check-all --verify: verifies a rebuild and a downgrade at the version of the check run" {
+  local found
+  setup_check_verify
+  stub_script verify-pkg.sh 0
+  for found in "new_build: 1.0.0" "available_downgrade: 0.9.0"; do
+    echo "$found"
+    checked_status pkg "$found"
+    rm -f "$TEST_TMPDIR/verify-pkg.sh.args"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg ${found#*: } $TEST_TMPDIR/out/prepared/pkg" ]
+  done
+}
+
+# A prepared update names neither the version nor the asset value that
+# verify downloads
+@test "check-all --verify: takes out an update the check run found no new version for" {
+  local found
+  setup_check_verify
+  stub_script verify-pkg.sh 0
+  for found in up_to_date "held: 2.0.0" "new_version: 2.0.0;x" ""; do
+    echo "$found"
+    mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+    if [[ -n "$found" ]]; then
+      checked_status pkg "$found"
+    else
+      rm -f "$TEST_TMPDIR/.status/pkg"
+    fi
+    run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
+    [ ! -e "$TEST_TMPDIR/out/prepared/pkg" ]
+    [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: no new version from the check run" ]
+  done
+}
+
+@test "check-all --verify: passes the asset value of the check run" {
+  checked_asset_package 1.0.0 "new_version: 2.0.0" 2.0.0-a
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script verify-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg --asset 2.0.0-a" ]
+}
+
+@test "check-all --verify: takes out an update without the asset value of the check run" {
+  checked_asset_package 1.0.0 "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script verify-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
+  [ ! -e "$TEST_TMPDIR/out/prepared/pkg" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: no asset value from the check run" ]
 }
 
 # === alert_issue_body ===
@@ -4031,7 +4118,7 @@ pkgver_dash: ''"
   [ "$status" -eq 0 ]
   grep -qx "_deb=$V250" "$TEST_TMPDIR/out/demo/PKGBUILD"
   mock_downloads
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 2.5.0rc1 "$TEST_TMPDIR/out/demo" --asset "$V250"
   [ "$status" -eq 0 ]
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 2.5.0rc1 "$TEST_TMPDIR/out/demo" --asset "$V250"
   [ "$status" -eq 0 ]
@@ -4047,7 +4134,7 @@ pkgver_dash: ''"
   [ "$status" -eq 0 ]
   grep -qx "pkgrel=2" "$TEST_TMPDIR/out/demo/PKGBUILD"
   mock_downloads
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 2.4.6 "$TEST_TMPDIR/out/demo" --asset "$V246_3"
   [ "$status" -eq 0 ]
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 2.4.6 "$TEST_TMPDIR/out/demo" --asset "$V246_3"
   [ "$status" -eq 0 ]
@@ -4296,7 +4383,26 @@ current_asset: '$1-a'"
   "$TEST_TMPDIR/scripts/update-pkg.sh" demo 2.5.0rc1 --asset "$V250" --prepare "$TEST_TMPDIR/out"
   sed -i '/^_deb=/d' "$TEST_TMPDIR/out/demo/PKGBUILD"
   mock_downloads
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo "$TEST_TMPDIR/out/demo"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 2.5.0rc1 "$TEST_TMPDIR/out/demo" --asset "$V250"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD needs one _deb= line, it has 0"* ]]
+  [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+@test "verify-pkg: refuses a prepared asset value other than the one it is given" {
+  setup_asset_package 2.4.6 "$V246_3" 1 2.5.0rc1 "$V250" 1
+  "$TEST_TMPDIR/scripts/update-pkg.sh" demo 2.5.0rc1 --asset "$V250" --prepare "$TEST_TMPDIR/out"
+  mock_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 2.5.0rc1 "$TEST_TMPDIR/out/demo" --asset "${V250}x"
+  [ "$status" -eq 1 ]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+@test "verify-pkg: needs --asset for a package with upstream.asset_var" {
+  setup_asset_package 2.4.6 "$V246_3" 1 2.5.0rc1 "$V250" 1
+  "$TEST_TMPDIR/scripts/update-pkg.sh" demo 2.5.0rc1 --asset "$V250" --prepare "$TEST_TMPDIR/out"
+  mock_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 2.5.0rc1 "$TEST_TMPDIR/out/demo"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.asset_var is set, so --asset is needed"* ]]
 }

@@ -541,13 +541,21 @@ id_of() {
   run yq '.jobs | to_entries[] | .key as $job | .value.steps[] | select(.uses | test("^actions/download-artifact@")) |
     $job + " " + .with.path + " " + .with["artifact-ids"] + " " + (.with | has("name") | tostring)' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 6 ]
+  [ "${#lines[@]}" -eq 7 ]
   [ "${lines[0]}" = "prepare .status $(id_of check checked) false" ]
-  [ "${lines[1]}" = "verify handoff $(id_of prepare handoff) false" ]
-  [ "${lines[2]}" = "publish .status $(id_of check checked) false" ]
-  [ "${lines[3]}" = "publish handoff $(id_of verify verified) false" ]
-  [ "${lines[4]}" = "issues .status $(id_of check checked) false" ]
-  [ "${lines[5]}" = "issues .status $(id_of publish published) false" ]
+  [ "${lines[1]}" = "verify .status $(id_of check checked) false" ]
+  [ "${lines[2]}" = "verify handoff $(id_of prepare handoff) false" ]
+  [ "${lines[3]}" = "publish .status $(id_of check checked) false" ]
+  [ "${lines[4]}" = "publish handoff $(id_of verify verified) false" ]
+  [ "${lines[5]}" = "issues .status $(id_of check checked) false" ]
+  [ "${lines[6]}" = "issues .status $(id_of publish published) false" ]
+}
+
+# verify-pkg.sh takes the version and the asset value of the check run
+@test "check-updates: verify downloads the statuses of the check job before it runs as builder" {
+  run yq -o=json -I=0 '.jobs.verify.needs' "$CHECK_UPDATES"
+  [ "$output" = '["image","check","prepare"]' ]
+  [ "$(step_index verify "Download statuses")" -lt "$(step_index verify "Verify checksums")" ]
 }
 
 # Runs the Decide step in a workspace whose statuses/ holds the statuses that
