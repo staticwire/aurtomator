@@ -87,6 +87,7 @@ aurtomator only sets `pkgver` and `pkgrel`, updates checksums and `.SRCINFO`, an
 - **`pkgver()` with the wrong strategy**: use `git-latest` for VCS packages
 - **A `SKIP` next to a real checksum of a remote source**: `updpkgsums` runs for the real checksum and would turn such a `SKIP` into a hash, which the check of the prepared files refuses. A `SKIP` that makepkg gives itself does not count: that of a signature (`.sig`, `.sign`, `.asc`), of an svn source, and of a git, hg or bzr source without a pin makepkg hashes, see [docs/SUPPORTED-PACKAGES.md](docs/SUPPORTED-PACKAGES.md#mixed-skip-and-real-checksums-blocked)
 - **Sources that do not follow `pkgver`**: when a download has a real checksum or a VCS source is pinned, a bump has to change a source URL or a checksum for each architecture, or the new version would hold the old files. Make `pkgver` the literal and derive the other variable from it
+- **Lines the check cannot read from the PKGBUILD**: a line of `.SRCINFO` that holds the version must keep a value the PKGBUILD writes as text and take the new version where the PKGBUILD derives it. A value written with an escaped character, `{a,b}` or `$'...'`, or taken from a variable that does not follow `pkgver`, stops the update. Write such a value as plain text or derive it from `pkgver`
 - **Source URLs returning HTML** or an error status: a HEAD request checks every `http` and `https` source, also one with a `SKIP` checksum
 
 Patches in `source=()` trigger a warning and are not blocked.
