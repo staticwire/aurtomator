@@ -1022,8 +1022,6 @@ EOF
   [ "$(cat "$TEST_TMPDIR/git-clone")" = "http:https https://git.example.com/repo.git" ]
 }
 
-# fabric-git is r2173.ef2e985d on the AUR: rev-parse --short grows with the
-# repository, and r2173.ef2e985 reads as older
 @test "git-latest: clones github.com for the github type" {
   fake_git_upstream
   create_test_package "test-git" "git-latest" "upstream:
@@ -1062,6 +1060,8 @@ EOF
   [[ "$output" == *"Failed to count commits"* ]]
 }
 
+# fabric-git is r2173.ef2e985d on the AUR: rev-parse --short grows with the
+# repository, and vercmp reads r2173.ef2e985 as newer
 @test "git-latest: takes the length of the hash from current" {
   fake_git_upstream
   local len
