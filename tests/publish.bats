@@ -2747,6 +2747,12 @@ EOF
   run run_summary "$TEST_TMPDIR/st"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+
+  # A repository without packages leaves the directory empty
+  rm "$TEST_TMPDIR/st/_upstream"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # === aur_export and aur_reanchor ===
