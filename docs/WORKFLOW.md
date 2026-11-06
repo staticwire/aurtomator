@@ -1197,13 +1197,15 @@ While `packages/` holds no package, the script writes nothing. A repository made
 The package block starts with the cards that **Record statistics** of `publish` draws in `stats/`, see [5.9](#59-statistics):
 
 ```html
+<a href="stats/events.csv">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">
   <img alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">
 </picture>
+</a>
 ```
 
-GitHub shows `card-dark.svg` in its dark theme and `card.svg` in its light one. The block is the same in every run, so new numbers change the files in `stats/` and leave the README as it is.
+GitHub shows `card-dark.svg` in its dark theme and `card.svg` in its light one, and a click on the card opens the journal. The block is the same in every run, so new numbers change the files in `stats/` and leave the README as it is.
 
 #### Package table
 
@@ -1335,7 +1337,7 @@ A run only adds lines to the journal. A line that is not a row, such as one a ha
 
 `stats-card.sh` draws `stats/card.svg` and `stats/card-dark.svg` from the journal for the day of the run. A card is 680 by 356 pixels, in the colors of the light or the dark theme of GitHub:
 
-- The header names the repository and the number of packages in `packages/`. When the last row of a package is a failure, the number of such packages follows in red.
+- The header names the repository and the number of packages in `packages/`. When the last row of a package is a failure, the number of such packages follows in red. The day of the card stands below them, as `updated Nov 8, 2026`, so a card that no run drew again shows its age.
 - The table counts four things over the last 7, 30 and 365 days, the day of the run included. `Pushes to AUR` counts the pushes, `Packages updated` the packages with at least one push, `New packages` the `added` rows, and `Failed checks` the rows of `check_failed` and `update_failed`. While the journal is younger than a column, the column is headed `since <month> <day>` with the day of the first row.
 - The heatmap shows the pushes of each day of the last 53 weeks, one column for each week from Sunday, as on the profile page of GitHub. The shades have fixed steps at 1, 2, 4 and 6 pushes a day, so one busy day leaves the shades of the other days as they are. A day before the first row of the journal has an outline only, so a day without data looks different from a day without a push.
 
