@@ -102,6 +102,8 @@ lib() {
   [ "$output" = 'update_failed,1.0' ]
   run lib stats_event up_to_date 1.0
   [ "$output" = 'up_to_date,1.0' ]
+  run lib stats_event "cooldown: 2026-11-12" 1.0
+  [ "$output" = 'up_to_date,1.0' ]
   for kind in held jump_skipped downgrade_skipped pending; do
     run lib stats_event "$kind: 2.5.0rc1" 2.4.6
     [ "$output" = "$kind,2.5.0rc1" ]
@@ -304,6 +306,20 @@ added_rows() {
   st a up_to_date
   record
   [ "$(added_rows)" = '2026-11-10T05:17:22Z,a,up_to_date,2.4.6,,44' ]
+}
+
+@test "record-events: a wait for the cooldown counts as up to date" {
+  pkg a r2378.06ea49d
+  st a "cooldown: 2026-11-12"
+  journal '2026-11-08T05:17:41Z,a,updated,r2378.06ea49d,r2370.0aa1111,42'
+  record
+  [ "$status" -eq 0 ]
+  [ -z "$(added_rows)" ]
+  [[ "$stderr" != *"maps to no journal event"* ]]
+  journal '2026-11-08T05:17:41Z,a,updated,r2378.06ea49d,r2370.0aa1111,42' '2026-11-09T05:17:41Z,a,check_failed,r2378.06ea49d,,43'
+  record
+  [ "$status" -eq 0 ]
+  [ "$(added_rows)" = '2026-11-10T05:17:22Z,a,up_to_date,r2378.06ea49d,,44' ]
 }
 
 @test "record-events: a version that changed without a push of the run" {
