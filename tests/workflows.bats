@@ -1994,6 +1994,53 @@ no_commit() {
   no_commit
 }
 
+@test "check-updates: the commit step adds the files of stats/ the checkout does not have yet" {
+  make_commit_repo README.md="new table" stats/events.csv=journal stats/card.svg=card stats/card-dark.svg=dark \
+    stats/other.svg=other
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["README.md", "stats/events.csv", "stats/card.svg", "stats/card-dark.svg"]' "$GH_LOG.tree"
+  grep -qF -- "-f message=chore: update package versions [skip ci] " "$GH_LOG"
+}
+
+@test "check-updates: a commit of stats/ alone is a commit of the statistics" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_commit_repo stats/card.svg="new card"
+  mkdir "$ws/stats"
+  echo card >"$ws/stats/card.svg"
+  echo journal >"$ws/stats/events.csv"
+  git -C "$ws" add stats
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m stats
+  cp "$ws/stats/events.csv" "$BATS_TEST_TMPDIR/results/stats/events.csv"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["stats/card.svg"]' "$GH_LOG.tree"
+  grep -qF -- "-f message=chore: update package statistics [skip ci] " "$GH_LOG"
+}
+
+@test "check-updates: the commit step stops when a new file of stats/ appeared on the moved head" {
+  make_commit_repo README.md="new table" stats/card.svg=card
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/bar.yml)" run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["README.md", "stats/card.svg"]' "$GH_LOG.tree"
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/bar.yml && echo "stats/card.svg 0123456789012345678901234567890123456789")" \
+    run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::stats/card.svg changed on main during the run"* ]]
+  no_commit
+}
+
+@test "check-updates: the commit step leaves stats/ alone when it is a tracked link" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_commit_repo stats/card.svg=card
+  ln -s packages "$ws/stats"
+  git -C "$ws" add stats
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m link
+  run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No changes to commit"* ]]
+}
+
 @test "check-updates: the close step runs before the issue step, and not after a failed step or publish" {
   run yq '[.jobs.issues.steps[].name] | join(",")' "$CHECK_UPDATES"
   [[ "$output" == *"Close resolved issues,Create issues" ]]

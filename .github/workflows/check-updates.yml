@@ -527,12 +527,18 @@ jobs:
           BRANCH: ${{ github.ref_name }}
           RESULTS: /results
         run: |
-          # Only README.md and the package YAMLs of the checkout are
-          # committed, from the copies that Hand over took from builder
+          # README.md and the package YAMLs of the checkout are committed
+          # from the copies of Hand over, the files of stats/ from root's
           changed=()
-          for copy in "$RESULTS/README.md" "$RESULTS"/packages/*.yml; do
+          for copy in "$RESULTS/README.md" "$RESULTS"/packages/*.yml \
+            "$RESULTS/stats/events.csv" "$RESULTS/stats/card.svg" "$RESULTS/stats/card-dark.svg"; do
             [[ -f "$copy" ]] || continue
             file=${copy#"$RESULTS"/}
+            # The first run with statistics adds the files of stats/
+            if [[ "$file" == stats/* && ! -e "$file" && ! -L "$file" && ! -L stats ]]; then
+              changed+=("$file")
+              continue
+            fi
             [[ -f "$file" && ! -L "$file" ]] || continue
             cmp -s -- "$copy" "$file" || changed+=("$file")
           done
@@ -542,6 +548,9 @@ jobs:
           fi
 
           MESSAGE="chore: update package versions [skip ci]"
+          if ! printf '%s\n' "${changed[@]}" | grep -qv '^stats/'; then
+            MESSAGE="chore: update package statistics [skip ci]"
+          fi
 
           HEAD_SHA=$(gh api "repos/$REPO/git/ref/heads/$BRANCH" --jq '.object.sha')
           BASE_TREE=$(gh api "repos/$REPO/git/commits/$HEAD_SHA" --jq '.tree.sha')
@@ -556,10 +565,13 @@ jobs:
             remote=$(gh api "repos/$REPO/git/trees/$BASE_TREE?recursive=1" \
               --jq '.tree[] | select(.type == "blob") | .path + " " + .sha')
             for file in "${changed[@]}"; do
-              if ! grep -qxF -- "$file $(git_ws rev-parse "HEAD:$file")" <<<"$remote"; then
-                echo "::notice::$file changed on $BRANCH during the run, so the statuses of this run are not committed"
-                exit 0
+              if [[ -e "$file" ]]; then
+                grep -qxF -- "$file $(git_ws rev-parse "HEAD:$file")" <<<"$remote" && continue
+              else
+                cut -d ' ' -f 1 <<<"$remote" | grep -qxF -- "$file" || continue
               fi
+              echo "::notice::$file changed on $BRANCH during the run, so the statuses of this run are not committed"
+              exit 0
             done
           fi
 
