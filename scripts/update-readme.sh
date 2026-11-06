@@ -107,7 +107,7 @@ if [[ "$has_badges" == true ]]; then
 
   # Names the project itself, so it does not follow AURTOMATOR_UPSTREAM;
   # 1793d1 is the blue of the Arch Linux logo
-  badges+="[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-1793d1)](https://github.com/staticwire/aurtomator)"
+  badges+="[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-1793d1?logo=archlinux&logoColor=white)](https://github.com/staticwire/aurtomator)"
 
   # Replace between badge markers
   {
