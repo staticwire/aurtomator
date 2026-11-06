@@ -399,6 +399,18 @@ added_rows() {
   [[ "$stderr" != *"status of a"* && "$stderr" != *"status of b"* ]]
 }
 
+@test "record-events: a journal that cannot be copied leaves no file behind" {
+  pkg a 1.0
+  st a up_to_date
+  journal '2026-11-08T05:17:41Z,a,tracked,1.0,,42'
+  printf '#!/bin/sh\nexit 1\n' >"$MOCK_DIR/cat"
+  chmod +x "$MOCK_DIR/cat"
+  record
+  [ "$status" -ne 0 ]
+  [ ! -e "$TEST_TMPDIR/out.csv" ]
+  [ ! -e "$TEST_TMPDIR/out.csv.tmp" ]
+}
+
 @test "record-events: a wrong header of the journal writes nothing" {
   pkg a 1.0
   st a up_to_date

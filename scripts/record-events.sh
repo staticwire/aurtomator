@@ -145,6 +145,7 @@ for name in "${names[@]}"; do
   fi
 done
 
+trap 'rm -f -- "${ARG[out]}.tmp"' EXIT
 {
   if [[ "$creating" == true ]]; then
     printf '%s\n' "$STATS_HEADER"
