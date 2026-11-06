@@ -467,3 +467,154 @@ day 0 1" ]
   [ "$status" -eq 0 ]
   [ "$output" = $'pushes 0 0 0\npackages 0 0 0\nadded 0 0 0\nfailed 0 0 0\nfailing 0' ]
 }
+
+# Helper: stats-card.sh over the journal and packages/ on day $1
+card() {
+  mkdir -p "$TEST_TMPDIR/card"
+  AURTOMATOR_STATS_DATE="$1" run --separate-stderr "$TEST_TMPDIR/scripts/stats-card.sh" --journal "$J" \
+    --packages "$TEST_TMPDIR/packages" --name aur-packages --out "$TEST_TMPDIR/card"
+}
+
+# Helper: x and y of each cell in the group of card $1 with fill $2
+cells() {
+  awk -v fill="fill=\"$2\"" '/^<g / { on = index($0, fill) > 0; next } /^<\/g>/ { on = 0 }
+    on { match($0, /x="[^"]*" y="[^"]*"/); print substr($0, RSTART, RLENGTH) }' "$1"
+}
+
+# Helper: $2 rows of an update of a package on day $1
+pushes() {
+  local i
+  for ((i = 0; i < $2; i++)); do
+    printf '%sT10:00:00Z,p%s,updated,1.1,1.0,1\n' "$1" "$i" >>"$J"
+  done
+}
+
+@test "stats-card: the pushes of a day set the level of its cell" {
+  journal '2026-10-28T10:00:00Z,p0,tracked,1.0,,1'
+  pushes 2026-11-02 6
+  pushes 2026-11-03 5
+  pushes 2026-11-04 4
+  pushes 2026-11-05 3
+  pushes 2026-11-06 2
+  pushes 2026-11-07 1
+  card 2026-11-07
+  [ "$status" -eq 0 ]
+  local svg="$TEST_TMPDIR/card/card.svg"
+  [ "$(cells "$svg" '#c4e3f5')" = 'x="632" y="310"' ]
+  [ "$(cells "$svg" '#74bde6')" = $'x="632" y="288"\nx="632" y="299"' ]
+  [ "$(cells "$svg" '#1793d1')" = $'x="632" y="266"\nx="632" y="277"' ]
+  [ "$(cells "$svg" '#0e6a9e')" = 'x="632" y="255"' ]
+  [ "$(cells "$svg" '#eff2f5')" = $'x="621" y="277"\nx="621" y="288"\nx="621" y="299"\nx="621" y="310"\nx="632" y="244"' ]
+  [ "$(cells "$svg" none | wc -l)" -eq 360 ]
+  [ "$(cells "$TEST_TMPDIR/card/card-dark.svg" '#62bdf0')" = 'x="632" y="255"' ]
+}
+
+@test "stats-card: a column longer than the journal is headed with its first day" {
+  journal '2026-11-06T10:00:00Z,a,tracked,1.0,,1'
+  card 2026-11-08
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '>since Nov 6</text>' "$TEST_TMPDIR/card/card.svg")" -eq 3 ]
+  [ "$(cells "$TEST_TMPDIR/card/card.svg" none | wc -l)" -eq 362 ]
+  journal '2026-11-02T10:00:00Z,a,tracked,1.0,,1'
+  card 2026-11-08
+  grep -q '>7 days</text>' "$TEST_TMPDIR/card/card.svg"
+  [ "$(grep -c '>since Nov 2</text>' "$TEST_TMPDIR/card/card.svg")" -eq 2 ]
+  journal '2026-10-10T10:00:00Z,a,tracked,1.0,,1'
+  card 2026-11-08
+  grep -q '>30 days</text>' "$TEST_TMPDIR/card/card.svg"
+  grep -q '>since Oct 10</text>' "$TEST_TMPDIR/card/card.svg"
+  journal '2025-11-09T10:00:00Z,a,tracked,1.0,,1'
+  card 2026-11-08
+  grep -q '>365 days</text>' "$TEST_TMPDIR/card/card.svg"
+  ! grep -q '>since ' "$TEST_TMPDIR/card/card.svg"
+}
+
+@test "stats-card: the header counts the packages and those failing now" {
+  touch "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/b.yml" "$TEST_TMPDIR/packages/notes.txt"
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1' '2026-11-01T10:00:00Z,b,tracked,1.0,,1'
+  card 2026-11-08
+  [ "$status" -eq 0 ]
+  grep -q '<tspan font-weight="600" fill="#1f2328">2</tspan> packages</text>' "$TEST_TMPDIR/card/card.svg"
+  ! grep -q failing "$TEST_TMPDIR/card/card.svg"
+  printf '%s\n' '2026-11-07T10:00:00Z,b,check_failed,1.0,,2' >>"$J"
+  rm "$TEST_TMPDIR/packages/a.yml"
+  card 2026-11-08
+  grep -q '<tspan font-weight="600" fill="#1f2328">1</tspan> package <tspan fill="#cf222e">· 1 failing</tspan></text>' "$TEST_TMPDIR/card/card.svg"
+  grep -q '<tspan fill="#f85149">· 1 failing</tspan>' "$TEST_TMPDIR/card/card-dark.svg"
+}
+
+@test "stats-card: a long repository name is cut short of the package count" {
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1'
+  mkdir -p "$TEST_TMPDIR/card"
+  local name
+  for name in 12345678901234567890123456789012 123456789012345678901234567890123; do
+    AURTOMATOR_STATS_DATE=2026-11-08 run --separate-stderr "$TEST_TMPDIR/scripts/stats-card.sh" --journal "$J" \
+      --packages "$TEST_TMPDIR/packages" --name "$name" --out "$TEST_TMPDIR/card"
+    [ "$status" -eq 0 ]
+  done
+  grep -q '>123456789012345678901234567890\.\.\.</text>' "$TEST_TMPDIR/card/card.svg"
+  AURTOMATOR_STATS_DATE=2026-11-08 run --separate-stderr "$TEST_TMPDIR/scripts/stats-card.sh" --journal "$J" \
+    --packages "$TEST_TMPDIR/packages" --name 12345678901234567890123456789012 --out "$TEST_TMPDIR/card"
+  grep -q '>12345678901234567890123456789012</text>' "$TEST_TMPDIR/card/card.svg"
+}
+
+@test "stats-card: numbers above zero take the color of their row" {
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1' '2026-11-02T10:00:00Z,b,added,1.0,,1' \
+    '2026-11-03T10:00:00Z,a,check_failed,1.0,,1' '2026-11-04T10:00:00Z,a,updated,1.1,1.0,1'
+  card 2026-11-08
+  [ "$status" -eq 0 ]
+  local svg="$TEST_TMPDIR/card/card.svg"
+  grep -q '<text x="436" y="120" font-size="16" font-weight="600" text-anchor="end" fill="#1f2328">1</text>' "$svg"
+  grep -q '<text x="436" y="148" font-size="16" font-weight="600" text-anchor="end" fill="#1f2328">1</text>' "$svg"
+  grep -q '<text x="436" y="176" font-size="16" font-weight="600" text-anchor="end" fill="#1a7f37">1</text>' "$svg"
+  grep -q '<text x="436" y="204" font-size="16" font-weight="600" text-anchor="end" fill="#cf222e">1</text>' "$svg"
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1'
+  card 2026-11-08
+  [ "$(grep -c 'font-size="16" font-weight="600" text-anchor="end" fill="#818b98">0</text>' "$svg")" -eq 12 ]
+  grep -q '<tspan font-weight="600" fill="#1f2328">0</tspan> pushes in the last year</text>' "$svg"
+  pushes 2026-11-08 1
+  card 2026-11-08
+  grep -q '<tspan font-weight="600" fill="#1f2328">1</tspan> push in the last year</text>' "$svg"
+}
+
+@test "stats-card: the same journal and day give the same bytes" {
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1'
+  pushes 2026-11-05 3
+  card 2026-11-08
+  [ "$status" -eq 0 ]
+  cp "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/first.svg"
+  cp "$TEST_TMPDIR/card/card-dark.svg" "$TEST_TMPDIR/first-dark.svg"
+  card 2026-11-08
+  cmp "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/first.svg"
+  cmp "$TEST_TMPDIR/card/card-dark.svg" "$TEST_TMPDIR/first-dark.svg"
+  ! cmp -s "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/card/card-dark.svg"
+}
+
+@test "stats-card: a wrong name, day, option or path exits 1 and draws nothing" {
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1'
+  mkdir -p "$TEST_TMPDIR/card"
+  local args=(--journal "$J" --packages "$TEST_TMPDIR/packages" --name aur-packages --out "$TEST_TMPDIR/card")
+  local script="$TEST_TMPDIR/scripts/stats-card.sh"
+  run --separate-stderr timeout 10 "$script" "${args[@]}" --extra
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"Unknown option: --extra"* ]]
+  run --separate-stderr timeout 10 "$script" "${args[@]:0:6}" --out
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--out needs a value"* ]]
+  run --separate-stderr "$script" "${args[@]:0:6}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"Usage: stats-card.sh"* ]]
+  run --separate-stderr "$script" "${args[@]/aur-packages/a/b}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--name"* ]]
+  for day in 2026-11-8 2026-13-01 2026-02-30 tomorrow; do
+    AURTOMATOR_STATS_DATE="$day" run --separate-stderr "$script" "${args[@]}"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"AURTOMATOR_STATS_DATE"* ]]
+  done
+  run --separate-stderr "$script" "${args[@]/#"$J"/"$TEST_TMPDIR/none.csv"}"
+  [ "$status" -eq 1 ]
+  run --separate-stderr "$script" "${args[@]/#"$TEST_TMPDIR/card"/"$TEST_TMPDIR/none"}"
+  [ "$status" -eq 1 ]
+  [ -z "$(ls -A "$TEST_TMPDIR/card")" ]
+}
