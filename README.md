@@ -113,7 +113,7 @@ The line under the package table in the README of your repository shows the vers
 
 ## Statistics
 
-Your repository keeps a journal of every change of state of its packages in `stats/events.csv`: pushes, waits, failures, recoveries, and packages added and removed. Its README shows a card drawn from the journal above the package table, with the pushes to the AUR, the packages updated, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The card names the day it was drawn, and a click on it opens the journal. Google Sheets and Grafana read the journal from its URL. Details are in [docs/WORKFLOW.md section 5.9](docs/WORKFLOW.md#59-statistics).
+Your repository keeps a journal of every change of state of its packages in `stats/events.csv`: pushes, waits, failures, recoveries, and packages added and removed. Its README shows a card drawn from the journal above the package table, with the packages updated, the pushes to the AUR, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The card names the day it was drawn, and a click on it opens the journal. Google Sheets and Grafana read the journal from its URL. Details are in [docs/WORKFLOW.md section 5.9](docs/WORKFLOW.md#59-statistics).
 
 ## Resource usage
 

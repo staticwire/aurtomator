@@ -48,7 +48,7 @@ The badge URLs name `validate.yml` and `check-updates.yml` in your repository, s
 
 ### Statistics
 
-The first run with a package adds `stats/` to your repository: `events.csv`, the journal of every change of state of your packages, and `card.svg` and `card-dark.svg`, the card at the top of the package block of the README. The card shows the pushes to the AUR, the packages updated, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The journal starts with that run, with one `tracked` row for each package, and holds nothing from before it. The first run of each day commits the card of the new day. See [WORKFLOW.md](WORKFLOW.md#59-statistics) for the events of the journal and for reading it in Google Sheets or Grafana.
+The first run with a package adds `stats/` to your repository: `events.csv`, the journal of every change of state of your packages, and `card.svg` and `card-dark.svg`, the card at the top of the package block of the README. The card shows the packages updated, the pushes to the AUR, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The journal starts with that run, with one `tracked` row for each package, and holds nothing from before it. The first run of each day commits the card of the new day. See [WORKFLOW.md](WORKFLOW.md#59-statistics) for the events of the journal and for reading it in Google Sheets or Grafana.
 
 ## The calling workflows
 

@@ -2406,7 +2406,7 @@ current: '1.0.0'"
   [ "${block[1]}" = '<a href="stats/events.csv">' ]
   [ "${block[2]}" = '<picture>' ]
   [ "${block[3]}" = '  <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">' ]
-  [ "${block[4]}" = '  <img width="100%" alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">' ]
+  [ "${block[4]}" = '  <img width="100%" alt="Packages updated, pushes to AUR, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">' ]
   [ "${block[5]}" = '</picture>' ]
   [ "${block[6]}" = '</a>' ]
   [ "${block[7]}" = '' ]

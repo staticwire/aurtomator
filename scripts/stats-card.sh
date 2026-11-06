@@ -116,8 +116,8 @@ END {
     }
     printf "<text x=\"%d\" y=\"90\" font-size=\"12\" text-anchor=\"end\" fill=\"%s\">%s</text>\n", cx[i], mu, head
   }
-  split("pushes packages added failed", key, " ")
-  split("Pushes to AUR|Packages updated|New packages|Failed checks", label, "|")
+  split("packages pushes added failed", key, " ")
+  split("Packages updated|Pushes to AUR|New packages|Failed checks", label, "|")
   color["pushes"] = tx; color["packages"] = tx; color["added"] = grn; color["failed"] = red
   for (j = 1; j <= 4; j++) {
     y = 120 + (j - 1) * 28

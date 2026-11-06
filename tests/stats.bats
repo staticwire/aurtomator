@@ -602,6 +602,18 @@ pushes() {
   grep -q '>12345678901234567890123456789012</text>' "$TEST_TMPDIR/card/card.svg"
 }
 
+@test "stats-card: the packages updated come before the pushes" {
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1' '2026-11-05T10:00:00Z,a,updated,1.1,1.0,2' \
+    '2026-11-06T10:00:00Z,a,updated,1.2,1.1,3'
+  card 2026-11-08
+  [ "$status" -eq 0 ]
+  local svg="$TEST_TMPDIR/card/card.svg"
+  grep -qx '<text x="24" y="120" font-size="14" fill="#1f2328">Packages updated</text>' "$svg"
+  grep -qx '<text x="436" y="120" font-size="16" font-weight="600" text-anchor="end" fill="#1f2328">1</text>' "$svg"
+  grep -qx '<text x="24" y="148" font-size="14" fill="#1f2328">Pushes to AUR</text>' "$svg"
+  grep -qx '<text x="436" y="148" font-size="16" font-weight="600" text-anchor="end" fill="#1f2328">2</text>' "$svg"
+}
+
 @test "stats-card: numbers above zero take the color of their row" {
   journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1' '2026-11-02T10:00:00Z,b,added,1.0,,1' \
     '2026-11-03T10:00:00Z,a,check_failed,1.0,,1' '2026-11-04T10:00:00Z,a,updated,1.1,1.0,1'

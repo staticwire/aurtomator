@@ -134,7 +134,7 @@ table_row() {
 readonly CARD='<a href="stats/events.csv">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">
-  <img width="100%" alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">
+  <img width="100%" alt="Packages updated, pushes to AUR, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">
 </picture>
 </a>'
 
