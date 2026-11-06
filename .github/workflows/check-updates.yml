@@ -218,6 +218,18 @@ jobs:
           if [[ -f "$RESULTS/README.md" ]] && ! cmp -s "$RESULTS/README.md" README.md; then
             work=true
           fi
+          # The windows of the card move with the day, so publish runs also
+          # when today's card differs from the committed one
+          if compgen -G 'packages/*.yml' >/dev/null; then
+            if [[ ! -f stats/events.csv ]]; then
+              work=true
+            elif mkdir -p "$RESULTS/stats" &&
+              ./aurtomator/scripts/stats-card.sh --journal stats/events.csv --packages packages \
+                --name "${GITHUB_REPOSITORY#*/}" --out "$RESULTS/stats" &&
+              ! cmp -s "$RESULTS/stats/card.svg" stats/card.svg; then
+              work=true
+            fi
+          fi
           echo "prepare=$prepare" >>"$GITHUB_OUTPUT"
           echo "work=$work" >>"$GITHUB_OUTPUT"
 

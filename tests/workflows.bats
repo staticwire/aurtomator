@@ -562,10 +562,11 @@ id_of() {
 # Hand over wrote, given as name=status pairs, beside the README of the
 # checkout. The copy of the README in $RESULTS differs from it when
 # $README_CHANGED is set and is missing when $NO_README_COPY is set. sudo and
-# git fail. Prints the step outputs.
+# git fail. The day of the card is 2026-11-10. Prints the step outputs.
 run_decide_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" results="$BATS_TEST_TMPDIR/results" pair
   mkdir -p "$ws/statuses" "$bin" "$results"
+  ln -sfn "$BATS_TEST_DIRNAME/.." "$ws/aurtomator"
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/statuses/${pair%%=*}"
   done
@@ -579,7 +580,8 @@ run_decide_step() {
   step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
   (cd "$ws" && PATH="$bin:$PATH" RESULTS="$results" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
-    bash -e "$BATS_TEST_TMPDIR/step.sh") >/dev/null
+    GITHUB_REPOSITORY=owner/aur-packages AURTOMATOR_STATS_DATE=2026-11-10 bash -e "$BATS_TEST_TMPDIR/step.sh") \
+    >/dev/null 2>"$BATS_TEST_TMPDIR/decide.log"
   cat "$BATS_TEST_TMPDIR/output"
 }
 
@@ -615,6 +617,52 @@ run_decide_step() {
 
 @test "check-updates: Decide counts a missing copy of the README as unchanged" {
   NO_README_COPY=1 run run_decide_step pkg=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false' ]
+}
+
+# Puts package a, its journal and the card of day $1 into the workspace of
+# run_decide_step
+decide_stats() {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws/packages" "$ws/stats"
+  echo "name: a" >"$ws/packages/a.yml"
+  printf '%s\n' 'time,package,event,version,previous,run' '2026-11-08T05:17:41Z,a,tracked,1.0,,6' >"$ws/stats/events.csv"
+  AURTOMATOR_STATS_DATE="$1" "$BATS_TEST_DIRNAME/../scripts/stats-card.sh" --journal "$ws/stats/events.csv" \
+    --packages "$ws/packages" --name aur-packages --out "$ws/stats" 2>/dev/null
+}
+
+@test "check-updates: Decide publishes when the journal or the card is missing" {
+  mkdir -p "$BATS_TEST_TMPDIR/ws/packages"
+  echo "name: a" >"$BATS_TEST_TMPDIR/ws/packages/a.yml"
+  run run_decide_step a=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=true' ]
+  decide_stats 2026-11-10
+  rm "$BATS_TEST_TMPDIR/ws/stats/card.svg"
+  run run_decide_step a=up_to_date
+  [ "$output" = $'prepare=false\nwork=true' ]
+  decide_stats 2026-11-10
+  rm "$BATS_TEST_TMPDIR/ws/stats/events.csv"
+  run run_decide_step a=up_to_date
+  [ "$output" = $'prepare=false\nwork=true' ]
+}
+
+@test "check-updates: Decide publishes once the windows of the card moved" {
+  decide_stats 2026-11-09
+  run run_decide_step a=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=true' ]
+  decide_stats 2026-11-10
+  run run_decide_step a=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false' ]
+}
+
+@test "check-updates: Decide leaves the run alone when it cannot draw the card" {
+  decide_stats 2026-11-09
+  echo 'time,package' >"$BATS_TEST_TMPDIR/ws/stats/events.csv"
+  run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=false\nwork=false' ]
 }
