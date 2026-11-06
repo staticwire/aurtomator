@@ -501,6 +501,19 @@ pushes() {
   done
 }
 
+@test "stats-card: a year of journal gives the cards of the fixtures" {
+  local fixtures="$PROJECT_DIR/tests/fixtures/stats" name
+  cp "$fixtures/events.csv" "$J"
+  # Every package of the journal but those it removed
+  for name in $(awk -F, 'NR > 1 { last[$2] = $3 } END { for (p in last) if (last[p] != "removed") print p }' "$J"); do
+    touch "$TEST_TMPDIR/packages/$name.yml"
+  done
+  card 2026-11-08
+  [ "$status" -eq 0 ]
+  cmp "$TEST_TMPDIR/card/card.svg" "$fixtures/card.svg"
+  cmp "$TEST_TMPDIR/card/card-dark.svg" "$fixtures/card-dark.svg"
+}
+
 @test "stats-card: the pushes of a day set the level of its cell" {
   journal '2026-10-28T10:00:00Z,p0,tracked,1.0,,1'
   pushes 2026-11-02 6
@@ -538,7 +551,7 @@ pushes() {
   journal '2025-11-09T10:00:00Z,a,tracked,1.0,,1'
   card 2026-11-08
   grep -q '>365 days</text>' "$TEST_TMPDIR/card/card.svg"
-  ! grep -q '>since ' "$TEST_TMPDIR/card/card.svg"
+  run ! grep -q '>since ' "$TEST_TMPDIR/card/card.svg"
 }
 
 @test "stats-card: the header counts the packages and those failing now" {
@@ -547,12 +560,31 @@ pushes() {
   card 2026-11-08
   [ "$status" -eq 0 ]
   grep -q '<tspan font-weight="600" fill="#1f2328">2</tspan> packages</text>' "$TEST_TMPDIR/card/card.svg"
-  ! grep -q failing "$TEST_TMPDIR/card/card.svg"
+  run ! grep -q failing "$TEST_TMPDIR/card/card.svg"
   printf '%s\n' '2026-11-07T10:00:00Z,b,check_failed,1.0,,2' >>"$J"
   rm "$TEST_TMPDIR/packages/a.yml"
   card 2026-11-08
   grep -q '<tspan font-weight="600" fill="#1f2328">1</tspan> package <tspan fill="#cf222e">· 1 failing</tspan></text>' "$TEST_TMPDIR/card/card.svg"
   grep -q '<tspan fill="#f85149">· 1 failing</tspan>' "$TEST_TMPDIR/card/card-dark.svg"
+}
+
+@test "stats-card: a month label two weeks after the last one is left out" {
+  journal '2025-10-01T10:00:00Z,a,tracked,1.0,,1'
+  card 2026-10-20
+  [ "$status" -eq 0 ]
+  grep -qx '<text x="60" y="238" font-size="11" fill="#818b98">Oct</text>' "$TEST_TMPDIR/card/card.svg"
+  run ! grep -q '>Nov</text>' "$TEST_TMPDIR/card/card.svg"
+  grep -qx '<text x="137" y="238" font-size="11" fill="#818b98">Dec</text>' "$TEST_TMPDIR/card/card.svg"
+}
+
+@test "stats-card: the header names the day of the card" {
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1'
+  card 2026-11-08
+  [ "$status" -eq 0 ]
+  grep -qx '<text x="656" y="54" font-size="12" text-anchor="end" fill="#59636e">updated Nov 8, 2026</text>' "$TEST_TMPDIR/card/card.svg"
+  grep -qx '<text x="656" y="54" font-size="12" text-anchor="end" fill="#9198a1">updated Nov 8, 2026</text>' "$TEST_TMPDIR/card/card-dark.svg"
+  card 2027-01-31
+  grep -qx '<text x="656" y="54" font-size="12" text-anchor="end" fill="#59636e">updated Jan 31, 2027</text>' "$TEST_TMPDIR/card/card.svg"
 }
 
 @test "stats-card: a long repository name is cut short of the package count" {
@@ -599,7 +631,7 @@ pushes() {
   card 2026-11-08
   cmp "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/first.svg"
   cmp "$TEST_TMPDIR/card/card-dark.svg" "$TEST_TMPDIR/first-dark.svg"
-  ! cmp -s "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/card/card-dark.svg"
+  run ! cmp -s "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/card/card-dark.svg"
 }
 
 @test "stats-card: a wrong name, day, option or path exits 1 and draws nothing" {

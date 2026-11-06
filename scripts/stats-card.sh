@@ -103,6 +103,8 @@ END {
   if (failing > 0) printf " <tspan fill=\"%s\">\302\267 %d failing</tspan>", red, failing
   print "</text>"
   printf "<text x=\"54\" y=\"54\" font-size=\"12\" fill=\"%s\">AUR packages maintained with aurtomator</text>\n", mu
+  # The day of the card, so a card no run has drawn again shows its age
+  printf "<text x=\"656\" y=\"54\" font-size=\"12\" text-anchor=\"end\" fill=\"%s\">updated %s %d, %s</text>\n", mu, MON[month(today)], strftime("%d", today, 1) + 0, substr(date, 1, 4)
 
   split("7 30 365", window, " ")
   split("436 546 656", cx, " ")
