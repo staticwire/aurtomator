@@ -12,6 +12,7 @@
    - [6.2 Test job](#62-test-job)
    - [6.3 CI image updates](#63-ci-image-updates)
    - [6.4 Validate and pipeline jobs](#64-validate-and-pipeline-jobs)
+   - [6.5 Runner probe](#65-runner-probe)
 7. [Local Testing](#7-local-testing)
 8. [Writing Custom Strategies](#8-writing-custom-strategies)
 
@@ -1303,7 +1304,7 @@ The two tests of the `namcap` check in `update-pkg.sh` run the real `namcap`, an
 
 ### 6.3 CI image updates
 
-Once a month, when Docker Hub has a new `archlinux:base-devel`, Dependabot opens a pull request in aurtomator that changes the digest in `.github/ci-image/Dockerfile`. The `image` jobs read the digest from the pull request, so `test` and the two calls of [6.4](#64-validate-and-pipeline-jobs) run in the new image before the merge.
+Once a month, when Docker Hub has a new `archlinux:base-devel`, Dependabot opens a pull request in aurtomator that changes the digest in `.github/ci-image/Dockerfile`. The `image` jobs read the digest from the pull request, so `test` and the two calls of [6.4](#64-validate-and-pipeline-jobs) run in the new image before the merge. The probe of [6.5](#65-runner-probe) checks the new image for what `builder` rests on.
 
 The `merge-image` job merges such a pull request without a review. It is off until `CI_IMAGE_AUTO_MERGE`, a variable of the aurtomator repository, is `true`. It runs after `lint`, `test`, `validate` and `pipeline` passed, only for a pull request that `dependabot[bot]` opened, on an event Dependabot caused, and gets `contents: write` and `pull-requests: write`. A pull request that changes any other file, a Dependabot update of an action for example, stays open with a notice. Otherwise the job squash-merges it with `--match-head-commit`, so a commit pushed after the tests stops the merge.
 
@@ -1316,6 +1317,14 @@ The two jobs call the reusable workflows of the same commit, with the `./.github
 `validate` calls `validate.yml` with `contents: read`. Your repository calls the same workflow on every push to `main` and on pull requests, see [SETUP.md](SETUP.md#the-calling-workflows). After the `image` job of [5.2](#52-permissions-and-container), its job `packages` runs in the image with a 10-minute timeout. It upgrades `archlinux-keyring` before the system, installs `git` and `go-yq`, runs **Checkout** and **Checkout aurtomator** as in [5.3](#53-steps), and runs `./aurtomator/scripts/validate-pkg.sh --all` in the step `Validate packages`. It creates no `builder`: `validate-pkg.sh` reads YAML and runs no PKGBUILD. In aurtomator, `packages/` holds `example.yml.sample` alone, so the job there checks the call itself: the pin check, the two checkouts and the container. In your repository, the pull request that moves the pin runs the validator of the new release against your packages before the merge.
 
 `pipeline` calls `check-updates.yml` with `contents: write` and `issues: write`, with aurtomator itself as the repository of the packages. No package exists there, so `image`, `check` and `issues` run, `prepare` and `verify` are skipped, and `publish` is skipped as well: with no package, `update-readme.sh` leaves the README of aurtomator as it is. The test `update-readme: the README of aurtomator is what the script writes for it` in `tests/scripts.bats` fails when the script changes it. The job shows on GitHub what the BATS tests cannot: that the runner finds the action in `aurtomator/`, that `GITHUB_ACTION_PATH` leads the action to the scripts, that the checkouts at `job.workflow_sha` work in the containers, and that the artifacts pass between the jobs. It runs for a push and for a pull request from a branch of aurtomator, `github.event.pull_request.head.repo.full_name == github.repository`, because a pull request from a fork of aurtomator gets a read-only token.
+
+### 6.5 Runner probe
+
+`runner-probe.yml` runs only by hand, with `contents: read`: `Run workflow` in the Actions tab, or `gh workflow run runner-probe.yml`. It runs on the branch chosen there, so it can check the pull request of a new image before the merge. Run it after GitHub changes the `ubuntu-latest` image and after the digest in `.github/ci-image/Dockerfile` moves. `builder` in the jobs of [5.3](#53-steps) rests on facts of the runner that no BATS test sees: the account the runner runs as, the owners and modes of what it mounts into a job container, and what `builder` reaches there.
+
+The job `runner` prints `id` of the account the runner runs as on the VM. The job `container` runs in the image that `image` reads, as the jobs of [5.3](#53-steps) do. It installs `sudo` and runs **Add builder**, the step of `check-updates.yml`, which a test in `tests/workflows.bats` keeps equal to it. The step **The mounts** prints `id builder`, the mounts under `/__` from `/proc/self/mountinfo`, and the owner and mode of `/__w`, `/__w/_actions`, `$RUNNER_TEMP`, its `_runner_file_commands`, the workspace, `/__e`, `/__t` and `/var/run/docker.sock`.
+
+The step **What builder reaches** tests as `builder` whether it can write `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY`, `$RUNNER_TEMP`, the workspace, `/__w`, `/__w/_actions` and `/__e`, and whether it can read or write the Docker socket. It prints the exit code of each test and the names of the variables that `sudo` gives `builder`. It fails when a test passes or a name starts with `GITHUB_`, `ACTIONS_` or `RUNNER_`.
 
 ## 7. Local Testing
 

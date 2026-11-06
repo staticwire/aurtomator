@@ -1,0 +1,105 @@
+name: Runner probe
+
+# Run by hand after GitHub changes the runner image and after the digest in
+# .github/ci-image/Dockerfile moves. It prints what builder in the jobs of
+# check-updates.yml rests on, and fails when builder can write a file of the
+# runner, use the Docker socket or read a variable of the runner.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The account the runner runs as on the VM
+  runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The runner account
+        run: id
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.read.outputs.ref }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/ci-image
+
+      - name: Read image
+        id: read
+        run: |
+          ref=$(sed -n 's/^FROM //p' .github/ci-image/Dockerfile)
+          if [[ ! "$ref" =~ ^archlinux:base-devel@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::.github/ci-image/Dockerfile must pin archlinux:base-devel by digest"
+            exit 1
+          fi
+          echo "ref=$ref" >>"$GITHUB_OUTPUT"
+
+  container:
+    needs: image
+    runs-on: ubuntu-latest
+    container: ${{ needs.image.outputs.ref }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman-key --init
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm --needed sudo
+
+      # The step of check-updates.yml, which tests/workflows.bats keeps equal
+      - name: Add builder
+        run: |
+          useradd -m -u 2000 builder
+          if [[ "$(id -u builder)" == "$(stat -c %u "$RUNNER_TEMP")" ]]; then
+            echo "::error::builder has the uid of the account that owns $RUNNER_TEMP"
+            exit 1
+          fi
+          owned=$(find /__w /__e \( -user builder -o -group builder \) -print -quit)
+          if [[ -n "$owned" ]]; then
+            echo "::error::builder owns $owned"
+            exit 1
+          fi
+
+      - name: The mounts
+        run: |
+          id builder
+          grep -E ' /__[a-z]+ ' /proc/self/mountinfo || true
+          stat -c '%n %u:%g %a' /__w /__w/_actions "$RUNNER_TEMP" "$RUNNER_TEMP/_runner_file_commands" \
+            "$GITHUB_WORKSPACE" /__e /__t /var/run/docker.sock || true
+
+      # Prints every result before it fails
+      - name: What builder reaches
+        run: |
+          fail=0
+          # Runs test with flag $1 on path $2 as builder, which has to fail
+          check() {
+            local rc=0
+            sudo -u builder test "$1" "$2" || rc=$?
+            echo "builder: test $1 $2: $rc"
+            if [[ "$rc" -eq 0 ]]; then
+              echo "::error::builder passes test $1 $2"
+              fail=1
+            fi
+          }
+          for path in "$GITHUB_ENV" "$GITHUB_PATH" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" \
+            "$RUNNER_TEMP" "$GITHUB_WORKSPACE" /__w /__w/_actions /__e; do
+            check -w "$path"
+          done
+          check -r /var/run/docker.sock
+          check -w /var/run/docker.sock
+          names=$(sudo -u builder env | cut -d= -f1)
+          echo "The variables of builder: $(paste -sd ' ' <<<"$names")"
+          if leaked=$(grep -E '^(GITHUB|ACTIONS|RUNNER)_' <<<"$names"); then
+            echo "::error::sudo passes $(paste -sd ' ' <<<"$leaked") to builder"
+            fail=1
+          fi
+          exit "$fail"

@@ -2465,3 +2465,103 @@ calling_workflow() {
   run yq '.jobs.validate.uses | line_comment' "$validate"
   [ "$output" = "vX.Y.Z" ]
 }
+
+PROBE="$GITHUB_DIR/workflows/runner-probe.yml"
+
+@test "runner-probe: runs only by hand, reads the repository only and has time limits" {
+  run yq -o=json -I=0 '.on' "$PROBE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"workflow_dispatch":null}' ]
+  run yq -o=json -I=0 '.permissions' "$PROBE"
+  [ "$output" = '{"contents":"read"}' ]
+  run yq -o=json -I=0 '.jobs | keys' "$PROBE"
+  [ "$output" = '["runner","image","container"]' ]
+  run yq '[.jobs[] | .["timeout-minutes"] > 0] | all' "$PROBE"
+  [ "$output" = "true" ]
+}
+
+@test "runner-probe: adds builder as check-updates does" {
+  run yq -o=json -I=0 '[.jobs.container.steps[].name]' "$PROBE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '["Install dependencies","Add builder","The mounts","What builder reaches"]' ]
+  run yq '.jobs.container.steps[] | select(.name == "Add builder") | .run' "$PROBE"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [ "$output" = "$(step_run check "Add builder")" ]
+}
+
+# The paths that builder may not write, in the order the probe tests them,
+# with the file commands under /fc
+PROBE_PATHS=(/fc/set_env /fc/add_path /fc/set_output /fc/step_summary /__w/_temp /__w/repo/repo /__w /__w/_actions /__e)
+
+# Runs the step What builder reaches. sudo logs each test it runs as builder
+# to $CALLS/sudo and passes those in $REACH, given as "<flag>:<path>"
+# separated by spaces. As builder, env prints the names in $BUILDER_ENV.
+run_probe_reach_step() {
+  local bin="$BATS_TEST_TMPDIR/bin"
+  CALLS="$BATS_TEST_TMPDIR/calls"
+  mkdir -p "$bin" "$CALLS"
+  cat >"$bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1 $2" == "-u builder" ]] || exit 97
+shift 2
+case "$1" in
+  test)
+    echo "$*" >>"$CALLS/sudo"
+    [[ " $REACH " == *" $2:$3 "* ]]
+    ;;
+  env) tr ' ' '\n' <<<"$BUILDER_ENV" | sed 's/$/=x/' ;;
+  *) exit 97 ;;
+esac
+EOF
+  chmod +x "$bin/sudo"
+  yq '.jobs.container.steps[] | select(.name == "What builder reaches") | .run' "$PROBE" >"$BATS_TEST_TMPDIR/step.sh"
+  run env PATH="$bin:$PATH" CALLS="$CALLS" REACH="${REACH:-}" BUILDER_ENV="${BUILDER_ENV:-HOME PATH}" \
+    GITHUB_ENV=/fc/set_env GITHUB_PATH=/fc/add_path GITHUB_OUTPUT=/fc/set_output \
+    GITHUB_STEP_SUMMARY=/fc/step_summary RUNNER_TEMP=/__w/_temp GITHUB_WORKSPACE=/__w/repo/repo \
+    bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "runner-probe: passes when builder reaches nothing of the runner" {
+  local expected=() path
+  run_probe_reach_step
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"::error::"* ]]
+  [[ "$output" == *"The variables of builder: HOME PATH"* ]]
+  for path in "${PROBE_PATHS[@]}"; do
+    expected+=("test -w $path")
+  done
+  expected+=("test -r /var/run/docker.sock" "test -w /var/run/docker.sock")
+  [ "$(cat "$CALLS/sudo")" = "$(printf '%s\n' "${expected[@]}")" ]
+}
+
+@test "runner-probe: fails when builder can write a file of the runner, after every test" {
+  local path
+  for path in "${PROBE_PATHS[@]}"; do
+    echo "$path"
+    REACH="-w:$path" run_probe_reach_step
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::builder passes test -w $path"* ]]
+    [ "$(grep -c '^builder: test ' <<<"$output")" -eq 11 ]
+  done
+}
+
+@test "runner-probe: fails when builder can use the Docker socket" {
+  local flag
+  for flag in -r -w; do
+    echo "$flag"
+    REACH="$flag:/var/run/docker.sock" run_probe_reach_step
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::builder passes test $flag /var/run/docker.sock"* ]]
+  done
+}
+
+@test "runner-probe: fails when sudo passes a variable of the runner to builder" {
+  local name
+  for name in GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN RUNNER_TEMP; do
+    echo "$name"
+    BUILDER_ENV="HOME $name PATH" run_probe_reach_step
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::sudo passes $name to builder"* ]]
+  done
+}
