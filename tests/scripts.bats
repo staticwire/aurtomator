@@ -4007,3 +4007,79 @@ current: '1.0.0'"
   grep -qF '<td nowrap>🔨 1.0.0 rebuilt</td>' "$TEST_TMPDIR/README.md"
   grep -qF '<td nowrap>⏳ 2.0.0 pending</td>' "$TEST_TMPDIR/README.md"
 }
+
+# === cooldown ===
+
+# Helper: the UTC date $1 days from today, negative for the past
+utc_day() {
+  date -u -d "$1 days" +%F
+}
+
+@test "lib.sh: valid_date takes a real date YYYY-MM-DD only" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run valid_date 2026-11-06
+  [ "$status" -eq 0 ]
+  local bad
+  for bad in 2026-02-30 2026-11-6 20261106 2026-11-06T10:00:00Z ' 2026-11-06' 10000-01-01 'next week' ''; do
+    run valid_date "$bad"
+    [ "$status" -ne 0 ] || {
+      echo "taken: $bad"
+      return 1
+    }
+  done
+}
+
+@test "lib.sh: cooldown_until gives git-latest 7 days after the last push" {
+  create_test_package "pkg-git" "git-latest" "last_updated: '2026-11-05'"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run cooldown_until "$TEST_TMPDIR/packages/pkg-git.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = 2026-11-12 ]
+}
+
+@test "lib.sh: cooldown_until takes the days of any strategy from cooldown_days" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+last_updated: '2026-11-05'
+cooldown_days: 14"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run cooldown_until "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = 2026-11-19 ]
+}
+
+@test "lib.sh: cooldown_until prints nothing for another strategy, cooldown_days: 0 or no last_updated" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+last_updated: '2026-11-05'"
+  create_test_package "pkg-off" "git-latest" "last_updated: '2026-11-05'
+cooldown_days: 0"
+  create_test_package "pkg-new" "git-latest" "current: r1.abc1234"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local name
+  for name in pkg pkg-off pkg-new; do
+    run cooldown_until "$TEST_TMPDIR/packages/$name.yml"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || {
+      echo "$name: $output"
+      return 1
+    }
+  done
+}
+
+@test "lib.sh: cooldown_until refuses a cooldown_days or a last_updated that is not valid" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local value
+  for value in -1 366 7.5 "'7 days'" "'x[\$(touch $TEST_TMPDIR/ran)]'"; do
+    create_test_package "pkg-git" "git-latest" "last_updated: '2026-11-05'
+cooldown_days: $value"
+    run --separate-stderr cooldown_until "$TEST_TMPDIR/packages/pkg-git.yml"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == "cooldown_days must be a whole number from 0 to 365: "* ]]
+  done
+  [ ! -e "$TEST_TMPDIR/ran" ]
+  create_test_package "pkg-git" "git-latest" "last_updated: '2026-02-30'"
+  run --separate-stderr cooldown_until "$TEST_TMPDIR/packages/pkg-git.yml"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "last_updated must be a date YYYY-MM-DD: 2026-02-30" ]
+}

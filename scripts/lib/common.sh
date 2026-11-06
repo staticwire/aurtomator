@@ -357,6 +357,36 @@ version_jump() {
   ((${#new} >= ${#old} + 2))
 }
 
+# Succeeds when $1 is a real date in the form YYYY-MM-DD
+valid_date() {
+  [[ "$(date -u -d "$1" +%F 2>/dev/null)" == "$1" ]]
+}
+
+# Prints the first day, YYYY-MM-DD, on which package file $1 may be pushed
+# again, or nothing without a cooldown. Returns 1 when a field is not valid.
+cooldown_until() {
+  local file="$1" days last
+  days=$(pkg_get "$file" '.cooldown_days // ""')
+  if [[ -z "$days" ]]; then
+    days=0
+    [[ "$(pkg_get "$file" .strategy)" != git-latest ]] || days=7
+  fi
+  # Only digits reach (( )): bash runs $(...) in an array subscript there
+  if [[ ! "$days" =~ ^(0|[1-9][0-9]{0,2})$ ]] || ((days > 365)); then
+    echo "cooldown_days must be a whole number from 0 to 365: $days" >&2
+    return 1
+  fi
+  last=$(pkg_get "$file" '.last_updated // ""')
+  if ((days == 0)) || [[ -z "$last" ]]; then
+    return 0
+  fi
+  if ! valid_date "$last"; then
+    echo "last_updated must be a date YYYY-MM-DD: $last" >&2
+    return 1
+  fi
+  date -u -d "$last + $days days" +%F
+}
+
 # Print every tag name of a git repository, one per line, from git
 # ls-remote over https only and without a terminal prompt
 # Args: $1=HTTPS URL of the repository
