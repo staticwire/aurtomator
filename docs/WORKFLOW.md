@@ -875,11 +875,11 @@ Every comparison that finds the current version newer than the latest one (`verc
 - `available_downgrade: 1.2.0` → `🔻 1.2.0 available (downgrade)`
 - `downgrade: 1.2.0` → `🔻 downgraded to 1.2.0`
 
-All three count toward `pkg_ok`, so the packages badge stays `brightgreen`. Only `check_failed` and `update_failed` turn it red.
+None of the three is a failure, and the statistics card counts a pushed downgrade as a push, see [5.9](#59-statistics).
 
 #### Version jumps
 
-An update whose first number has at least two digits more than the first number of `current`, such as `13 → 2026102100` or `4.4215 → 4215`, reaches the AUR only when the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the same upstream than a release: GrapheneOS tags the standalone releases of `hardened_malloc` `1` to `14` and its GrapheneOS builds, such as `2026102100`, in the same repository, and the default tag filter keeps both. Without the flag, `check-all.sh` writes `jump_skipped: <version>`, logs the line below and pushes nothing. `--prepare` and `--publish` apply the same rule. A skipped jump opens no issue and counts toward `pkg_ok`, and `update-readme.sh` renders `jump_skipped: 2026102100` as `🔺 2026102100 skipped (version jump)`.
+An update whose first number has at least two digits more than the first number of `current`, such as `13 → 2026102100` or `4.4215 → 4215`, reaches the AUR only when the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the same upstream than a release: GrapheneOS tags the standalone releases of `hardened_malloc` `1` to `14` and its GrapheneOS builds, such as `2026102100`, in the same repository, and the default tag filter keeps both. Without the flag, `check-all.sh` writes `jump_skipped: <version>`, logs the line below and pushes nothing. `--prepare` and `--publish` apply the same rule. A skipped jump opens no issue and does not count among the failing packages of the statistics card, and `update-readme.sh` renders `jump_skipped: 2026102100` as `🔺 2026102100 skipped (version jump)`.
 
 ```text
 ! hardened_malloc: version jump 13 → 2026102100, skipped: allow_version_jump is not set
@@ -956,7 +956,7 @@ With `hold: true`, `check-all.sh` writes `held: <version>`, logs the first line 
 ! myjdk-ea-bin: update 28+25 → 29+1 notice: Create the package for the old major
 ```
 
-A skipped downgrade or version jump comes first, see [4.3](#43-downgrade-behavior). `--prepare` and `--publish` apply the rules again to the version of the check run. A held update counts toward `pkg_ok`, and `update-readme.sh` renders `held: 29+1` as `✋ 29+1 held`.
+A skipped downgrade or version jump comes first, see [4.3](#43-downgrade-behavior). `--prepare` and `--publish` apply the rules again to the version of the check run. A held update does not count among the failing packages of the statistics card, and `update-readme.sh` renders `held: 29+1` as `✋ 29+1 held`.
 
 Every rule that fires writes its note to `.status/_alerts`, and the run opens an issue from it, see [5.6](#56-issues). A held update gets the issue `✋ <package>: update held` with the notes of every rule that fired, because after the hand publish a rule without `hold` no longer fires. The run closes it once the version is in the AUR. A published update gets the issue `🔔 <package>: <version> notice` with its notes, and the maintainer closes it once the edit is done.
 
@@ -999,7 +999,7 @@ A tag appears before its release. liquidsoap uploads the assets of a release to 
 | `new_build: 2.4.6` | `🔨 2.4.6 rebuild available` | A new value of the version the AUR has, not pushed yet |
 | `rebuilt: 2.4.6` | `🔨 2.4.6 rebuilt` | The rebuild was pushed to the AUR |
 
-All three count toward `pkg_ok`.
+None of the three counts among the failing packages of the statistics card, see [5.9](#59-statistics).
 
 `update-pkg.sh`, `verify-pkg.sh` and `publish-pkg.sh` take the value with `--asset <value>`, and `check-all.sh` passes it. A package with `upstream.asset_var` needs it, and any other package refuses it. The value starts with a letter or a digit and holds only `A-Za-z0-9 . _ + ~ -`, because bash expands a tilde at the start of an assignment: `_deb=~root` gives the home directory of `root`. `update-pkg.sh` writes the value to the line of `upstream.asset_var`. `verify-pkg.sh` reads it from that line of the prepared `PKGBUILD`, as it reads `pkgver`, and `publish-pkg.sh` refuses a prepared line with another value than its `--asset`.
 
@@ -1095,7 +1095,7 @@ The jobs pass files to each other as artifacts. A job takes an artifact by the `
 5. **Check updates:** runs `check-all.sh` and then `update-readme.sh` as `builder` in its directory, with `GITHUB_TOKEN` set to the read-only workflow token. `sudo --preserve-env` passes the token, so it does not appear on a command line. Workflow commands are stopped while it runs.
 6. **Stop builder:** a process of `builder` can outlive its step, so the step stops them all. First, `sudo -u builder kill -KILL -1` signals every process that `builder` may signal, in one system call. A fork that is under way at that moment fails, so a process that forks again and again cannot escape it. Then the step kills every process whose effective or real user is `builder` and waits up to 30 seconds for them to end. A zombie does not count: it runs nothing, and pid 1 of a job container never reaps one. A process that is still running after that fails the step, and so does a process list that `ps` cannot produce. In a job that failed before it created `builder`, the step does nothing.
 7. **Hand over:** runs only when **Stop builder** succeeded, and copies the regular files of the directory of `builder` whose names fit: `.status/<name>` to `statuses/`, `handoff/prepared/<package>/PKGBUILD`, `.SRCINFO` and `base` and `handoff/status/<package>` to `upload/`, and `README.md` and `packages/<package>.yml` to `/results/`, a directory of root in the container. `find` follows no link and separates paths with NUL, because a name may hold a newline. A package name never starts with a dot, so `.` and `..` match no path. No process of `builder` runs by then, and `builder` reads each file, so a link swapped in after the test reaches nothing that `builder` cannot read.
-8. **Decide:** sets the output `prepare` when a status in `statuses/` is `new_version`, `available_downgrade` or `new_build`, and the output `work` for `prepare` and for a copy of the README in `/results/` that differs from the README of the checkout.
+8. **Decide:** sets the output `prepare` when a status in `statuses/` is `new_version`, `available_downgrade` or `new_build`. It sets the output `work` for `prepare`, for a copy of the README in `/results/` that differs from the README of the checkout, and in a repository with a package for the statistics: when `stats/events.csv` is missing, or when the card that `stats-card.sh` of `aurtomator/` draws as root from it for the day of the run differs from `stats/card.svg`, see [5.9](#59-statistics).
 9. **Upload statuses:** uploads `statuses/` as the `checked` artifact with a retention of 1 day.
 10. **Drop the checkouts:** removes `.git` and `aurtomator/`. `rm` removes a link named `aurtomator` and does not follow it.
 
@@ -1141,11 +1141,12 @@ The jobs pass files to each other as artifacts. A job takes an artifact by the `
 11. **Publish updates:** runs `check-all.sh --publish handoff` and then `update-readme.sh` as `builder` in its directory, with `GPG_KEY_ID`, `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, and without `GITHUB_TOKEN`, as it runs no strategy. It keeps the statuses of `check` and checks the prepared files before it pushes, see [4.4](#44-prepare-and-publish). Workflow commands are stopped while it runs.
 12. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
 13. **Hand over:** the step of `check`, through the alias `*hand-over`: the statuses, `_alerts` and `_upstream` included, the README and the package YAMLs.
-14. **Commit changes via API:** see [5.5](#55-verified-commit).
-15. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day. After a failed **Stop builder**, **Hand over** did not run, so `statuses/` does not exist and the step fails. `issues` then fails at its download of `published` and opens or closes no issue in that run, and `notify` opens the issue of the failed run, see [5.7](#57-failed-runs).
-16. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
+14. **Record statistics:** when **Hand over** ran and `packages/` holds a package, runs `record-events.sh` and `stats-card.sh` of `aurtomator/` as root. They read the journal of the checkout, the statuses in `statuses/`, and the package YAMLs of the checkout and of `/results/`, the versions before and after the run, and write `events.csv`, `card.svg` and `card-dark.svg` to `/results/stats/`, see [5.9](#59-statistics). When a script fails, the step prints a warning, removes the three files and goes on, so the commit of the README and the YAMLs does not wait for the statistics.
+15. **Commit changes via API:** see [5.5](#55-verified-commit).
+16. **Upload statuses:** also after a failed step, uploads `statuses/` as the `published` artifact with a retention of 1 day. After a failed **Stop builder**, **Hand over** did not run, so `statuses/` does not exist and the step fails. `issues` then fails at its download of `published` and opens or closes no issue in that run, and `notify` opens the issue of the failed run, see [5.7](#57-failed-runs).
+17. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
-Step 14 runs as root with `GH_TOKEN` set to the workflow token, `github.token`. It reads the copies in `/results/` and runs git only in the checkout. Steps 15 and 16 run as root without it.
+Step 15 runs as root with `GH_TOKEN` set to the workflow token, `github.token`. It reads the copies in `/results/` and runs git only in the checkout. Steps 14, 16 and 17 run as root without it.
 
 `issues`:
 
@@ -1164,7 +1165,7 @@ Steps 6 and 7 run as root with `GH_TOKEN` set to the workflow token. No other us
 `update-readme.sh` rewrites two blocks of `README.md`:
 
 1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: the badges `Validate packages` and `Check AUR Package Updates`, the status of `validate.yml` and `check-updates.yml` in your repository, which `GITHUB_REPOSITORY` names in CI and the GitHub `origin` names in a local run, and the badge `maintained with aurtomator`, which links to aurtomator. Without either, the block holds the last badge alone. The badge URLs name the two files, so the calling workflows keep those names.
-2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`, built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
+2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`: the statistics card, then the table built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
 
 While `packages/` holds no package, the script writes nothing. A repository made from the template keeps the setup steps in its README until its first package, and the README of aurtomator stays as it is. A README whose last package was removed keeps the table it had. With a package, the table markers are required and the badges are optional. Each marker must be a line of its own, once, with the start marker above the end marker. The script checks this for the table, and for the badges when their start marker is there, and stops before it writes anything otherwise. A line that only quotes a marker in its text is left as it is.
 
@@ -1191,13 +1192,18 @@ While `packages/` holds no package, the script writes nothing. A repository made
 | `.status/_assets`      | `<name>` and the asset value, split by a tab | One line for each value found, see [4.6](#46-values-from-release-asset-names) |
 | `.status/_upstream`    | `newer: 0.7.0` or `current: 0.6.0` | The latest aurtomator release against `VERSION` at the pin, see [5.8](#58-version-of-aurtomator) |
 
-#### Packages badge
+#### Statistics card
 
-```text
-https://img.shields.io/badge/packages-<ok>%2F<total>-<color>
+The package block starts with the cards that **Record statistics** of `publish` draws in `stats/`, see [5.9](#59-statistics):
+
+```html
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">
+  <img alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">
+</picture>
 ```
 
-`<ok>` counts every package without a `check_failed` or `update_failed` status, a new one without `current` included. The color is `brightgreen` with no failures and `red` otherwise.
+GitHub shows `card-dark.svg` in its dark theme and `card.svg` in its light one. The block is the same in every run, so new numbers change the files in `stats/` and leave the README as it is.
 
 #### Package table
 
@@ -1215,12 +1221,12 @@ The table is HTML, since a Markdown table cell takes no attributes. GitHub keeps
 
 A `git push` from the workflow would show as unverified, so the step commits through the GitHub Git Data API:
 
-1. Compare the copies that **Hand over** took from `builder` with the files of the checkout, `README.md` and every `packages/<package-name>.yml` that the checkout holds, and stop when none differs. No other file is committed, and a YAML that is not in your repository is left out.
-2. Read the branch head and its tree. A head other than the commit the job checked out means a commit was pushed during the run. The step then lists the tree of the new head, and when a changed file differs there from the checked-out commit, or is gone, it prints a notice and commits nothing, because the tree of step 3 replaces each file as a whole and would drop that change. The next run starts from the new head and writes the statuses again. A package that this run pushed to the AUR keeps its old `last_updated`: the next run finds the version in the AUR and writes only `current`. When the pushed commits changed none of these files, the step commits on the new head.
+1. Compare the copies in `/results/` with the files of the checkout: `README.md` and every `packages/<package-name>.yml` that the checkout holds, which **Hand over** took from `builder`, and `stats/events.csv`, `stats/card.svg` and `stats/card-dark.svg`, which **Record statistics** wrote. A file of `stats/` that the checkout does not have yet counts as changed, so the first run with statistics adds them. Stop when no file differs. No other file is committed, and a YAML that is not in your repository is left out.
+2. Read the branch head and its tree. A head other than the commit the job checked out means a commit was pushed during the run. The step then lists the tree of the new head, and when a changed file differs there from the checked-out commit, or is gone, or is a new file of `stats/` that the new head holds already, it prints a notice and commits nothing, because the tree of step 3 replaces each file as a whole and would drop that change. The next run starts from the new head and writes the statuses again. A package that this run pushed to the AUR keeps its old `last_updated`: the next run finds the version in the AUR and writes only `current`. When the pushed commits changed none of these files, the step commits on the new head.
 3. Create a blob for every changed file from its copy, a tree on the base tree, and a commit. git runs as root in the checkout, which `builder` never writes, with that one directory as `safe.directory`.
 4. Move the branch ref with `force=false`.
 
-The step commits to `github.repository` on `github.ref_name`, your repository and the branch of the run, with the `contents: write` that the calling job grants. A run started by hand from another branch therefore reads the package YAMLs of that branch, pushes their updates to the AUR and commits to that branch, while the schedule runs on the default branch only. The message is `chore: update package versions [skip ci]`. `[skip ci]` keeps the commit from starting the workflows that run on a push: the calling `validate.yml` in your repository, `ci.yml` in aurtomator. GitHub marks the commit as verified because the Actions bot creates it through the API.
+The step commits to `github.repository` on `github.ref_name`, your repository and the branch of the run, with the `contents: write` that the calling job grants. A run started by hand from another branch therefore reads the package YAMLs of that branch, pushes their updates to the AUR and commits to that branch, while the schedule runs on the default branch only. The message is `chore: update package versions [skip ci]`, or `chore: update package statistics [skip ci]` when only files of `stats/` changed. `[skip ci]` keeps the commit from starting the workflows that run on a push: the calling `validate.yml` in your repository, `ci.yml` in aurtomator. GitHub marks the commit as verified because the Actions bot creates it through the API.
 
 ### 5.6 Issues
 
@@ -1272,6 +1278,79 @@ aurtomator 0.6.0 ([0.7.0 available](https://github.com/staticwire/aurtomator/rel
 A run that could not read the release writes the line without the link.
 
 A newer release also opens an issue, and a run closes it once the pin names that release or a newer one is out, see [5.6](#56-issues).
+
+### 5.9 Statistics
+
+A repository with a package keeps the history of its packages in `stats/events.csv`, a journal that `publish` adds to, and its README shows a card drawn from the journal. Root runs the two scripts in **Record statistics** of `publish`, see [5.3](#53-steps): `record-events.sh` writes the journal, and `stats-card.sh` draws the card. When either fails, the run commits the README and the package YAMLs without `stats/`.
+
+#### The journal
+
+`stats/events.csv` is a CSV file. Its first line is the header, and each line after it is one change of state of a package:
+
+```text
+time,package,event,version,previous,run
+2026-11-08T05:17:41Z,myapp-bin,tracked,0.138.0,,42200000001
+2026-11-09T10:17:03Z,myapp-bin,updated,0.139.0,0.138.0,42210000002
+2026-11-09T10:17:03Z,other-pkg,check_failed,2.5.0rc1,,42210000002
+2026-11-10T05:17:22Z,other-pkg,up_to_date,2.5.0rc1,,42220000003
+2026-11-10T05:17:22Z,new-pkg,added,1.30.0,,42220000003
+```
+
+| Column | Content |
+|---|---|
+| `time` | The time in UTC when the run wrote the row, as `2026-11-09T10:17:03Z`. The rows of a run share it |
+| `package` | The name of the package |
+| `event` | What the package moved to, see the table of events |
+| `version` | The version of the event: the version pushed or waited for, or the version of the package at a failure |
+| `previous` | The version before a push or a change of version, empty for the other events |
+| `run` | The id of the workflow run, which opens at `https://github.com/<owner>/<repo>/actions/runs/<run>` |
+
+The rows hold no free text. The error of a failure stays in its issue and in the log of its run.
+
+| Event | Written for |
+|---|---|
+| `updated`, `downgrade`, `rebuilt` | A push to the AUR, as the status of the same name |
+| `held`, `jump_skipped`, `downgrade_skipped`, `pending` | A wait: the update to `version` does not go out yet |
+| `check_failed`, `update_failed` | A failure |
+| `up_to_date` | A package at its version again after a wait or a failure, or at the first version known of it |
+| `tracked` | Each package of the run that creates the journal |
+| `added` | A package whose YAML is new |
+| `removed` | A package whose YAML is gone |
+
+The statuses of an update that is not out yet, `new_version`, `available_downgrade` and `new_build`, write no row.
+
+`record-events.sh` compares the final status of each package with the last row of the package:
+
+1. A push is always written, with `previous` set to `current` of the package before the run.
+2. A status of another class than the last row is written. The pushes, `up_to_date`, `tracked` and `added` form one class, and each wait, each failure and `removed` is a class of its own.
+3. An up-to-date package whose `current` after the run differs from the version of its last row that is no wait is written as `updated`, or as `downgrade` when `vercmp` puts the new version lower, with `previous`. This catches a version that changed without a push of the run: a hand edit of `current`, or a push whose commit did not land.
+4. A wait is written again for another version.
+5. Nothing else is written.
+
+A package with a YAML and no row gets `added` first, or `tracked` in the run that creates the journal, with its `current` before the run. A package with rows and no YAML gets `removed` once, and a renamed package gets a `removed` and an `added`. A package that fails for a month gives one `check_failed` row, so the failed checks on the card count the times a package started to fail.
+
+A run only adds lines to the journal. A line that is not a row, such as one a hand edit broke, stays in the file, counts for nothing and gets a warning with its line number in the log of the run. A first line other than the header stops `record-events.sh`, and the journal gets no rows until the header is back.
+
+#### The card
+
+`stats-card.sh` draws `stats/card.svg` and `stats/card-dark.svg` from the journal for the day of the run. A card is 680 by 356 pixels, in the colors of the light or the dark theme of GitHub:
+
+- The header names the repository and the number of packages in `packages/`. When the last row of a package is a failure, the number of such packages follows in red.
+- The table counts four things over the last 7, 30 and 365 days, the day of the run included. `Pushes to AUR` counts the pushes, `Packages updated` the packages with at least one push, `New packages` the `added` rows, and `Failed checks` the rows of `check_failed` and `update_failed`. While the journal is younger than a column, the column is headed `since <month> <day>` with the day of the first row.
+- The heatmap shows the pushes of each day of the last 53 weeks, one column for each week from Sunday, as on the profile page of GitHub. The shades have fixed steps at 1, 2, 4 and 6 pushes a day, so one busy day leaves the shades of the other days as they are. A day before the first row of the journal has an outline only, so a day without data looks different from a day without a push.
+
+Days are UTC days. The same journal, packages and day give the same bytes.
+
+**Decide** of `check` draws the card of the day from the committed journal and sets `work` when it differs from `stats/card.svg`. The windows of the card move once a day, so the first run of a day commits a new card, as `chore: update package statistics [skip ci]` when nothing else changed, and the later runs of that day find it unchanged. The first run with statistics commits the journal with a `tracked` row for each package, both cards and the new block of the README together.
+
+#### Reading the journal elsewhere
+
+GitHub shows `stats/events.csv` as a table with a search field, for a file of up to 512 KB. Other tools read the journal of a public repository from its raw URL:
+
+- Google Sheets: `=IMPORTDATA("https://raw.githubusercontent.com/<owner>/<repo>/<branch>/stats/events.csv")` in a cell. Sheets reads the URL again about once an hour while the sheet is open.
+- Grafana: a query of the type CSV of the Infinity data source, on the same URL.
+
+For a private repository, the raw URL needs a token that can read the contents of the repository. The Infinity data source can send one with its authentication, and `IMPORTDATA` sends none.
 
 ## 6. CI Quality Gate: ci.yml
 
