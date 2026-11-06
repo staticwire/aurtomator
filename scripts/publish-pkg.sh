@@ -59,12 +59,6 @@ strategy=$(pkg_get "$PKG_FILE" .strategy)
 
 base=$(prepared_base "$PREPARED") || exit 1
 
-prepared_ver=$(sed -n 's/^pkgver=//p' "${PREPARED}/PKGBUILD" | head -1)
-if [[ "$prepared_ver" != "$VERSION" ]]; then
-  log_err "Prepared PKGBUILD has pkgver=${prepared_ver}, expected ${VERSION}"
-  exit 1
-fi
-
 # =============================================================================
 # CLONE AUR REPO
 # =============================================================================
@@ -89,6 +83,22 @@ fi
 
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
+
+# update-pkg.sh hands over the files of the AUR when the AUR has the version
+aur_asset=""
+[[ -z "$ASSET_VAR" ]] || aur_asset=$(_plain_value "${aur_files}/PKGBUILD" "$ASSET_VAR")
+if cmp -s "${aur_files}/PKGBUILD" "${PREPARED}/PKGBUILD" && cmp -s "${aur_files}/.SRCINFO" "${PREPARED}/.SRCINFO" &&
+  [[ "$(_plain_value "${aur_files}/PKGBUILD" pkgver)" == "$VERSION" && "$aur_asset" == "$ASSET" ]]; then
+  log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
+  pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
+  exit 2
+fi
+
+prepared_ver=$(sed -n 's/^pkgver=//p' "${PREPARED}/PKGBUILD" | head -1)
+if [[ "$prepared_ver" != "$VERSION" ]]; then
+  log_err "Prepared PKGBUILD has pkgver=${prepared_ver}, expected ${VERSION}"
+  exit 1
+fi
 check_prepared_files "$aur_files" "$PREPARED" "$VERSION" "$(pkgver_dash "$PKG_FILE")" \
   "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" || exit 1
 
@@ -102,16 +112,10 @@ for file in PKGBUILD .SRCINFO; do
   git -C "$aur_dir" update-index --add --cacheinfo "100644,${blob},${file}" || exit 1
 done
 
-if git -C "$aur_dir" diff --cached --quiet; then
-  log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
-  pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
-  exit 2
-fi
-
 if [[ "$DRY_RUN" == "--dry-run" ]]; then
   log_warn "[DRY RUN] Would push $PKG_NAME $VERSION to AUR"
   log_info "PKGBUILD diff:"
-  git -C "$aur_dir" diff --cached PKGBUILD || true
+  git -C "$aur_dir" diff --cached -- PKGBUILD || true
   exit 0
 fi
 

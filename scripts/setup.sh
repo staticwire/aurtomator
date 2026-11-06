@@ -413,6 +413,10 @@ setup_secrets() {
       gh_repo=$(ask "GitHub repo (owner/name)")
     fi
     ok "Target repo: $gh_repo"
+    [[ -z "$GIT_AUTHOR_NAME" ]] || printf "  AUR_GIT_NAME: %s\n" "$GIT_AUTHOR_NAME"
+    [[ -z "$GIT_AUTHOR_EMAIL" ]] || printf "  AUR_GIT_EMAIL: %s\n" "$GIT_AUTHOR_EMAIL"
+    printf "  AUR_SSH_KEY: the key in %s\n" "$(realpath -- "$AUR_SSH_KEY")"
+    [[ -z "$gpg_source" ]] || printf "  GPG_SIGNING_KEY: GPG key %s\n" "$GPG_KEY_ID"
 
     # The secrets hold the key that pushes every package of the user
     if [[ "$NON_INTERACTIVE" != "true" ]]; then
@@ -563,6 +567,8 @@ verify_all() {
     ok "SSH: aur.archlinux.org accessible"
   else
     fail "SSH: cannot connect to aur.archlinux.org"
+    # The last line of ssh names the cause: a host key, the key or the network
+    [[ -z "$ssh_out" ]] || printf "    %s\n" "$(tail -n 1 <<<"$ssh_out")"
     errors=$((errors + 1))
   fi
 

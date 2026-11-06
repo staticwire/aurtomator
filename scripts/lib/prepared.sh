@@ -18,7 +18,7 @@ _has_nul() {
   [[ "$(tr -d '\000' <"$1" | wc -c)" -ne "$(wc -c <"$1")" ]]
 }
 
-# Split a PKGBUILD into lines of five kinds, without executing it:
+# Split a PKGBUILD into lines of six kinds, without executing it:
 #   SKEL<TAB>line          every line, with pkgver=, pkgrel=, the asset_var
 #                          line and each top-level checksum array replaced
 #                          by a placeholder
@@ -26,6 +26,8 @@ _has_nul() {
 #                          asset_var line
 #   SUM<TAB>array<TAB>index<TAB>HASH|SKIP  one line per checksum
 #   SUMVAL<TAB>array<TAB>value  the same checksum with its value
+#   NOTE<TAB>text          a comment in or after a checksum array, or an
+#                          empty line inside one, as empty text
 #   BAD<TAB>text           anything in a checksum array but a quoted
 #                          checksum, a comment or a line continuation
 # Args: $1=pkgbuild path, $2=asset_var of the package, if any
@@ -47,9 +49,14 @@ _pkgbuild_parts() {
     # As bash does: a # that starts a word comments out the rest of the
     # line, and a backslash at the end of a line outside a comment joins
     # the next line, which inside the parentheses is only a separator
-    function body(text,   raw, cont, end, rest) {
+    function body(text,   raw, cont, end, rest, note) {
       raw = text
-      sub(/(^|[ \t])#.*/, "", text)
+      if (match(text, /(^|[ \t])#.*/)) {
+        note = substr(text, RSTART)
+        sub(/^[ \t]/, "", note)
+        print "NOTE\t" note
+        text = substr(text, 1, RSTART - 1)
+      }
       cont = text == raw && text ~ /(^|[ \t])\\$/
       if (cont) text = substr(text, 1, length(text) - 1)
       end = index(text, ")")
@@ -62,6 +69,7 @@ _pkgbuild_parts() {
       if (rest !~ /^[ \t]*$/) print "BAD\t" NR ": " rest
       return 0
     }
+    in_sums && /^[ \t]*$/ { print "NOTE\t" }
     in_sums { in_sums = body($0); next }
     /^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?=\(/ {
       name = substr($0, 1, index($0, "=") - 1)
@@ -110,7 +118,7 @@ _sum_arrays() {
 check_prepared_pkgbuild() {
   local version="$3" rel="${4:-1}" asset_var="${5:-}" asset="${6:-}"
   local old_parts new_parts value
-  local -a assets
+  local -a assets notes
   if ! old_parts=$(_pkgbuild_parts "$1" "$asset_var") || ! new_parts=$(_pkgbuild_parts "$2" "$asset_var"); then
     log_err "Could not read the PKGBUILD to compare"
     return 1
@@ -123,6 +131,15 @@ check_prepared_pkgbuild() {
   if grep -q $'^BAD\t' <<<"$new_parts"; then
     log_err "Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array:"
     grep $'^BAD\t' <<<"$new_parts" | cut -f2- >&2
+    return 1
+  fi
+  # updpkgsums writes no comment, so any comment or empty line in an array
+  # must be one the AUR copy has, as often as it has it
+  mapfile -t notes < <(LC_ALL=C comm -23 <(grep $'^NOTE\t' <<<"$new_parts" | LC_ALL=C sort) \
+    <(grep $'^NOTE\t' <<<"$old_parts" | LC_ALL=C sort) | cut -f2-)
+  if ((${#notes[@]} > 0)); then
+    log_err "Prepared PKGBUILD adds comments or empty lines to the checksum arrays:"
+    printf '  %s\n' "${notes[@]@Q}" >&2
     return 1
   fi
   # updpkgsums writes all checksum arrays in one block at the place of the
@@ -175,13 +192,14 @@ _asset_line_value() {
   printf '%s\n' "${values[0]}"
 }
 
-# Print the value of the first line of a PKGBUILD that sets the variable,
-# without the double or single quotes around it, as bash reads it
+# Print the value of the first line of a PKGBUILD that sets the variable as
+# bash reads it, without the quotes around it and a comment after it
 # Args: $1=PKGBUILD, $2=variable name
 _plain_value() {
-  local value dq='^"(.*)"$' sq="^'(.*)'$"
+  local value end='([[:space:]]+#.*|[[:space:]]*)$'
+  local dq="^\"([^\"]*)\"$end" sq="^'([^']*)'$end" bare="^([^[:space:]]*)$end"
   value=$(sed -n "s/^$2=//p" "$1" | head -1)
-  if [[ "$value" =~ $dq || "$value" =~ $sq ]]; then
+  if [[ "$value" =~ $dq || "$value" =~ $sq || "$value" =~ $bare ]]; then
     value="${BASH_REMATCH[1]}"
   fi
   printf '%s\n' "$value"

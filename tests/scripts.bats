@@ -1908,6 +1908,19 @@ EOF
   [ "${lines[2]}" = "KEY9" ]
 }
 
+# git puts a tracked file in place of the ignored one at a checkout or a merge
+@test "lib.sh: load_config refuses a .aurtomator.conf that git tracks" {
+  printf "GIT_AUTHOR_NAME='a'\nGIT_AUTHOR_EMAIL='b'\nAUR_SSH_KEY='c'\nGPG_KEY_ID='d'\n" >"$TEST_TMPDIR/.aurtomator.conf"
+  git -C "$TEST_TMPDIR" init -q
+  run load_config_values
+  [ "$status" -eq 0 ]
+
+  git -C "$TEST_TMPDIR" add -f .aurtomator.conf
+  run load_config_values
+  [ "$status" -eq 1 ]
+  [ "$output" = "$TEST_TMPDIR/.aurtomator.conf is tracked by git, so a commit can set its values. Check them, then take the file out of the repository: git rm --cached .aurtomator.conf" ]
+}
+
 # A .aurtomator.conf that a pull request adds runs nothing
 @test "lib.sh: load_config refuses any other line and runs nothing" {
   local pwned="$TEST_TMPDIR/pwned" line

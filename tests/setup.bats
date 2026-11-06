@@ -577,6 +577,22 @@ EOF
   [[ "$output" == *"$TEST_TMPDIR/scripts/setup.sh verify"* ]]
 }
 
+# An unknown host key, a refused key and the network fail the same check
+@test "setup verify: shows why ssh failed" {
+  write_full_config "VALIDKEY123"
+  cat >"$TEST_TMPDIR/mock-bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+echo "No ED25519 host key is known for aur.archlinux.org and you have requested strict checking." >&2
+echo "Host key verification failed." >&2
+exit 255
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/ssh"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ SSH: cannot connect to aur.archlinux.org"$'\n'"    Host key verification failed."$'\n'* ]]
+}
+
 @test "setup verify: names draft.sh of the clone with AURTOMATOR_DATA_DIR" {
   write_full_config ""
   mkdir -p "$BATS_TEST_TMPDIR/data"
@@ -640,6 +656,29 @@ EOF
   [[ "$output" == *"AUR_SSH_KEY"* ]]
   [[ "$output" == *"GPG_SIGNING_KEY"* ]]
   grep -qx 'secret set AUR_SSH_KEY -R test/repo' "$TEST_TMPDIR/gh.args"
+}
+
+@test "setup secrets: stops on a .aurtomator.conf that git tracks and sets nothing" {
+  write_full_config "VALIDKEY123"
+  git -C "$TEST_TMPDIR" add -f .aurtomator.conf
+  log_gh_calls
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$TEST_TMPDIR/.aurtomator.conf is tracked by git"* ]]
+  [ ! -e "$TEST_TMPDIR/gh.args" ]
+}
+
+# The values can come from a file a commit changed, so they show before the
+# question, a key path as the file it names
+@test "setup secrets: shows each value and the key file before it sets them" {
+  write_full_config "VALIDKEY123"
+  sed -i "s|^AUR_SSH_KEY=.*|AUR_SSH_KEY='ssh/../ssh/aur.pem'|" "$TEST_TMPDIR/.aurtomator.conf"
+  cd "$TEST_TMPDIR"
+
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"  AUR_GIT_NAME: Test User"$'\n'"  AUR_GIT_EMAIL: test@test.com"$'\n'"  AUR_SSH_KEY: the key in $(realpath "$TEST_TMPDIR/ssh/aur.pem")"$'\n'"  GPG_SIGNING_KEY: GPG key VALIDKEY123"$'\n'*"Setting secrets on test/repo:"* ]]
 }
 
 # On a terminal gh prints a line of its own for each secret

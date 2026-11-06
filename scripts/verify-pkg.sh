@@ -24,15 +24,6 @@ PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
 
 base=$(prepared_base "$PREPARED") || exit 1
-version=$(sed -n 's/^pkgver=//p' "${PREPARED}/PKGBUILD" | head -1)
-validate_pkgver "$version" || exit 1
-# The asset value is read from the prepared PKGBUILD, as the version is.
-# publish-pkg.sh checks it against the value the check run found.
-asset_var=$(pkg_asset_var "$PKG_FILE") || exit 1
-asset=""
-if [[ -n "$asset_var" ]]; then
-  asset=$(_asset_line_value "${PREPARED}/PKGBUILD" "$asset_var" "Prepared PKGBUILD") || exit 1
-fi
 
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -50,6 +41,22 @@ fi
 
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
+
+# update-pkg.sh hands over the files of the AUR when the AUR has the version
+if cmp -s "${aur_files}/PKGBUILD" "${PREPARED}/PKGBUILD" && cmp -s "${aur_files}/.SRCINFO" "${PREPARED}/.SRCINFO"; then
+  log_ok "The prepared files of $PKG_NAME are those of the AUR, nothing to verify"
+  exit 0
+fi
+
+version=$(sed -n 's/^pkgver=//p' "${PREPARED}/PKGBUILD" | head -1)
+validate_pkgver "$version" || exit 1
+# The asset value is read from the prepared PKGBUILD, as the version is.
+# publish-pkg.sh checks it against the value the check run found.
+asset_var=$(pkg_asset_var "$PKG_FILE") || exit 1
+asset=""
+if [[ -n "$asset_var" ]]; then
+  asset=$(_asset_line_value "${PREPARED}/PKGBUILD" "$asset_var" "Prepared PKGBUILD") || exit 1
+fi
 check_prepared_files "$aur_files" "$PREPARED" "$version" "$(pkgver_dash "$PKG_FILE")" \
   "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$asset_var" "$asset" || exit 1
 mkdir "${tmp_dir}/downloads"

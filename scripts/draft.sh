@@ -157,6 +157,12 @@ from_url() {
   fi
 }
 
+# Print the text with each control byte as ?, since the AUR package sets it
+# and the terminal would act on such a byte
+shown() {
+  printf '%s' "${1//[[:cntrl:]]/?}"
+}
+
 origin=""
 for source in "${SOURCES[@]}"; do
   if from_source "$source"; then
@@ -169,9 +175,9 @@ if [[ -z "$origin" ]] && from_url "$URL"; then
 fi
 if [[ -z "$origin" ]]; then
   log_err "No rule matches the url or a source of ${NAME}:"
-  printf '  url: %s\n' "$URL" >&2
+  printf '  url: %s\n' "$(shown "$URL")" >&2
   for source in "${SOURCES[@]}"; do
-    printf '  source: %s\n' "$source" >&2
+    printf '  source: %s\n' "$(shown "$source")" >&2
   done
   if [[ -n "${AURTOMATOR_RUNNER:-}" ]]; then
     log_info "Write it from the sample: $AURTOMATOR_RUNNER sample > packages/${NAME}.yml"
@@ -181,7 +187,7 @@ if [[ -z "$origin" ]]; then
   exit 1
 fi
 if [[ -n "$EPOCH" && "$EPOCH" != 0 ]]; then
-  warn_epoch "$EPOCH"
+  warn_epoch "$(shown "$EPOCH")"
 fi
 
 # yq takes every value from the environment, so it stays a string
@@ -195,7 +201,7 @@ if [[ -n "$PKGVER" ]]; then
 fi
 mkdir -p "${AURTOMATOR_DATA_DIR}/packages"
 mv "$tmp/draft.yml" "$FILE"
-log_ok "packages/${NAME}.yml: $STRATEGY from $origin"
+log_ok "packages/${NAME}.yml: $STRATEGY from $(shown "$origin")"
 sed 's/^/  /' "$FILE" >&2
 
 if ! "${AURTOMATOR_DIR}/scripts/validate-pkg.sh" "$NAME" || ! "${AURTOMATOR_DIR}/scripts/check-update.sh" "$NAME"; then
