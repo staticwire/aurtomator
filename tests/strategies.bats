@@ -2127,15 +2127,18 @@ EOF
   create_test_package "test-404" "github-release" "upstream:
   project: owner/repo"
 
-  # curl -sf prints nothing on a 404 and exits 22
+  # On a 404 curl -f writes no body and exits 22, and the -w of http_get
+  # writes the URL and the error to stderr
   cat >"$TEST_TMPDIR/mock-bin/curl" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\tThe requested URL returned error: 404\t' "${@: -1}" >&2
 exit 22
 EOF
   chmod +x "$TEST_TMPDIR/mock-bin/curl"
 
   run "$TEST_TMPDIR/strategies/github-release.sh" "test-404"
   [ "$status" -eq 1 ]
+  [[ "$output" == *"https://api.github.com/repos/owner/repo/releases/latest: The requested URL returned error: 404"* ]]
   [[ "$output" == *"Failed to fetch latest release for owner/repo"* ]]
 }
 

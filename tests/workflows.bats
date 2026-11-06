@@ -1844,25 +1844,36 @@ EOF
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
-case "$1 $2" in
-  "api repos/owner/fork") echo "${GH_HAS_ISSUES:-true}" ;;
+cmd="$1 $2" limit=30 emoji="" filter=""
+while (($#)); do
+  case "$1" in
+    --limit) limit=$2 ;;
+    --jq) filter=$2 ;;
+    --label)
+      case "$2" in
+        auto-update) emoji="❌" ;;
+        update-held) emoji="✋" ;;
+        aurtomator-update) emoji="🚀" ;;
+      esac
+      ;;
+  esac
+  shift
+done
+# gh answers with the JSON of the API and applies --jq to it
+case "$cmd" in
+  "api repos/owner/fork") json="{\"has_issues\": ${GH_HAS_ISSUES:-true}}" ;;
   "issue list")
     [[ -z "${GH_FAIL:-}" ]] || exit 1
-    limit=30 emoji=""
-    while (($#)); do
-      [[ "$1" != --limit ]] || limit=$2
-      if [[ "$1" == --label ]]; then
-        case "$2" in
-          auto-update) emoji="❌" ;;
-          update-held) emoji="✋" ;;
-          aurtomator-update) emoji="🚀" ;;
-        esac
-      fi
-      shift
-    done
-    grep "^[0-9]* $emoji" <<<"${GH_OPEN:-}" | head -n "$limit" || true
+    json=$({ grep "^[0-9]* $emoji" <<<"${GH_OPEN:-}" || true; } | head -n "$limit" |
+      jq -Rn '[inputs | capture("^(?<number>[0-9]+) (?<title>.*)$") | .number |= tonumber]')
     ;;
+  *) exit 0 ;;
 esac
+if [[ -n "$filter" ]]; then
+  jq -r "$filter" <<<"$json"
+else
+  printf '%s\n' "$json"
+fi
 EOF
   chmod +x "$bin/gh"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
@@ -1923,30 +1934,42 @@ EOF
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
-case "$2" in
-  repos/owner/fork/git/ref/heads/main) echo "$GH_HEAD" ;;
-  repos/owner/fork/git/commits/*) echo "tree-of-head" ;;
+endpoint=$2 filter="" inputs=0
+while (($#)); do
+  case "$1" in
+    --jq) filter=$2 ;;
+    --input)
+      inputs=$((inputs + 1))
+      cat -- "$2" >"$GH_LOG.tree"
+      ;;
+  esac
+  shift
+done
+# gh answers with the JSON of the API and applies --jq to it. A recursive
+# tree also lists each directory, as an entry of type tree.
+case "$endpoint" in
+  repos/owner/fork/git/ref/heads/main) json="{\"object\": {\"sha\": \"$GH_HEAD\", \"type\": \"commit\"}}" ;;
+  repos/owner/fork/git/commits/*) json='{"tree": {"sha": "tree-of-head"}}' ;;
   "repos/owner/fork/git/trees/tree-of-head?recursive=1")
     [[ -z "${GH_TREE_FAIL:-}" ]] || exit 1
-    printf '%s\n' "$GH_TREE"
+    json=$(jq -Rn '[inputs | select(length > 0) | capture("^(?<path>.*) (?<sha>[0-9a-f]+)$") | . + {type: "blob"}] as $blobs |
+      [$blobs[].path | split("/") | range(1; length) as $i | .[:$i] | join("/")] | unique |
+      {sha: "tree-of-head", tree: (map({path: ., type: "tree", sha: "0000000000000000000000000000000000000000"}) + $blobs)}' <<<"$GH_TREE")
     ;;
-  repos/owner/fork/git/blobs) echo "blob" ;;
+  repos/owner/fork/git/blobs) json='{"sha": "blob"}' ;;
   repos/owner/fork/git/trees)
-    inputs=0
-    while [[ $# -gt 0 ]]; do
-      if [[ "$1" == --input ]]; then
-        inputs=$((inputs + 1))
-        cat -- "$2" >"$GH_LOG.tree"
-      fi
-      shift
-    done
     echo "inputs: $inputs" >>"$GH_LOG"
-    echo "tree"
+    json='{"sha": "tree"}'
     ;;
-  repos/owner/fork/git/commits) echo "commit" ;;
-  repos/owner/fork/git/refs/heads/main) echo "{}" ;;
+  repos/owner/fork/git/commits) json='{"sha": "commit"}' ;;
+  repos/owner/fork/git/refs/heads/main) json='{}' ;;
   *) exit 1 ;;
 esac
+if [[ -n "$filter" ]]; then
+  jq -r "$filter" <<<"$json"
+else
+  printf '%s\n' "$json"
+fi
 EOF
   chmod +x "$bin/gh" "$bin/sudo"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
@@ -1977,6 +2000,8 @@ no_commit() {
   make_commit_repo README.md="new table"
   run_commit_step
   [ "$status" -eq 0 ]
+  # The commit holds the new tree, with the checked out head as its parent
+  grep -qxF "api repos/owner/fork/git/commits -f message=chore: update package versions [skip ci] -f tree=tree -f parents[]=$(git -C "$BATS_TEST_TMPDIR/ws" rev-parse HEAD) --jq .sha" "$GH_LOG"
   # Without force=false a push during the run would be overwritten
   grep -qx "api repos/owner/fork/git/refs/heads/main -f sha=commit -F force=false --method PATCH" "$GH_LOG"
   no_call "recursive"
@@ -2520,21 +2545,29 @@ run_notify_step() {
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
-case "$1 $2" in
-  "api repos/owner/fork") echo "${GH_HAS_ISSUES:-true}" ;;
+cmd="$1 $2" filter=""
+while (($#)); do
+  [[ "$1" != --jq ]] || filter=$2
+  shift
+done
+# gh answers with the JSON of the API and applies --jq to it
+case "$cmd" in
+  "api repos/owner/fork") json="{\"has_issues\": ${GH_HAS_ISSUES:-true}}" ;;
   "api repos/owner/fork/actions/runs/7/jobs")
     [[ -z "${GH_JOBS_FAIL:-}" ]] || exit 1
-    if [[ -n "${GH_JOBS_JSON:-}" ]]; then
-      jq -r "$4" <<<"$GH_JOBS_JSON"
-    else
+    if [[ -z "${GH_JOBS_JSON:-}" ]]; then
       echo "$GH_JOBS"
+      exit 0
     fi
+    json=$GH_JOBS_JSON
     ;;
   "issue list")
     [[ -z "${GH_FAIL:-}" ]] || exit 1
-    [[ -z "${GH_TITLES:-}" ]] || printf '%s\n' "$GH_TITLES"
+    json=$(jq -Rn '[inputs | select(length > 0) | {title: .}]' <<<"${GH_TITLES:-}")
     ;;
+  *) exit 0 ;;
 esac
+jq -r "$filter" <<<"$json"
 EOF
   chmod +x "$bin/gh"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
@@ -2586,8 +2619,9 @@ EOF
 }
 
 @test "notify-failure: opens no second issue while one is open" {
-  GH_TITLES="❌ Check AUR Package Updates failed" run_notify_step
+  GH_JOBS=check GH_TITLES="❌ Check AUR Package Updates failed" run_notify_step
   [ "$status" -eq 0 ]
+  [[ "$output" == *"Issue already open, skipping"* ]]
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
 }

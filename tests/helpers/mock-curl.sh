@@ -16,6 +16,15 @@ for arg in "$@"; do
   url="$arg"
 done
 
+# A failed request, as curl -f writes it with the -w texts of http_get and
+# http_get_json: the URL on stdout for the latter, the error on stderr
+http_error() {
+  [[ "$write_out" != '\n%{url_effective}'* ]] || printf '\n%s' "$url"
+  [[ "$write_out" != *'%{onerror}%{stderr}'* ]] ||
+    printf '%s\tThe requested URL returned error: %s\t' "$url" "$1" >&2
+  exit 22
+}
+
 case "$url" in
   # --- Specific error/null patterns (must be before wildcards) ---
 
@@ -347,7 +356,7 @@ case "$url" in
   *api.github.com/repos/prerelease-only/repo/releases/latest | \
     *api.github.com/repos/no-releases/repo/releases/latest | \
     *api.github.com/repos/stable-list/repo/releases/latest)
-    exit 22
+    http_error 404
     ;;
   *"api.github.com/repos/prerelease-only/repo/releases?per_page=100" | \
     *"api.github.com/repos/prerelease-only/repo/releases?per_page=100&page=1")
@@ -383,8 +392,7 @@ case "$url" in
   *codeberg.org/api/v1/repos/no-releases/repo/releases/latest | \
     *codeberg.org/api/v1/repos/prerelease-only/repo/releases/latest | \
     *codeberg.org/api/v1/repos/broken/repo/releases/latest)
-    printf '%s\tThe requested URL returned error: 404\t' "$url" >&2
-    exit 22
+    http_error 404
     ;;
   *"codeberg.org/api/v1/repos/no-releases/repo/releases?limit=1" | \
     *"codeberg.org/api/v1/repos/empty/repo/releases?limit=50&page=1" | \
@@ -421,10 +429,7 @@ case "$url" in
       '{"name": "liquidsoap_2.4.6-debian-forky-ocaml4.14.2-3_amd64.deb"}, {"name": "liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb"}'
     ;;
   *api.github.com/repos/asset-owner/asset-repo/releases/tags/v2.5.0-rc1)
-    if [[ "${MOCK_RELEASE_STATUS:-200}" != 200 ]]; then
-      printf '%s\tThe requested URL returned error: %s\t' "$url" "$MOCK_RELEASE_STATUS" >&2
-      exit 22
-    fi
+    [[ "${MOCK_RELEASE_STATUS:-200}" == 200 ]] || http_error "$MOCK_RELEASE_STATUS"
     sep=""
     assets=""
     for name in ${MOCK_ASSETS-liquidsoap_2.5.0-debian-forky-ocaml5.5.1-1_amd64.deb liquidsoap_2.5.0-debian-forky-ocaml5.5.1-1_arm64.deb liquidsoap-minimal_2.5.0-debian-forky-ocaml5.5.1-1_amd64.deb liquidsoap_2.5.0-debian-trixie-ocaml5.5.1-1_amd64.deb}; do
@@ -436,16 +441,12 @@ case "$url" in
     ;;
   # GitHub answers 404 for a tag without a release, as for a draft
   *api.github.com/repos/asset-owner/asset-repo/releases/tags/*)
-    printf '%s\tThe requested URL returned error: 404\t' "$url" >&2
-    exit 22
+    http_error 404
     ;;
   # The commit of a tag: MOCK_TAG_AGE gives the hours since its date, 48 by
   # default, and MOCK_COMMIT_STATUS=500 fails the request
   *api.github.com/repos/asset-owner/asset-repo/commits/*)
-    if [[ "${MOCK_COMMIT_STATUS:-200}" != 200 ]]; then
-      printf '%s\tThe requested URL returned error: %s\t' "$url" "$MOCK_COMMIT_STATUS" >&2
-      exit 22
-    fi
+    [[ "${MOCK_COMMIT_STATUS:-200}" == 200 ]] || http_error "$MOCK_COMMIT_STATUS"
     printf '{"commit": {"committer": {"date": "%s"}}}\n' "$(date -u -d "-${MOCK_TAG_AGE:-48} hours" +%Y-%m-%dT%H:%M:%SZ)"
     ;;
   # The release of a tag with a plus sign, only under the encoded name
@@ -456,7 +457,7 @@ case "$url" in
   # The latest release of aurtomator itself: the tag in MOCK_UPSTREAM_TAG,
   # v0.6.0 by default, or a failed request for "fail"
   *api.github.com/repos/staticwire/aurtomator/releases/latest)
-    [[ "${MOCK_UPSTREAM_TAG:-v0.6.0}" != fail ]] || exit 22
+    [[ "${MOCK_UPSTREAM_TAG:-v0.6.0}" != fail ]] || http_error 404
     printf '{"tag_name": "%s"}\n' "${MOCK_UPSTREAM_TAG:-v0.6.0}"
     ;;
 
