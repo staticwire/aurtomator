@@ -535,6 +535,10 @@ The dry run runs the PKGBUILD of the AUR on your machine before it stops: the au
 
 Commit the package YAML and push to your repository. The push to `main` runs `Validate packages`. `Check AUR Package Updates` runs on the schedule `17 * * * *` of `.github/workflows/check-updates.yml`, and GitHub starts only part of those runs: in October 2026 a repository with this schedule got about five a day, one every five hours. Actions > Check AUR Package Updates > Run workflow starts a run at once, through `workflow_dispatch`. A run started by hand from a branch other than the default one reads the package YAMLs of that branch, pushes their updates to the AUR, and commits its results to that branch. The schedule runs on the default branch only.
 
+## Pull requests to your repository
+
+`Validate packages` runs `validate-pkg.sh --all` on a pull request, so it checks the YAMLs of `packages/` and no other file. A pull request that changes `aurtomator.sh` runs its code on your machine at the next `./aurtomator.sh` command after you check it out or merge it. One that changes a calling workflow changes what CI runs with your secrets after the merge: the `uses:` line of `check-updates.yml` names the workflow that gets `AUR_SSH_KEY` and `GPG_SIGNING_KEY`. Read these files in the diff before you merge, and check a new pin as [The aurtomator.sh script](#the-aurtomatorsh-script) describes. The scripts stop on a `.aurtomator.conf` that git tracks, see [Configuration file](#configuration-file).
+
 ## Troubleshooting
 
 ### SSH: Permission denied (publickey)

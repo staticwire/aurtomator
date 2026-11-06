@@ -844,8 +844,10 @@ make_builder_inputs() {
   echo notes >"$ws/handoff/prepared/foo/notes.txt"
   ln -s "$BATS_TEST_TMPDIR/secret" "$ws/handoff/prepared/foo/link"
   echo "update_failed: boom" >"$ws/handoff/status/foo"
-  mkdir -p "$ws/handoff/status/sub"
+  mkdir -p "$ws/handoff/status/sub" "$ws/handoff/prepared/foo/status" "$ws/handoff/prepared/xstatus"
   echo x >"$ws/handoff/status/sub/x"
+  echo x >"$ws/handoff/prepared/foo/status/x"
+  echo x >"$ws/handoff/prepared/xstatus/x"
   echo other >"$ws/handoff/other"
 }
 
@@ -1088,9 +1090,11 @@ make_handoff() {
   make_handoff
   chmod 0755 "$work/handoff/prepared/foo/PKGBUILD"
   echo notes >"$work/handoff/prepared/foo/notes.txt"
-  mkdir -p "$work/handoff/prepared/.x" "$work/handoff/status/sub"
+  mkdir -p "$work/handoff/prepared/.x" "$work/handoff/status/sub" "$work/handoff/prepared/foo/status" "$work/handoff/prepared/xstatus"
   echo hidden >"$work/handoff/prepared/.x/PKGBUILD"
   echo x >"$work/handoff/status/sub/x"
+  echo x >"$work/handoff/prepared/foo/status/x"
+  echo x >"$work/handoff/prepared/xstatus/x"
   echo other >"$work/handoff/other"
   run_hand_over_step
   [ "$status" -eq 0 ]
@@ -1589,7 +1593,8 @@ moved_tree() {
 # answers the head of main with $GH_HEAD (HEAD of the repository by
 # default), lists the tree of that head from $GH_TREE as "path sha" lines
 # (the tree of HEAD by default) or fails the listing when $GH_TREE_FAIL is
-# set, and logs every call to $GH_LOG.
+# set, and logs every call to $GH_LOG. For a new tree it logs the number of
+# --input options and keeps the body of the last one in $GH_LOG.tree.
 run_commit_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
@@ -1611,7 +1616,18 @@ case "$2" in
     printf '%s\n' "$GH_TREE"
     ;;
   repos/owner/fork/git/blobs) echo "blob" ;;
-  repos/owner/fork/git/trees) cat >/dev/null && echo "tree" ;;
+  repos/owner/fork/git/trees)
+    inputs=0
+    while [[ $# -gt 0 ]]; do
+      if [[ "$1" == --input ]]; then
+        inputs=$((inputs + 1))
+        cat -- "$2" >"$GH_LOG.tree"
+      fi
+      shift
+    done
+    echo "inputs: $inputs" >>"$GH_LOG"
+    echo "tree"
+    ;;
   repos/owner/fork/git/commits) echo "commit" ;;
   repos/owner/fork/git/refs/heads/main) echo "{}" ;;
   *) exit 1 ;;
@@ -1646,8 +1662,19 @@ no_commit() {
   make_commit_repo README.md="new table"
   run_commit_step
   [ "$status" -eq 0 ]
-  grep -q "^api repos/owner/fork/git/refs/heads/main " "$GH_LOG"
+  # Without force=false a push during the run would be overwritten
+  grep -qx "api repos/owner/fork/git/refs/heads/main -f sha=commit -F force=false --method PATCH" "$GH_LOG"
   no_call "recursive"
+}
+
+# gh sends the body of the last --input and puts a -f field in the query
+@test "check-updates: the commit step sends one body for the new tree" {
+  make_commit_repo README.md="new table"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  grep -qx "inputs: 1" "$GH_LOG"
+  no_call "base_tree="
+  jq -e '.base_tree == "tree-of-head" and .tree == [{"path": "README.md", "mode": "100644", "type": "blob", "sha": "blob"}]' "$GH_LOG.tree"
 }
 
 @test "check-updates: the commit step commits on a moved head that left its files alone" {
@@ -2112,7 +2139,8 @@ NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 # Runs the step of notify-failure for run 7 of owner/fork. gh lists the
 # titles in $GH_TITLES as the open issues, answers has_issues with
 # $GH_HAS_ISSUES (true by default), lists the jobs in $GH_JOBS as the failed
-# ones (an empty $GH_JOBS lists no failed job) or fails that when
+# ones (an empty $GH_JOBS lists no failed job), applies the filter of the
+# step to the jobs in $GH_JOBS_JSON when it is set, or fails that when
 # $GH_JOBS_FAIL is set, fails the list of issues when $GH_FAIL is set and
 # logs every call to $GH_LOG.
 run_notify_step() {
@@ -2125,7 +2153,11 @@ case "$1 $2" in
   "api repos/owner/fork") echo "${GH_HAS_ISSUES:-true}" ;;
   "api repos/owner/fork/actions/runs/7/jobs")
     [[ -z "${GH_JOBS_FAIL:-}" ]] || exit 1
-    echo "$GH_JOBS"
+    if [[ -n "${GH_JOBS_JSON:-}" ]]; then
+      jq -r "$4" <<<"$GH_JOBS_JSON"
+    else
+      echo "$GH_JOBS"
+    fi
     ;;
   "issue list")
     [[ -z "${GH_FAIL:-}" ]] || exit 1
@@ -2138,7 +2170,7 @@ EOF
   : >"$GH_LOG"
   yq '.jobs.notify.steps[0].run' "$NOTIFY" >"$BATS_TEST_TMPDIR/step.sh"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_TITLES="${GH_TITLES:-}" GH_FAIL="${GH_FAIL:-}" \
-    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_JOBS="${GH_JOBS:-}" GH_JOBS_FAIL="${GH_JOBS_FAIL:-}" \
+    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_JOBS="${GH_JOBS:-}" GH_JOBS_FAIL="${GH_JOBS_FAIL:-}" GH_JOBS_JSON="${GH_JOBS_JSON:-}" \
     GH_REPO=owner/fork RUN_ID=7 \
     RUN_URL=https://example.invalid/runs/7 RUN_BRANCH="${RUN_BRANCH:-main}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
@@ -2158,6 +2190,13 @@ EOF
   grep -q 'https://example.invalid/runs/7' "$GH_LOG"
   grep -q 'failed in check, publish' "$GH_LOG"
   grep -q 'until a run succeeds, and that run closes this issue\.$' "$GH_LOG"
+}
+
+# A job that runs into timeout-minutes concludes timed_out
+@test "notify-failure: names the jobs that failed or timed out" {
+  GH_JOBS_JSON='{"jobs":[{"name":"check","conclusion":"failure"},{"name":"verify","conclusion":"timed_out"},{"name":"publish","conclusion":"skipped"},{"name":"status","conclusion":"success"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  grep -q 'failed in check, verify' "$GH_LOG"
 }
 
 @test "notify-failure: opens the issue when the jobs cannot be listed" {

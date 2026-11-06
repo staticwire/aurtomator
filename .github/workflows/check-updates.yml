@@ -518,9 +518,7 @@ jobs:
               '. + [{"path": $path, "mode": "100644", "type": "blob", "sha": $sha}]')
           done
 
-          TREE_SHA=$(echo "$TREE_ENTRIES" | gh api "repos/$REPO/git/trees" \
-            --input - \
-            -f base_tree="$BASE_TREE" \
+          TREE_SHA=$(gh api "repos/$REPO/git/trees" \
             --jq '.sha' \
             --method POST \
             -H "Content-Type: application/json" \

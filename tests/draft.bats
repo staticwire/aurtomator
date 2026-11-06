@@ -332,6 +332,22 @@ stub_git_latest() {
   [[ "$output" == *"The .SRCINFO of demo is no regular file"* ]]
 }
 
+# A checkout would apply the attributes of the AUR repository with the git
+# config of the user
+@test "draft: reads .SRCINFO without a checkout of the AUR repository" {
+  aur_package demo 1.0.0 'source = https://github.com/o/demo/archive/v1.0.0.tar.gz'
+  local work="$TEST_TMPDIR/aur-work/demo"
+  echo '* filter=mark' >"$work/.gitattributes"
+  git -C "$work" add .gitattributes
+  git -C "$work" -c user.name=t -c user.email=t@example.invalid commit -qm attributes
+  git -C "$work" push -q "$TEST_TMPDIR/aur/demo.git" HEAD
+  git config --global filter.mark.smudge "touch $TEST_TMPDIR/smudged; cat"
+  run "$TEST_TMPDIR/scripts/draft.sh" demo
+  [ "$status" -eq 0 ]
+  expect_yaml demo 'name: demo' 'strategy: github-tag' 'upstream:' '  project: o/demo' 'current: 1.0.0'
+  [ ! -e "$TEST_TMPDIR/smudged" ]
+}
+
 # The AUR answers an unknown name with an empty repository
 @test "draft: stops when the AUR has no such package" {
   git init -q --bare "$TEST_TMPDIR/aur/demo.git"
@@ -342,14 +358,24 @@ stub_git_latest() {
 }
 
 @test "draft: writes the values of .SRCINFO into the YAML as text and never runs the PKGBUILD" {
-  aur_package demo '1.0.0$(touch pwned)' "source = git+https://git.example.org/~owner/\$(touch pwned)\"x'"
+  aur_package demo 1.0.0 "source = git+https://git.example.org/~owner/\$(touch pwned)\"x'"
   cd "$TEST_TMPDIR"
   run "$TEST_TMPDIR/scripts/draft.sh" demo
   [ "$status" -eq 1 ]
-  [ "$(yq '.current' "$TEST_TMPDIR/packages/demo.yml")" = '1.0.0$(touch pwned)' ]
   [ "$(yq '.upstream.url' "$TEST_TMPDIR/packages/demo.yml")" = "https://git.example.org/~owner/\$(touch pwned)\"x'" ]
   [ ! -e "$TEST_TMPDIR/pwned" ]
   [ ! -e "$TEST_TMPDIR/pkgbuild-ran" ]
+}
+
+@test "draft: writes nothing for a pkgver that is no version" {
+  aur_package demo '1.0.0$(touch pwned)' 'source = https://github.com/o/demo/archive/v1.0.0.tar.gz'
+  cd "$TEST_TMPDIR"
+  run "$TEST_TMPDIR/scripts/draft.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed: '1.0.0\$(touch pwned)'"* ]]
+  [[ "$output" == *"The .SRCINFO of demo has a pkgver that current cannot hold, so no YAML is written"* ]]
+  [ ! -e "$TEST_TMPDIR/packages/demo.yml" ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
 }
 
 @test "draft: warns about an epoch other than 0" {
