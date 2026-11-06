@@ -77,7 +77,22 @@ jobs:
           pacman-key --init
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git go-yq
-          useradd -m builder
+
+      # builder may own no file that the runner mounts into the container,
+      # so it gets a fixed uid that no account of the runner has
+      - &add-builder
+        name: Add builder
+        run: |
+          useradd -m -u 2000 builder
+          if [[ "$(id -u builder)" == "$(stat -c %u "$RUNNER_TEMP")" ]]; then
+            echo "::error::builder has the uid of the account that owns $RUNNER_TEMP"
+            exit 1
+          fi
+          owned=$(find /__w /__e \( -user builder -o -group builder \) -print -quit)
+          if [[ -n "$owned" ]]; then
+            echo "::error::builder owns $owned"
+            exit 1
+          fi
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -104,6 +119,7 @@ jobs:
 
       - &stop-builder
         name: Stop builder
+        id: stop
         if: always()
         run: |
           # A job that failed before useradd has no builder and no checkout
@@ -119,6 +135,9 @@ jobs:
             printf '%s\n' "$procs" |
               awk -v u="$uid" '($1 == u || $2 == u) && $3 !~ /^Z/ { n++ } END { exit !n }'
           }
+          # kill -1 reaches every process builder may signal in one call,
+          # and a fork under way then fails
+          sudo -u builder kill -KILL -1 || true
           for _ in $(seq 30); do
             rc=0
             live || rc=$?
@@ -138,7 +157,7 @@ jobs:
       # runs. builder reads each file, so a link reaches nothing it cannot.
       - &hand-over
         name: Hand over
-        if: always()
+        if: always() && steps.stop.outcome == 'success'
         env:
           WORK: /work
           RESULTS: /results
@@ -234,7 +253,8 @@ jobs:
           pacman-key --init
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git openssh namcap jq go-yq pacman-contrib
-          useradd -m builder
+
+      - *add-builder
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -292,7 +312,8 @@ jobs:
           pacman-key --init
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git jq go-yq
-          useradd -m builder
+
+      - *add-builder
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -356,7 +377,8 @@ jobs:
           pacman-key --init
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git github-cli openssh gnupg jq go-yq
-          useradd -m builder
+
+      - *add-builder
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
