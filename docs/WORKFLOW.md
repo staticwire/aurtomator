@@ -18,7 +18,7 @@
 
 ## 1. Overview
 
-aurtomator bumps the version of AUR packages you already maintain. It does **not** generate PKGBUILDs: it changes `pkgver` in the existing PKGBUILD on the AUR, regenerates checksums and `.SRCINFO`, and pushes the update.
+aurtomator bumps the version of AUR packages you already maintain. It does **not** generate PKGBUILDs: it changes `pkgver` and `pkgrel` in the existing PKGBUILD on the AUR, regenerates checksums and `.SRCINFO`, and pushes the update.
 
 ### End-to-end flow
 
@@ -70,7 +70,7 @@ flowchart TD
 
 - **One YAML per package.** Adding or removing a package is one file.
 - **Strategy-based version detection.** Each type of upstream source has its own script. A new source is a new script plus the checks of its fields in `scripts/validate-pkg.sh`.
-- **Patch, do not generate.** aurtomator trusts your PKGBUILD and changes only `pkgver`, `pkgrel`, checksums and `.SRCINFO`. Build steps, dependencies and install files stay untouched.
+- **Patch, do not generate.** aurtomator trusts your PKGBUILD and changes only `pkgver`, `pkgrel`, checksums, `.SRCINFO` and, for a package with `upstream.asset_var`, the line of that variable, see [4.6](#46-values-from-release-asset-names). Build steps, dependencies and install files stay untouched.
 - **Five jobs, one with secrets.** A PKGBUILD is code, and an update executes it from the audit to `makepkg --printsrcinfo`. `check` runs the strategies with the read-only workflow token, executes no PKGBUILD and decides what the run does. The jobs after it take the status of every package from `check`. `prepare` runs the PKGBUILD steps without secrets and without a token, and hands over only prepared files and update failures, because code from one PKGBUILD can write the files of every package there. `verify` downloads the sources of each prepared update and checks its checksums, without secrets and as an unprivileged user, so code from one PKGBUILD cannot forge the checksums of another package. `publish` holds the SSH key, the GPG key and the write token, never executes a PKGBUILD, runs no strategy and never downloads a source, and checks what `verify` passes on before it pushes. See [4.4](#44-prepare-and-publish). `issues` opens and closes the issues in every run, with a token that writes issues and nothing else, see [5.6](#56-issues).
 - **Failure isolation.** A broken package does not block the others. Each failure is logged for its package, and a package that starts failing gets a GitHub Issue, see [5.6](#56-issues). Each package has a time budget, so one that hangs does not hold up the run either.
 
@@ -93,7 +93,7 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 | `pkgver_format` | no      | The upstream version with a fixed text around it, `%s` in its place, as `4.%s`, see below |
 | `alerts`       | no       | Rules for steps of upstream that need a hand edit: each pauses the update or reports a note, see [4.5](#45-update-alerts) |
 
-`validate-pkg.sh` refuses a key that is not in this table, and an `upstream` key that the strategy does not read, so a misspelled key does not go unread. A misspelled `allow_downgrade` gives `packages/<name>.yml: unknown key: allow_downgrades`. The `upstream` keys of each strategy are its line of `UPSTREAM_KEYS` in `scripts/validate-pkg.sh`, and the error names the strategies that read the key, as in `upstream.branch applies to the git-latest strategy only`. A key that no strategy reads gives `upstream.projet is not a field of any strategy`. A file that is not a map of fields, and an `upstream` that is not a map, are refused before these checks. It also refuses a `current` with a character outside `A-Za-z0-9._+` or without a digit, the form of a version in every script.
+`validate-pkg.sh` refuses a key that is not in this table, and an `upstream` key that the strategy does not read, so a misspelled key does not go unread. A misspelled `allow_downgrade` gives `packages/<name>.yml: unknown key: allow_downgrades`. The `upstream` keys of each strategy are its line of `UPSTREAM_KEYS` in `scripts/validate-pkg.sh`, and the error names the strategies that read the key, as in `upstream.branch applies to the git-latest strategy only`. A key that no strategy reads gives `upstream.projet is not a field of any strategy`. A file that is not a map of fields is refused before these checks, and an `upstream` that is not a map before the check of its keys. It also refuses a `current` with a character outside `A-Za-z0-9._+` or without a digit, the form of a version in every script.
 
 Example:
 
@@ -166,7 +166,7 @@ upstream:
   project: owner/repo
 ```
 
-**Custom tag format:** for tags like `MeshLab-2025.07` or `0.1.8-stable`, set `tag_version_regex`. The text of its first capture group becomes the version. bash `[[ =~ ]]` takes the group, so the regex may hold `|`. A group of alternatives has to come after the version, as in `^v?([0-9.]+)(-stable|)$`, because bash knows no group that does not capture: `^(mesa-)?([0-9.]+)$` gives `mesa-`.
+**Custom tag format:** for tags like `MeshLab-2025.07` or `0.1.8-stable`, set `tag_version_regex`. The text of its first capture group becomes the version. bash `[[ =~ ]]` takes the group, so the regex may hold `|`. Without `tag_version_replace`, a group of alternatives has to come after the version, as in `^v?([0-9.]+)(-stable|)$`, because bash knows no group that does not capture: `^(mesa-)?([0-9.]+)$` gives `mesa-`.
 
 ```yaml
 name: meshlab-bin
@@ -187,7 +187,7 @@ upstream:
   tag_version_replace: '\1.\2.\3'
 ```
 
-`validate-pkg.sh` refuses `tag_version_replace` without `tag_version_regex`, with a character other than `A-Za-z0-9._+` outside `\1` to `\9`, or with a group the regex does not have. Both fields also work with `github-tag`, `github-nightly`, `gitlab-tag`, `gitea-tag` and `git-tag`. `validate-pkg.sh` refuses `tag_version_regex` with any other strategy.
+`validate-pkg.sh` refuses `tag_version_replace` without `tag_version_regex`, with a character other than `A-Za-z0-9._+` outside `\1` to `\9`, or with a group the regex does not have. Both fields also work with `github-tag`, `github-nightly`, `gitlab-tag`, `gitea-tag`, `gitea-release` and `git-tag`. `validate-pkg.sh` refuses `tag_version_regex` with any other strategy.
 
 ### 3.2 github-tag
 
@@ -235,7 +235,7 @@ upstream:
 - **Pattern A, fixed tag** (default): `nightly_tag` names one tag that moves, as in neovim, ghostty or yazi.
 - **Pattern B, dated tags**: `nightly_tag` is a prefix with a dash, such as `nightly-`. Of the first 20 releases the API lists, the first whose tag contains it wins (ruffle). With `nightly_tag_regex` in place of `nightly_tag`, the strategy reads up to 3 pages of 100 releases and takes the release published last among those whose tag matches the ERE (servo).
 - **Pattern C, separate nightly repo**: `nightly_tag: latest` reads `/releases/latest` of a dedicated build repo (yt-dlp).
-- **Pattern D, channel filter**: `channel` picks the newest of the last 20 releases whose name contains it (brave).
+- **Pattern D, channel filter**: of the first 20 releases the API lists, the first whose name contains `channel` wins (brave).
 
 Patterns B and C depend on how a repository files its releases. `/releases/latest` skips pre-releases, and ruffle-rs/ruffle files its nightlies as pre-releases, so pattern C gives its stable `v0.7.1`. `/releases/latest` also sorts by `created_at`, which GitHub sets to the date of the tagged commit, not of the release. Every release of servo/servo-nightly-builds carries `2024-02-14` there, and its release list starts with 12 `v0.x` rc releases, so `nightly_tag: '-'` picks `v0.7.0-rc1`. `nightly_tag_regex` ranks the matches by `published_at` and depends on neither order. A page with fewer than 100 releases, an empty one included, is the last page it reads.
 
@@ -320,7 +320,7 @@ upstream:
 
 **Upstream:** one GitHub release by tag (`/repos/{owner}/{repo}/releases/tags/{tag}`) and the `updated_at` of the assets listed in the package YAML.
 
-**When to use:** releases whose tag never moves while the assets behind it are replaced, such as a model zoo or a rolling download tag. A PKGBUILD for such a release points at fixed URLs, so an update changes `pkgver` and the checksums and nothing else. Nightly binaries fit as well, such as the `nightly` tag of `wezterm/wezterm`. The PKGBUILD has no `pkgver()`, because the audit blocks one with this strategy, and `pkgver` holds the date, see [pkgver() with the wrong strategy](SUPPORTED-PACKAGES.md#pkgver-with-the-wrong-strategy-blocked).
+**When to use:** releases whose tag never moves while the assets behind it are replaced, such as a model zoo or a rolling download tag. A PKGBUILD for such a release points at fixed URLs, so an update changes `pkgver`, `pkgrel` and the checksums and nothing else. Nightly binaries fit as well, such as the `nightly` tag of `wezterm/wezterm`. The PKGBUILD has no `pkgver()`, because the audit blocks one with this strategy, and `pkgver` holds the date, see [pkgver() with the wrong strategy](SUPPORTED-PACKAGES.md#pkgver-with-the-wrong-strategy-blocked).
 
 **YAML fields:**
 
@@ -432,11 +432,11 @@ upstream:
 
 Each type reads only its own of `host`, `project` and `url`, and `validate-pkg.sh` refuses the others: `host` with `github` or `git`, `project` with `git`, and `url` with `github` or `gitlab`.
 
-**Version:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the hash of `HEAD` and prints the usual `-git` format `r<count>.<hash>`, for example `r431.66db9ce`. The clone takes `--filter=tree:0` and holds commits and tags only, because the strategy reads no files: a full bare clone of `googleapis/mcp-toolbox`, 1.4 GB by the GitHub API, timed out after the 120 s of a check. A server without partial clone ignores the filter with a warning and sends the whole repository. With `upstream.branch`, the clone takes `--branch`, and `HEAD` is that branch, as makepkg checks it out for `#branch=`: sharkdp/fd gives `r2061.9e90463` on `master` and `r1925.cf8a48a` with `branch: abort-on-panic`. A branch the repository does not have fails the clone. `validate-pkg.sh` refuses a name that `git check-ref-format --branch` refuses, such as one that starts with `-`. The hash has as many characters as the hash in `current`, and 7 when `current` is empty. `git rev-parse --short` in a `pkgver()` gives more characters as the repository grows: fabric-git is `r2173.ef2e985d` on the AUR, and `vercmp` reads `r2173.ef2e985` of the same commit as older.
+**Version:** makes a bare clone into a temporary directory, counts the commits on `HEAD` (`git rev-list --count HEAD`), takes the hash of `HEAD` and prints the usual `-git` format `r<count>.<hash>`, for example `r431.66db9ce`. The clone takes `--filter=tree:0` and holds commits and tags only, because the strategy reads no files: a full bare clone of `googleapis/mcp-toolbox`, 1.4 GB by the GitHub API, timed out after the 120 s of a check. A server without partial clone ignores the filter with a warning and sends the whole repository. With `upstream.branch`, the clone takes `--branch`, and `HEAD` is that branch, as makepkg checks it out for `#branch=`: sharkdp/fd gives `r2061.9e90463` on `master` and `r1925.cf8a48a` with `branch: abort-on-panic`. A branch the repository does not have fails the clone. `validate-pkg.sh` refuses a name that `git check-ref-format --branch` refuses, such as one that starts with `-`. The hash has as many characters as the hash in `current`, and 7 when `current` is empty. `git rev-parse --short` in a `pkgver()` gives more characters as the repository grows: fabric-git is `r2173.ef2e985d` on the AUR, and `vercmp` reads `r2173.ef2e985` of the same commit as newer, so a hash of 7 characters would publish that commit again.
 
-With `upstream.describe`, the strategy prints what the `git describe` recipes of the [Arch package guidelines for VCS packages](https://manual.archlinux.page/package-guidelines/vcs/) print: `git describe --long --abbrev=<n>`, with `--tags` for `describe: tags` and without it for `describe: annotated`, which takes annotated tags only. `upstream.tag_prefix` is cut from the start of the tag first, as `sed 's/^v//'` does, and then `sed 's/\([^-]*-g\)/r\1/;s/-/./g'` turns `v1.2.0-rc1-47-g0bbf5ad` into `1.2.0.rc1.r47.g0bbf5ad`. On a tagged commit, `--long` still gives `r0` and the hash. The hash takes as many characters as the hash after `.g` in `current`, and 7 when `current` is empty. A repository without a tag reachable from `HEAD` fails with `git describe finds no tag reachable from HEAD of <url>`. `validate-pkg.sh` refuses a `describe` other than `tags` or `annotated`, a `tag_prefix` without `describe`, and a `tag_prefix` with a character outside `A-Za-z0-9._+/-`.
+With `upstream.describe`, the strategy prints what the `git describe` recipes of the [Arch package guidelines for VCS packages](https://manual.archlinux.page/package-guidelines/vcs/) print: `git describe --long --abbrev=<n>`, with `--tags` for `describe: tags` and without it for `describe: annotated`, which takes annotated tags only. `upstream.tag_prefix` is cut from the start of the tag first, as `sed 's/^v//'` does, and then `sed 's/\([^-]*-g\)/r\1/;s/-/./g'` turns `v1.2.0-rc1-47-g0bbf5ad` into `1.2.0.rc1.r47.g0bbf5ad`. On a tagged commit, `--long` still gives `r0` and the hash. The hash takes at least as many characters as the hash after `.g` in `current`, and at least 7 when `current` is empty: `git describe` adds characters when the shorter hash is not unique. A repository without a tag reachable from `HEAD` fails with `git describe finds no tag reachable from HEAD of <url>`. `validate-pkg.sh` refuses a `describe` other than `tags` or `annotated`, a `tag_prefix` without `describe`, and a `tag_prefix` with a character outside `A-Za-z0-9._+/-`.
 
-`current` must be empty or of the form the strategy prints: `r<count>.<hash>`, or `<tag>.r<count>.g<hash>` with `upstream.describe`. `validate-pkg.sh` refuses any other. `vercmp` reads `1.4.0.r47.g0bbf5ad` as newer than every `r<count>.<hash>`, so a `current` of the other form would make each check a downgrade, and the package would never update.
+`current` must be empty or of the form the strategy prints: `r<count>.<hash>`, or `<tag>.r<count>.g<hash>` with `upstream.describe`. `validate-pkg.sh` refuses any other. `vercmp` reads `1.4.0.r47.g0bbf5ad` as newer than every `r<count>.<hash>`. Without `upstream.describe`, a `current` of the `git describe` form would make each check a downgrade, and the package would never update. With `upstream.describe`, a `current` of the form `r<count>.<hash>` would make the next check an update, even on the same commit.
 
 Every new commit upstream is a new version. A push of a `git-latest` package waits 7 days after the last one, unless `cooldown_days` sets other days, see [4.7](#47-cooldown).
 
@@ -544,7 +544,7 @@ upstream:
 | `upstream.registry` | yes      | Crate name (e.g. `serde`, `tokio`) |
 | `upstream.prerelease` | no     | `true` reads `max_version`, pre-releases included. Needs `pkgver_dash`. Default `false`. |
 
-**Version:** reads `.crate.max_stable_version`, which excludes pre-releases, or `.crate.max_version` with `prerelease: true`. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as the crates.io API policy requires.
+**Version:** reads `.crate.max_stable_version`, which excludes pre-releases, or `.crate.max_version` with `prerelease: true`. The request sends `User-Agent: aurtomator/1.0`, as the crates.io API policy requires.
 
 **Example YAML:**
 
@@ -580,7 +580,7 @@ pkgver_dash: .
 |---------------------|----------|--------------------------------------------------------------|
 | `upstream.repology` | no       | Repology project name. Defaults to the package `name`.       |
 
-**Version:** returns the version of the first entry with `status == "newest"` outside the AUR. The AUR entries are left out, because for a package of ours they hold our own version. When only the AUR is newest, the strategy returns the newest `outdated` version outside the AUR by `vercmp`, and a `current` above it reads as a downgrade, see [4.3](#43-downgrade-behavior). The version is the normalized `version` field of Repology: the OpenBSD entry of qodem gives `1.0.1`, and its `origversion` is `1.0.1p1`. The request sends `User-Agent: aurtomator/1.0`, as every strategy request does and as Repology asks.
+**Version:** returns the version of the first entry with `status == "newest"` outside the AUR. The AUR entries are left out, because for a package of ours they hold our own version. When only the AUR is newest, the strategy returns the newest `outdated` version outside the AUR by `vercmp`, and a `current` above it reads as a downgrade, see [4.3](#43-downgrade-behavior). The version is the normalized `version` field of Repology: the OpenBSD entry of qodem gives `1.0.1`, and its `origversion` is `1.0.1p1`. The request sends `User-Agent: aurtomator/1.0`, as Repology asks.
 
 The version lags behind upstream until a distribution other than the AUR packages the new release. A project that Repology does not know, such as `wingide` in place of `wing-ide`, fails the check with `Project <name> not found on Repology`. A project with no `newest` or `outdated` entry outside the AUR fails with `No version found on Repology for <name> outside the AUR`.
 
@@ -704,7 +704,7 @@ upstream:
 | `upstream.project` | no       | Tarball name. Defaults to the package `name`.                |
 | `upstream.path`    | no       | Directory on download.kde.org. Defaults to `stable/{project}`. |
 
-**Version:** matches `{project}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`). When the listing also holds directories named by digits and dots, it reads the newest of them by `sort -V`, and the `src/` in it when there is one, as for KDE Gear. The highest version of both listings wins by `sort -Vu`, so older tarballs beside the directories do not hide a newer release. A newest directory without a tarball of the project stops the strategy with that directory in the message, so a project dropped from Plasma is not followed into an older directory. A dot or a plus in `project` matches itself. `validate-pkg.sh` refuses a `project` with a character outside `A-Za-z0-9@._+-`, and a `path` with an empty segment, a segment that starts with a dot, or a character outside `A-Za-z0-9._+-`.
+**Version:** matches `{project}-{version}.tar.xz` links on the listing, where the version is digits and dots (`[0-9]+\.[0-9]+(\.[0-9]+)*`). When the listing also holds directories named by digits and dots, it reads the newest of them by `sort -V`, and the `src/` in it when there is one, as for KDE Gear. The highest version of both listings wins by `sort -Vu`, so older tarballs beside the directories do not hide a newer release. A newest directory without a tarball of the project stops the strategy with that directory in the message, so a project dropped from Plasma is not followed into an older directory. A dot or a plus in `project` matches itself. `validate-pkg.sh` refuses a `project` that does not start with a letter or a digit or that holds a character outside `A-Za-z0-9@._+-`, and a `path` with an empty segment, a segment that starts with a dot, or a character outside `A-Za-z0-9._+-`.
 
 **Example YAML:**
 
@@ -820,12 +820,12 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--
 4. Warn when the PKGBUILD has no `# Maintainer:` line.
 5. Audit the PKGBUILD. `pkgver()` with the wrong strategy and mixed checksums block the update. Patches and an `epoch` other than 0 only warn. See [SUPPORTED-PACKAGES.md](SUPPORTED-PACKAGES.md).
 6. Set `pkgver` with `sed` and `pkgrel` to 1, or to the `pkgrel` of the AUR when the AUR has this version already, as for a package added without `current`. For a package with `upstream.asset_var`, also write the value of `--asset` to its line and set `pkgrel` as [4.6](#46-values-from-release-asset-names) says. When `pkgver` and `pkgrel` of the AUR PKGBUILD already hold these values, read as bash reads them, so past quotes and a comment, the AUR already has this version: the script changes no line, writes the version to `current` and the value to `current_asset`, and exits with code 2. A dry run writes neither.
-7. Validate every `http` and `https` source URL, whatever its checksum. Unless a checksum array holds a `SKIP` other than that of a signature and no remote source has a real hash, run `updpkgsums`, and verify the result with `makepkg --verifysource --skippgpcheck`. A signature is a source whose file name ends in `.sig`, `.sign` or `.asc`, and makepkg gives it `SKIP` itself, as it does for a VCS source without a `#commit=`, `#tag=` or `#revision=` pin. Step 5 allows a real remote hash only next to such a `SKIP`, and `makepkg` clones the repository of a VCS source to run `updpkgsums`. Any failure stops the update.
+7. Validate every `http` and `https` source URL, whatever its checksum. Unless a checksum array holds a `SKIP` other than that of a signature and no remote source has a real hash, run `updpkgsums`, and verify the result with `makepkg --verifysource --skippgpcheck`. A signature is a source whose file name ends in `.sig`, `.sign` or `.asc`, and makepkg gives it `SKIP` itself. makepkg also gives `SKIP` to every `svn` source and to a `git`, `hg` or `bzr` source without the pin it hashes: `#commit=` or `#tag=` for git, `#tag=` or `#revision=` for hg, and `#revision=` for bzr. A `fossil` source is hashed as a download. Step 5 allows a real remote hash only next to such a `SKIP`, and `makepkg` clones the repository of a VCS source to run `updpkgsums`. Any failure stops the update.
 8. Run `namcap` when it is installed. Errors stop the update. Warnings are printed.
 9. Regenerate `.SRCINFO` with `makepkg --printsrcinfo`.
 10. Check `PKGBUILD` and `.SRCINFO` against the files of the clone's `HEAD`, as publish does in steps 4 and 5 of [4.4](#44-prepare-and-publish). A refused file stops the update.
 11. With `--dry-run`, print the PKGBUILD diff and stop.
-12. Commit `PKGBUILD` and `.SRCINFO` as `<new-version> release from <strategy>`, or `<new-version>-<pkgrel> release from <strategy>` for a rebuild, authored by `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL` (default `aurtomator`). With `GPG_KEY_ID` set, the commit is amended with a signature. When signing fails, the commit is pushed unsigned.
+12. Commit `PKGBUILD` and `.SRCINFO` as `<new-version> release from <strategy>`, or `<new-version>-<pkgrel> release from <strategy>` for a rebuild, authored by `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, by default `aurtomator` and `aurtomator@users.noreply.github.com`. With `GPG_KEY_ID` set, the commit is amended with a signature. When signing fails, the commit is pushed unsigned.
 13. Push, with up to 3 attempts 5 seconds apart.
 14. Write `current`, `current_asset` for a package with `upstream.asset_var`, and `last_updated` to the package YAML.
 
@@ -835,7 +835,7 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--
 
 An upstream version lower than `current` reaches the AUR only when the package YAML sets `allow_downgrade: true`. Without it, `check-all.sh` skips the version, writes `downgrade_skipped: <version>` and pushes nothing. A skipped downgrade opens no issue and does not count as a failure. `--prepare` and `--publish` apply the same rule, so a downgrade of a package without the flag is never prepared or published.
 
-The default guards against a lower version that upstream does not mean as a step back. `github-release` reads `/releases/latest`, and GitHub picks that release by the date of the commit it was made from, not by the date it was published. A maintenance release of an older line, made from a commit newer than the one of the current release, becomes the latest release. Without the flag, aurtomator would push it as a downgrade and push the newer version again at the next release.
+The default guards against a lower version that upstream does not mean as a step back. Without `tag_version_regex`, `github-release` reads `/releases/latest`, and GitHub picks that release by the date of the commit it was made from. The date it was published does not count. A maintenance release of an older line, made from a commit newer than the one of the current release, becomes the latest release. Without the flag, aurtomator would push it as a downgrade and push the newer version again at the next release.
 
 `allow_downgrade: true` fits a package whose upstream does mean it, for example one that rolls back a broken release and the AUR package should follow.
 
@@ -848,7 +848,7 @@ The default guards against a lower version that upstream does not mean as a step
 
 #### How to detect downgrades in logs
 
-Every comparison that finds the current version newer than the latest one (`vercmp "$current" "$latest"` returns `1`) logs the literal token `DOWNGRADE`. In a CI run, `check-all.sh` logs the first line for a package without `allow_downgrade: true` and the second for one with it:
+A comparison that finds the current version newer than the latest one (`vercmp "$current" "$latest"` prints `1`) logs the literal token `DOWNGRADE`. In a CI run, `check-all.sh` logs the first line for a package without `allow_downgrade: true`. For a package with it, the second line follows once no alert holds the update, its cooldown is over and, for a package with `upstream.asset_regex`, its asset value is found:
 
 ```text
 ! myapp-bin: DOWNGRADE detected 1.2.1 → 1.2.0, skipped: allow_downgrade is not set
@@ -964,7 +964,7 @@ With `hold: true`, `check-all.sh` writes `held: <version>`, logs the first line 
 
 A skipped downgrade or version jump comes first, see [4.3](#43-downgrade-behavior). `--prepare` and `--publish` apply the rules again to the version of the check run. A held update does not count among the failing packages of the statistics card, and `update-readme.sh` renders `held: 29+1` as `✋ 29+1 held`.
 
-Every rule that fires writes its note to `.status/_alerts`, and the run opens an issue from it, see [5.6](#56-issues). A held update gets the issue `✋ <package>: update held` with the notes of every rule that fired, because after the hand publish a rule without `hold` no longer fires. The run closes it once the version is in the AUR. A published update gets the issue `🔔 <package>: <version> notice` with its notes, and the maintainer closes it once the edit is done.
+Every rule that fires writes its note to `.status/_alerts`. The run opens an issue from the notes for a held update and for a published one, see [5.6](#56-issues). A held update gets the issue `✋ <package>: update held` with the notes of every rule that fired, because after the hand publish a rule without `hold` no longer fires. The run closes it once the version is in the AUR. A published update gets the issue `🔔 <package>: <version> notice` with its notes, and the maintainer closes it once the edit is done.
 
 `validate-pkg.sh` refuses an entry with any other key, without exactly one of `when`, `from` and `match`, with `when` other than `major`, with a `from` that is not a version, a `match` that bash does not accept as an ERE, a `note` that is not one line of text, or a `hold` that is not a boolean. It refuses `when: major` together with `pkgver_format`, because the fixed text of a format such as `4.%s` holds the first number of every version. `check-all.sh` reads the rules on every run. A rule it cannot evaluate, or a `note` that is not one line of text, fails the check of the package and never lets a held update through.
 
@@ -1007,7 +1007,7 @@ A tag appears before its release. liquidsoap uploads the assets of a release to 
 
 None of the three counts among the failing packages of the statistics card, see [5.9](#59-statistics).
 
-`update-pkg.sh`, `verify-pkg.sh` and `publish-pkg.sh` take the value with `--asset <value>`, and `check-all.sh` passes it. A package with `upstream.asset_var` needs it, and any other package refuses it. The value starts with a letter or a digit and holds only `A-Za-z0-9 . _ + ~ -`, because bash expands a tilde at the start of an assignment: `_deb=~root` gives the home directory of `root`. `update-pkg.sh` writes the value to the line of `upstream.asset_var`. `verify-pkg.sh` reads it from that line of the prepared `PKGBUILD`, as it reads `pkgver`, and `publish-pkg.sh` refuses a prepared line with another value than its `--asset`.
+`update-pkg.sh`, `verify-pkg.sh` and `publish-pkg.sh` take the value with `--asset <value>`, and `check-all.sh` passes it. A package with `upstream.asset_var` needs it, and any other package refuses it. The value starts with a letter or a digit and holds only `A-Za-z0-9 . _ + ~ -`, because bash expands a tilde at the start of an assignment: `_deb=~root` gives the home directory of `root`. `update-pkg.sh` writes the value to the line of `upstream.asset_var`. `verify-pkg.sh` and `publish-pkg.sh` refuse a prepared line with another value than their `--asset`, as they refuse a `pkgver` other than `<version>`.
 
 The AUR `PKGBUILD` must hold exactly one line of `upstream.asset_var`, and its value is the old value. `pkgrel` follows from the version and the value:
 
@@ -1206,7 +1206,7 @@ Steps 6 and 7 run as root with `GH_TOKEN` set to the workflow token. No other us
 `update-readme.sh` rewrites two blocks of `README.md`:
 
 1. **Badges** between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: the badges `Validate packages` and `Check AUR Package Updates`, the status of `validate.yml` and `check-updates.yml` in your repository, which `GITHUB_REPOSITORY` names in CI and the GitHub `origin` names in a local run, and the badge `maintained with aurtomator`, which links to aurtomator. Without either, the block holds the last badge alone. The badge URLs name the two files, so the calling workflows keep those names.
-2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`: the statistics card, then the table built from `.status/`. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
+2. **Package table** between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`: the statistics card, then a table with a row for each package in `packages/`: its name, `current`, strategy, `last_updated` and the label of its status in `.status/`. A package without a status file shows `✨ new` without `current` and `✅ tracking` with it. Each name links to `https://aur.archlinux.org/pkgbase/<name>`. The AUR shows the base of a split package there and sends any other package to `/packages/<name>`. The version of aurtomator follows the table, see [5.8](#58-version-of-aurtomator).
 
 While `packages/` holds no package, the script writes nothing. A repository made from the template keeps the setup steps in its README until its first package, and the README of aurtomator stays as it is. A README whose last package was removed keeps the table it had. With a package, the table markers are required and the badges are optional. Each marker must be a line of its own, once, with the start marker above the end marker. The script checks this for the table, and for the badges when their start marker is there, and stops before it writes anything otherwise. A line that only quotes a marker in its text is left as it is.
 
@@ -1228,7 +1228,7 @@ While `packages/` holds no package, the script writes nothing. A repository made
 | `.status/<name>`       | `pending: 2.5.0rc1`              | The release asset of the version is not out yet, see [4.6](#46-values-from-release-asset-names) |
 | `.status/<name>`       | `new_build: 2.4.6`               | Rebuild of the version the AUR has found, not pushed yet |
 | `.status/<name>`       | `rebuilt: 2.4.6`                 | Rebuild pushed to the AUR                |
-| `.status/<name>`       | `check_failed: <error>`          | The strategy failed                      |
+| `.status/<name>`       | `check_failed: <error>`          | The check failed: the strategy, the asset value, an alert rule, the cooldown fields, or the status of the check run |
 | `.status/<name>`       | `update_failed: <error>`         | The update failed                        |
 | `.status/_alerts`      | `<name>`, `hold` or `notice`, the note, split by tabs | One line for each alert that fired, see [4.5](#45-update-alerts) |
 | `.status/_assets`      | `<name>` and the asset value, split by a tab | One line for each value found, see [4.6](#46-values-from-release-asset-names) |
@@ -1311,7 +1311,7 @@ The step lists the jobs of the run and takes those with the conclusion `failure`
 
 `VERSION` in the root of aurtomator holds its version, and the release PR of aurtomator writes it, see `CONTRIBUTING.md`. A run reads it from the checkout in `aurtomator/`, so the version a run uses is that of the SHA the calling workflows pin, the SHA of a release tag. Dependabot opens the pull request in your repository that moves the pin to a new release, see [SETUP.md](SETUP.md#the-calling-workflows).
 
-`check-all.sh` logs the version first. In a check run and with `--update`, it reads the latest release of `staticwire/aurtomator` from the GitHub API, with `GITHUB_TOKEN` when it is set, and compares it with `VERSION` by `vercmp`. It writes `newer: <release>` or `current: <release>` to `.status/_upstream` and logs a line when the release is newer. A failed request, or a tag other than `vX.Y.Z`, logs a warning and writes nothing, and the run goes on. `--prepare` and `--publish` run no request and carry `.status/_upstream` of the check run. Without `VERSION`, it asks nothing.
+`check-all.sh` logs the version before the first package, in every mode but `--verify`. In a check run and with `--update`, it reads the latest release of `staticwire/aurtomator` from the GitHub API, with `GITHUB_TOKEN` when it is set, and compares it with `VERSION` by `vercmp`. It writes `newer: <release>` or `current: <release>` to `.status/_upstream` and logs a line when the release is newer. A failed request, or a tag other than `vX.Y.Z`, logs a warning and writes nothing, and the run goes on. `--prepare` and `--publish` run no request and carry `.status/_upstream` of the check run. Without `VERSION`, it asks nothing.
 
 `update-readme.sh` writes the version under the package table, and with `newer:` a link to the release:
 
@@ -1414,6 +1414,8 @@ actionlint
 
 `actionlint` does not check the `run:` blocks of a composite action. The step `shellcheck the actions` takes them from every `.github/actions/*/action.yml` with the `yq` of the runner image and runs `shellcheck -s bash` on them at its default severity, so an unquoted variable fails the step as it fails `actionlint` in a workflow.
 
+The step `shellcheck and shfmt the runner` prints the `aurtomator.sh` script of the template with `tests/helpers/runner-script.sh`, which takes it from [SETUP.md](SETUP.md#the-aurtomatorsh-script), and runs `shellcheck` and `shfmt -d -i 2 -ci` on it.
+
 ### 6.2 Test job
 
 15-minute timeout. It runs in the image that the `image` job of `ci.yml` reads. That job is the `image` job of [5.2](#52-permissions-and-container) without `Check the pin`, and its checkout takes the commit of the run. It upgrades `archlinux-keyring`, installs `bash bats git go-yq jq curl openssh namcap ruby ruby-erb` and the gems `bashcov` 4.0.0 and `simplecov-cobertura` 4.0.0 with the two gems they need, `simplecov` 1.3.2 and `rexml` 3.4.4. `gem install` names each of the four with its version and resolves no dependency, because gem takes the newest release of a dependency it resolves, and that release would run in a required check. Then it runs:
@@ -1459,7 +1461,7 @@ The step **What builder reaches** tests as `builder` whether it can write `$GITH
 ```bash
 sudo pacman -S --needed git curl go-yq pacman-contrib namcap
 # For tests and linting:
-sudo pacman -S --needed bats shellcheck shfmt
+sudo pacman -S --needed bats jq openssh shellcheck shfmt actionlint
 ```
 
 The commands of 7.2 to 7.6 run in your repository through its script `aurtomator.sh`. It runs the scripts of aurtomator at the commit the calling workflows pin, so a local run uses the strategies and the checks of the version a run in CI uses, see [SETUP.md](SETUP.md#the-aurtomatorsh-script).
@@ -1588,6 +1590,8 @@ shfmt -w -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tes
 actionlint
 ```
 
+CI also runs `shellcheck` on the `run:` blocks of `.github/actions/*/action.yml`, and `shellcheck` and `shfmt` on the runner script, see [6.1](#61-lint-job).
+
 ## 8. Writing Custom Strategies
 
 Your repository holds no strategies. A run takes them from `strategies/` of aurtomator at the pinned SHA, so a new strategy comes into aurtomator by a pull request, as `CONTRIBUTING.md` describes. A strategy is a bash script in `strategies/` that finds the latest upstream version of a package.
@@ -1659,24 +1663,26 @@ echo "$version"
 
 | Function                        | Description                                         |
 |---------------------------------|-----------------------------------------------------|
-| `resolve_data_dir`              | Sets `AURTOMATOR_DATA_DIR` to the absolute path of its value, or of the working directory when it is unset, and exits 1 when that is no directory. `common.sh` runs it when it is sourced |
+| `resolve_data_dir`              | Sets `AURTOMATOR_DATA_DIR` to the absolute path of its value, or of the working directory when it is unset or empty, and exits 1 when that is no directory. `common.sh` runs it when it is sourced |
 | `pkg_file <name>`               | Resolves `packages/<name>.yml`, returns 1 if missing |
 | `pkg_get <file> <yq-query>`     | Reads a field from a YAML file with yq              |
 | `pkg_set <file> <query> <val>`  | Writes a field to a YAML file with yq               |
 | `pkg_set_current <file> <version> [asset value]` | Writes `current` and, with an asset value, `current_asset` |
 | `pkgver_dash <file>`            | Prints the `pkgver_dash` of a package: `_`, `.`, `drop` for `''`, or nothing |
-| `to_pkgver <version> [dash] [format]` | Prints the pkgver of an upstream version, with `pkgver_dash` and `pkgver_format` applied |
+| `to_pkgver <version> <dash> <format>` | Prints the pkgver of an upstream version, with `pkgver_dash` and `pkgver_format` applied. `<dash>` is the output of `pkgver_dash`, and an empty `<dash>` or `<format>` leaves that step out |
 | `pkg_asset_var <file>`          | Prints the `upstream.asset_var` of a package or nothing, returns 1 for a name that is not a variable name starting with `_` |
 | `require_cmd <cmd>`             | Exits 1 if the command is not in `PATH`             |
 | `http_get <url> [curl option]...` | Fetches a URL with `curl`, see 8.3                |
 | `http_get_json <url> [curl option]...` | `http_get` for an API that answers JSON, see 8.3 |
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
-| `github_release_matching <api> <ere> <pages> [stable] [version <template>]` | Prints a release whose tag matches the ERE, as JSON, from the pages of 100 releases up to the first one with fewer than 100, at most `<pages>` pages: the one published last, or with `version` the one with the newest version that the template gives. `stable` leaves out pre-releases |
+| `github_release_matching <api> <ere> <pages> [stable] [version] [template]` | Prints a release whose tag matches the ERE, as JSON, from the pages of 100 releases up to the first one with fewer than 100, at most `<pages>` pages: the one published last, or with `version` the one with the newest version that the template gives. `stable` leaves out pre-releases. The arguments keep their places, so a call with `version` and without `stable` passes an empty fourth argument |
 | `github_tags <owner/repo>`      | `remote_tags` of a GitHub repository, with `GITHUB_TOKEN` when it is set |
 | `validate_pkgver <version>`     | Returns 1 for an empty version, one with a character outside `A-Za-z0-9._+` or one without a digit |
 | `validate_asset_value <value>`  | Returns 1 for a value that does not start with a letter or a digit, or holds a character outside `A-Za-z0-9._+~-` |
 | `check_asset_option <asset_var> <value>` | Returns 1 when a package with `asset_var` gets no `--asset`, another package gets one, or `validate_asset_value` refuses the value |
 | `version_jump <current> <new>`  | Returns 0 when the first number of the new version has at least two digits more than the first number of the current one |
+| `valid_date <date>`             | Succeeds when the date is a real date in the form `YYYY-MM-DD` |
+| `cooldown_until <file>`         | Prints the first day, `YYYY-MM-DD`, on which the package may be pushed again, or nothing when it has no cooldown or no `last_updated`. Returns 1 when `cooldown_days` or `last_updated` is not valid |
 | `remote_tags <url>`             | Prints every tag name of a git repository from `git ls-remote`, over `https` only and without a terminal prompt |
 | `release_tags <tags>`           | Prints the tags of the form `v1.2.3` or `1.2.3`, one per line |
 | `tag_version_fill <template>`   | Prints the template with `\1` to `\9` replaced by the groups in `BASH_REMATCH`, returns 1 for a group the last match does not have |
@@ -1695,7 +1701,7 @@ The logging functions write to stderr and omit ANSI colors when stderr is not a 
 
 ### 8.5 YAML conventions for custom strategies
 
-Put the strategy's settings under `upstream`, with descriptive names, and list them in the header of the strategy script. Other strategies ignore fields they do not read.
+Put the settings of the strategy under `upstream`, with descriptive names. List them in the header of the strategy script and in the line of the strategy in `UPSTREAM_KEYS`, see [8.3](#83-checklist). `validate-pkg.sh` refuses an `upstream` key that the strategy of the package does not read, see [section 2](#2-package-yaml-format).
 
 ```yaml
 name: my-package
