@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # pkgbuild.sh - Checks update-pkg.sh runs on a PKGBUILD. All but
-# warn_maintainer_line source the file in a child bash.
+# warn_maintainer_line and warn_epoch source the file in a child bash.
 #
 # Sourced by lib.sh, after common.sh.
 

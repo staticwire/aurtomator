@@ -21,6 +21,8 @@
 #                             "tag" (default), "release_body", "tag_date", "published_date"
 #   upstream.version_pattern - regex for extracting version from release body (pattern A)
 #   upstream.channel        - filter releases by name (pattern D)
+#   upstream.tag_version_regex - ERE with a capture group, for version_source tag
+#   upstream.tag_version_replace - the version from its groups (default: \1)
 #   upstream.date_format    - format of date(1) for tag_date and published_date
 #                             (default: "%Y.%m.%d")
 

@@ -3,10 +3,10 @@
 # prepared.sh - Checks of a prepared update against the AUR copy
 #
 # The job that executes a PKGBUILD holds no secrets, so the files it hands
-# over are untrusted. The job that pushes accepts them only when they differ
-# from the AUR copy in pkgver, pkgrel, the checksums as updpkgsums writes
-# them and the value of the asset_var line. None of these checks sources the
-# file.
+# over are untrusted. The job that pushes accepts a PKGBUILD that differs
+# from the AUR copy only in pkgver, pkgrel, the asset_var value and the
+# checksums as updpkgsums writes them, and a .SRCINFO with the changes that
+# check_prepared_srcinfo lists. None of these checks sources the file.
 #
 # Sourced by lib.sh, after common.sh.
 
