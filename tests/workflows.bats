@@ -619,11 +619,11 @@ run_decide_step() {
   [ "$output" = $'prepare=false\nwork=false' ]
 }
 
-# Decide and the commit step read the copies of Hand over
-@test "check-updates: Hand over, Decide and the commit step name the same directory of root" {
+# Decide, Record statistics and the commit step read the copies of Hand over
+@test "check-updates: the steps that read the copies of Hand over name the same directory of root" {
   run yq '[.jobs[].steps[] | select(.env.RESULTS) | .name + " " + .env.RESULTS] | sort | unique | join(",")' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = "Commit changes via API /results,Decide /results,Hand over /results" ]
+  [ "$output" = "Commit changes via API /results,Decide /results,Hand over /results,Record statistics /results" ]
 }
 
 @test "check-updates: update-readme.sh runs as builder after check-all.sh, in check and publish" {
@@ -1381,6 +1381,78 @@ make_handoff() {
   [ -z "$(ls -A "$ws/upload")" ]
   [ -z "$(ls -A "$ws/statuses")" ]
   [ ! -s "$SUDO_LOG" ]
+}
+
+# A workspace with aurtomator linked in, package a at 1.0 before the run and
+# at $1 after it, its status $2, and a journal of one run before
+make_stats_ws() {
+  local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results"
+  mkdir -p "$ws/packages" "$ws/statuses" "$ws/stats" "$results/packages"
+  ln -sfn "$BATS_TEST_DIRNAME/.." "$ws/aurtomator"
+  printf 'name: a\nstrategy: github-release\nupstream:\n  project: o/a\ncurrent: 1.0\n' >"$ws/packages/a.yml"
+  sed "s/^current: .*/current: $1/" "$ws/packages/a.yml" >"$results/packages/a.yml"
+  printf '%s\n' "$2" >"$ws/statuses/a"
+  printf '%s\n' 'time,package,event,version,previous,run' '2026-11-08T05:17:41Z,a,tracked,1.0,,6' >"$ws/stats/events.csv"
+}
+
+# Runs Record statistics in that workspace for the repository $REPO, by
+# default owner/aur-packages, at a fixed time and run
+run_stats_step() {
+  step_run publish "Record statistics" >"$BATS_TEST_TMPDIR/stats-step.sh"
+  (cd "$BATS_TEST_TMPDIR/ws" && RESULTS="$BATS_TEST_TMPDIR/results" GITHUB_REPOSITORY="${REPO-owner/aur-packages}" \
+    GITHUB_RUN_ID=7 AURTOMATOR_STATS_TIME=2026-11-10T05:17:22Z AURTOMATOR_STATS_DATE=2026-11-10 \
+    bash -e "$BATS_TEST_TMPDIR/stats-step.sh")
+}
+
+@test "check-updates: Record statistics runs as root between Hand over and the commit step" {
+  local at
+  at=$(step_index publish "Record statistics")
+  [ "$at" = "$(($(step_index publish "Hand over") + 1))" ]
+  [ "$(step_index publish "Commit changes via API")" = "$((at + 1))" ]
+  run step_run publish "Record statistics"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"./aurtomator/scripts/record-events.sh "* ]]
+  [[ "$output" != *sudo* ]]
+}
+
+@test "check-updates: Record statistics writes the journal and both cards for the commit step" {
+  local stats="$BATS_TEST_TMPDIR/results/stats"
+  make_stats_ws 1.1 "updated: 1.1"
+  run run_stats_step
+  [ "$status" -eq 0 ]
+  [ "$(tail -n 1 "$stats/events.csv")" = '2026-11-10T05:17:22Z,a,updated,1.1,1.0,7' ]
+  grep -q '>aur-packages</text>' "$stats/card.svg"
+  grep -q '>aur-packages</text>' "$stats/card-dark.svg"
+  [ "$(ls "$stats")" = $'card-dark.svg\ncard.svg\nevents.csv' ]
+}
+
+@test "check-updates: Record statistics warns and leaves stats/ empty when a script fails" {
+  local stats="$BATS_TEST_TMPDIR/results/stats"
+  make_stats_ws 1.1 "updated: 1.1"
+  echo 'time,package' >"$BATS_TEST_TMPDIR/ws/stats/events.csv"
+  run run_stats_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::The statistics of this run were not recorded"* ]]
+  [ -z "$(ls -A "$stats")" ]
+  make_stats_ws 1.1 "updated: 1.1"
+  REPO=owner/ run run_stats_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::The statistics of this run were not recorded"* ]]
+  [ -z "$(ls -A "$stats")" ]
+}
+
+@test "check-updates: Record statistics writes nothing without a package or a hand over" {
+  local results="$BATS_TEST_TMPDIR/results"
+  make_stats_ws 1.0 up_to_date
+  rm "$BATS_TEST_TMPDIR/ws/packages/a.yml"
+  run run_stats_step
+  [ "$status" -eq 0 ]
+  [ ! -e "$results/stats" ]
+  make_stats_ws 1.0 up_to_date
+  rm -r "$results/packages"
+  run run_stats_step
+  [ "$status" -eq 0 ]
+  [ ! -e "$results/stats" ]
 }
 
 # Runs the issue step of the issues job in a workspace with the statuses

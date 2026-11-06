@@ -503,6 +503,23 @@ jobs:
 
       - *hand-over
 
+      # Root writes stats/ from the journal of the checkout and the copies of
+      # Hand over. A failure leaves stats/ out of the commit.
+      - name: Record statistics
+        env:
+          RESULTS: /results
+        run: |
+          [[ -d "$RESULTS/packages" ]] || exit 0
+          compgen -G 'packages/*.yml' >/dev/null || exit 0
+          mkdir -p "$RESULTS/stats"
+          if ! ./aurtomator/scripts/record-events.sh --journal stats/events.csv --statuses statuses \
+            --before packages --after "$RESULTS/packages" --out "$RESULTS/stats/events.csv" ||
+            ! ./aurtomator/scripts/stats-card.sh --journal "$RESULTS/stats/events.csv" --packages packages \
+              --name "${GITHUB_REPOSITORY#*/}" --out "$RESULTS/stats"; then
+            echo "::warning::The statistics of this run were not recorded"
+            rm -f -- "$RESULTS/stats/events.csv" "$RESULTS/stats/card.svg" "$RESULTS/stats/card-dark.svg"
+          fi
+
       - name: Commit changes via API
         env:
           GH_TOKEN: ${{ github.token }}
