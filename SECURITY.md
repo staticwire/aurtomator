@@ -26,7 +26,7 @@ In scope:
 
 - `scripts/`: any defect that allows arbitrary code execution, secret exfiltration, or writes outside the working tree.
 - `strategies/`: injection through crafted upstream responses, YAML parsing issues, or command injection through package configuration.
-- `.github/workflows/`: misconfiguration that leaks the `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME` or `AUR_GIT_EMAIL` secrets into logs, artifacts, pull requests or third-party actions. A user repository passes these secrets to the reusable workflows when it calls them.
+- `.github/workflows/` and `.github/actions/`: misconfiguration that leaks the `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME` or `AUR_GIT_EMAIL` secrets into logs, artifacts, pull requests or third-party actions. A user repository passes these secrets to the reusable workflows when it calls them.
 - Anything else in this repository that can make a user repository push a compromised package to the AUR without the intent of its maintainer.
 
 Out of scope:
