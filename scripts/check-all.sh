@@ -283,6 +283,15 @@ run_package() {
   local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex
   local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
   pkg_name=$(pkg_get "$pkg_file" .name)
+  # --prepare and --publish keep a wait for the cooldown from the check run
+  if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ "${CHECKED[$pkg_name]:-}" == "cooldown: "* ]]; then
+    if valid_date "${CHECKED[$pkg_name]#cooldown: }"; then
+      printf '%s\n' "${CHECKED[$pkg_name]}" >"${STATUS_DIR}/${pkg_name}"
+    else
+      echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
+    fi
+    return
+  fi
   # --publish keeps the status of the check run and publishes only a package
   # that run found outdated. Only package names from packages/ reach a path,
   # never a name from WORK_DIR.
