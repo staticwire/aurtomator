@@ -1706,7 +1706,7 @@ last_updated: '2026-10-22'"
 
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
-  [ "$(sed -n '/PACKAGES:START/,/PACKAGES:END/p' "$TEST_TMPDIR/README.md" | sed '1,2d')" = '
+  [ "$(sed -n '/PACKAGES:START/,/PACKAGES:END/p' "$TEST_TMPDIR/README.md" | sed '1,5d')" = '
 <table>
 <tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>
 <tr><td><a href="https://aur.archlinux.org/pkgbase/pkg-a">pkg-a</a></td><td>1.0.0</td><td nowrap>github-release</td><td nowrap>2026-10-22</td><td nowrap>✅ up to date</td></tr>
@@ -2317,38 +2317,6 @@ current: '1.0.0'"
   ! grep -q 'old badges' "$TEST_TMPDIR/README.md"
 }
 
-@test "update-readme: badge is green when all packages ok" {
-  create_test_package "pkg-ok" "github-release" "upstream:
-  project: owner/repo
-current: '2.0.0'"
-
-  echo "up_to_date" >"$TEST_TMPDIR/.status/pkg-ok"
-
-  cat >"$TEST_TMPDIR/README.md" <<'EOF'
-<!-- PACKAGES:START -->
-<!-- PACKAGES:END -->
-EOF
-  git -C "$TEST_TMPDIR" init -q
-  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
-}
-
-@test "update-readme: badge is red when package fails" {
-  create_test_package "pkg-bad" "github-release" "upstream:
-  project: owner/repo
-current: '1.0.0'"
-
-  echo "check_failed: error" >"$TEST_TMPDIR/.status/pkg-bad"
-
-  cat >"$TEST_TMPDIR/README.md" <<'EOF'
-<!-- PACKAGES:START -->
-<!-- PACKAGES:END -->
-EOF
-  git -C "$TEST_TMPDIR" init -q
-  "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  grep -q "red" "$TEST_TMPDIR/README.md"
-}
-
 @test "update-readme: preserves content outside markers" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
@@ -2422,7 +2390,7 @@ EOF
   [ "$output" = "0" ]
 }
 
-@test "update-readme: the package block starts with the packages badge" {
+@test "update-readme: the package block starts with the statistics card" {
   git -C "$TEST_TMPDIR" init -q
   git -C "$TEST_TMPDIR" remote add origin "https://github.com/owner/data.git"
   printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
@@ -2431,12 +2399,17 @@ EOF
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
+  echo "check_failed: error" >"$TEST_TMPDIR/.status/pkg-a"
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   mapfile -t block < <(sed -n '/^<!-- PACKAGES:START -->$/,/^<!-- PACKAGES:END -->$/p' "$TEST_TMPDIR/README.md")
-  [ "${block[1]}" = '![packages](https://img.shields.io/badge/packages-1%2F1-brightgreen)' ]
-  [ "${block[2]}" = '' ]
-  [ "${block[3]}" = '<table>' ]
+  [ "${block[1]}" = '<picture>' ]
+  [ "${block[2]}" = '  <source media="(prefers-color-scheme: dark)" srcset="stats/card-dark.svg">' ]
+  [ "${block[3]}" = '  <img alt="Pushes to AUR, packages updated, new packages and failed checks over 7, 30 and 365 days" src="stats/card.svg">' ]
+  [ "${block[4]}" = '</picture>' ]
+  [ "${block[5]}" = '' ]
+  [ "${block[6]}" = '<table>' ]
+  ! grep -q 'img.shields.io/badge/packages' "$TEST_TMPDIR/README.md"
 }
 
 # Helper: a README with both marker pairs and a line between them
@@ -2515,7 +2488,6 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   grep -qF '<td>1.0.0</td><td nowrap>github-release</td><td nowrap>-</td><td nowrap>✅ tracking</td>' "$TEST_TMPDIR/README.md"
-  grep -qF 'packages-1%2F1-brightgreen' "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: a package without current is new" {
@@ -2527,25 +2499,6 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/pkg-new">pkg-new</a></td><td>-</td><td nowrap>github-release</td><td nowrap>-</td><td nowrap>✨ new</td></tr>' "$TEST_TMPDIR/README.md"
-}
-
-# A package that has not been checked yet has failed nothing
-@test "update-readme: a new package counts as ok in the badge" {
-  create_test_package "pkg-new" "github-release" "upstream:
-  project: owner/repo"
-  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
-  git -C "$TEST_TMPDIR" init -q
-
-  run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 0 ]
-  grep -qF 'packages-1%2F1-brightgreen' "$TEST_TMPDIR/README.md"
-
-  create_test_package "pkg-a" "github-release" "upstream:
-  project: owner/repo
-current: '1.0.0'"
-  run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 0 ]
-  grep -qF 'packages-2%2F2-brightgreen' "$TEST_TMPDIR/README.md"
 }
 
 # === update-readme.sh: last_updated column ===
@@ -3394,7 +3347,7 @@ EOF
   [ "$(cat "$TEST_TMPDIR/.status/pkg-down-upd")" = "downgrade: 2.0.0" ]
 }
 
-@test "update-readme: renders downgrade icon and keeps badge green" {
+@test "update-readme: renders downgrade icon" {
   create_test_package "pkg-down" "github-release" "upstream:
   project: owner/repo
 current: '3.0.0'"
@@ -3409,9 +3362,6 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
   grep -q "🔻 downgraded to 1.0.0" "$TEST_TMPDIR/README.md"
-  # Downgrades count toward pkg_ok, so the badge stays green.
-  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
-  run ! grep -q "packages-.*-red" "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: renders available_downgrade icon with (downgrade) suffix" {
@@ -3429,11 +3379,9 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
   grep -q "🔻 1.0.0 available (downgrade)" "$TEST_TMPDIR/README.md"
-  # Available downgrades count toward pkg_ok too, so the badge stays green.
-  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
-@test "update-readme: renders a skipped downgrade and keeps the badge green" {
+@test "update-readme: renders a skipped downgrade" {
   create_test_package "pkg-down" "github-release" "upstream:
   project: owner/repo
 current: '3.0.0'"
@@ -3448,7 +3396,6 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
   grep -q "🔻 1.0.0 skipped (downgrade)" "$TEST_TMPDIR/README.md"
-  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
 # === version jumps ===
@@ -3491,7 +3438,7 @@ allow_version_jump: true"
   [ "$(cat "$TEST_TMPDIR/.status/pkg-step")" = "new_version: 100" ]
 }
 
-@test "update-readme: renders a skipped version jump and keeps the badge green" {
+@test "update-readme: renders a skipped version jump" {
   create_test_package "pkg-jump" "github-release" "upstream:
   project: owner/repo
 current: '13'"
@@ -3506,7 +3453,6 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
   grep -q "🔺 2026102100 skipped (version jump)" "$TEST_TMPDIR/README.md"
-  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
 @test "check-all: holds an update an alert with hold: true fires on" {
@@ -3665,7 +3611,7 @@ EOF
   [ "$(cat "$TEST_TMPDIR/.status/pkg-hold")" = "held: 29+1" ]
 }
 
-@test "update-readme: renders a held update and keeps the badge green" {
+@test "update-readme: renders a held update" {
   create_test_package "pkg-hold" "github-release" "upstream:
   project: owner/repo
 current: 28+25"
@@ -3680,7 +3626,6 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
 
   grep -q "<td nowrap>✋ 29+1 held</td>" "$TEST_TMPDIR/README.md"
-  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
 
 @test "check-all: --prepare, --verify and --publish need a directory" {
@@ -4042,7 +3987,7 @@ log_update_pkg() {
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "rebuilt: 1.0.0" ]
 }
 
-@test "update-readme: renders a rebuild and a pending asset, and keeps the badge green" {
+@test "update-readme: renders a rebuild and a pending asset" {
   local name
   for name in built rebuilt waiting; do
     create_test_package "$name" "github-release" "upstream:
@@ -4059,5 +4004,4 @@ current: '1.0.0'"
   grep -qF '<td nowrap>🔨 1.0.0 rebuild available</td>' "$TEST_TMPDIR/README.md"
   grep -qF '<td nowrap>🔨 1.0.0 rebuilt</td>' "$TEST_TMPDIR/README.md"
   grep -qF '<td nowrap>⏳ 2.0.0 pending</td>' "$TEST_TMPDIR/README.md"
-  grep -q "brightgreen" "$TEST_TMPDIR/README.md"
 }
