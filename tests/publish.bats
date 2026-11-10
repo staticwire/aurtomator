@@ -2012,6 +2012,24 @@ current: '1.0.0'"
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
+# The name pkg is a prefix of pkg2, so a match of part of a line counts
+@test "check-all --publish: keeps the new version of a package the check run deferred" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  create_test_package "pkg2" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  checked_status pkg2 "new_version: 2.0.0"
+  checked_status _deferred "pkg2"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg2")" = "new_version: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
+}
+
 @test "check-all --publish: keeps the update failure the prepare run recorded" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo

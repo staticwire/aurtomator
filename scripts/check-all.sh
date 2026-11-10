@@ -308,7 +308,12 @@ run_package() {
           return
         fi
         if [[ -L "${WORK_DIR}/prepared" || ! -d "${WORK_DIR}/prepared/${pkg_name}" ]]; then
-          handed_failure "$pkg_name" >"${STATUS_DIR}/${pkg_name}"
+          # The check run left it for a later run, past the 256 jobs of a run
+          if grep -qxF -e "$pkg_name" <<<"${CHECKED[_deferred]:-}"; then
+            printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
+          else
+            handed_failure "$pkg_name" >"${STATUS_DIR}/${pkg_name}"
+          fi
           return
         fi
         ;;
