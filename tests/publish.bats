@@ -2460,6 +2460,27 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
 }
 
+# The job has 30 minutes, and a package started late still takes up to 330 s
+@test "check-all --verify: starts no package after the time budget of the loop" {
+  setup_check_verify
+  stub_script verify-pkg.sh 0
+  AURTOMATOR_VERIFY_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
+  [ ! -e "$TEST_TMPDIR/out/prepared/pkg" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: verify ran out of its 0 minutes in this run" ]
+}
+
+@test "check-all --verify: gives the loop 20 minutes by default" {
+  run grep -cx 'VERIFY_BUDGET="${AURTOMATOR_VERIFY_BUDGET:-1200}"' "$PROJECT_DIR/scripts/check-all.sh"
+  [ "$output" = "1" ]
+  setup_check_verify
+  stub_script verify-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  grep -qx "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/verify-pkg.sh.args"
+}
+
 @test "check-all --verify: takes out an update that fails, with update_failed" {
   setup_check_verify
   stub_script verify-pkg.sh 1 "checksum mismatch"

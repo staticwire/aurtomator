@@ -34,6 +34,10 @@ DRY_RUN=""
 CHECK_TIMEOUT="${AURTOMATOR_CHECK_TIMEOUT:-120}"
 UPDATE_TIMEOUT="${AURTOMATOR_UPDATE_TIMEOUT:-300}"
 
+# Time budget of the verify loop, in seconds: no package starts after it,
+# so the verify job ends within its 30 minutes
+VERIFY_BUDGET="${AURTOMATOR_VERIFY_BUDGET:-1200}"
+
 # Pause, in seconds, before a package whose check failed is checked again
 RECHECK_DELAY="${AURTOMATOR_RECHECK_DELAY:-60}"
 
@@ -129,7 +133,10 @@ if [[ "$MODE" == "verify" ]]; then
     asset=""
     [[ -z "$asset_regex" ]] || asset=$(awk -F'\t' -v p="$pkg_name" '$1 == p { v = $2 } END { print v }' <<<"${CHECKED[_assets]:-}")
     verify_rc=0
-    if ! validate_pkgver "$version" 2>/dev/null; then
+    if ((SECONDS >= VERIFY_BUDGET)); then
+      verify_rc=1
+      verify_err="verify ran out of its $((VERIFY_BUDGET / 60)) minutes in this run"
+    elif ! validate_pkgver "$version" 2>/dev/null; then
       verify_rc=1
       verify_err="no new version from the check run"
     elif [[ -n "$asset_regex" ]] && ! validate_asset_value "$asset" 2>/dev/null; then
