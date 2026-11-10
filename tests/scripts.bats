@@ -777,6 +777,51 @@ current: '2.0.0'"
   [[ "$output" == *"Package not found: "*"/packages/nonexistent.yml"* ]]
 }
 
+# Helper: a curl that appends its arguments to curl.args, one per line,
+# before it answers
+record_curl() {
+  mv "$MOCK_DIR/curl" "$MOCK_DIR/curl-answer"
+  cat >"$MOCK_DIR/curl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >>"$TEST_TMPDIR/curl.args"
+exec "$MOCK_DIR/curl-answer" "\$@"
+EOF
+  chmod +x "$MOCK_DIR/curl"
+}
+
+# Helper: the value of every --max-filesize that curl got, in order
+curl_max_filesizes() {
+  grep -x -A1 -- '--max-filesize' "$TEST_TMPDIR/curl.args" | grep -vx -e '--max-filesize' -e '--'
+}
+
+@test "check-update: gives the strategy the answer limit of the package" {
+  record_curl
+  create_test_package "release" "github-release" "upstream:
+  project: owner/repo
+  max_answer_mb: 80
+current: '1.0.0'"
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-update.sh" release
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.0.0" ]
+  [ "$(curl_max_filesizes | sort -u)" = "80M" ]
+}
+
+@test "check-update: refuses an answer limit that is no whole number from 1 to 500" {
+  local value
+  record_curl
+  for value in 0 501 1.5 10M abc; do
+    echo "$value"
+    create_test_package "release" "github-release" "upstream:
+  project: owner/repo
+  max_answer_mb: $value
+current: '1.0.0'"
+    run "$TEST_TMPDIR/scripts/check-update.sh" release
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"upstream.max_answer_mb must be a whole number from 1 to 500"* ]]
+  done
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
 # === validate_source_urls ===
 
 @test "lib.sh: validate_source_urls checks every source_<arch> array" {
@@ -939,7 +984,7 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
+  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
 }
 
 # Helper: a curl that writes $CURL_STDERR to stderr, as its -w does on a
@@ -3742,6 +3787,16 @@ pkgver_dash: ''"
   run --separate-stderr "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc1
   [ "$status" -eq 0 ]
   [ "$output" = "2.5.0-debian-forky-ocaml5.5.1-1" ]
+}
+
+@test "check-asset: takes the answer limit of the package" {
+  liquidsoap_package
+  yq -i '.upstream.max_answer_mb = 70' "$TEST_TMPDIR/packages/liq.yml"
+  record_curl
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc1
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.5.0-debian-forky-ocaml5.5.1-1" ]
+  [ "$(curl_max_filesizes | sort -u)" = "70M" ]
 }
 
 # The regex of the brief takes the OCaml 4 and the OCaml 5 build of 2.4.6

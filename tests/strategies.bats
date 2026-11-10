@@ -1845,6 +1845,47 @@ curl_agents() {
   [ "$(curl_agents)" = "Example/2.0 (+https://example.com/bot)" ]
 }
 
+# === Answer size ===
+
+# Helper: the value of every --max-filesize that curl got, in order
+curl_max_filesizes() {
+  grep -x -A1 -- '--max-filesize' "$TEST_TMPDIR/curl.args" | grep -vx -e '--max-filesize' -e '--'
+}
+
+@test "strategies: take at most 50 MB of an answer" {
+  record_curl
+  create_test_package "release" "github-release" "upstream:
+  project: owner/repo"
+  create_test_package "rust" "crates" "upstream:
+  registry: serde"
+  create_test_package "repo" "repology" "upstream:
+  repology: firefox"
+
+  run "$TEST_TMPDIR/strategies/github-release.sh" release
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/strategies/crates.sh" rust
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/strategies/repology.sh" repo
+  [ "$status" -eq 0 ]
+  [ "$(curl_max_filesizes | wc -l)" -eq "$(grep -cx -- '-A' "$TEST_TMPDIR/curl.args")" ]
+  [ "$(curl_max_filesizes | sort -u)" = "50M" ]
+}
+
+# curl takes the last --max-filesize
+@test "webpage-scrape: takes at most 5 MB of a page, or the limit of the package" {
+  record_curl
+  create_test_package "scrape" "webpage-scrape" "upstream:
+  url: https://example.com/releases
+  pattern: 'test-scrape-([0-9.]+)\\.tar\\.gz'"
+  run "$TEST_TMPDIR/strategies/webpage-scrape.sh" scrape
+  [ "$status" -eq 0 ]
+  [ "$(curl_max_filesizes | tail -1)" = "5M" ]
+  rm "$TEST_TMPDIR/curl.args"
+  MAX_ANSWER_MB=80 run "$TEST_TMPDIR/strategies/webpage-scrape.sh" scrape
+  [ "$status" -eq 0 ]
+  [ "$(curl_max_filesizes | tail -1)" = "80M" ]
+}
+
 # === Error handling: unknown package ===
 
 @test "strategy fails gracefully on unknown package" {

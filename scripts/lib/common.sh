@@ -150,11 +150,28 @@ USER_AGENT="aurtomator/1.0"
 # on the page of its bot check
 HTTP_FAILURE='%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated}'
 
-# Args: $1=URL, the rest: curl options. curl follows a redirect to plain
-# http by default, where the network can change the answer.
+# The most megabytes of one answer: upstream.max_answer_mb of the package,
+# which check-update.sh exports, or 50
+MAX_ANSWER_MB="${MAX_ANSWER_MB:-}"
+
+# Prints upstream.max_answer_mb of package file $1, nothing without it, and
+# fails for a value that is no whole number from 1 to 500
+max_answer_mb() {
+  local mb
+  mb=$(pkg_get "$1" '.upstream.max_answer_mb // ""') || return 1
+  [[ -n "$mb" ]] || return 0
+  if [[ ! "$mb" =~ ^[1-9][0-9]{0,2}$ ]] || ((mb > 500)); then
+    log_err "upstream.max_answer_mb must be a whole number from 1 to 500: $mb"
+    return 1
+  fi
+  printf '%s\n' "$mb"
+}
+
+# Args: $1=URL, the rest: curl options, which come after these and win.
+# curl follows a redirect to plain http by default, so --proto-redir stays.
 _curl_get() {
   curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
-    --proto '=https' --proto-redir '=https' \
+    --proto '=https' --proto-redir '=https' --max-filesize "${MAX_ANSWER_MB:-50}M" \
     -A "$USER_AGENT" -w "$HTTP_FAILURE" "${@:2}" "$1"
 }
 

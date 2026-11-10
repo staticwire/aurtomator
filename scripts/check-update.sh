@@ -20,6 +20,9 @@ strategy=$(pkg_get "$PKG_FILE" .strategy)
 current=$(pkg_get "$PKG_FILE" '.current // ""')
 dash=$(pkgver_dash "$PKG_FILE")
 format=$(pkg_get "$PKG_FILE" '.pkgver_format // ""')
+# The strategy runs in a process of its own and reads the limit from here
+MAX_ANSWER_MB=$(max_answer_mb "$PKG_FILE") || exit 1
+export MAX_ANSWER_MB
 
 # Run strategy
 strategy_script="${AURTOMATOR_DIR}/strategies/${strategy}.sh"

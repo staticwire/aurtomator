@@ -28,22 +28,22 @@ readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_d
 # The upstream keys that each strategy reads, in the order of the strategy
 # table of README.md. A test compares them with the keys the scripts name.
 readonly UPSTREAM_KEYS=(
-  "github-release: project tag_version_regex tag_version_replace asset_regex asset_var"
-  "github-tag: project tag_version_regex tag_version_replace asset_regex asset_var"
-  "github-nightly: project nightly_tag nightly_tag_regex channel version_source version_pattern date_format tag_version_regex tag_version_replace"
-  "github-asset: project tag assets"
-  "gitlab-tag: host project tag_version_regex tag_version_replace"
-  "gitea-tag: host project tag_version_regex tag_version_replace"
-  "gitea-release: host project tag_version_regex tag_version_replace"
+  "github-release: project tag_version_regex tag_version_replace asset_regex asset_var max_answer_mb"
+  "github-tag: project tag_version_regex tag_version_replace asset_regex asset_var max_answer_mb"
+  "github-nightly: project nightly_tag nightly_tag_regex channel version_source version_pattern date_format tag_version_regex tag_version_replace max_answer_mb"
+  "github-asset: project tag assets max_answer_mb"
+  "gitlab-tag: host project tag_version_regex tag_version_replace max_answer_mb"
+  "gitea-tag: host project tag_version_regex tag_version_replace max_answer_mb"
+  "gitea-release: host project tag_version_regex tag_version_replace max_answer_mb"
   "git-tag: url tag_version_regex tag_version_replace"
   "git-latest: type url host project branch describe tag_prefix"
-  "pypi: registry"
-  "npm: registry"
-  "crates: registry prerelease"
-  "repology: repology"
-  "archpkg: archpkg testing"
-  "webpage-scrape: url pattern user_agent"
-  "kde-tarball: project path"
+  "pypi: registry max_answer_mb"
+  "npm: registry max_answer_mb"
+  "crates: registry prerelease max_answer_mb"
+  "repology: repology max_answer_mb"
+  "archpkg: archpkg testing max_answer_mb"
+  "webpage-scrape: url pattern user_agent max_answer_mb"
+  "kde-tarball: project path max_answer_mb"
 )
 
 # Succeeds when $1 is one of the words of $2. A substring match would pass
@@ -251,6 +251,16 @@ validate_pkg() {
       ((errors++))
     fi
   done
+
+  local answer_tag answer_mb
+  answer_tag=$(pkg_get "$file" '.upstream.max_answer_mb | tag')
+  if [[ "$answer_tag" != "!!null" ]]; then
+    answer_mb=$(pkg_get "$file" '.upstream.max_answer_mb')
+    if [[ "$answer_tag" != "!!int" || ! "$answer_mb" =~ ^[1-9][0-9]{0,2}$ ]] || ((answer_mb > 500)); then
+      log_err "$shown: upstream.max_answer_mb must be a whole number from 1 to 500"
+      ((errors++))
+    fi
+  fi
 
   local cooldown_tag cooldown_days
   cooldown_tag=$(pkg_get "$file" '.cooldown_days | tag')

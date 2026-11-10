@@ -36,6 +36,7 @@ replace=$(pkg_get "$PKG_FILE" '.upstream.tag_version_replace // ""')
 asset_regex=$(pkg_get "$PKG_FILE" '.upstream.asset_regex // ""')
 dash=$(pkgver_dash "$PKG_FILE")
 format=$(pkg_get "$PKG_FILE" '.pkgver_format // ""')
+MAX_ANSWER_MB=$(max_answer_mb "$PKG_FILE") || exit 1
 
 if [[ -z "$asset_regex" ]]; then
   log_err "$PKG_NAME has no upstream.asset_regex"

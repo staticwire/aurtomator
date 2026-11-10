@@ -100,6 +100,18 @@ upstream:
 #   asset_var: _deb                        # a variable name that starts with _
 
 # =============================================================================
+# ANSWER SIZE
+# =============================================================================
+# A request that a strategy or the asset check sends with curl reads at most
+# 50 MB of one answer, and webpage-scrape at most 5 MB of its page.
+# max_answer_mb, a whole number from 1 to 500, sets another limit for one
+# package. git-tag and git-latest read with git and take no max_answer_mb.
+#
+# upstream:
+#   project: owner/repo
+#   max_answer_mb: 100
+
+# =============================================================================
 # PER-STRATEGY EXAMPLES
 # =============================================================================
 

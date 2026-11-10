@@ -1109,6 +1109,45 @@ cooldown_days: $value"
   done
 }
 
+@test "validate: upstream.max_answer_mb from 1 to 500 passes" {
+  local value
+  for value in 1 80 500; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  max_answer_mb: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $value"
+      return 1
+    }
+  done
+}
+
+@test "validate: upstream.max_answer_mb that is not a whole number from 1 to 500 rejected" {
+  local value
+  for value in 0 501 1.5 "'80'" 080 10M abc; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  max_answer_mb: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"packages/mypkg.yml: upstream.max_answer_mb must be a whole number from 1 to 500"* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+}
+
+# git-tag and git-latest read their upstream with git, not with curl
+@test "validate: upstream.max_answer_mb applies to the strategies that send HTTP requests" {
+  create_test_package "mypkg" "git-tag" "upstream:
+  url: https://example.com/repo.git
+  max_answer_mb: 80"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.max_answer_mb applies to the "*" strategies only"* ]]
+}
+
 @test "validate: cooldown_days that is not a whole number from 0 to 365 rejected" {
   local value
   for value in -1 366 7.5 "'7'" 007 abc; do

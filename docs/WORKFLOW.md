@@ -95,6 +95,8 @@ Each package has a file at `packages/<name>.yml`. The file name, the `name` fiel
 
 `validate-pkg.sh` refuses a key that is not in this table, and an `upstream` key that the strategy does not read, so a misspelled key does not go unread. A misspelled `allow_downgrade` gives `packages/<name>.yml: unknown key: allow_downgrades`. The `upstream` keys of each strategy are its line of `UPSTREAM_KEYS` in `scripts/validate-pkg.sh`, and the error names the strategies that read the key, as in `upstream.branch applies to the git-latest strategy only`. A key that no strategy reads gives `upstream.projet is not a field of any strategy`. A file that is not a map of fields is refused before these checks, and an `upstream` that is not a map before the check of its keys. It also refuses a `current` with a character outside `A-Za-z0-9._+` or without a digit, the form of a version in every script.
 
+A request that a strategy or `check-asset.sh` sends with curl reads at most 50 MB of one answer, and `webpage-scrape` reads at most 5 MB of its page. `upstream.max_answer_mb`, a whole number from 1 to 500, sets another limit for the requests of one package, `webpage-scrape` included, and a larger answer fails the check. `check-update.sh` hands the value to the strategy as `MAX_ANSWER_MB`. `git-tag` and `git-latest` read with git and take no `max_answer_mb`.
+
 Example:
 
 ```yaml
@@ -651,7 +653,7 @@ upstream:
 
 **Version:**
 
-1. Fetches the page: HTTPS only, at most 5 redirects and 5 MB, with the User-Agent `aurtomator/1.0` or `upstream.user_agent`. SourceForge answers a bare `Mozilla/5.0` with HTTP 403. `validate-pkg.sh` refuses a `user_agent` with a character outside printable ASCII, because curl sends the text after a line break as a header of its own.
+1. Fetches the page: HTTPS only, at most 5 redirects and 5 MB or `upstream.max_answer_mb`, with the User-Agent `aurtomator/1.0` or `upstream.user_agent`. SourceForge answers a bare `Mozilla/5.0` with HTTP 403. `validate-pkg.sh` refuses a `user_agent` with a character outside printable ASCII, because curl sends the text after a line break as a header of its own.
 2. Finds every match with `grep -oE`.
 3. Takes the first capture group of each match with bash `[[ =~ ]]`, so the pattern may hold any character, `/` included.
 4. Returns the newest version by `vercmp`, as [github-tag](#32-github-tag) does.
@@ -1647,7 +1649,7 @@ echo "$version"
 
 1. **Location:** `strategies/<name>.sh`, executable (`chmod +x`). `<name>` is the value of the YAML `strategy` field.
 2. **Header:** `set -euo pipefail`, then source `scripts/lib/common.sh` for `pkg_file`, `pkg_get` and logging. `tests/strategies.bats` runs every strategy with `common.sh` as the only file of `scripts/`.
-3. **HTTP:** `http_get <url> [curl option]...` from `common.sh`. It runs `curl -sfL --max-time 30` and tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. `-f` fails on HTTP errors and `-L` follows redirects, over https only: `--proto '=https' --proto-redir '=https'`. Every request sends the User-Agent in `USER_AGENT`, `aurtomator/1.0` by default. A failed request prints the URL of the last answer and the error of curl to stderr, and names a Cloudflare challenge, which only a browser passes. `http_get_json` fails also on an answer that is not a JSON object or array, such as the HTML page of a bot check after a redirect, and names the URL of that answer. A test in `tests/strategies.bats` fails when a strategy calls `curl` itself.
+3. **HTTP:** `http_get <url> [curl option]...` from `common.sh`. It runs `curl -sfL --max-time 30` and tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. `-f` fails on HTTP errors and `-L` follows redirects, over https only: `--proto '=https' --proto-redir '=https'`. An answer is at most `MAX_ANSWER_MB` megabytes, 50 by default, through `--max-filesize`, and an option of the caller comes after these and wins. Every request sends the User-Agent in `USER_AGENT`, `aurtomator/1.0` by default. A failed request prints the URL of the last answer and the error of curl to stderr, and names a Cloudflare challenge, which only a browser passes. `http_get_json` fails also on an answer that is not a JSON object or array, such as the HTML page of a bot check after a redirect, and names the URL of that answer. A test in `tests/strategies.bats` fails when a strategy calls `curl` itself.
 4. **Result:** check for an empty string and for `null` from `yq`.
 5. **Prefix:** strip a leading `v` with `${version#v}` when upstream tags look like `v1.0.0`.
 6. **Validation:** in `scripts/validate-pkg.sh`, add a line to `UPSTREAM_KEYS` with the `upstream` keys the strategy reads, at its place in the strategy table of `README.md`, and the checks of its required fields. Without the line, `validate-pkg.sh` refuses every YAML of the strategy that has an `upstream` key, and `tests/validate-pkg.bats` fails. The name of the strategy needs no entry: every script in `strategies/` is a valid strategy.
