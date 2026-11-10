@@ -1183,12 +1183,12 @@ run_add_builder_step() {
   mkdir -p "$bin" "$CALLS"
   printf '#!/bin/sh\necho "$*" >>"$CALLS/useradd"\nexit "$USERADD_RC"\n' >"$bin/useradd"
   printf '#!/bin/sh\n[ "$*" = "-u builder" ] && echo "$BUILDER_UID"\n' >"$bin/id"
-  printf '#!/bin/sh\n[ "$*" = "-c %%u $RUNNER_TEMP" ] && echo "$TEMP_OWNER"\n' >"$bin/stat"
+  printf '#!/bin/sh\n[ "$*" = "-c %%u $RUNNER_TEMP" ] && [ "$STAT_RC" = 0 ] && echo "$TEMP_OWNER"\nexit "$STAT_RC"\n' >"$bin/stat"
   printf '#!/bin/sh\necho "$*" >>"$CALLS/find"\n[ -z "$FOUND" ] || echo "$FOUND"\nexit "$FIND_RC"\n' >"$bin/find"
   chmod +x "$bin/useradd" "$bin/id" "$bin/stat" "$bin/find"
   step_run check "Add builder" >"$BATS_TEST_TMPDIR/step.sh"
   run env PATH="$bin:$PATH" CALLS="$CALLS" RUNNER_TEMP=/__w/_temp USERADD_RC="${USERADD_RC:-0}" \
-    BUILDER_UID="${BUILDER_UID:-2000}" TEMP_OWNER="${TEMP_OWNER:-1001}" FOUND="${FOUND:-}" \
+    BUILDER_UID="${BUILDER_UID:-2000}" TEMP_OWNER="${TEMP_OWNER:-1001}" STAT_RC="${STAT_RC:-0}" FOUND="${FOUND:-}" \
     FIND_RC="${FIND_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
@@ -1221,6 +1221,14 @@ run_add_builder_step() {
 @test "check-updates: Add builder fails when find cannot read the mounts" {
   FIND_RC=1 run_add_builder_step
   [ "$status" -ne 0 ]
+  [ "$output" = "::error::find could not search /__w and /__e for the files of builder" ]
+}
+
+@test "check-updates: Add builder fails when stat cannot read the owner of the runner temp" {
+  STAT_RC=1 run_add_builder_step
+  [ "$status" -ne 0 ]
+  [ "$output" = "::error::Could not read the owner of /__w/_temp" ]
+  [ ! -e "$CALLS/find" ]
 }
 
 # Runs the Stop builder step in an empty workspace. builder has uid 2000,

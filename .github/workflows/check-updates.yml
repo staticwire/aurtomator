@@ -92,11 +92,18 @@ jobs:
         name: Add builder
         run: |
           useradd -m -u 2000 builder
-          if [[ "$(id -u builder)" == "$(stat -c %u "$RUNNER_TEMP")" ]]; then
+          if ! temp_owner=$(stat -c %u "$RUNNER_TEMP"); then
+            echo "::error::Could not read the owner of $RUNNER_TEMP"
+            exit 1
+          fi
+          if [[ "$(id -u builder)" == "$temp_owner" ]]; then
             echo "::error::builder has the uid of the account that owns $RUNNER_TEMP"
             exit 1
           fi
-          owned=$(find /__w /__e \( -user builder -o -group builder \) -print -quit)
+          if ! owned=$(find /__w /__e \( -user builder -o -group builder \) -print -quit); then
+            echo "::error::find could not search /__w and /__e for the files of builder"
+            exit 1
+          fi
           if [[ -n "$owned" ]]; then
             echo "::error::builder owns $owned"
             exit 1
