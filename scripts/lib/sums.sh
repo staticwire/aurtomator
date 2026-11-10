@@ -5,12 +5,30 @@
 #
 # Sourced by lib.sh, after common.sh and prepared.sh.
 
+# The most bytes of one download, and of all the downloads of one package
+SOURCE_FILE_MAX=$((600 * 1024 * 1024))
+SOURCES_MAX=$((1024 * 1024 * 1024))
+
+# Print the bytes a download may still take: what SOURCES_MAX leaves beside
+# the downloads in directory $1, at most SOURCE_FILE_MAX
+_download_left() {
+  local used left
+  used=$(du -sb -- "$1" | cut -f1) || return 1
+  left=$((SOURCES_MAX - used))
+  if ((left <= 0)); then
+    log_err "The downloads of the package reach the budget of 1 GiB"
+    return 1
+  fi
+  ((left < SOURCE_FILE_MAX)) || left=$SOURCE_FILE_MAX
+  printf '%s\n' "$left"
+}
+
 # Print the path of the file makepkg hashes for a source, following
 # get_protocol, get_filename and download_file of makepkg. A source that
 # makepkg would handle another way is refused, never guessed at.
 # Args: $1=source entry of a .SRCINFO, $2=AUR repo, $3=download directory
 _source_file() {
-  local entry="$1" url="${1#*::}" name file
+  local entry="$1" url="${1#*::}" name file left rc
   if [[ "$entry" == *::* ]]; then
     name="${entry%%::*}"
   else
@@ -38,15 +56,23 @@ _source_file() {
     return 1
   else
     file="${3}/$(printf '%s' "$url" | sha256sum | cut -d' ' -f1)"
-    # Retried and with the cookie engine on, as makepkg does. The AUR copy
-    # picks the URL, so redirects stay on https and size and stalls are bounded.
-    if [[ ! -f "$file" ]] &&
-      ! curl -qgfsSL -b '' --retry 3 --retry-delay 3 --proto '=https' \
-        --proto-redir '=https' --max-filesize 600M --speed-limit 102400 \
-        --speed-time 60 -o "$file" "$url"; then
-      rm -f "$file"
-      log_err "Could not download $url"
-      return 1
+    if [[ ! -f "$file" ]]; then
+      left=$(_download_left "$3") || return 1
+      # Retried and with the cookie engine on, as makepkg does. The AUR copy
+      # picks the URL, so redirects stay on https and size and stalls are bounded.
+      rc=0
+      curl -qgfsSL -b '' --retry 3 --retry-delay 3 --proto '=https' \
+        --proto-redir '=https' --max-filesize "$left" --speed-limit 102400 \
+        --speed-time 60 -o "$file" "$url" || rc=$?
+      if ((rc != 0)); then
+        rm -f "$file"
+        if ((rc == 63 && left < SOURCE_FILE_MAX)); then
+          log_err "The downloads of the package pass the budget of 1 GiB at $url"
+        else
+          log_err "Could not download $url"
+        fi
+        return 1
+      fi
     fi
   fi
   printf '%s\n' "$file"
@@ -126,11 +152,11 @@ _source_sum() {
   printf '%s\n' "${sum%% *}"
 }
 
-# check_prepared_pkgbuild lets checksum values change, and the code of one
-# PKGBUILD runs where the updates of all packages are prepared. So each
-# value must match its source, hashed the way makepkg does. The sources
-# come from the prepared .SRCINFO, which check_prepared_srcinfo ties to the
-# AUR copy. Run check_prepared_files first.
+# check_prepared_pkgbuild lets checksum values change, and prepare computes
+# them in a job where code from the PKGBUILD runs. So each value must match
+# its source, hashed the way makepkg does. The sources come from the
+# prepared .SRCINFO, which check_prepared_srcinfo ties to the AUR copy. Run
+# check_prepared_files first.
 # Args: $1=AUR repo, $2=prepared dir, $3=empty directory for the downloads
 # Returns: 0 when every checksum matches, 1 otherwise (reason on stderr)
 verify_prepared_sums() {

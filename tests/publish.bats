@@ -1133,7 +1133,42 @@ commit_aur_state() {
   setup_verify
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
-  grep -q -- ' --max-filesize 600M --speed-limit 102400 --speed-time 60 -o ' "$TEST_TMPDIR/curl.args"
+  grep -q -- " --max-filesize $((600 * 1024 * 1024)) --speed-limit 102400 --speed-time 60 -o " "$TEST_TMPDIR/curl.args"
+}
+
+# A sparse file stands for the downloads of the package before this one
+@test "_source_file: gives a download what the budget of the package leaves" {
+  local downloads="$TEST_TMPDIR/downloads" left
+  mock_downloads
+  mkdir -p "$downloads" "$TEST_TMPDIR/aur"
+  truncate -s 900M "$downloads/earlier"
+  left=$((1024 * 1024 * 1024 - $(du -sb "$downloads" | cut -f1)))
+  run _source_file https://example.com/demo-1.1.0.tar.gz "$TEST_TMPDIR/aur" "$downloads"
+  [ "$status" -eq 0 ]
+  grep -q -- " --max-filesize $left " "$TEST_TMPDIR/curl.args"
+}
+
+@test "_source_file: downloads nothing once the budget of the package is gone" {
+  local downloads="$TEST_TMPDIR/downloads"
+  mock_downloads
+  mkdir -p "$downloads" "$TEST_TMPDIR/aur"
+  truncate -s 1G "$downloads/earlier"
+  run _source_file https://example.com/demo-1.1.0.tar.gz "$TEST_TMPDIR/aur" "$downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The downloads of the package reach the budget of 1 GiB"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+# curl exits 63 past --max-filesize
+@test "_source_file: names the budget when curl stops at what it leaves" {
+  local downloads="$TEST_TMPDIR/downloads"
+  mkdir -p "$downloads" "$TEST_TMPDIR/aur"
+  truncate -s 900M "$downloads/earlier"
+  printf '#!/usr/bin/env bash\nexit 63\n' >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
+  run _source_file https://example.com/demo-1.1.0.tar.gz "$TEST_TMPDIR/aur" "$downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The downloads of the package pass the budget of 1 GiB at https://example.com/demo-1.1.0.tar.gz"* ]]
 }
 
 # Over http or ftp, the checksum is whatever the network path serves, in
