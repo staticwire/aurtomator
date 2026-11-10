@@ -1420,6 +1420,7 @@ EOF
 # $BATS_TEST_TMPDIR/bin first on PATH. sudo logs its arguments to $SUDO_LOG
 # and runs the command of -u builder as the test user. bash takes the
 # options in $HAND_OVER_SHELL, -e by default, as the default shell of a step.
+# PACKAGE is $HAND_OVER_PACKAGE, as a job of prepare sets it.
 run_hand_over_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BATS_TEST_TMPDIR/ws" "$bin"
@@ -1436,7 +1437,7 @@ EOF
   step_run prepare "Hand over" >"$BATS_TEST_TMPDIR/step.sh"
   # shellcheck disable=SC2086
   run env -C "$BATS_TEST_TMPDIR/ws" PATH="$bin:$PATH" SUDO_LOG="$SUDO_LOG" WORK="$BATS_TEST_TMPDIR/work" \
-    RESULTS="$BATS_TEST_TMPDIR/results" sh ${HAND_OVER_SHELL:--e} "$BATS_TEST_TMPDIR/step.sh"
+    RESULTS="$BATS_TEST_TMPDIR/results" PACKAGE="${HAND_OVER_PACKAGE:-}" sh ${HAND_OVER_SHELL:--e} "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Writes the files that prepare hands over for the package foo into the
@@ -1467,6 +1468,23 @@ make_handoff() {
   [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/foo' ]
   [ "$(stat -c %a "$ws/upload/prepared/foo/PKGBUILD")" = "644" ]
   [ "$(cat "$ws/upload/status/foo")" = "updated: 2.0" ]
+}
+
+@test "check-updates: Hand over takes only the package of its job" {
+  local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work"
+  make_handoff
+  mkdir -p "$work/handoff/prepared/bar"
+  echo pkgbuild >"$work/handoff/prepared/bar/PKGBUILD"
+  echo "update_failed: forged" >"$work/handoff/status/bar"
+  HAND_OVER_PACKAGE=foo run_hand_over_step
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
+  [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/foo' ]
+  rm -rf "$ws"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
+  [ "$output" = $'./prepared/bar/PKGBUILD\n./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/bar\n./status/foo' ]
 }
 
 # A link would put a file that root can read into an artifact anyone with

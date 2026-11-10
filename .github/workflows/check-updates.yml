@@ -196,8 +196,10 @@ jobs:
             # fails on a missing prepared/ or status/, and the step goes on.
             (cd "$WORK/handoff" && find prepared status -type f -print0 2>/dev/null || true) |
               while IFS= read -r -d '' f; do
-                if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
-                  [[ "$f" =~ ^status/${name_re}$ ]]; then
+                if [[ "$f" =~ ^prepared/(${name_re})/(PKGBUILD|\.SRCINFO|base)$ ]] ||
+                  [[ "$f" =~ ^status/(${name_re})$ ]]; then
+                  # A job of one package hands over that package alone
+                  [[ -z "${PACKAGE:-}" || "${BASH_REMATCH[1]}" == "$PACKAGE" ]] || continue
                   take "handoff/$f" "upload/$f"
                 fi
               done
