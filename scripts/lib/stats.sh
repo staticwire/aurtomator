@@ -6,7 +6,7 @@
 
 # The first line of the journal, and the pattern of every line after it
 STATS_HEADER='time,package,event,version,previous,run'
-STATS_ROW_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z,[A-Za-z0-9@_+][A-Za-z0-9@._+-]*,(tracked|added|removed|updated|downgrade|rebuilt|held|jump_skipped|downgrade_skipped|pending|check_failed|update_failed|up_to_date),[A-Za-z0-9._+]*,[A-Za-z0-9._+]*,[0-9]*$'
+STATS_ROW_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z,[A-Za-z0-9@_+][A-Za-z0-9@._+-]*,(tracked|added|removed|updated|downgrade|rebuilt|held|jump_skipped|downgrade_skipped|pending|check_failed|update_failed|up_to_date)'",[A-Za-z0-9._+]{0,$PKGVER_MAX},[A-Za-z0-9._+]{0,$PKGVER_MAX},[0-9]*\$"
 
 # Print the rows of journal $1 without its header, and warn of each line
 # that is not a row. Returns: 1 when the first line is not the header
@@ -45,13 +45,13 @@ stats_class() {
 stats_event() {
   local status="$1" current="$2" event version
   local LC_ALL=C
-  [[ "$current" =~ ^[A-Za-z0-9._+]+$ ]] || current=""
+  [[ "$current" =~ ^[A-Za-z0-9._+]{1,$PKGVER_MAX}$ ]] || current=""
   case "$status" in
     up_to_date | "cooldown: "*) event=up_to_date version="$current" ;;
     check_failed:* | update_failed:*) event="${status%%:*}" version="$current" ;;
     "updated: "* | "downgrade: "* | "rebuilt: "* | "held: "* | "jump_skipped: "* | "downgrade_skipped: "* | "pending: "*)
       event="${status%%: *}" version="${status#*: }"
-      [[ "$version" =~ ^[A-Za-z0-9._+]+$ ]] || return 1
+      [[ "$version" =~ ^[A-Za-z0-9._+]{1,$PKGVER_MAX}$ ]] || return 1
       ;;
     "new_version: "* | "available_downgrade: "* | "new_build: "*) return 0 ;;
     *) return 1 ;;

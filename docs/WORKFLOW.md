@@ -1601,7 +1601,7 @@ Your repository holds no strategies. A run takes them from `strategies/` of aurt
 - **Input:** one positional argument, the package name.
 - **Success:** the version on stdout as one line, exit code 0.
 - **Failure:** an error on stderr, a non-zero exit code.
-- **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`, and a version without a digit, such as `latest`. `pkgver_dash` replaces the dashes before that check, see [section 2](#2-package-yaml-format).
+- **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`, a version of more than 64 characters, and a version without a digit, such as `latest`. `pkgver_dash` replaces the dashes before that check, see [section 2](#2-package-yaml-format).
 
 The script can rely on `yq` and `curl`. `scripts/lib/common.sh` provides YAML helpers, `http_get` for requests and logging. It sets `AURTOMATOR_DIR` to the root of the checkout of aurtomator and `AURTOMATOR_DATA_DIR` to the directory with the packages, see [7.1](#71-prerequisites).
 
@@ -1677,7 +1677,7 @@ echo "$version"
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
 | `github_release_matching <api> <ere> <pages> [stable] [version] [template]` | Prints a release whose tag matches the ERE, as JSON, from the pages of 100 releases up to the first one with fewer than 100, at most `<pages>` pages: the one published last, or with `version` the one with the newest version that the template gives. `stable` leaves out pre-releases. The arguments keep their places, so a call with `version` and without `stable` passes an empty fourth argument |
 | `github_tags <owner/repo>`      | `remote_tags` of a GitHub repository, with `GITHUB_TOKEN` when it is set |
-| `validate_pkgver <version>`     | Returns 1 for an empty version, one with a character outside `A-Za-z0-9._+` or one without a digit |
+| `validate_pkgver <version>`     | Returns 1 for an empty version, one of more than 64 characters, one with a character outside `A-Za-z0-9._+` or one without a digit |
 | `validate_asset_value <value>`  | Returns 1 for a value that does not start with a letter or a digit, or holds a character outside `A-Za-z0-9._+~-` |
 | `check_asset_option <asset_var> <value>` | Returns 1 when a package with `asset_var` gets no `--asset`, another package gets one, or `validate_asset_value` refuses the value |
 | `version_jump <current> <new>`  | Returns 0 when the first number of the new version has at least two digits more than the first number of the current one |

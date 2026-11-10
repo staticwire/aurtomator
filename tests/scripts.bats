@@ -1079,6 +1079,17 @@ MOCKCURL
   [[ "$output" == *"Version string rejected, only A-Za-z0-9 . _ + are allowed"* ]]
 }
 
+@test "lib.sh: validate_pkgver takes 64 characters and names the length of more" {
+  local v64
+  v64="$(printf 'a%.0s' {1..63})1"
+  run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" "$v64"
+  [ "$status" -eq 0 ]
+  run bash -c 'source "$0/scripts/lib.sh"; validate_pkgver "$1"' "$TEST_TMPDIR" "${v64}2"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Version string rejected, it has 65 characters and at most 64 are allowed"* ]]
+  [[ "$output" != *"$v64"* ]]
+}
+
 # === version_jump ===
 
 @test "lib.sh: version_jump finds a first number two digits longer" {

@@ -290,6 +290,9 @@ github_release_matching() {
 # VERSION VALIDATION
 # =============================================================================
 
+# The most characters of a version, which a README cell and the journal hold
+PKGVER_MAX=64
+
 # Reject a version string before it is written into a PKGBUILD.
 # update-pkg.sh writes the value with sed and makepkg then sources the
 # file, so a shell metacharacter in an upstream tag would execute in CI.
@@ -303,6 +306,10 @@ validate_pkgver() {
   local LC_ALL=C
   if [[ -z "$ver" ]]; then
     log_err "Version string is empty"
+    return 1
+  fi
+  if ((${#ver} > PKGVER_MAX)); then
+    log_err "Version string rejected, it has ${#ver} characters and at most ${PKGVER_MAX} are allowed"
     return 1
   fi
   if [[ ! "$ver" =~ ^[A-Za-z0-9._+]+$ ]]; then

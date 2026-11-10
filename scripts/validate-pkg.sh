@@ -127,7 +127,7 @@ validate_alert() {
   tag=$(pkg_get "$file" ".alerts[$i].from | tag")
   value=$(pkg_get "$file" ".alerts[$i].from")
   if [[ "$tag" != "!!null" ]] && ! validate_pkgver "$value" 2>/dev/null; then
-    log_err "$rule.from must be a version of A-Za-z0-9 . _ + with a digit: $value"
+    log_err "$rule.from must be a version of at most 64 characters of A-Za-z0-9 . _ + with a digit: $value"
     errors=1
   fi
 
@@ -276,7 +276,7 @@ validate_pkg() {
   local current_value
   current_value=$(pkg_get "$file" '.current // ""')
   if [[ -n "$current_value" ]] && ! validate_pkgver "$current_value" 2>/dev/null; then
-    log_err "$shown: current must hold a digit and only A-Za-z0-9 . _ +: ${current_value@Q}"
+    log_err "$shown: current must hold a digit and at most 64 characters of A-Za-z0-9 . _ +: ${current_value@Q}"
     ((errors++))
   fi
 

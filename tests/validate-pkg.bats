@@ -98,13 +98,13 @@ current: '$current'"
 
 @test "validate: fails on a current that is no version" {
   local current
-  for current in '1.0$(touch x)' 1.0-1 'v 1' abc; do
+  for current in '1.0$(touch x)' 1.0-1 'v 1' abc "$(printf 'a%.0s' {1..64})1"; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 current: '$current'"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"current must hold a digit and only A-Za-z0-9 . _ +: ${current@Q}"* ]]
+    [[ "$output" == *"current must hold a digit and at most 64 characters of A-Za-z0-9 . _ +: ${current@Q}"* ]]
   done
   create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
@@ -1244,7 +1244,7 @@ alerts:
 
 @test "validate: an alert from that is not a version rejected" {
   local value
-  for value in "'1.0-rc1'" "''" "beta" "[1.0]"; do
+  for value in "'1.0-rc1'" "''" "beta" "[1.0]" "$(printf 'a%.0s' {1..64})1"; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 alerts:
@@ -1252,7 +1252,7 @@ alerts:
     note: License change"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"alerts[0].from must be a version of A-Za-z0-9 . _ + with a digit"* ]]
+    [[ "$output" == *"alerts[0].from must be a version of at most 64 characters of A-Za-z0-9 . _ + with a digit"* ]]
   done
 }
 

@@ -59,6 +59,19 @@ lib() {
   [[ "$stderr" != *"line 1 of"* && "$stderr" != *"line 2 of"* && "$stderr" != *"line 11 of"* ]]
 }
 
+@test "stats_rows: a version of more than 64 characters is no row" {
+  local v64
+  v64="$(printf 'a%.0s' {1..63})1"
+  printf '%s\n' 'time,package,event,version,previous,run' \
+    "2026-11-08T05:17:41Z,a,updated,$v64,$v64,42" \
+    "2026-11-08T05:17:41Z,a,updated,${v64}2,1.0,42" \
+    "2026-11-08T05:17:41Z,a,updated,1.0,${v64}2,42" >"$J"
+  run --separate-stderr lib stats_rows "$J"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-11-08T05:17:41Z,a,updated,$v64,$v64,42" ]
+  [[ "$stderr" == *"line 3 of $J is not a journal row"* && "$stderr" == *"line 4 of $J is not a journal row"* ]]
+}
+
 @test "stats_last_states: the last row of each package, and the last version it was at" {
   printf '%s\n' 'time,package,event,version,previous,run' \
     '2026-11-08T05:17:41Z,b,tracked,2.0,,42' \
@@ -120,6 +133,18 @@ lib() {
   [ "$output" = 'up_to_date,' ]
   run lib stats_event "check_failed: x" '1.0;rm'
   [ "$output" = 'check_failed,' ]
+}
+
+@test "stats_event: a version of more than 64 characters fails, a current one is left empty" {
+  local v64
+  v64="$(printf 'a%.0s' {1..63})1"
+  run lib stats_event "updated: $v64" "$v64"
+  [ "$output" = "updated,$v64" ]
+  run --separate-stderr lib stats_event "updated: ${v64}2" 1.0
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  run lib stats_event up_to_date "${v64}2"
+  [ "$output" = 'up_to_date,' ]
 }
 
 @test "stats_event: an unknown status or version fails with nothing" {
@@ -354,6 +379,16 @@ added_rows() {
   record
   [ "$status" -eq 0 ]
   [ -z "$(added_rows)" ]
+}
+
+@test "record-events: a current version of more than 64 characters is unknown" {
+  local v64
+  v64="$(printf 'a%.0s' {1..63})1"
+  pkg a "${v64}2"
+  st a up_to_date
+  record
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/out.csv")" = $'time,package,event,version,previous,run\n2026-11-10T05:17:22Z,a,tracked,,,44' ]
 }
 
 @test "record-events: a version change ends a failure as an update" {

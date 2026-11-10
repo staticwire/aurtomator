@@ -57,7 +57,7 @@ current_of() {
   local value
   [[ -f "$1" ]] || return 0
   value=$(pkg_get "$1" '.current // ""' 2>/dev/null) || return 0
-  [[ "$value" =~ ^[A-Za-z0-9._+]+$ ]] || return 0
+  [[ "$value" =~ ^[A-Za-z0-9._+]{1,$PKGVER_MAX}$ ]] || return 0
   printf '%s\n' "$value"
 }
 
