@@ -462,6 +462,44 @@ added_rows() {
   [ ! -e "$TEST_TMPDIR/out.csv.tmp" ]
 }
 
+# root reads the journal of the checkout, so a link, a device or a linked
+# directory stops the script before it reads a byte
+@test "record-events: a journal that is a link or no file, or in no directory, exits 1 at once" {
+  local args=(--journal "$J" --statuses "$TEST_TMPDIR/statuses" --before "$TEST_TMPDIR/packages"
+    --after "$TEST_TMPDIR/after" --out "$TEST_TMPDIR/out.csv")
+  pkg a 1.0
+  st a up_to_date
+  ln -s /dev/zero "$J"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$J is a link or no regular file, so it is no journal"* ]]
+  rm "$J"
+  journal '2026-11-08T05:17:41Z,a,tracked,1.0,,42'
+  mv "$J" "$TEST_TMPDIR/key"
+  ln -s "$TEST_TMPDIR/key" "$J"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$J is a link or no regular file, so it is no journal"* ]]
+  rm "$J"
+  mkdir "$J"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$J is a link or no regular file, so it is no journal"* ]]
+  rm -r "$TEST_TMPDIR/stats"
+  mkdir "$TEST_TMPDIR/other"
+  cp "$TEST_TMPDIR/key" "$TEST_TMPDIR/other/events.csv"
+  ln -s other "$TEST_TMPDIR/stats"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$TEST_TMPDIR/stats is a link or no directory, so it holds no journal"* ]]
+  rm "$TEST_TMPDIR/stats"
+  echo x >"$TEST_TMPDIR/stats"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$TEST_TMPDIR/stats is a link or no directory, so it holds no journal"* ]]
+  [ ! -e "$TEST_TMPDIR/out.csv" ]
+}
+
 @test "record-events: a wrong header of the journal writes nothing" {
   pkg a 1.0
   st a up_to_date
@@ -695,6 +733,23 @@ pushes() {
   cmp "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/first.svg"
   cmp "$TEST_TMPDIR/card/card-dark.svg" "$TEST_TMPDIR/first-dark.svg"
   run ! cmp -s "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/card/card-dark.svg"
+}
+
+@test "stats-card: a journal that is a link or in a linked directory exits 1 and draws nothing" {
+  local args=(--journal "$J" --packages "$TEST_TMPDIR/packages" --name aur-packages --out "$TEST_TMPDIR/card")
+  mkdir -p "$TEST_TMPDIR/card"
+  ln -s /dev/zero "$J"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/stats-card.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$J is a link or no regular file, so it is no journal"* ]]
+  rm "$J"
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1'
+  mv "$TEST_TMPDIR/stats" "$TEST_TMPDIR/other"
+  ln -s other "$TEST_TMPDIR/stats"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/stats-card.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$TEST_TMPDIR/stats is a link or no directory, so it holds no journal"* ]]
+  [ -z "$(ls -A "$TEST_TMPDIR/card")" ]
 }
 
 @test "stats-card: a wrong name, day, option or path exits 1 and draws nothing" {

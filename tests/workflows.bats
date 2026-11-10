@@ -603,8 +603,8 @@ run_decide_step() {
   step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
   (cd "$ws" && PATH="$bin:$PATH" RESULTS="$results" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
-    GITHUB_REPOSITORY=owner/aur-packages AURTOMATOR_STATS_DATE=2026-11-10 bash -e "$BATS_TEST_TMPDIR/step.sh") \
-    >/dev/null 2>"$BATS_TEST_TMPDIR/decide.log"
+    GITHUB_REPOSITORY=owner/aur-packages AURTOMATOR_STATS_DATE=2026-11-10 timeout 60 bash -e "$BATS_TEST_TMPDIR/step.sh") \
+    >"$BATS_TEST_TMPDIR/decide.out" 2>"$BATS_TEST_TMPDIR/decide.log"
   cat "$BATS_TEST_TMPDIR/output"
 }
 
@@ -689,6 +689,31 @@ decide_stats() {
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
+}
+
+# A journal root cannot read would set work in every run, and publish would
+# record nothing
+@test "check-updates: Decide warns and leaves the run alone for a journal that is a link or no file" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  decide_stats 2026-11-09
+  ln -sf /dev/zero "$ws/stats/events.csv"
+  run run_decide_step a=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
+  grep -qx '::warning::stats/events.csv is a link or no regular file, so this run records no statistics' \
+    "$BATS_TEST_TMPDIR/decide.out"
+  rm -r "$ws/stats"
+  echo x >"$ws/stats"
+  run run_decide_step a=up_to_date
+  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
+  grep -qx '::warning::stats is a link or no directory, so this run records no statistics' "$BATS_TEST_TMPDIR/decide.out"
+  rm "$ws/stats"
+  decide_stats 2026-11-09
+  mv "$ws/stats" "$ws/other"
+  ln -s other "$ws/stats"
+  run run_decide_step a=up_to_date
+  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
+  grep -qx '::warning::stats is a link or no directory, so this run records no statistics' "$BATS_TEST_TMPDIR/decide.out"
 }
 
 @test "check-updates: Decide leaves the run alone when it cannot draw the card" {
@@ -1481,7 +1506,7 @@ run_stats_step() {
   step_run publish "Record statistics" >"$BATS_TEST_TMPDIR/stats-step.sh"
   (cd "$BATS_TEST_TMPDIR/ws" && RESULTS="$BATS_TEST_TMPDIR/results" GITHUB_REPOSITORY="${REPO-owner/aur-packages}" \
     GITHUB_RUN_ID=7 AURTOMATOR_STATS_TIME=2026-11-10T05:17:22Z AURTOMATOR_STATS_DATE=2026-11-10 \
-    bash -e "$BATS_TEST_TMPDIR/stats-step.sh")
+    timeout 60 bash -e "$BATS_TEST_TMPDIR/stats-step.sh")
 }
 
 @test "check-updates: Record statistics runs as root between Hand over and the commit step" {
@@ -1519,6 +1544,24 @@ run_stats_step() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"::warning::The statistics of this run were not recorded"* ]]
   [ -z "$(ls -A "$stats")" ]
+}
+
+@test "check-updates: Record statistics warns and leaves stats/ empty for a journal that is a link" {
+  local stats="$BATS_TEST_TMPDIR/results/stats"
+  make_stats_ws 1.1 "updated: 1.1"
+  ln -sf /dev/zero "$BATS_TEST_TMPDIR/ws/stats/events.csv"
+  run run_stats_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::The statistics of this run were not recorded"* ]]
+  [ -z "$(ls -A "$stats")" ]
+}
+
+# A stall of a script takes the path of its failure, so the commit lands
+@test "check-updates: Record statistics bounds the time of both scripts" {
+  run step_run publish "Record statistics"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"! timeout 120 ./aurtomator/scripts/record-events.sh "* ]]
+  [[ "$output" == *"! timeout 120 ./aurtomator/scripts/stats-card.sh "* ]]
 }
 
 @test "check-updates: Record statistics writes nothing without a package or a hand over" {
@@ -2165,6 +2208,30 @@ no_commit() {
   make_commit_repo stats/card.svg=card
   ln -s packages "$ws/stats"
   git -C "$ws" add stats
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m link
+  run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No changes to commit"* ]]
+}
+
+# A path under a file would replace that file in the tree, and one under a
+# link would write through the link
+@test "check-updates: the commit step leaves out stats/ when stats is a file or a link to a directory" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_commit_repo README.md="new table" stats/events.csv=journal
+  echo x >"$ws/stats"
+  git -C "$ws" add stats
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m file
+  run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::stats/events.csv is left out of the commit, stats is a link or no directory"* ]]
+  jq -e '[.tree[].path] == ["README.md"]' "$GH_LOG.tree"
+  rm -rf "$ws" "$BATS_TEST_TMPDIR/results"
+  make_commit_repo stats/card.svg="new card"
+  mkdir "$ws/other"
+  echo card >"$ws/other/card.svg"
+  ln -s other "$ws/stats"
+  git -C "$ws" add other stats
   git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m link
   run_commit_step
   [ "$status" -eq 0 ]

@@ -62,6 +62,7 @@ current_of() {
 }
 
 # The last state of each package in the journal
+stats_journal_ok "${ARG[journal]}" || exit 1
 declare -A EVENT=() VERSION=() CURRENT=()
 creating=true
 if [[ -e "${ARG[journal]}" ]]; then

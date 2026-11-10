@@ -50,6 +50,7 @@ for key in packages out; do
     exit 1
   fi
 done
+stats_journal_ok "${ARG[journal]}" || exit 1
 if [[ ! -f "${ARG[journal]}" ]]; then
   log_err "--journal is not a file: ${ARG[journal]}"
   exit 1

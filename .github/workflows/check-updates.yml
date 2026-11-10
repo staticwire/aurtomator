@@ -223,10 +223,14 @@ jobs:
           packages=false
           if compgen -G 'packages/*.yml' >/dev/null; then
             packages=true
-            if [[ ! -f stats/events.csv ]]; then
+            if [[ -L stats || (-e stats && ! -d stats) ]]; then
+              echo "::warning::stats is a link or no directory, so this run records no statistics"
+            elif [[ -L stats/events.csv || (-e stats/events.csv && ! -f stats/events.csv) ]]; then
+              echo "::warning::stats/events.csv is a link or no regular file, so this run records no statistics"
+            elif [[ ! -e stats/events.csv ]]; then
               work=true
             elif mkdir -p "$RESULTS/stats" &&
-              ./aurtomator/scripts/stats-card.sh --journal stats/events.csv --packages packages \
+              timeout 120 ./aurtomator/scripts/stats-card.sh --journal stats/events.csv --packages packages \
                 --name "${GITHUB_REPOSITORY#*/}" --out "$RESULTS/stats" &&
               ! cmp -s "$RESULTS/stats/card.svg" stats/card.svg; then
               work=true
@@ -523,7 +527,7 @@ jobs:
       - *hand-over
 
       # Root writes stats/ from the journal of the checkout and the copies of
-      # Hand over. A failure leaves stats/ out of the commit.
+      # Hand over. A failure or a timeout leaves stats/ out of the commit.
       - name: Record statistics
         env:
           RESULTS: /results
@@ -531,9 +535,9 @@ jobs:
           [[ -d "$RESULTS/packages" ]] || exit 0
           compgen -G 'packages/*.yml' >/dev/null || exit 0
           mkdir -p "$RESULTS/stats"
-          if ! ./aurtomator/scripts/record-events.sh --journal stats/events.csv --statuses statuses \
+          if ! timeout 120 ./aurtomator/scripts/record-events.sh --journal stats/events.csv --statuses statuses \
             --before packages --after "$RESULTS/packages" --out "$RESULTS/stats/events.csv" ||
-            ! ./aurtomator/scripts/stats-card.sh --journal "$RESULTS/stats/events.csv" --packages packages \
+            ! timeout 120 ./aurtomator/scripts/stats-card.sh --journal "$RESULTS/stats/events.csv" --packages packages \
               --name "${GITHUB_REPOSITORY#*/}" --out "$RESULTS/stats"; then
             echo "::warning::The statistics of this run were not recorded"
             rm -f -- "$RESULTS/stats/events.csv" "$RESULTS/stats/card.svg" "$RESULTS/stats/card-dark.svg"
@@ -553,10 +557,17 @@ jobs:
             "$RESULTS/stats/events.csv" "$RESULTS/stats/card.svg" "$RESULTS/stats/card-dark.svg"; do
             [[ -f "$copy" ]] || continue
             file=${copy#"$RESULTS"/}
-            # The first run with statistics adds the files of stats/
-            if [[ "$file" == stats/* && ! -e "$file" && ! -L "$file" && ! -L stats ]]; then
-              changed+=("$file")
-              continue
+            if [[ "$file" == stats/* ]]; then
+              # A path under a file would replace it, one under a link go through it
+              if [[ -L stats || (-e stats && ! -d stats) ]]; then
+                echo "::warning::$file is left out of the commit, stats is a link or no directory"
+                continue
+              fi
+              # The first run with statistics adds the files of stats/
+              if [[ ! -e "$file" && ! -L "$file" ]]; then
+                changed+=("$file")
+                continue
+              fi
             fi
             [[ -f "$file" && ! -L "$file" ]] || continue
             cmp -s -- "$copy" "$file" || changed+=("$file")

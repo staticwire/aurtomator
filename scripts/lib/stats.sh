@@ -8,6 +8,21 @@
 STATS_HEADER='time,package,event,version,previous,run'
 STATS_ROW_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z,[A-Za-z0-9@_+][A-Za-z0-9@._+-]*,(tracked|added|removed|updated|downgrade|rebuilt|held|jump_skipped|downgrade_skipped|pending|check_failed|update_failed|up_to_date)'",[A-Za-z0-9._+]{0,$PKGVER_MAX},[A-Za-z0-9._+]{0,$PKGVER_MAX},[0-9]*\$"
 
+# Fails, with the reason on stderr, when journal $1 or its directory is a
+# link, or the journal is there and no regular file
+stats_journal_ok() {
+  local dir
+  dir=$(dirname -- "$1")
+  if [[ -L "$dir" || (-e "$dir" && ! -d "$dir") ]]; then
+    log_err "$dir is a link or no directory, so it holds no journal"
+    return 1
+  fi
+  if [[ -L "$1" || (-e "$1" && ! -f "$1") ]]; then
+    log_err "$1 is a link or no regular file, so it is no journal"
+    return 1
+  fi
+}
+
 # Print the rows of journal $1 without its header, and warn of each line
 # that is not a row. Returns: 1 when the first line is not the header
 stats_rows() {
