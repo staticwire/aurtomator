@@ -272,7 +272,7 @@ The `.SRCINFO` check accepts a derived variable whose text is one of the forms o
 
 ### Lines the check cannot read from the PKGBUILD (BLOCKED)
 
-A line of `.SRCINFO` other than `pkgver`, `pkgrel`, `source` and the checksums that holds the version, where the PKGBUILD writes the value with an escaped character, `{a,b}` or `$'...'`, takes the version from a variable that does not follow `pkgver`, or derives the value from `pkgver` and also writes its text elsewhere outside a comment.
+A line of `.SRCINFO` other than `pkgver`, `pkgrel`, `source` and the checksums that holds the version, where the PKGBUILD writes the value with an escaped character, `{a,b}` or `$'...'`, takes the version from a variable that does not follow `pkgver`, or derives the value from `pkgver` and also writes its text elsewhere outside a comment line. A comment after code counts as text.
 
 **Detection:** the `.SRCINFO` check looks up the value of each such line, the part after ` = `, in the text of the AUR PKGBUILD without its `pkgver=` and `pkgrel=` lines, the line of `upstream.asset_var`, its checksum arrays and its comment lines. A line whose value that text holds must stay as it is, and any other line must take the new version. A prepared line that differs stops the update, and the message names the line the check expected. Publish and verify run it, and `update-pkg.sh` runs it before the commit. See step 5 of publish in [WORKFLOW.md section 4.4](WORKFLOW.md#44-prepare-and-publish).
 
