@@ -469,6 +469,15 @@ step_run() {
   yq ".jobs.$1.steps[] | select(.name == \"$2\") | .run" "$CHECK_UPDATES"
 }
 
+# The commit step writes back to the branch of the run, and a tag is none
+@test "check-updates: check stops first thing on a run started from a tag" {
+  run yq -o=json -I=0 '.jobs.check.steps[0] | [.name, .if]' "$CHECK_UPDATES"
+  [ "$output" = "[\"Require a branch\",\"github.ref_type != 'branch'\"]" ]
+  run bash -e -c "$(step_run check "Require a branch")"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::Start the run from a branch: it commits its results to the branch it runs on" ]
+}
+
 @test "check-updates: runs only when called, with the four secrets optional" {
   run yq -o=json -I=0 '.on' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
@@ -1137,11 +1146,14 @@ make_builder_inputs() {
   [ "$output" = "!cancelled() && needs.check.outputs.work == 'true'" ]
 }
 
+# check requires a branch before it installs anything
 @test "check-updates: check, prepare, verify and publish add builder right after the install" {
-  local job
+  local job first
   for job in check prepare verify publish; do
     echo "$job"
-    run yq -o=json -I=0 "[.jobs.$job.steps[0].name, .jobs.$job.steps[1].name]" "$CHECK_UPDATES"
+    first=0
+    [[ "$job" != check ]] || first=1
+    run yq -o=json -I=0 "[.jobs.$job.steps[$first].name, .jobs.$job.steps[$((first + 1))].name]" "$CHECK_UPDATES"
     [ "$status" -eq 0 ]
     [ "$output" = '["Install dependencies","Add builder"]' ]
     [ "$(step_run "$job" "Add builder")" = "$(step_run check "Add builder")" ]
