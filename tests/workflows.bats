@@ -928,9 +928,11 @@ builder_steps() {
 @test "run-as-builder: takes its inputs through the environment" {
   run yq -o=json -I=0 '.runs.steps[0].env' "$BUILDER_ACTION"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"ARGS":"${{ inputs.args }}","KEEP_ENV":"${{ inputs.keep-env }}","README_TOO":"${{ inputs.readme }}","WORK":"/work"}' ]
+  [ "$output" = '{"ARGS":"${{ inputs.args }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","WORK":"/work"}' ]
   run yq '.inputs.readme.default' "$BUILDER_ACTION"
   [ "$output" = "false" ]
+  run yq '.inputs.package.default' "$BUILDER_ACTION"
+  [ "$output" = "" ]
 }
 
 # Runs the run-as-builder action with the inputs of step $2 of job $1, in
@@ -943,9 +945,11 @@ builder_steps() {
 # stdout and one only stderr, and exits with $SUDO_RC. chown and git log
 # their arguments to chown.log and git.log in the test directory. The action
 # sits in aurtomator/ of the workspace, and GITHUB_ACTION_PATH names its
-# directory, or $ACTION_PATH when it is set.
+# directory, or $ACTION_PATH when it is set. The input package takes
+# $MATRIX_PACKAGE, foo by default, for the package of a job of the matrix,
+# and $PACKAGE_INPUT in place of the input of the step when it is set.
 run_builder_step() {
-  local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep readme
+  local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep readme package
   local action_dir="$BATS_TEST_TMPDIR/ws/aurtomator/.github/actions/run-as-builder"
   mkdir -p "$bin" "$action_dir"
   printf '#!/bin/sh\necho "$*" >>"$CALL_LOGS/chown.log"\n' >"$bin/chown"
@@ -972,10 +976,14 @@ EOF
   args=$(yq "$step | .with.args // \"\"" "$CHECK_UPDATES")
   keep=$(yq "$step | .with[\"keep-env\"] // \"\"" "$CHECK_UPDATES")
   readme=$(yq "$step | .with.readme // \"false\"" "$CHECK_UPDATES")
+  package=$(yq "$step | .with.package // \"\"" "$CHECK_UPDATES")
+  # shellcheck disable=SC2016
+  package=${package//'${{ matrix.package }}'/${MATRIX_PACKAGE-foo}}
+  package=${PACKAGE_INPUT-$package}
   rm -f "$SUDO_LOG"
   run env -C "$ws" PATH="$bin:$PATH" GITHUB_WORKSPACE="$ws" CALL_LOGS="$BATS_TEST_TMPDIR" \
     GITHUB_ACTION_PATH="${ACTION_PATH:-$action_dir}" SUDO_LOG="$SUDO_LOG" TEST_X_RC="${TEST_X_RC:-0}" \
-    ARGS="$args" KEEP_ENV="$keep" README_TOO="$readme" WORK="$BATS_TEST_TMPDIR/work" \
+    ARGS="$args" KEEP_ENV="$keep" PACKAGE="$package" README_TOO="$readme" WORK="$BATS_TEST_TMPDIR/work" \
     bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
 }
 
@@ -1095,6 +1103,47 @@ make_builder_inputs() {
   [ "$status" -eq 0 ]
   [ -d "$work" ]
   [ -z "$(ls -A "$work")" ]
+}
+
+@test "run-as-builder: gives builder the files of one package when the input names it" {
+  local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  echo "name: bar" >"$ws/packages/bar.yml"
+  echo "new_version: 3.0" >"$ws/.status/bar"
+  printf 'foo\t2.0-x\nbar\t3.0-x\n' >"$ws/.status/_assets"
+  printf 'bar\tnotice\tNote\n' >"$ws/.status/_alerts"
+  PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step check "Check updates"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
+  [ "$output" = "$(printf '%s\n' ./.status ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
+}
+
+@test "run-as-builder: copies nothing of one package through a link" {
+  local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work" input
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  for input in packages .status; do
+    mv "$ws/$input" "$BATS_TEST_TMPDIR/real-$input"
+    ln -s "$BATS_TEST_TMPDIR/real-$input" "$ws/$input"
+  done
+  PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step check "Check updates"
+  [ "$status" -eq 0 ]
+  [ -z "$(ls -A "$work")" ]
+}
+
+@test "run-as-builder: refuses a package that is no package name" {
+  local name
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  for name in '../x' 'a b' '.x' '-x'; do
+    echo "$name"
+    rm -rf "$BATS_TEST_TMPDIR/work"
+    PACKAGE_INPUT="$name" SUDO_OUT=ok run_builder_step check "Check updates"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::Not a package name: $name"* ]]
+    [ ! -e "$BATS_TEST_TMPDIR/work" ]
+    [ ! -e "$SUDO_LOG" ]
+  done
 }
 
 # A directory left by an earlier step could hold files that builder chose

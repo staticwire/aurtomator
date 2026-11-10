@@ -1,9 +1,10 @@
 name: Run check-all.sh as builder
 description: >-
-  Copies the inputs of builder into a directory of its own, runs
-  scripts/check-all.sh there as builder with workflow commands stopped,
-  then scripts/update-readme.sh when readme is true and check-all.sh
-  succeeded, and exits with the status of the last script that ran.
+  Copies the inputs of builder into a directory of its own, only those of one
+  package when package names it, runs scripts/check-all.sh there as builder
+  with workflow commands stopped, then scripts/update-readme.sh when readme
+  is true and check-all.sh succeeded, and exits with the status of the last
+  script that ran.
 
 # builder writes its results only into its own directory. The workspace and
 # aurtomator/ stay root's, and the Hand over step takes the results as data.
@@ -15,6 +16,10 @@ inputs:
     default: ""
   keep-env:
     description: Comma-separated names of the variables of the step that builder keeps
+    required: false
+    default: ""
+  package:
+    description: The one package whose YAML and status builder gets, with nothing of another package
     required: false
     default: ""
   readme:
@@ -29,6 +34,7 @@ runs:
       env:
         ARGS: ${{ inputs.args }}
         KEEP_ENV: ${{ inputs.keep-env }}
+        PACKAGE: ${{ inputs.package }}
         README_TOO: ${{ inputs.readme }}
         WORK: /work
       run: |
@@ -42,34 +48,50 @@ runs:
           echo "::error::builder cannot run $code/scripts/check-all.sh"
           exit 1
         fi
+        name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
+        if [[ -n "$PACKAGE" && ! "$PACKAGE" =~ ^${name_re}$ ]]; then
+          echo "::error::Not a package name: $PACKAGE"
+          exit 1
+        fi
         install -d -m 0700 "$WORK"
         # The regular files of the expected names, never a link
-        name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
         take() {
           [[ -f "$1" && ! -L "$1" ]] || return 0
           install -D -m 0644 "$1" "$WORK/$1"
         }
-        take README.md
-        if [[ -d packages && ! -L packages ]]; then
-          for f in packages/*.yml; do
-            [[ "${f#packages/}" =~ ^${name_re}\.yml$ ]] || continue
-            take "$f"
-          done
-        fi
-        if [[ -d .status && ! -L .status ]]; then
-          for f in .status/*; do
-            [[ "${f#.status/}" =~ ^${name_re}$ ]] || continue
-            take "$f"
-          done
-        fi
-        if [[ -d handoff && ! -L handoff ]]; then
-          (cd handoff && find prepared status -type f -print0 2>/dev/null || true) |
-            while IFS= read -r -d '' f; do
-              if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
-                [[ "$f" =~ ^status/${name_re}$ ]]; then
-                take "handoff/$f"
-              fi
+        if [[ -n "$PACKAGE" ]]; then
+          # One package: its YAML, its status and the records check-all.sh reads
+          if [[ -d packages && ! -L packages ]]; then
+            take "packages/$PACKAGE.yml"
+          fi
+          if [[ -d .status && ! -L .status ]]; then
+            take ".status/$PACKAGE"
+            take .status/_assets
+            take .status/_upstream
+          fi
+        else
+          take README.md
+          if [[ -d packages && ! -L packages ]]; then
+            for f in packages/*.yml; do
+              [[ "${f#packages/}" =~ ^${name_re}\.yml$ ]] || continue
+              take "$f"
             done
+          fi
+          if [[ -d .status && ! -L .status ]]; then
+            for f in .status/*; do
+              [[ "${f#.status/}" =~ ^${name_re}$ ]] || continue
+              take "$f"
+            done
+          fi
+          if [[ -d handoff && ! -L handoff ]]; then
+            (cd handoff && find prepared status -type f -print0 2>/dev/null || true) |
+              while IFS= read -r -d '' f; do
+                if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
+                  [[ "$f" =~ ^status/${name_re}$ ]]; then
+                  take "handoff/$f"
+                fi
+              done
+          fi
         fi
         chown -R builder:builder "$WORK"
 
