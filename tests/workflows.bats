@@ -1919,7 +1919,8 @@ moved_tree() {
 # answers the head of main with $GH_HEAD (HEAD of the repository by
 # default), lists the tree of that head from $GH_TREE as "path sha" lines
 # (the tree of HEAD by default) or fails the listing when $GH_TREE_FAIL is
-# set, and logs every call to $GH_LOG. For a new tree it logs the number of
+# set, and logs every call to $GH_LOG. It appends the body of each blob to
+# $GH_LOG.blobs, one line each. For a new tree it logs the number of
 # --input options and keeps the body of the last one in $GH_LOG.tree.
 run_commit_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
@@ -1940,7 +1941,11 @@ while (($#)); do
     --jq) filter=$2 ;;
     --input)
       inputs=$((inputs + 1))
-      cat -- "$2" >"$GH_LOG.tree"
+      if [[ "$endpoint" == */git/blobs ]]; then
+        cat -- "$2" | jq -c . >>"$GH_LOG.blobs"
+      else
+        cat -- "$2" >"$GH_LOG.tree"
+      fi
       ;;
   esac
   shift
@@ -1975,6 +1980,7 @@ EOF
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   : >"$GH_LOG"
+  : >"$GH_LOG.blobs"
   : >"$SUDO_LOG"
   step_run publish "Commit changes via API" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" SUDO_LOG="$SUDO_LOG" REPO=owner/fork BRANCH=main \
@@ -2050,8 +2056,8 @@ no_commit() {
   GH_HEAD=$MOVED GH_TREE="$(moved_tree packages/bar.yml)" run_commit_step
   [ "$status" -eq 0 ]
   [ ! -s "$SUDO_LOG" ]
-  grep -qxF "api repos/owner/fork/git/blobs -f content=$(printf 'new table\n' | base64 -w0) -f encoding=base64 --jq .sha" "$GH_LOG"
-  grep -qxF "api repos/owner/fork/git/blobs -f content=$(printf 'current: 2.0\n' | base64 -w0) -f encoding=base64 --jq .sha" "$GH_LOG"
+  grep -qxF "{\"content\":\"$(printf 'new table\n' | base64 -w0)\",\"encoding\":\"base64\"}" "$GH_LOG.blobs"
+  grep -qxF "{\"content\":\"$(printf 'current: 2.0\n' | base64 -w0)\",\"encoding\":\"base64\"}" "$GH_LOG.blobs"
   run grep -c "git/blobs" "$GH_LOG"
   [ "$output" = "2" ]
   [ "$(cat "$BATS_TEST_TMPDIR/ws/README.md")" = "readme" ]
@@ -2069,8 +2075,21 @@ no_commit() {
     [ "$status" -eq 0 ]
     run grep -c "git/blobs" "$GH_LOG"
     [ "$output" = "1" ]
-    grep -qxF "api repos/owner/fork/git/blobs -f content=$(printf 'new table\n' | base64 -w0) -f encoding=base64 --jq .sha" "$GH_LOG"
+    grep -qxF "{\"content\":\"$(printf 'new table\n' | base64 -w0)\",\"encoding\":\"base64\"}" "$GH_LOG.blobs"
   done
+}
+
+# Linux refuses one argument over 128 KiB, which a file of 98 KB passes in
+# base64, so the body of a blob goes on stdin
+@test "check-updates: the commit step sends a file of 200 KB as a blob" {
+  local journal="$BATS_TEST_TMPDIR/results/stats/events.csv"
+  make_commit_repo stats/events.csv=journal
+  head -c 200000 /dev/zero | tr '\0' a >"$journal"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  grep -qx "api repos/owner/fork/git/blobs --jq .sha --method POST -H Content-Type: application/json --input -" "$GH_LOG"
+  jq -r 'select(.encoding == "base64") | .content' "$GH_LOG.blobs" | base64 -d | cmp - "$journal"
+  jq -e '[.tree[].path] == ["stats/events.csv"]' "$GH_LOG.tree"
 }
 
 # A blob would turn a tracked link into a file

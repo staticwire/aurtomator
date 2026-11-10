@@ -596,11 +596,15 @@ jobs:
 
           TREE_ENTRIES="[]"
           for file in "${changed[@]}"; do
-            CONTENT=$(base64 -w0 -- "$RESULTS/$file")
-            BLOB_SHA=$(gh api "repos/$REPO/git/blobs" \
-              -f content="$CONTENT" \
-              -f encoding="base64" \
-              --jq '.sha')
+            # Linux refuses one argument over 128 KiB, so the file goes on
+            # stdin
+            BLOB_SHA=$(base64 -w0 -- "$RESULTS/$file" |
+              jq -Rs '{content: ., encoding: "base64"}' |
+              gh api "repos/$REPO/git/blobs" \
+                --jq '.sha' \
+                --method POST \
+                -H "Content-Type: application/json" \
+                --input -)
             TREE_ENTRIES=$(echo "$TREE_ENTRIES" | jq \
               --arg path "$file" \
               --arg sha "$BLOB_SHA" \
