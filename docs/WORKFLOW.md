@@ -440,7 +440,7 @@ With `upstream.describe`, the strategy prints what the `git describe` recipes of
 
 Every new commit upstream is a new version. A push of a `git-latest` package waits 7 days after the last one, unless `cooldown_days` sets other days, see [4.7](#47-cooldown).
 
-The clone runs with `GIT_ALLOW_PROTOCOL=http:https`. A URL in a package YAML that comes with a pull request therefore cannot read a local repository or connect to an ssh host with the SSH key of the machine that runs the check.
+The clone runs with `GIT_ALLOW_PROTOCOL=https`. A URL in a package YAML that comes with a pull request therefore cannot read a local repository or connect to an ssh host with the SSH key of the machine that runs the check, and a redirect cannot move the clone to http.
 
 **Example YAML (GitHub):**
 

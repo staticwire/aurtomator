@@ -48,8 +48,8 @@ case "$upstream_type" in
     ;;
 esac
 
-# Clone bare repo to get commit count + hash. http and https only, so a URL
-# from the YAML reaches no local repository and no ssh host.
+# Clone bare repo to get commit count + hash. https only, so a URL from the
+# YAML reaches no local repository and no ssh host, and no redirect to http.
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -62,7 +62,7 @@ clone_args=(--bare --quiet --filter=tree:0)
 if [[ -n "$branch" ]]; then
   clone_args+=("--branch=$branch")
 fi
-GIT_ALLOW_PROTOCOL=http:https git clone "${clone_args[@]}" "$repo_url" "$tmp_dir/repo" || {
+GIT_ALLOW_PROTOCOL=https git clone "${clone_args[@]}" "$repo_url" "$tmp_dir/repo" || {
   echo "Failed to clone $repo_url" >&2
   exit 1
 }

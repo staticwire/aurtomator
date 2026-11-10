@@ -1019,7 +1019,7 @@ EOF
   [ "$status" -eq 0 ]
   # Should match r3.<7-char-hash>
   [[ "$output" =~ ^r3\.[0-9a-f]{7}$ ]]
-  [ "$(cat "$TEST_TMPDIR/git-clone")" = "http:https https://git.example.com/repo.git" ]
+  [ "$(cat "$TEST_TMPDIR/git-clone")" = "https https://git.example.com/repo.git" ]
 }
 
 @test "git-latest: clones github.com for the github type" {
@@ -1030,7 +1030,7 @@ EOF
 
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
   [ "$status" -eq 0 ]
-  [ "$(cat "$TEST_TMPDIR/git-clone")" = "http:https https://github.com/owner/repo.git" ]
+  [ "$(cat "$TEST_TMPDIR/git-clone")" = "https https://github.com/owner/repo.git" ]
 }
 
 # A bare clone of googleapis/mcp-toolbox, 1.4 GB, does not fit in the time of
