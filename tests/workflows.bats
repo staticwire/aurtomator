@@ -2256,7 +2256,15 @@ no_commit() {
   run yq '.jobs.issues.steps[] | select(.name == "Close resolved issues") | .if' "$CHECK_UPDATES"
   [ "$output" = "needs.publish.result == 'success' || needs.publish.result == 'skipped'" ]
   run yq '.jobs.issues.steps[] | select(.name == "Create issues") | .if' "$CHECK_UPDATES"
-  [ "$output" = "always()" ]
+  [ "$output" = "always() && steps.clean.outcome == 'success'" ]
+}
+
+# With publish skipped, the statuses come as builder of check wrote them
+@test "check-updates: the issues job checks the statuses before any step reads them" {
+  run yq -o=json -I=0 '.jobs.issues.steps[] | select(.name == "Check the statuses") | [.id, .if, .run]' "$CHECK_UPDATES"
+  [ "$output" = "[\"clean\",null,\"bash -c 'source ./aurtomator/scripts/lib.sh && clean_statuses .status'\"]" ]
+  [ "$(step_index issues "Check the statuses")" = "$(($(step_index issues "Download statuses of publish") + 1))" ]
+  [ "$(step_index issues "Write the run summary")" = "$(($(step_index issues "Check the statuses") + 1))" ]
 }
 
 # A change that leaves the package table alone skips publish and still opens

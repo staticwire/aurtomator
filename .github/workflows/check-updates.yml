@@ -711,6 +711,12 @@ jobs:
           artifact-ids: ${{ needs.publish.outputs.published-id || '0' }}
           path: .status
 
+      # With publish skipped, the statuses come as builder of check wrote
+      # them, so root checks them as publish does
+      - name: Check the statuses
+        id: clean
+        run: bash -c 'source ./aurtomator/scripts/lib.sh && clean_statuses .status'
+
       - name: Write the run summary
         run: bash -c 'source ./aurtomator/scripts/lib.sh && run_summary .status' >>"$GITHUB_STEP_SUMMARY"
 
@@ -798,7 +804,7 @@ jobs:
           fi
 
       - name: Create issues
-        if: always()
+        if: always() && steps.clean.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

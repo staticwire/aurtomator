@@ -1075,7 +1075,7 @@ Nothing about a wait counts as a failure. The run summary lists the package with
 
 A waiting update goes out with the next run once the `last_updated` line of its package is deleted, and that push writes the date again. A run started by hand follows the cooldown as a scheduled run does.
 
-`--prepare` and `--publish` keep a `cooldown` of the check run, as they keep `held`, and apply the cooldown again to `new_version`, `available_downgrade` and `new_build`, see [4.4](#44-prepare-and-publish). A `cooldown` status without a valid date becomes `check_failed: invalid status from the check run`.
+`--prepare` and `--publish` keep a `cooldown` of the check run, as they keep `held`, and apply the cooldown again to `new_version`, `available_downgrade` and `new_build`, see [4.4](#44-prepare-and-publish). A `cooldown` status without a valid date becomes `check_failed: invalid status from the check run`, and so does a status whose version `validate_pkgver` refuses, of any kind.
 
 `validate-pkg.sh` refuses a `cooldown_days` that is not a whole number from 0 to 365, a `last_updated` that is not a date `YYYY-MM-DD`, and a `last_updated` later than the current UTC date, since a typo in the year would hold the package for years. A package with a new version fails its check when its `cooldown_days` is not valid, or when its `last_updated` is not a date while the cooldown is on. The status then is `check_failed: cooldown_days must be a whole number from 0 to 365: <value>` or `check_failed: last_updated must be a date YYYY-MM-DD: <value>`.
 
@@ -1196,11 +1196,12 @@ Step 15 runs as root with `GH_TOKEN` set to the workflow token, `github.token`. 
 2. **Checkout aurtomator:** into `aurtomator/`. The job reads no file of your repository, so it does not check it out. Without git in the image, `actions/checkout` downloads the files through the REST API.
 3. **Download statuses of check:** the `checked` artifact to `.status/`, when `publish` was skipped and `check` uploaded the artifact. Without `.status/`, the steps after it write an empty summary and open or close no issue.
 4. **Download statuses of publish:** the `published` artifact to `.status/`, when `publish` ran.
-5. **Write the run summary:** see [5.6](#56-issues).
-6. **Close resolved issues:** see [5.6](#56-issues).
-7. **Create issues:** see [5.6](#56-issues).
+5. **Check the statuses:** runs `clean_statuses` of `scripts/lib/status.sh`, which checks each status as `check-all.sh --publish` does, because with `publish` skipped the statuses come as `builder` of `check` wrote them. A status of another form, or with a version or a day that check refuses, becomes `check_failed: invalid status from the check run`, and an `_upstream` of another form than `newer: <version>` or `current: <version>` is removed. **Create issues** runs only after this step succeeded.
+6. **Write the run summary:** see [5.6](#56-issues).
+7. **Close resolved issues:** see [5.6](#56-issues).
+8. **Create issues:** see [5.6](#56-issues).
 
-Steps 6 and 7 run as root with `GH_TOKEN` set to the workflow token. No other user runs code in the workspace of this job, so root writes the bodies with `scripts/lib/issue.sh` of `aurtomator/`.
+Steps 7 and 8 run as root with `GH_TOKEN` set to the workflow token. No other user runs code in the workspace of this job, so root writes the bodies with `scripts/lib/issue.sh` of `aurtomator/`.
 
 ### 5.4 README update
 
@@ -1291,8 +1292,8 @@ When the checks of 5 or more packages failed on one host, `HOST_ISSUE_MIN` in `s
 
 An alert opens an issue as well, see [4.5](#45-update-alerts). Its notes come from `.status/_alerts`, where `check-all.sh` writes one line for each alert that fired: the package, `hold` or `notice`, and the note, split by tabs. The body comes from `alert_issue_body` in `scripts/lib/issue.sh`.
 
-- A `held:` status opens an issue titled `✋ <package>: update held` with the label `update-held`, unless an open `update-held` issue has that title. The body holds the held version and the notes of every alert that fired, and asks the maintainer to publish the version by hand and set `current`.
-- An `updated:` or `downgrade:` status of a package with a line in `.status/_alerts` opens an issue titled `🔔 <package>: <version> notice` with the label `update-notice`, unless an open `update-notice` issue has that title. The body holds the published version and the notes. The maintainer closes it once the edit is done.
+- A `held:` status opens an issue titled `✋ <package>: update held` with the label `update-held`, unless an open `update-held` issue has that title. The body holds the held version and the notes of every alert that fired, in a code block, and asks the maintainer to publish the version by hand and set `current`.
+- An `updated:` or `downgrade:` status of a package with a line in `.status/_alerts` opens an issue titled `🔔 <package>: <version> notice` with the label `update-notice`, unless an open `update-notice` issue has that title. The body holds the published version and the notes, in a code block. The maintainer closes it once the edit is done.
 
 A newer aurtomator release, `newer: <release>` in `.status/_upstream`, opens an issue titled `🚀 aurtomator <release> available` with the label `aurtomator-update`, unless an open `aurtomator-update` issue has that title. The body comes from `upstream_issue_body`: the release, the version the run uses, the update through Dependabot, and links to the release notes, to the manual update in SETUP.md and to the run. See [5.8](#58-version-of-aurtomator).
 

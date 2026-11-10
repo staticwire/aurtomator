@@ -211,6 +211,10 @@ checked_version() {
   local status="${CHECKED[$1]:-}"
   case "$status" in
     "new_version: "* | "available_downgrade: "* | "new_build: "* | "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
+      if ! validate_pkgver "${status#*: }" 2>/dev/null; then
+        echo "invalid status from the check run" >&2
+        return 1
+      fi
       echo "${status#*: }"
       ;;
     up_to_date) ;;
@@ -308,7 +312,15 @@ run_package() {
           return
         fi
         ;;
-      up_to_date | check_failed:* | "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
+      up_to_date | check_failed:*)
+        printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
+        return
+        ;;
+      "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
+        if ! validate_pkgver "${found#*: }" 2>/dev/null; then
+          echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
+          return
+        fi
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         # The issue of a held update lists the notes of its alerts
         [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(fired_alerts "$pkg_file" "$(pkg_get "$pkg_file" '.current // ""')" "${found#held: }" 2>/dev/null)"

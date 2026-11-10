@@ -1625,6 +1625,22 @@ alerts:
   [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "0" ]
 }
 
+# Every kind with a version reaches vercmp and the alerts of --prepare
+@test "check-all --prepare: fails a checked status of any kind whose version is unsafe" {
+  local kind
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  stub_script update-pkg.sh 0
+  for kind in new_version available_downgrade new_build downgrade_skipped jump_skipped held pending; do
+    echo "$kind"
+    checked_status pkg "$kind: 2.0](https://evil.example)"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "check_failed: invalid status from the check run" ]
+  done
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+}
+
 @test "check-all --prepare: prepares no update the check run left in its cooldown" {
   create_test_package "pkg-git" "git-latest" "upstream:
   type: github
@@ -1907,6 +1923,24 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: invalid status from the check run" ]
+}
+
+# --publish keeps these four kinds, and update-readme.sh puts their version
+# into the package table
+@test "check-all --publish: replaces a skipped, held or pending status with an unsafe version" {
+  local kind
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  for kind in downgrade_skipped jump_skipped held pending; do
+    echo "$kind"
+    checked_status pkg "$kind: <b>2.0</b>"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: invalid status from the check run" ]
+    checked_status pkg "$kind: 2.0"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "$kind: 2.0" ]
+  done
 }
 
 @test "check-all --publish: replaces a checked status with extra lines" {
@@ -2407,10 +2441,12 @@ current: '1.0.0'"
 
 # === alert_issue_body ===
 
-@test "alert_issue_body: lists every note of a held update" {
+# builder of check writes _alerts, so a mention or a link in it does not
+# render
+@test "alert_issue_body: lists every note of a held update in a code block" {
   echo "held: 29+1" >"$TEST_TMPDIR/demo"
   printf '%s\t%s\t%s\n' demo notice "Create the package for the old major" other hold "Not this one" \
-    demo hold "Raise makedepends java-environment to 28" >"$TEST_TMPDIR/_alerts"
+    demo hold "Raise makedepends to 28 @octocat [x](https://example.invalid)" >"$TEST_TMPDIR/_alerts"
   run alert_issue_body "$TEST_TMPDIR/demo" https://github.com/owner/repo/actions/runs/1
   [ "$status" -eq 0 ]
   expected=$(
@@ -2419,8 +2455,10 @@ Package: `demo`
 Held version: `29+1`
 Run: https://github.com/owner/repo/actions/runs/1
 
-- Create the package for the old major
-- Raise makedepends java-environment to 28
+```
+Create the package for the old major
+Raise makedepends to 28 @octocat [x](https://example.invalid)
+```
 
 Auto-created by update workflow. Publish the version by hand after the edit and set `current` in the package YAML to it. The next run closes this issue.
 EOF
@@ -2447,7 +2485,9 @@ Package: `demo`
 Published version: `29+1`
 Run: https://example.invalid/run
 
-- Create the package for the old major
+```
+Create the package for the old major
+```
 
 Auto-created by update workflow. Close it once the edit is done.
 EOF
@@ -2742,6 +2782,34 @@ EOF
   [ "$output" = "💤 next update 2026-11-12" ]
   run status_label "unknown: 1.0"
   [ "$output" = "✅ tracking" ]
+}
+
+# With publish skipped, the issues job reads the statuses of check as
+# builder wrote them
+@test "clean_statuses: a status that --publish would refuse becomes a check failure" {
+  make_statuses ok=up_to_date failed="check_failed: <b>x</b>" new="new_version: 2.0" day="cooldown: 2026-11-12" \
+    held="held: 1.0\` @octocat [x](https://example.invalid) \`" pending="pending: <b>x</b>" \
+    lines=$'updated: 2.0\n| x |' day2="cooldown: tomorrow" other="exploded: 1.0" _alerts=$'a\thold\tnote'
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/st/ok")" = up_to_date ]
+  [ "$(cat "$TEST_TMPDIR/st/failed")" = "check_failed: <b>x</b>" ]
+  [ "$(cat "$TEST_TMPDIR/st/new")" = "new_version: 2.0" ]
+  [ "$(cat "$TEST_TMPDIR/st/day")" = "cooldown: 2026-11-12" ]
+  for name in held pending lines day2 other; do
+    [ "$(cat "$TEST_TMPDIR/st/$name")" = "check_failed: invalid status from the check run" ]
+  done
+  [ "$(cat "$TEST_TMPDIR/st/_alerts")" = $'a\thold\tnote' ]
+}
+
+@test "clean_statuses: an _upstream of another form than newer or current and a version goes" {
+  make_statuses _upstream="newer: 0.12.0"
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$(cat "$TEST_TMPDIR/st/_upstream")" = "newer: 0.12.0" ]
+  make_statuses _upstream="newer: 0.12.0 [x](https://example.invalid)"
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/st/_upstream" ]
 }
 
 # Helper: writes the statuses given as name=status pairs to $TEST_TMPDIR/st

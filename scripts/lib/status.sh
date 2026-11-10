@@ -24,6 +24,32 @@ status_label() {
   esac
 }
 
+# Check the statuses in directory $1 as --publish of check-all.sh does: a
+# status it would refuse becomes a check failure, a refused _upstream goes
+clean_statuses() {
+  local file status
+  for file in "$1"/*; do
+    [[ -f "$file" ]] || continue
+    status=$(<"$file")
+    case "${file##*/}" in
+      _upstream)
+        [[ "$status" =~ ^(newer|current):\ [0-9]+\.[0-9]+\.[0-9]+$ ]] || rm -f -- "$file"
+        continue
+        ;;
+      _*) continue ;;
+    esac
+    case "$status" in
+      up_to_date | check_failed:* | update_failed:*) continue ;;
+      "cooldown: "*) ! valid_date "${status#cooldown: }" || continue ;;
+      "updated: "* | "downgrade: "* | "rebuilt: "* | "new_version: "* | "available_downgrade: "* | "new_build: "* | \
+        "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
+        ! validate_pkgver "${status#*: }" 2>/dev/null || continue
+        ;;
+    esac
+    echo "check_failed: invalid status from the check run" >"$file"
+  done
+}
+
 # Print the Markdown summary of a run from status directory $1. An error
 # holds text from upstream, so it goes into a code block, as in its issue.
 run_summary() {
