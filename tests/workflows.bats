@@ -545,7 +545,9 @@ step_run() {
   [[ "$output" != *"--prepare"* ]]
   [[ "$output" != *"update-pkg.sh"* ]]
   run yq '.jobs.check.outputs | keys | join(" ")' "$CHECK_UPDATES"
-  [ "$output" = "prepare work checked-id" ]
+  [ "$output" = "prepare to-prepare work checked-id" ]
+  run yq '.jobs.check.outputs["to-prepare"]' "$CHECK_UPDATES"
+  [ "$output" = '${{ steps.decide.outputs.to-prepare }}' ]
 }
 
 # Prints the artifact-ids of a download of the artifact that job $1 uploads
@@ -621,46 +623,77 @@ run_decide_step() {
 @test "check-updates: Decide prepares when a package is outdated" {
   run run_decide_step pkg="new_version: 2.0.0" other=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=false' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
   run run_decide_step pkg="available_downgrade: 1.0.0"
-  [ "$output" = $'prepare=true\nwork=true\npackages=false' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
   run run_decide_step pkg="new_build: 1.0.0" _assets=$'pkg\t1.0.0-b'
-  [ "$output" = $'prepare=true\nwork=true\npackages=false' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
 }
 
 @test "check-updates: Decide prepares nothing while an asset is pending" {
   README_CHANGED=1 run run_decide_step pkg="pending: 2.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
 }
 
 @test "check-updates: Decide prepares nothing while an update waits for its cooldown" {
   README_CHANGED=1 run run_decide_step pkg="cooldown: 2026-11-12"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
   run run_decide_step pkg="cooldown: 2026-11-12"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
 }
 
 @test "check-updates: Decide publishes only a change of the README" {
   README_CHANGED=1 run run_decide_step pkg="check_failed: API down"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
   README_CHANGED=1 run run_decide_step pkg="downgrade_skipped: 1.0.0"
-  [ "$output" = $'prepare=false\nwork=true\npackages=false' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
 }
 
 @test "check-updates: Decide does nothing when nothing changed" {
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
 }
 
 @test "check-updates: Decide counts a missing copy of the README as unchanged" {
   NO_README_COPY=1 run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+}
+
+@test "check-updates: Decide lists the outdated packages for the jobs of prepare" {
+  run run_decide_step b="new_version: 2.0.0" a="available_downgrade: 1.0.0" c="new_build: 1.0.0" \
+    d=up_to_date e="pending: 2.0.0" f="check_failed: down" _assets=$'c\t1.0.0-b'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["a","b","c"]' ]
+  [ ! -e "$BATS_TEST_TMPDIR/ws/statuses/_deferred" ]
+}
+
+@test "check-updates: Decide lists no name that Hand over would not take" {
+  run run_decide_step "bad name=new_version: 2.0.0" "-x=new_version: 2.0.0" pkg="new_version: 2.0.0"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
+}
+
+# GitHub starts at most 256 jobs from one matrix
+@test "check-updates: Decide prepares 256 packages and leaves the rest for the next run" {
+  local pairs=() i expected=""
+  for i in $(seq -w 1 258); do
+    pairs+=("p$i=new_version: 2.0.0")
+  done
+  for i in $(seq -w 1 256); do
+    expected+="\"p$i\","
+  done
+  run run_decide_step "${pairs[@]}"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "prepare=true" ]
+  [ "${lines[3]}" = "to-prepare=[${expected%,}]" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/ws/statuses/_deferred")" = $'p257\np258' ]
+  grep -qxF '::warning::2 outdated packages wait for the next run, which prepares at most 256' "$BATS_TEST_TMPDIR/decide.out"
 }
 
 # Puts package a, its journal and the card of day $1 into the workspace of
@@ -679,26 +712,26 @@ decide_stats() {
   echo "name: a" >"$BATS_TEST_TMPDIR/ws/packages/a.yml"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
   decide_stats 2026-11-10
   rm "$BATS_TEST_TMPDIR/ws/stats/card.svg"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=true\npackages=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
   decide_stats 2026-11-10
   rm "$BATS_TEST_TMPDIR/ws/stats/events.csv"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=true\npackages=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
 }
 
 @test "check-updates: Decide publishes once the windows of the card moved" {
   decide_stats 2026-11-09
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=true' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
   decide_stats 2026-11-10
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
 }
 
 # A journal root cannot read would set work in every run, and publish would
@@ -709,20 +742,20 @@ decide_stats() {
   ln -sf /dev/zero "$ws/stats/events.csv"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
   grep -qx '::warning::stats/events.csv is a link or no regular file, so this run records no statistics' \
     "$BATS_TEST_TMPDIR/decide.out"
   rm -r "$ws/stats"
   echo x >"$ws/stats"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
   grep -qx '::warning::stats is a link or no directory, so this run records no statistics' "$BATS_TEST_TMPDIR/decide.out"
   rm "$ws/stats"
   decide_stats 2026-11-09
   mv "$ws/stats" "$ws/other"
   ln -s other "$ws/stats"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
   grep -qx '::warning::stats is a link or no directory, so this run records no statistics' "$BATS_TEST_TMPDIR/decide.out"
 }
 
@@ -731,7 +764,7 @@ decide_stats() {
   echo 'time,package' >"$BATS_TEST_TMPDIR/ws/stats/events.csv"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=true' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
 }
 
 # Decide, Record statistics and the commit step read the copies of Hand over

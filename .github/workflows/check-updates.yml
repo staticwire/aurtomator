@@ -69,6 +69,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       prepare: ${{ steps.decide.outputs.prepare }}
+      to-prepare: ${{ steps.decide.outputs.to-prepare }}
       work: ${{ steps.decide.outputs.work }}
       checked-id: ${{ steps.upload.outputs.artifact-id }}
 
@@ -222,11 +223,32 @@ jobs:
         env:
           RESULTS: /results
         run: |
-          # prepare runs for an outdated package, publish also for a change
-          # in the README
+          # prepare runs a job for each outdated package, at most 256 as a
+          # matrix allows, and publish also runs for a change in the README
+          name_re='^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$'
+          to_prepare=()
+          deferred=()
+          for f in statuses/*; do
+            name=${f#statuses/}
+            [[ -f "$f" && "$name" =~ $name_re ]] || continue
+            grep -qE '^(new_version|available_downgrade|new_build): ' "$f" || continue
+            if ((${#to_prepare[@]} < 256)); then
+              to_prepare+=("$name")
+            else
+              deferred+=("$name")
+            fi
+          done
           prepare=false
-          if grep -qsE '^(new_version|available_downgrade|new_build): ' statuses/*; then
+          list='[]'
+          if ((${#to_prepare[@]} > 0)); then
             prepare=true
+            # The pattern lets no quote or backslash into a name
+            list=$(printf '"%s",' "${to_prepare[@]}")
+            list="[${list%,}]"
+          fi
+          if ((${#deferred[@]} > 0)); then
+            printf '%s\n' "${deferred[@]}" >statuses/_deferred
+            echo "::warning::${#deferred[@]} outdated packages wait for the next run, which prepares at most 256"
           fi
           work=$prepare
           if [[ -f "$RESULTS/README.md" ]] && ! cmp -s "$RESULTS/README.md" README.md; then
@@ -254,6 +276,7 @@ jobs:
             echo "prepare=$prepare"
             echo "work=$work"
             echo "packages=$packages"
+            echo "to-prepare=$list"
           } >>"$GITHUB_OUTPUT"
 
       # prepare, verify and publish read them, and issues when publish is
