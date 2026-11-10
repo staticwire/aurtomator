@@ -66,11 +66,13 @@ fi
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
 
-# update-pkg.sh hands over the files of the AUR when the AUR has the version
-if cmp -s "${aur_files}/PKGBUILD" "${PREPARED}/PKGBUILD" && cmp -s "${aur_files}/.SRCINFO" "${PREPARED}/.SRCINFO"; then
+handed_rc=0
+check_handed_aur_files "$aur_files" "$PREPARED" "$VERSION" "$ASSET_VAR" "$ASSET" || handed_rc=$?
+if ((handed_rc == 0)); then
   log_ok "The prepared files of $PKG_NAME are those of the AUR, nothing to verify"
   exit 0
 fi
+((handed_rc == 2)) || exit 1
 
 check_prepared_files "$aur_files" "$PREPARED" "$VERSION" "$(pkgver_dash "$PKG_FILE")" \
   "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" || exit 1

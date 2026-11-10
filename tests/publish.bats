@@ -781,7 +781,7 @@ current: '1.0.0'"
   write_srcinfo "$PREPARED/.SRCINFO" 1.0.0 1 "$H1" "$H2"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has pkgrel=1, expected 2"* ]]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
@@ -953,9 +953,19 @@ current: '0.9.0'"
   cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has pkgver=1.0.0, expected 1.1.0"* ]]
+  [[ "$output" == *"The prepared files are those of the AUR, which has 1.0.0, not 1.1.0"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+}
+
+@test "publish-pkg: takes only the files of the AUR at the version the AUR has" {
+  setup_publish
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.0.0 2 "sha256sums=('$H3' '$H4')"
+  write_srcinfo "$PREPARED/.SRCINFO" 1.0.0 2 "$H3" "$H4"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
 @test "publish-pkg: checks a prepared .SRCINFO beside the PKGBUILD of the AUR" {
@@ -965,7 +975,7 @@ current: '0.9.0'"
   sed -i 's/^\tpkgdesc = demo$/\tpkgdesc = changed/' "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO line 2 changes a value the PKGBUILD holds as text: pkgdesc = changed, expected pkgdesc = demo"* ]]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
@@ -1144,15 +1154,42 @@ commit_aur_state() {
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
-@test "verify-pkg: has nothing to verify when the prepared files are those of the AUR" {
+@test "verify-pkg: has nothing to verify when the prepared files are those of the AUR at its version" {
   setup_verify
   local work="$TEST_TMPDIR/aur-work-demo"
   sed -i 's/^pkgver=.*/pkgver="1.0.0"/' "$work/PKGBUILD"
   commit_aur_state "quote pkgver"
   cp "$work/PKGBUILD" "$work/.SRCINFO" "$PREPARED/"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 0 ]
   [[ "$output" == *"The prepared files of demo are those of the AUR, nothing to verify"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+# update-pkg.sh hands over the files of the AUR only for the version the
+# AUR has, so any other version is a prepare run that broke
+@test "verify-pkg: refuses the files of the AUR for a version the AUR does not have" {
+  setup_verify
+  cp "$OLD" "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/"
+  mv "$PREPARED/old.SRCINFO" "$PREPARED/.SRCINFO"
+  cp "$OLD" "$PREPARED/PKGBUILD"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The prepared files are those of the AUR, which has 1.0.0, not 1.1.0"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+# A source that changed under the same URL would pass verify with its new
+# checksum, while update-pkg.sh hands over the AUR files at that version
+@test "verify-pkg: takes only the files of the AUR at the version the AUR has" {
+  setup_verify
+  local sum
+  sum=$(printf 'source of %s\n' "https://example.com/demo-1.0.0.tar.gz" | sha256sum | cut -d' ' -f1)
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.0.0 2 "sha256sums=('$sum' '$SUM_LOCAL')"
+  write_srcinfo "$PREPARED/.SRCINFO" 1.0.0 2 "$sum" "$SUM_LOCAL"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
@@ -1163,7 +1200,7 @@ commit_aur_state() {
   sed -i 's/^\tpkgdesc = demo$/\tpkgdesc = changed/' "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO line 2 changes a value the PKGBUILD holds as text: pkgdesc = changed, expected pkgdesc = demo"* ]]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
 }
 
 @test "verify-pkg: refuses a line that keeps the old version the PKGBUILD derives" {
@@ -4572,7 +4609,7 @@ pkgver_dash: ''"
   echo "$AUR_BASE" >"$PREPARED/base"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 2.4.6 "$PREPARED" --asset "$V246_3"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has pkgrel=1, expected 2"* ]]
+  [[ "$output" == *"The prepared files are those of the AUR, which has 2.4.6 with _deb=$V246_2, not 2.4.6 with _deb=$V246_3"* ]]
   [ "$(yq -r .current_asset "$TEST_TMPDIR/packages/demo.yml")" = "$V246_2" ]
 }
 
