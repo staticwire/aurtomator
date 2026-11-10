@@ -60,9 +60,10 @@ write_srcinfo() {
 
 # Helper: bare repo standing in for the AUR repo of <pkg>, holding the given
 # PKGBUILD, .SRCINFO and other files. A git on PATH clones it for any AUR
-# URL and logs that URL to $TEST_TMPDIR/clone-urls. A mirror clone gets
-# $TEST_TMPDIR/upstream.git instead, logged to git-clone-urls. Sets
-# AUR_REMOTE and AUR_BASE.
+# URL and logs that URL to $TEST_TMPDIR/clone-urls. A fetch from an https
+# URL gets $TEST_TMPDIR/upstream.git instead, its URL logged to
+# git-clone-urls and its arguments to git-fetch-args. Sets AUR_REMOTE and
+# AUR_BASE.
 # Usage: make_aur_remote <pkg> <PKGBUILD path> <.SRCINFO path> [file]...
 make_aur_remote() {
   local work="$TEST_TMPDIR/aur-work-$1"
@@ -81,10 +82,11 @@ make_aur_remote() {
   AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
   cat >"$MOCK_DIR/git" <<EOF
 #!/usr/bin/env bash
-if [[ "\$1" == "clone" && " \$* " == *" --mirror "* ]]; then
+if [[ " \$* " == *" fetch "* && "\${@: -2:1}" == https://* ]]; then
   echo "\${@: -2:1}" >>"$TEST_TMPDIR/git-clone-urls"
   echo "\${GIT_ALLOW_PROTOCOL:-unset}" >>"$TEST_TMPDIR/git-allow"
-  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git clone -q --mirror "$TEST_TMPDIR/upstream.git" "\${@: -1}"
+  echo "\$*" >>"$TEST_TMPDIR/git-fetch-args"
+  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git "\${@:1:\$#-2}" "file://$TEST_TMPDIR/upstream.git" "\${@: -1}"
 fi
 if [[ "\$1" == "clone" ]]; then
   echo "\${@: -2:1}" >>"$TEST_TMPDIR/clone-urls"
@@ -1435,6 +1437,8 @@ use_source() {
   grep -qx 'https://example.com/demo.git' "$TEST_TMPDIR/git-clone-urls"
   # git follows a redirect only to a protocol it allows
   [ "$(cat "$TEST_TMPDIR/git-allow")" = "https" ]
+  # The tag alone, without the history of the repository
+  grep -q -- ' fetch -q --depth 1 --no-tags https://example.com/demo.git refs/tags/v1.1.0:refs/tags/v1.1.0$' "$TEST_TMPDIR/git-fetch-args"
 }
 
 @test "verify-pkg: checks a git source at a commit as makepkg does" {
@@ -1444,6 +1448,7 @@ use_source() {
   sed -i "s/$SUM_REMOTE/$GIT_SUM/" "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
+  grep -q -- " fetch -q --depth 1 --no-tags https://example.com/demo.git $GIT_COMMIT\$" "$TEST_TMPDIR/git-fetch-args"
 }
 
 @test "verify-pkg: refuses a wrong checksum of a git source" {
@@ -1455,13 +1460,13 @@ use_source() {
   [[ "$output" == *"demo.git#tag=v1.1.0"* ]]
 }
 
-@test "verify-pkg: refuses a git source it cannot clone" {
+@test "verify-pkg: refuses a git source it cannot fetch" {
   setup_verify
-  # No make_upstream, so the mirror clone finds no repository
+  # No make_upstream, so the fetch finds no repository
   use_source "demo::git+https://example.com/demo.git#tag=vVER"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Could not clone https://example.com/demo.git"* ]]
+  [[ "$output" == *"Could not fetch tag=v1.1.0 of https://example.com/demo.git"* ]]
 }
 
 @test "verify-pkg: refuses a git tag the repository does not have" {
@@ -1470,7 +1475,32 @@ use_source() {
   use_source "demo::git+https://example.com/demo.git#tag=releaseVER"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Could not archive release1.1.0 of https://example.com/demo.git"* ]]
+  [[ "$output" == *"Could not fetch tag=release1.1.0 of https://example.com/demo.git"* ]]
+}
+
+@test "_git_source_sum: fetches nothing once the budget of the package is gone" {
+  setup_verify
+  make_upstream
+  mkdir "$TEST_TMPDIR/downloads"
+  truncate -s 1G "$TEST_TMPDIR/downloads/earlier"
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.1.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The downloads of the package reach the budget of 1 GiB"* ]]
+  [ ! -e "$TEST_TMPDIR/git-fetch-args" ]
+}
+
+# git counts no bytes before it fetches, so the size is checked after. The
+# shell hashed /usr/bin/git before make_aur_remote wrote the git on PATH.
+@test "_git_source_sum: refuses a fetch that passes the budget of the package" {
+  setup_verify
+  make_upstream
+  mkdir "$TEST_TMPDIR/downloads"
+  truncate -s $((1024 * 1024 * 1024 - 1024)) "$TEST_TMPDIR/downloads/earlier"
+  hash -r
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.1.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The fetch of tag=v1.1.0 of https://example.com/demo.git passes the budget of 1 GiB of the package"* ]]
+  [ -e "$TEST_TMPDIR/git-fetch-args" ]
 }
 
 @test "verify-pkg: refuses a checksum of a git source at a branch" {

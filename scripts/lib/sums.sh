@@ -80,12 +80,12 @@ _source_file() {
 
 # Print the checksum makepkg computes for a git source, following
 # download_git and calc_checksum_git of makepkg: the tar archive of the tag
-# or commit, from a mirror clone with export-subst and export-ignore turned
-# off. makepkg gives any other git source SKIP, so a checksum never matches.
+# or commit, fetched alone, with export-subst and export-ignore turned off.
+# makepkg gives any other git source SKIP, so a checksum never matches.
 # Args: $1=source entry of a .SRCINFO, $2=algorithm, $3=AUR repo,
 #       $4=download directory
 _git_source_sum() {
-  local entry="$1" url="${1#*::}" name fragment="" ref dir sum
+  local entry="$1" url="${1#*::}" name fragment="" ref dir sum refspec
   local -x GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/etc/makepkg.d/gitconfig
   url="${url#git+}"
   if [[ "$url" == *#* ]]; then
@@ -120,11 +120,21 @@ _git_source_sum() {
     return 1
   fi
 
-  dir="${4}/$(printf '%s' "$url" | sha256sum | cut -d' ' -f1).git"
+  # The tar holds the tree and the commit, so one ref without its history
+  # gives the checksum of a full clone
+  dir="${4}/$(printf '%s#%s' "$url" "$fragment" | sha256sum | cut -d' ' -f1).git"
   if [[ ! -d "$dir" ]]; then
-    if ! GIT_ALLOW_PROTOCOL=https git clone -q --origin=origin --mirror "$url" "$dir"; then
+    _download_left "$4" >/dev/null || return 1
+    refspec="$ref"
+    [[ "${fragment%%=*}" != tag ]] || refspec="refs/tags/${ref}:refs/tags/${ref}"
+    if ! git init -q --bare "$dir" ||
+      ! GIT_ALLOW_PROTOCOL=https git -C "$dir" fetch -q --depth 1 --no-tags "$url" "$refspec"; then
       rm -rf "$dir"
-      log_err "Could not clone $url"
+      log_err "Could not fetch ${fragment} of $url"
+      return 1
+    fi
+    if ! _download_left "$4" >/dev/null 2>&1; then
+      log_err "The fetch of ${fragment} of $url passes the budget of 1 GiB of the package"
       return 1
     fi
     mkdir -p "${dir}/info"
