@@ -49,14 +49,19 @@ lib() {
     '2026-11-08T05:17:41Z,a,tracked,1.0,,42,' \
     '' \
     ' 2026-11-08T05:17:41Z,a,tracked,1.0,,42' \
-    '2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,' >"$J"
+    '2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,' \
+    '2026-11-08T05:17:41Z,_pkg,updated,1.0+1_a,0.9_b+1,42' \
+    '2026-11-08T05:17:41Z,+pkg,tracked,1.0,,42' \
+    '2026-11-08T05:17:41Z,a@b,tracked,1.0,,42' >"$J"
   run --separate-stderr lib stats_rows "$J"
   [ "$status" -eq 0 ]
-  [ "$output" = $'2026-11-08T05:17:41Z,a,tracked,1.0,,42\n2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,' ]
+  [ "$output" = $'2026-11-08T05:17:41Z,a,tracked,1.0,,42\n2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,\n2026-11-08T05:17:41Z,_pkg,updated,1.0+1_a,0.9_b+1,42\n2026-11-08T05:17:41Z,+pkg,tracked,1.0,,42\n2026-11-08T05:17:41Z,a@b,tracked,1.0,,42' ]
   for n in 3 4 5 6 7 8 9 10; do
     [[ "$stderr" == *"line $n of $J is not a journal row"* ]]
   done
-  [[ "$stderr" != *"line 1 of"* && "$stderr" != *"line 2 of"* && "$stderr" != *"line 11 of"* ]]
+  for n in 1 2 11 12 13 14; do
+    [[ "$stderr" != *"line $n of"* ]]
+  done
 }
 
 @test "stats_rows: a version of more than 64 characters is no row" {
@@ -216,6 +221,17 @@ added_rows() {
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/out.csv")" = $'time,package,event,version,previous,run\n2026-11-10T05:17:22Z,a,tracked,1.0,,44\n2026-11-10T05:17:22Z,b,tracked,2.0,,44' ]
   [ ! -e "$J" ]
+}
+
+# bash reads a subscript of @ from a variable as a key like any other
+@test "record-events: the names @, + and _ are names like any other" {
+  printf "name: '@'\nstrategy: github-release\nupstream:\n  project: o/at\ncurrent: 1.0\n" >"$TEST_TMPDIR/packages/@.yml"
+  pkg + 2.0
+  pkg _ 3.0
+  st @ "check_failed: x"
+  record
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/out.csv")" = $'time,package,event,version,previous,run\n2026-11-10T05:17:22Z,+,tracked,2.0,,44\n2026-11-10T05:17:22Z,@,tracked,1.0,,44\n2026-11-10T05:17:22Z,@,check_failed,1.0,,44\n2026-11-10T05:17:22Z,_,tracked,3.0,,44' ]
 }
 
 @test "record-events: a push is written with the version before it" {
