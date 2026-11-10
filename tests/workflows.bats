@@ -464,7 +464,8 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 
 CHECK_UPDATES="$GITHUB_DIR/workflows/check-updates.yml"
 
-# Prints the run block of step $2 in job $1 of check-updates.yml
+# Prints the run block of step $2 in job $1 of check-updates.yml. A job in a
+# container runs a step as sh -e {0}, so the tests run it with sh -e as well.
 step_run() {
   yq ".jobs.$1.steps[] | select(.name == \"$2\") | .run" "$CHECK_UPDATES"
 }
@@ -473,7 +474,7 @@ step_run() {
 @test "check-updates: check stops first thing on a run started from a tag" {
   run yq -o=json -I=0 '.jobs.check.steps[0] | [.name, .if]' "$CHECK_UPDATES"
   [ "$output" = "[\"Require a branch\",\"github.ref_type != 'branch'\"]" ]
-  run bash -e -c "$(step_run check "Require a branch")"
+  run sh -e -c "$(step_run check "Require a branch")"
   [ "$status" -eq 1 ]
   [ "$output" = "::error::Start the run from a branch: it commits its results to the branch it runs on" ]
 }
@@ -612,7 +613,7 @@ run_decide_step() {
   step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
   (cd "$ws" && PATH="$bin:$PATH" RESULTS="$results" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
-    GITHUB_REPOSITORY=owner/aur-packages AURTOMATOR_STATS_DATE=2026-11-10 timeout 60 bash -e "$BATS_TEST_TMPDIR/step.sh") \
+    GITHUB_REPOSITORY=owner/aur-packages AURTOMATOR_STATS_DATE=2026-11-10 timeout 60 sh -e "$BATS_TEST_TMPDIR/step.sh") \
     >"$BATS_TEST_TMPDIR/decide.out" 2>"$BATS_TEST_TMPDIR/decide.log"
   cat "$BATS_TEST_TMPDIR/output"
 }
@@ -1189,7 +1190,7 @@ run_add_builder_step() {
   step_run check "Add builder" >"$BATS_TEST_TMPDIR/step.sh"
   run env PATH="$bin:$PATH" CALLS="$CALLS" RUNNER_TEMP=/__w/_temp USERADD_RC="${USERADD_RC:-0}" \
     BUILDER_UID="${BUILDER_UID:-2000}" TEMP_OWNER="${TEMP_OWNER:-1001}" STAT_RC="${STAT_RC:-0}" FOUND="${FOUND:-}" \
-    FIND_RC="${FIND_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    FIND_RC="${FIND_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: Add builder adds builder with the uid 2000 when it owns no file of the runner" {
@@ -1265,7 +1266,7 @@ EOF
   step_run check "Stop builder" >"$BATS_TEST_TMPDIR/step.sh"
   run timeout 20 env -C "$ws" PATH="$bin:$PATH" CALLS="$CALLS" PS_LINES="${PS_LINES:-}" \
     PS_AFTER_KILL="${PS_AFTER_KILL:-}" PS_RC="${PS_RC:-0}" NO_BUILDER="${NO_BUILDER:-}" \
-    KILL_ENDS="${KILL_ENDS:-}" SUDO_RC="${SUDO_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    KILL_ENDS="${KILL_ENDS:-}" SUDO_RC="${SUDO_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: Stop builder goes on when builder runs nothing" {
@@ -1353,7 +1354,7 @@ EOF
   step_run prepare "Hand over" >"$BATS_TEST_TMPDIR/step.sh"
   # shellcheck disable=SC2086
   run env -C "$BATS_TEST_TMPDIR/ws" PATH="$bin:$PATH" SUDO_LOG="$SUDO_LOG" WORK="$BATS_TEST_TMPDIR/work" \
-    RESULTS="$BATS_TEST_TMPDIR/results" bash ${HAND_OVER_SHELL:--e} "$BATS_TEST_TMPDIR/step.sh"
+    RESULTS="$BATS_TEST_TMPDIR/results" sh ${HAND_OVER_SHELL:--e} "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Writes the files that prepare hands over for the package foo into the
@@ -1526,7 +1527,7 @@ run_stats_step() {
   step_run publish "Record statistics" >"$BATS_TEST_TMPDIR/stats-step.sh"
   (cd "$BATS_TEST_TMPDIR/ws" && RESULTS="$BATS_TEST_TMPDIR/results" GITHUB_REPOSITORY="${REPO-owner/aur-packages}" \
     GITHUB_RUN_ID=7 AURTOMATOR_STATS_TIME=2026-11-10T05:17:22Z AURTOMATOR_STATS_DATE=2026-11-10 \
-    timeout 60 bash -e "$BATS_TEST_TMPDIR/stats-step.sh")
+    timeout 60 sh -e "$BATS_TEST_TMPDIR/stats-step.sh")
 }
 
 @test "check-updates: Record statistics runs as root between Hand over and the commit step" {
@@ -1668,7 +1669,7 @@ EOF
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GITHUB_REPOSITORY=owner/fork \
-    RUN_URL=https://example.invalid/run bash -e "$BATS_TEST_TMPDIR/step.sh"
+    RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: an open issue of another package holds back no issue" {
@@ -1946,7 +1947,7 @@ EOF
   step_run issues "Close resolved issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" \
-    RUN_URL=https://example.invalid/run bash -e "$BATS_TEST_TMPDIR/step.sh"
+    RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # A git repository at $BATS_TEST_TMPDIR/ws whose HEAD holds README.md,
@@ -2049,7 +2050,7 @@ EOF
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" SUDO_LOG="$SUDO_LOG" REPO=owner/fork BRANCH=main \
     GH_HEAD="${GH_HEAD:-$(git -C "$ws" rev-parse HEAD)}" GH_TREE_FAIL="${GH_TREE_FAIL:-}" \
     GH_TREE="${GH_TREE:-$(git -C "$ws" ls-tree -r HEAD | awk '{ print $4 " " $3 }')}" \
-    RESULTS="$BATS_TEST_TMPDIR/results" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 bash -e "$BATS_TEST_TMPDIR/step.sh"
+    RESULTS="$BATS_TEST_TMPDIR/results" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 MOVED=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -2333,7 +2334,7 @@ run_bare_issues_step() {
   chmod +x "$bin/gh"
   step_run issues "$1" >"$BATS_TEST_TMPDIR/step.sh"
   (cd "$ws" && PATH="$bin:$PATH" GH_LOG="$BATS_TEST_TMPDIR/gh.log" GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" \
-    bash -e "$BATS_TEST_TMPDIR/step.sh")
+    sh -e "$BATS_TEST_TMPDIR/step.sh")
 }
 
 @test "check-updates: the issues job runs on without statuses" {
@@ -2584,7 +2585,7 @@ run_find_packages_step() {
   mkdir -p "$BATS_TEST_TMPDIR/ws"
   step_run publish "Find packages to push" >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
-  (cd "$BATS_TEST_TMPDIR/ws" && GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" bash -e "$BATS_TEST_TMPDIR/step.sh")
+  (cd "$BATS_TEST_TMPDIR/ws" && GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" sh -e "$BATS_TEST_TMPDIR/step.sh")
   cat "$BATS_TEST_TMPDIR/output"
 }
 
@@ -2608,7 +2609,7 @@ run_summary_step() {
   done
   step_run issues "Write the run summary" >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/summary"
-  (cd "$ws" && GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" bash -e "$BATS_TEST_TMPDIR/step.sh")
+  (cd "$ws" && GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" sh -e "$BATS_TEST_TMPDIR/step.sh")
   cat "$BATS_TEST_TMPDIR/summary"
 }
 
@@ -2958,7 +2959,7 @@ EOF
   run env PATH="$bin:$PATH" CALLS="$CALLS" REACH="${REACH:-}" BUILDER_ENV="${BUILDER_ENV:-HOME PATH}" \
     GITHUB_ENV=/fc/set_env GITHUB_PATH=/fc/add_path GITHUB_OUTPUT=/fc/set_output \
     GITHUB_STEP_SUMMARY=/fc/step_summary RUNNER_TEMP=/__w/_temp GITHUB_WORKSPACE=/__w/repo/repo \
-    bash -e "$BATS_TEST_TMPDIR/step.sh"
+    sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "runner-probe: passes when builder reaches nothing of the runner" {
