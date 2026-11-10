@@ -1888,6 +1888,19 @@ current: '1.0.0'"
   [[ "$output" == *"Required command not found"* ]]
 }
 
+# extra/yq of Arch is a jq wrapper with other options, and conflicts with
+# go-yq
+@test "lib.sh: require_cmd yq takes mikefarah/yq and refuses another yq" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run require_cmd yq
+  [ "$status" -eq 0 ]
+  printf '#!/bin/sh\necho "yq 3.4.3"\n' >"$MOCK_DIR/yq"
+  chmod +x "$MOCK_DIR/yq"
+  run require_cmd yq
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"yq must be mikefarah/yq, go-yq on Arch, and this one prints: yq 3.4.3"* ]]
+}
+
 # Prints the four values that load_config of lib.sh reads from the
 # .aurtomator.conf of $TEST_TMPDIR, one per line
 load_config_values() {

@@ -6,7 +6,7 @@ Required:
 
 - Arch Linux, or an Arch-based system with `makepkg` and `updpkgsums`
 - `git`
-- `yq`: the [Go version by mikefarah](https://github.com/mikefarah/yq), not the Python wrapper
+- `yq`: the [Go version by mikefarah](https://github.com/mikefarah/yq), not the Python wrapper, which the scripts refuse
 - `ssh-keygen` from `openssh`
 - `curl`
 - An AUR account at <https://aur.archlinux.org> with at least one package you maintain

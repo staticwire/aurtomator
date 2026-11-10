@@ -34,9 +34,14 @@ resolve_data_dir
 # =============================================================================
 
 require_cmd() {
-  local cmd="$1"
+  local cmd="$1" version
   if ! command -v "$cmd" &>/dev/null; then
     log_err "Required command not found: $cmd"
+    exit 1
+  fi
+  # The yq of Arch extra is a jq wrapper that reads other expressions
+  if [[ "$cmd" == yq ]] && version=$(yq --version 2>&1 | head -n 1) && [[ "$version" != *mikefarah/yq* ]]; then
+    log_err "yq must be mikefarah/yq, go-yq on Arch, and this one prints: $version"
     exit 1
   fi
 }
