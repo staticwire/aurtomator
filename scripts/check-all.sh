@@ -180,10 +180,8 @@ elif [[ -n "$AURTOMATOR_VERSION" ]]; then
   fi
 fi
 
-# The update failure that the prepare or the verify run recorded for a
-# package the check run found outdated. Both runs share one user with code
-# from every PKGBUILD, so nothing else of theirs is taken, and a package
-# they handed over nothing for fails as well.
+# The update failure that prepare or verify recorded for an outdated package,
+# or one of its own when they handed over nothing. Nothing else is taken.
 handed_failure() {
   local status_dir="${WORK_DIR}/status"
   local file="${status_dir}/$1"

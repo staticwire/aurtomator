@@ -300,17 +300,21 @@ jobs:
         run: rm -rf -- .git aurtomator
 
   # Every step that executes a PKGBUILD from the AUR runs here, without
-  # secrets and without a token. Code from one PKGBUILD can write the files
-  # of every package here, so this job only hands over prepared files and
-  # update failures, and decides nothing.
+  # secrets and without a token. Each package gets a job of its own, so code
+  # from a PKGBUILD reaches the files of its package alone.
   prepare:
     needs: [image, check]
     if: needs.check.outputs.prepare == 'true'
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
-    outputs:
-      handoff-id: ${{ steps.upload.outputs.artifact-id }}
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.check.outputs.to-prepare) }}
+    # Hand over takes the files of this package alone
+    env:
+      PACKAGE: ${{ matrix.package }}
 
     steps:
       - name: Install dependencies
@@ -346,16 +350,16 @@ jobs:
         uses: ./aurtomator/.github/actions/run-as-builder
         with:
           args: --prepare handoff
+          package: ${{ matrix.package }}
 
       - *stop-builder
 
       - *hand-over
 
       - name: Upload handoff
-        id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: handoff
+          name: handoff-${{ matrix.package }}
           path: upload/
           # .SRCINFO starts with a dot
           include-hidden-files: true
@@ -364,12 +368,13 @@ jobs:
 
       - *drop-checkouts
 
-  # Checks the checksums that prepare handed over against the sources, so
-  # code from one PKGBUILD cannot forge those of another package. Runs no
-  # PKGBUILD and holds no secrets: the downloads from URLs that the AUR sets
-  # stay out of the job with the keys.
+  # Checks the checksums that prepare handed over against the sources, in a
+  # job that runs no PKGBUILD and holds no secrets: the downloads from URLs
+  # that the AUR sets stay out of the job with the keys.
   verify:
     needs: [image, check, prepare]
+    # Also after a failed job of prepare, for the packages of the others
+    if: "!cancelled() && needs.check.outputs.prepare == 'true'"
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
@@ -405,10 +410,13 @@ jobs:
           artifact-ids: ${{ needs.check.outputs.checked-id || '0' }}
           path: .status
 
+      # A matrix gives no artifact id per job, and only prepare uploads
+      # handoff-*. Merged, one artifact or many keep the layout of one.
       - name: Download handoff
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.prepare.outputs.handoff-id || '0' }}
+          pattern: handoff-*
+          merge-multiple: true
           path: handoff
 
       # git and curl read the AUR repo and the sources here, as builder,
@@ -437,10 +445,10 @@ jobs:
 
   # Pushes what verify passed on and records the statuses of the check job.
   # Runs also when prepare is skipped, for a change in the README or the
-  # statistics, and when prepare or verify failed: then it publishes nothing,
-  # and every package with a new version gets update_failed. Nothing here
-  # executes a PKGBUILD: publish-pkg.sh checks the prepared files against the
-  # AUR copy.
+  # statistics, and when verify failed: then it publishes nothing, and every
+  # package with a new version gets update_failed, as a failed job of prepare
+  # gives it to its own package. Nothing here executes a PKGBUILD:
+  # publish-pkg.sh checks the prepared files against the AUR copy.
   publish:
     needs: [image, check, prepare, verify]
     if: "!cancelled() && needs.check.outputs.work == 'true'"

@@ -558,7 +558,7 @@ id_of() {
 
 @test "check-updates: each job gives the id of its upload as an output" {
   local pair job artifact
-  for pair in check=checked prepare=handoff verify=verified publish=published; do
+  for pair in check=checked verify=verified publish=published; do
     job=${pair%%=*} artifact=${pair#*=}
     echo "$job"
     run yq -o=json -I=0 "[.jobs.$job.steps[] | select(.uses | test(\"^actions/upload-artifact@\")) | [.id, .with.name]]" "$CHECK_UPDATES"
@@ -571,15 +571,17 @@ id_of() {
 
 # A name takes whichever artifact of that name the run holds, and a job of
 # the run can upload one. An empty id would download every artifact of the
-# run, so 0, which no artifact has, stands in for it.
+# run, so 0, which no artifact has, stands in for it. The jobs of prepare
+# give no id each, so verify takes their handoffs by a pattern only they
+# upload.
 @test "check-updates: each job downloads an artifact by the id the job of its upload gave" {
   run yq '.jobs | to_entries[] | .key as $job | .value.steps[] | select(.uses | test("^actions/download-artifact@")) |
-    $job + " " + .with.path + " " + .with["artifact-ids"] + " " + (.with | has("name") | tostring)' "$CHECK_UPDATES"
+    $job + " " + .with.path + " " + (.with["artifact-ids"] // ("pattern " + .with.pattern + " " + (.with["merge-multiple"] | tostring))) + " " + (.with | has("name") | tostring)' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 7 ]
   [ "${lines[0]}" = "prepare .status $(id_of check checked) false" ]
   [ "${lines[1]}" = "verify .status $(id_of check checked) false" ]
-  [ "${lines[2]}" = "verify handoff $(id_of prepare handoff) false" ]
+  [ "${lines[2]}" = "verify handoff pattern handoff-* true false" ]
   [ "${lines[3]}" = "publish .status $(id_of check checked) false" ]
   [ "${lines[4]}" = "publish handoff $(id_of verify verified) false" ]
   [ "${lines[5]}" = "issues .status $(id_of check checked) false" ]
@@ -784,11 +786,27 @@ decide_stats() {
   [[ "${output//"./aurtomator/scripts/"/}" != *"./scripts/"* ]]
 }
 
-@test "check-updates: prepare runs only for outdated packages and decides nothing" {
+@test "check-updates: prepare runs a job for each outdated package and decides nothing" {
   run yq '.jobs.prepare.if' "$CHECK_UPDATES"
   [ "$output" = "needs.check.outputs.prepare == 'true'" ]
-  run yq -o=json -I=0 '.jobs.prepare.outputs' "$CHECK_UPDATES"
-  [ "$output" = '{"handoff-id":"${{ steps.upload.outputs.artifact-id }}"}' ]
+  run yq -o=json -I=0 '.jobs.prepare.strategy' "$CHECK_UPDATES"
+  [ "$output" = '{"fail-fast":false,"matrix":{"package":"${{ fromJSON(needs.check.outputs.to-prepare) }}"}}' ]
+  run yq -o=json -I=0 '.jobs.prepare.env' "$CHECK_UPDATES"
+  [ "$output" = '{"PACKAGE":"${{ matrix.package }}"}' ]
+  run yq '.jobs.prepare.steps[] | select(.name == "Prepare updates") | .with.package' "$CHECK_UPDATES"
+  [ "$output" = '${{ matrix.package }}' ]
+  run yq '.jobs.prepare | has("outputs")' "$CHECK_UPDATES"
+  [ "$output" = "false" ]
+}
+
+@test "check-updates: each job of prepare uploads the handoff of its package" {
+  run yq -o=json -I=0 '[.jobs.prepare.steps[] | select(.uses | test("^actions/upload-artifact@")) | [.id, .with.name, .with["if-no-files-found"]]]' "$CHECK_UPDATES"
+  [ "$output" = '[[null,"handoff-${{ matrix.package }}","error"]]' ]
+}
+
+@test "check-updates: verify also runs after a failed job of prepare" {
+  run yq '.jobs.verify.if' "$CHECK_UPDATES"
+  [ "$output" = "!cancelled() && needs.check.outputs.prepare == 'true'" ]
 }
 
 @test "check-updates: Stop builder, Hand over and Drop the checkouts run nothing from the workspace" {
