@@ -3769,6 +3769,19 @@ pkgver_dash: ''"
   [[ "$output" == *"liq 2.5.0rc2: tag v2.5.0-rc2 has no release"* ]]
 }
 
+# git takes any committer date, and a date far ahead would keep the wait
+# going in every run
+@test "check-asset: fails for a tag whose commit is dated more than a day ahead" {
+  local ahead
+  liquidsoap_package
+  ahead=$(date -u -d "+25 hours" +%Y-%m-%dT%H:%M:%SZ)
+  MOCK_TAG_DATE="$ahead" run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"liq 2.5.0rc2: tag v2.5.0-rc2 has no release, and its date $ahead is more than 24 h ahead of now"* ]]
+  MOCK_TAG_DATE=$(date -u -d "+23 hours" +%Y-%m-%dT%H:%M:%SZ) run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 3 ]
+}
+
 @test "check-asset: fails when the tags cannot be read" {
   mock_tags
   create_test_package "gone" "github-tag" "upstream:

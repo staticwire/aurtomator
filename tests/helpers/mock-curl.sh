@@ -443,11 +443,12 @@ case "$url" in
   *api.github.com/repos/asset-owner/asset-repo/releases/tags/*)
     http_error 404
     ;;
-  # The commit of a tag: MOCK_TAG_AGE gives the hours since its date, 48 by
-  # default, and MOCK_COMMIT_STATUS=500 fails the request
+  # The commit of a tag, dated MOCK_TAG_DATE or MOCK_TAG_AGE hours back (48
+  # by default); MOCK_COMMIT_STATUS=500 fails the request
   *api.github.com/repos/asset-owner/asset-repo/commits/*)
     [[ "${MOCK_COMMIT_STATUS:-200}" == 200 ]] || http_error "$MOCK_COMMIT_STATUS"
-    printf '{"commit": {"committer": {"date": "%s"}}}\n' "$(date -u -d "-${MOCK_TAG_AGE:-48} hours" +%Y-%m-%dT%H:%M:%SZ)"
+    printf '{"commit": {"committer": {"date": "%s"}}}\n' \
+      "${MOCK_TAG_DATE:-$(date -u -d "-${MOCK_TAG_AGE:-48} hours" +%Y-%m-%dT%H:%M:%SZ)}"
     ;;
   # The release of a tag with a plus sign, only under the encoded name
   *api.github.com/repos/asset-owner/plus-repo/releases/tags/v1.0%2B1)
