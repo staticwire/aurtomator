@@ -1121,7 +1121,7 @@ The four steps use the composite action `.github/actions/run-as-builder` of aurt
 
 The workspace, with `.git` of your repository and `aurtomator/`, stays root's, and `builder` writes only into its own directory. A user who could write `.git/config` of a tree could have root's git run a command, because git runs the commands that some of its settings name, such as `core.fsmonitor`. So `check`, `prepare`, `verify` and `publish` follow the step of `builder` with two steps that `check` defines with the anchors `&stop-builder` and `&hand-over`, **Stop builder** and **Hand over**, and end with **Drop the checkouts**, the anchor `&drop-checkouts`. The three run also after a failed step, **Hand over** only when **Stop builder** succeeded. Root reads what `builder` wrote only through **Hand over**, as data, and runs git only in the commit step of `publish`, in the checkout. **Drop the checkouts** removes `.git` and `aurtomator/` as a second layer: the post step of `actions/checkout` runs git as root at the end of the job and stops at once when `.git/config` is missing.
 
-The jobs pass files to each other as artifacts. A job takes an artifact by the `artifact-id` that the upload step of the job before it gives as a job output, not by its name, with one exception for the handoffs of `prepare`. A job of the run can upload an artifact under any name, and with `overwrite: true` replace the artifact of another job. The replacement gets a new id, and the download by the old one fails. For an empty `artifact-ids`, `actions/download-artifact` downloads every artifact of the run, so an empty id, from a job whose upload did not run, becomes `0`, which no artifact has, and that download fails too. Only `issues` skips its download of `checked` when that id is empty, for a run without a package and without statuses, see step 9 of `check`. A matrix gives no output per job, so `verify` takes the artifacts `handoff-<package>` of the jobs of `prepare` by the pattern `handoff-*`, merged into `handoff/`. A replacement of one of them would reach `verify`, and it needs the runtime token of a job, which `builder` never gets: `run-as-builder` passes it only `GITHUB_REPOSITORY` and the variables of `keep-env`.
+The jobs pass files to each other as artifacts. A job takes an artifact by the `artifact-id` that the upload step of the job before it gives as a job output, not by its name, with one exception for the handoffs of `prepare`. A job of the run can upload an artifact under any name, and with `overwrite: true` replace the artifact of another job. The replacement gets a new id, and the download by the old one fails. For an empty `artifact-ids`, `actions/download-artifact` downloads every artifact of the run, so an empty id, from a job whose upload did not run, becomes `0`, which no artifact has, and that download fails too. Only `issues` skips its download of `checked` when that id is empty, for a run without a package and without statuses, see step 9 of `check`. A matrix gives no output per job, so `verify` takes the artifacts `handoff-<package>-<attempt>` of the jobs of `prepare` by the pattern `handoff-*`, merged into `handoffs/`. A replacement of one of them would reach `verify`, and it needs the runtime token of a job, which `builder` never gets: `run-as-builder` passes it only `GITHUB_REPOSITORY` and the variables of `keep-env`. A job of `prepare` that runs again uploads the handoff of its attempt beside the one of the attempt before, and `verify` takes the newest attempt of each package by its number. Of two artifacts with one name, `actions/download-artifact` takes the one with the higher id, and an artifact made later can have the lower id.
 
 `image`:
 
@@ -1153,8 +1153,9 @@ The jobs pass files to each other as artifacts. A job takes an artifact by the `
 6. **Prepare updates:** runs `check-all.sh --prepare handoff` as `builder` in its directory, for the package of the job, with its status from `check` and without a token. Code from a PKGBUILD can read the environment of every running process of `builder` through `/proc/<pid>/environ`, so the token stays in `check`. Workflow commands are stopped while it runs.
 7. **Stop builder:** the step of `check`, through the alias `*stop-builder`. A process started by a PKGBUILD ends here.
 8. **Hand over:** the step of `check`, through the alias `*hand-over`. Code from a PKGBUILD has run in the directory of `builder` by now, and only the prepared files and the status of the package of the job reach `upload/`.
-9. **Upload handoff:** uploads `upload/` as the `handoff-<package>` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
-10. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
+9. **Name the attempt:** moves `upload/` to `handoff-out/<attempt>/`, where `<attempt>` is `github.run_attempt`: 1 for the first attempt of the run, and one more with each re-run.
+10. **Upload handoff:** uploads `handoff-out/` as the `handoff-<package>-<attempt>` artifact with `include-hidden-files: true`, because `.SRCINFO` starts with a dot, and a retention of 1 day.
+11. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
 `verify`:
 
@@ -1163,12 +1164,13 @@ The jobs pass files to each other as artifacts. A job takes an artifact by the `
 3. **Checkout:** your repository.
 4. **Checkout aurtomator:** into `aurtomator/`.
 5. **Download statuses:** the `checked` artifact to `.status/`.
-6. **Download handoff:** every `handoff-<package>` artifact, merged into `handoff/`.
-7. **Verify checksums:** runs `check-all.sh --verify handoff` as `builder` in its directory, on the handoff it downloaded and with the versions and asset values of the statuses of `check`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
-8. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
-9. **Hand over:** the step of `check`, through the alias `*hand-over`.
-10. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
-11. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
+6. **Download handoff:** every `handoff-<package>-<attempt>` artifact, merged into `handoffs/`, where the files of each attempt stay in the directory `<attempt>/`.
+7. **Take the newest handoffs:** for each package, takes the newest attempt in `handoffs/` that holds its prepared directory or its status, and copies the prepared files and the status of that attempt to `handoff/`. So the failure of a newer attempt wins over the prepared files of an older one. An attempt is a directory whose name is a number without a leading zero. Only regular files of the names that **Hand over** takes are copied, and none with a link on its path.
+8. **Verify checksums:** runs `check-all.sh --verify handoff` as `builder` in its directory, on the handoff that step 7 took and with the versions and asset values of the statuses of `check`, see [4.4](#44-prepare-and-publish). git and curl read the AUR repo and the sources here. A job container has the Docker socket of the runner, which root can use and `builder` cannot. Workflow commands are stopped while it runs.
+9. **Stop builder:** the step of `check`, through the alias `*stop-builder`.
+10. **Hand over:** the step of `check`, through the alias `*hand-over`.
+11. **Upload verified handoff:** uploads `upload/` as the `verified` artifact with `include-hidden-files: true` and a retention of 1 day.
+12. **Drop the checkouts:** the step of `check`, through the alias `*drop-checkouts`.
 
 `publish`:
 

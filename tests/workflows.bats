@@ -581,7 +581,7 @@ id_of() {
   [ "${#lines[@]}" -eq 7 ]
   [ "${lines[0]}" = "prepare .status $(id_of check checked) false" ]
   [ "${lines[1]}" = "verify .status $(id_of check checked) false" ]
-  [ "${lines[2]}" = "verify handoff pattern handoff-* true false" ]
+  [ "${lines[2]}" = "verify handoffs pattern handoff-* true false" ]
   [ "${lines[3]}" = "publish .status $(id_of check checked) false" ]
   [ "${lines[4]}" = "publish handoff $(id_of verify verified) false" ]
   [ "${lines[5]}" = "issues .status $(id_of check checked) false" ]
@@ -799,9 +799,119 @@ decide_stats() {
   [ "$output" = "false" ]
 }
 
-@test "check-updates: each job of prepare uploads the handoff of its package" {
-  run yq -o=json -I=0 '[.jobs.prepare.steps[] | select(.uses | test("^actions/upload-artifact@")) | [.id, .with.name, .with["if-no-files-found"]]]' "$CHECK_UPDATES"
-  [ "$output" = '[[null,"handoff-${{ matrix.package }}","error"]]' ]
+# A job of prepare run again uploads a handoff of its own beside the one of
+# the attempt before
+@test "check-updates: each job of prepare uploads the handoff of its package and attempt" {
+  run yq -o=json -I=0 '[.jobs.prepare.steps[] | select(.uses | test("^actions/upload-artifact@")) | [.id, .with.name, .with.path, .with["if-no-files-found"]]]' "$CHECK_UPDATES"
+  [ "$output" = '[[null,"handoff-${{ matrix.package }}-${{ github.run_attempt }}","handoff-out/","error"]]' ]
+  run yq '.jobs.prepare.steps[] | select(.name == "Name the attempt") | .env.ATTEMPT' "$CHECK_UPDATES"
+  [ "$output" = '${{ github.run_attempt }}' ]
+  [ "$(step_index prepare "Name the attempt")" -eq $(($(step_index prepare "Hand over") + 1)) ]
+  [ "$(step_index prepare "Upload handoff")" -eq $(($(step_index prepare "Name the attempt") + 1)) ]
+}
+
+@test "check-updates: Name the attempt puts the handoff in a directory of the attempt" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws/upload/prepared/foo"
+  echo pkgbuild >"$ws/upload/prepared/foo/PKGBUILD"
+  step_run prepare "Name the attempt" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" ATTEMPT=3 sh -e "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ws/handoff-out/3/prepared/foo/PKGBUILD")" = "pkgbuild" ]
+  [ ! -e "$ws/upload" ]
+}
+
+# Helper: the prepared files of attempt $1 of a job of prepare for package
+# $2, each holding $3, as verify downloads them into handoffs/
+add_attempt() {
+  local dir="$BATS_TEST_TMPDIR/ws/handoffs/$1" file
+  mkdir -p "$dir/prepared/$2"
+  for file in PKGBUILD .SRCINFO base; do
+    echo "$3" >"$dir/prepared/$2/$file"
+  done
+}
+
+# Runs the step of verify that takes the newest handoffs, and lists every
+# file of handoff/ with its content
+run_take_step() {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws"
+  step_run verify "Take the newest handoffs" >"$BATS_TEST_TMPDIR/step.sh"
+  (cd "$ws" && sh -e "$BATS_TEST_TMPDIR/step.sh") || return
+  (cd "$ws/handoff" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(cat "$f")"; done)
+}
+
+@test "check-updates: verify takes the handoff of the newest attempt of each package" {
+  add_attempt 1 foo old
+  add_attempt 1 bar first
+  add_attempt 2 foo new
+  run run_take_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' './prepared/bar/.SRCINFO first' './prepared/bar/PKGBUILD first' './prepared/bar/base first' \
+    './prepared/foo/.SRCINFO new' './prepared/foo/PKGBUILD new' './prepared/foo/base new')" ]
+}
+
+@test "check-updates: verify takes the failure of a newer attempt over older prepared files" {
+  add_attempt 1 foo old
+  mkdir -p "$BATS_TEST_TMPDIR/ws/handoffs/2/status"
+  echo "update_failed: boom" >"$BATS_TEST_TMPDIR/ws/handoffs/2/status/foo"
+  run run_take_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "./status/foo update_failed: boom" ]
+}
+
+@test "check-updates: verify takes no link, no other name and no other attempt directory" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  add_attempt 1 foo kept
+  ln -sf "$BATS_TEST_TMPDIR/secret" "$ws/handoffs/1/prepared/foo/base"
+  add_attempt 01 bar padded
+  add_attempt x baz word
+  mkdir -p "$ws/handoffs/1/status" "$BATS_TEST_TMPDIR/elsewhere/prepared/foo"
+  echo x >"$ws/handoffs/1/status/-x"
+  echo linked >"$BATS_TEST_TMPDIR/elsewhere/prepared/foo/PKGBUILD"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$ws/handoffs/9"
+  run run_take_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' './prepared/foo/.SRCINFO kept' './prepared/foo/PKGBUILD kept')" ]
+}
+
+@test "check-updates: verify takes nothing without handoffs" {
+  run run_take_step
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -d "$BATS_TEST_TMPDIR/ws/handoff" ]
+}
+
+@test "check-updates: verify compares the attempts as numbers" {
+  add_attempt 2 foo second
+  add_attempt 10 foo tenth
+  run run_take_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' './prepared/foo/.SRCINFO tenth' './prepared/foo/PKGBUILD tenth' './prepared/foo/base tenth')" ]
+}
+
+@test "check-updates: verify takes nothing through a linked directory of an attempt" {
+  local ws="$BATS_TEST_TMPDIR/ws" linked="$BATS_TEST_TMPDIR/linked"
+  mkdir -p "$linked/prepared/foo" "$linked/bar" "$linked/status" "$ws/handoffs/1" "$ws/handoffs/2/prepared" "$ws/handoffs/3"
+  echo linked | tee "$linked/prepared/foo/PKGBUILD" "$linked/bar/PKGBUILD" "$linked/status/baz" >/dev/null
+  ln -s "$linked/prepared" "$ws/handoffs/1/prepared"
+  ln -s "$linked/bar" "$ws/handoffs/2/prepared/bar"
+  ln -s "$linked/status" "$ws/handoffs/3/status"
+  add_attempt 4 qux kept
+  run run_take_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' './prepared/qux/.SRCINFO kept' './prepared/qux/PKGBUILD kept' './prepared/qux/base kept')" ]
+}
+
+@test "check-updates: verify takes nothing from handoffs that is a link" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere/1/prepared/foo" "$ws"
+  echo linked >"$BATS_TEST_TMPDIR/elsewhere/1/prepared/foo/PKGBUILD"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$ws/handoffs"
+  run run_take_step
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "check-updates: verify also runs after a failed job of prepare" {
@@ -2637,7 +2747,7 @@ run_bare_issues_step() {
   run yq '[.jobs.verify.steps[].name] | join(",")' "$CHECK_UPDATES"
   [[ "$output" == *"Verify checksums,Stop builder,Hand over,Upload verified handoff"* ]]
   run yq '[.jobs.prepare.steps[].name] | join(",")' "$CHECK_UPDATES"
-  [[ "$output" == *"Prepare updates,Stop builder,Hand over,Upload handoff"* ]]
+  [[ "$output" == *"Prepare updates,Stop builder,Hand over,Name the attempt,Upload handoff"* ]]
   run yq '.jobs.verify.steps[] | select(.name == "Upload verified handoff") | .with.path' "$CHECK_UPDATES"
   [ "$output" = "upload/" ]
 }
