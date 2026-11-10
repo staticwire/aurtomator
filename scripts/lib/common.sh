@@ -34,9 +34,14 @@ resolve_data_dir
 # =============================================================================
 
 require_cmd() {
-  local cmd="$1"
+  local cmd="$1" version
   if ! command -v "$cmd" &>/dev/null; then
     log_err "Required command not found: $cmd"
+    exit 1
+  fi
+  # The yq of Arch extra is a jq wrapper that reads other expressions
+  if [[ "$cmd" == yq ]] && version=$(yq --version 2>&1 | head -n 1) && [[ "$version" != *mikefarah/yq* ]]; then
+    log_err "yq must be mikefarah/yq, go-yq on Arch, and this one prints: $version"
     exit 1
   fi
 }
@@ -145,11 +150,28 @@ USER_AGENT="aurtomator/1.0"
 # on the page of its bot check
 HTTP_FAILURE='%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated}'
 
-# Args: $1=URL, the rest: curl options. curl follows a redirect to plain
-# http by default, where the network can change the answer.
+# The most megabytes of one answer: upstream.max_answer_mb of the package,
+# which check-update.sh exports, or 50
+MAX_ANSWER_MB="${MAX_ANSWER_MB:-}"
+
+# Prints upstream.max_answer_mb of package file $1, nothing without it, and
+# fails for a value that is no whole number from 1 to 500
+max_answer_mb() {
+  local mb
+  mb=$(pkg_get "$1" '.upstream.max_answer_mb // ""') || return 1
+  [[ -n "$mb" ]] || return 0
+  if [[ ! "$mb" =~ ^[1-9][0-9]{0,2}$ ]] || ((mb > 500)); then
+    log_err "upstream.max_answer_mb must be a whole number from 1 to 500: $mb"
+    return 1
+  fi
+  printf '%s\n' "$mb"
+}
+
+# Args: $1=URL, the rest: curl options, which come after these and win.
+# curl follows a redirect to plain http by default, so --proto-redir stays.
 _curl_get() {
   curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
-    --proto '=https' --proto-redir '=https' \
+    --proto '=https' --proto-redir '=https' --max-filesize "${MAX_ANSWER_MB:-50}M" \
     -A "$USER_AGENT" -w "$HTTP_FAILURE" "${@:2}" "$1"
 }
 
@@ -290,6 +312,9 @@ github_release_matching() {
 # VERSION VALIDATION
 # =============================================================================
 
+# The most characters of a version, which a README cell and the journal hold
+PKGVER_MAX=64
+
 # Reject a version string before it is written into a PKGBUILD.
 # update-pkg.sh writes the value with sed and makepkg then sources the
 # file, so a shell metacharacter in an upstream tag would execute in CI.
@@ -303,6 +328,10 @@ validate_pkgver() {
   local LC_ALL=C
   if [[ -z "$ver" ]]; then
     log_err "Version string is empty"
+    return 1
+  fi
+  if ((${#ver} > PKGVER_MAX)); then
+    log_err "Version string rejected, it has ${#ver} characters and at most ${PKGVER_MAX} are allowed"
     return 1
   fi
   if [[ ! "$ver" =~ ^[A-Za-z0-9._+]+$ ]]; then

@@ -84,15 +84,14 @@ fi
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
 
-# update-pkg.sh hands over the files of the AUR when the AUR has the version
-aur_asset=""
-[[ -z "$ASSET_VAR" ]] || aur_asset=$(_plain_value "${aur_files}/PKGBUILD" "$ASSET_VAR")
-if cmp -s "${aur_files}/PKGBUILD" "${PREPARED}/PKGBUILD" && cmp -s "${aur_files}/.SRCINFO" "${PREPARED}/.SRCINFO" &&
-  [[ "$(_plain_value "${aur_files}/PKGBUILD" pkgver)" == "$VERSION" && "$aur_asset" == "$ASSET" ]]; then
+handed_rc=0
+check_handed_aur_files "$aur_files" "$PREPARED" "$VERSION" "$ASSET_VAR" "$ASSET" || handed_rc=$?
+if ((handed_rc == 0)); then
   log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
   pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
   exit 2
 fi
+((handed_rc == 2)) || exit 1
 
 prepared_ver=$(sed -n 's/^pkgver=//p' "${PREPARED}/PKGBUILD" | head -1)
 if [[ "$prepared_ver" != "$VERSION" ]]; then

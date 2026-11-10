@@ -49,14 +49,32 @@ lib() {
     '2026-11-08T05:17:41Z,a,tracked,1.0,,42,' \
     '' \
     ' 2026-11-08T05:17:41Z,a,tracked,1.0,,42' \
-    '2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,' >"$J"
+    '2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,' \
+    '2026-11-08T05:17:41Z,_pkg,updated,1.0+1_a,0.9_b+1,42' \
+    '2026-11-08T05:17:41Z,+pkg,tracked,1.0,,42' \
+    '2026-11-08T05:17:41Z,a@b,tracked,1.0,,42' >"$J"
   run --separate-stderr lib stats_rows "$J"
   [ "$status" -eq 0 ]
-  [ "$output" = $'2026-11-08T05:17:41Z,a,tracked,1.0,,42\n2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,' ]
+  [ "$output" = $'2026-11-08T05:17:41Z,a,tracked,1.0,,42\n2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,\n2026-11-08T05:17:41Z,_pkg,updated,1.0+1_a,0.9_b+1,42\n2026-11-08T05:17:41Z,+pkg,tracked,1.0,,42\n2026-11-08T05:17:41Z,a@b,tracked,1.0,,42' ]
   for n in 3 4 5 6 7 8 9 10; do
     [[ "$stderr" == *"line $n of $J is not a journal row"* ]]
   done
-  [[ "$stderr" != *"line 1 of"* && "$stderr" != *"line 2 of"* && "$stderr" != *"line 11 of"* ]]
+  for n in 1 2 11 12 13 14; do
+    [[ "$stderr" != *"line $n of"* ]]
+  done
+}
+
+@test "stats_rows: a version of more than 64 characters is no row" {
+  local v64
+  v64="$(printf 'a%.0s' {1..63})1"
+  printf '%s\n' 'time,package,event,version,previous,run' \
+    "2026-11-08T05:17:41Z,a,updated,$v64,$v64,42" \
+    "2026-11-08T05:17:41Z,a,updated,${v64}2,1.0,42" \
+    "2026-11-08T05:17:41Z,a,updated,1.0,${v64}2,42" >"$J"
+  run --separate-stderr lib stats_rows "$J"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-11-08T05:17:41Z,a,updated,$v64,$v64,42" ]
+  [[ "$stderr" == *"line 3 of $J is not a journal row"* && "$stderr" == *"line 4 of $J is not a journal row"* ]]
 }
 
 @test "stats_last_states: the last row of each package, and the last version it was at" {
@@ -120,6 +138,18 @@ lib() {
   [ "$output" = 'up_to_date,' ]
   run lib stats_event "check_failed: x" '1.0;rm'
   [ "$output" = 'check_failed,' ]
+}
+
+@test "stats_event: a version of more than 64 characters fails, a current one is left empty" {
+  local v64
+  v64="$(printf 'a%.0s' {1..63})1"
+  run lib stats_event "updated: $v64" "$v64"
+  [ "$output" = "updated,$v64" ]
+  run --separate-stderr lib stats_event "updated: ${v64}2" 1.0
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  run lib stats_event up_to_date "${v64}2"
+  [ "$output" = 'up_to_date,' ]
 }
 
 @test "stats_event: an unknown status or version fails with nothing" {
@@ -191,6 +221,17 @@ added_rows() {
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/out.csv")" = $'time,package,event,version,previous,run\n2026-11-10T05:17:22Z,a,tracked,1.0,,44\n2026-11-10T05:17:22Z,b,tracked,2.0,,44' ]
   [ ! -e "$J" ]
+}
+
+# bash reads a subscript of @ from a variable as a key like any other
+@test "record-events: the names @, + and _ are names like any other" {
+  printf "name: '@'\nstrategy: github-release\nupstream:\n  project: o/at\ncurrent: 1.0\n" >"$TEST_TMPDIR/packages/@.yml"
+  pkg + 2.0
+  pkg _ 3.0
+  st @ "check_failed: x"
+  record
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/out.csv")" = $'time,package,event,version,previous,run\n2026-11-10T05:17:22Z,+,tracked,2.0,,44\n2026-11-10T05:17:22Z,@,tracked,1.0,,44\n2026-11-10T05:17:22Z,@,check_failed,1.0,,44\n2026-11-10T05:17:22Z,_,tracked,3.0,,44' ]
 }
 
 @test "record-events: a push is written with the version before it" {
@@ -356,6 +397,16 @@ added_rows() {
   [ -z "$(added_rows)" ]
 }
 
+@test "record-events: a current version of more than 64 characters is unknown" {
+  local v64
+  v64="$(printf 'a%.0s' {1..63})1"
+  pkg a "${v64}2"
+  st a up_to_date
+  record
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/out.csv")" = $'time,package,event,version,previous,run\n2026-11-10T05:17:22Z,a,tracked,,,44' ]
+}
+
 @test "record-events: a version change ends a failure as an update" {
   pkg a 1.1
   st a up_to_date
@@ -425,6 +476,44 @@ added_rows() {
   [ "$status" -ne 0 ]
   [ ! -e "$TEST_TMPDIR/out.csv" ]
   [ ! -e "$TEST_TMPDIR/out.csv.tmp" ]
+}
+
+# root reads the journal of the checkout, so a link, a device or a linked
+# directory stops the script before it reads a byte
+@test "record-events: a journal that is a link or no file, or in no directory, exits 1 at once" {
+  local args=(--journal "$J" --statuses "$TEST_TMPDIR/statuses" --before "$TEST_TMPDIR/packages"
+    --after "$TEST_TMPDIR/after" --out "$TEST_TMPDIR/out.csv")
+  pkg a 1.0
+  st a up_to_date
+  ln -s /dev/zero "$J"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$J is a link or no regular file, so it is no journal"* ]]
+  rm "$J"
+  journal '2026-11-08T05:17:41Z,a,tracked,1.0,,42'
+  mv "$J" "$TEST_TMPDIR/key"
+  ln -s "$TEST_TMPDIR/key" "$J"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$J is a link or no regular file, so it is no journal"* ]]
+  rm "$J"
+  mkdir "$J"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$J is a link or no regular file, so it is no journal"* ]]
+  rm -r "$TEST_TMPDIR/stats"
+  mkdir "$TEST_TMPDIR/other"
+  cp "$TEST_TMPDIR/key" "$TEST_TMPDIR/other/events.csv"
+  ln -s other "$TEST_TMPDIR/stats"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$TEST_TMPDIR/stats is a link or no directory, so it holds no journal"* ]]
+  rm "$TEST_TMPDIR/stats"
+  echo x >"$TEST_TMPDIR/stats"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$TEST_TMPDIR/stats is a link or no directory, so it holds no journal"* ]]
+  [ ! -e "$TEST_TMPDIR/out.csv" ]
 }
 
 @test "record-events: a wrong header of the journal writes nothing" {
@@ -660,6 +749,23 @@ pushes() {
   cmp "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/first.svg"
   cmp "$TEST_TMPDIR/card/card-dark.svg" "$TEST_TMPDIR/first-dark.svg"
   run ! cmp -s "$TEST_TMPDIR/card/card.svg" "$TEST_TMPDIR/card/card-dark.svg"
+}
+
+@test "stats-card: a journal that is a link or in a linked directory exits 1 and draws nothing" {
+  local args=(--journal "$J" --packages "$TEST_TMPDIR/packages" --name aur-packages --out "$TEST_TMPDIR/card")
+  mkdir -p "$TEST_TMPDIR/card"
+  ln -s /dev/zero "$J"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/stats-card.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$J is a link or no regular file, so it is no journal"* ]]
+  rm "$J"
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1'
+  mv "$TEST_TMPDIR/stats" "$TEST_TMPDIR/other"
+  ln -s other "$TEST_TMPDIR/stats"
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/stats-card.sh" "${args[@]}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$TEST_TMPDIR/stats is a link or no directory, so it holds no journal"* ]]
+  [ -z "$(ls -A "$TEST_TMPDIR/card")" ]
 }
 
 @test "stats-card: a wrong name, day, option or path exits 1 and draws nothing" {

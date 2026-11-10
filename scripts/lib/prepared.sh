@@ -120,6 +120,31 @@ _pkgbuild_text() {
   '
 }
 
+# update-pkg.sh hands over the files of the AUR when the AUR has the version
+# and the asset value of the update, and only then
+# Args: $1=AUR copy, $2=prepared directory, $3=version, $4=asset_var of the
+#       package, if any, $5=asset value
+# Returns: 0 for the files of the AUR at its version, 2 for files to check
+#          as an update, 1 otherwise (reason on stderr)
+check_handed_aur_files() {
+  local aur_ver aur_asset="" same=false
+  aur_ver=$(_plain_value "$1/PKGBUILD" pkgver)
+  [[ -z "${4:-}" ]] || aur_asset=$(_plain_value "$1/PKGBUILD" "$4")
+  if cmp -s "$1/PKGBUILD" "$2/PKGBUILD" && cmp -s "$1/.SRCINFO" "$2/.SRCINFO"; then
+    same=true
+  fi
+  if [[ "$aur_ver" == "$3" && "$aur_asset" == "${5:-}" ]]; then
+    [[ "$same" == false ]] || return 0
+    log_err "The AUR has ${3}${4:+ with $4=${5:-}} already, so the prepared files must be those of the AUR"
+    return 1
+  fi
+  if [[ "$same" == true ]]; then
+    log_err "The prepared files are those of the AUR, which has ${aur_ver}${4:+ with $4=$aur_asset}, not ${3}${4:+ with $4=${5:-}}"
+    return 1
+  fi
+  return 2
+}
+
 # Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=expected version,
 #       $4=expected pkgrel (default 1), $5=asset_var of the package, if
 #       any, $6=expected asset value

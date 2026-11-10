@@ -98,13 +98,13 @@ current: '$current'"
 
 @test "validate: fails on a current that is no version" {
   local current
-  for current in '1.0$(touch x)' 1.0-1 'v 1' abc; do
+  for current in '1.0$(touch x)' 1.0-1 'v 1' abc "$(printf 'a%.0s' {1..64})1"; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 current: '$current'"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"current must hold a digit and only A-Za-z0-9 . _ +: ${current@Q}"* ]]
+    [[ "$output" == *"current must hold a digit and at most 64 characters of A-Za-z0-9 . _ +: ${current@Q}"* ]]
   done
   create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
@@ -1109,6 +1109,45 @@ cooldown_days: $value"
   done
 }
 
+@test "validate: upstream.max_answer_mb from 1 to 500 passes" {
+  local value
+  for value in 1 80 500; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  max_answer_mb: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $value"
+      return 1
+    }
+  done
+}
+
+@test "validate: upstream.max_answer_mb that is not a whole number from 1 to 500 rejected" {
+  local value
+  for value in 0 501 1.5 "'80'" 080 10M abc; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  max_answer_mb: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"packages/mypkg.yml: upstream.max_answer_mb must be a whole number from 1 to 500"* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+}
+
+# git-tag and git-latest read their upstream with git, not with curl
+@test "validate: upstream.max_answer_mb applies to the strategies that send HTTP requests" {
+  create_test_package "mypkg" "git-tag" "upstream:
+  url: https://example.com/repo.git
+  max_answer_mb: 80"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.max_answer_mb applies to the "*" strategies only"* ]]
+}
+
 @test "validate: cooldown_days that is not a whole number from 0 to 365 rejected" {
   local value
   for value in -1 366 7.5 "'7'" 007 abc; do
@@ -1244,7 +1283,7 @@ alerts:
 
 @test "validate: an alert from that is not a version rejected" {
   local value
-  for value in "'1.0-rc1'" "''" "beta" "[1.0]"; do
+  for value in "'1.0-rc1'" "''" "beta" "[1.0]" "$(printf 'a%.0s' {1..64})1"; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 alerts:
@@ -1252,7 +1291,7 @@ alerts:
     note: License change"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"alerts[0].from must be a version of A-Za-z0-9 . _ + with a digit"* ]]
+    [[ "$output" == *"alerts[0].from must be a version of at most 64 characters of A-Za-z0-9 . _ + with a digit"* ]]
   done
 }
 

@@ -36,6 +36,7 @@ replace=$(pkg_get "$PKG_FILE" '.upstream.tag_version_replace // ""')
 asset_regex=$(pkg_get "$PKG_FILE" '.upstream.asset_regex // ""')
 dash=$(pkgver_dash "$PKG_FILE")
 format=$(pkg_get "$PKG_FILE" '.pkgver_format // ""')
+MAX_ANSWER_MB=$(max_answer_mb "$PKG_FILE") || exit 1
 
 if [[ -z "$asset_regex" ]]; then
   log_err "$PKG_NAME has no upstream.asset_regex"
@@ -57,14 +58,21 @@ url_path() {
 }
 
 # Exit with 3 while a date of the GitHub API lies less than ASSET_WAIT back,
-# and with 1 after that, with the reason on stderr
+# with 1 after that or more than ASSET_WAIT ahead, the reason on stderr
 # Args: $1=date, as 2026-10-09T16:57:18Z, $2=what is missing
 wait_or_fail() {
+  local now at
   if [[ ! "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
     log_err "Unexpected date from the GitHub API: ${1@Q}"
     exit 1
   fi
-  if (($(date -u +%s) - $(date -u -d "$1" +%s) < ASSET_WAIT)); then
+  now=$(date -u +%s)
+  at=$(date -u -d "$1" +%s)
+  if ((at - now > ASSET_WAIT)); then
+    log_err "$PKG_NAME $PKGVER: $2, and its date $1 is more than $((ASSET_WAIT / 3600)) h ahead of now"
+    exit 1
+  fi
+  if ((now - at < ASSET_WAIT)); then
     log_warn "$PKG_NAME $PKGVER: $2, pending for $((ASSET_WAIT / 3600)) h from $1"
     exit 3
   fi

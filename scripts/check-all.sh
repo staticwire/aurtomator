@@ -34,6 +34,10 @@ DRY_RUN=""
 CHECK_TIMEOUT="${AURTOMATOR_CHECK_TIMEOUT:-120}"
 UPDATE_TIMEOUT="${AURTOMATOR_UPDATE_TIMEOUT:-300}"
 
+# Time budget of the verify loop, in seconds: no package starts after it,
+# so the verify job ends within its 30 minutes
+VERIFY_BUDGET="${AURTOMATOR_VERIFY_BUDGET:-1200}"
+
 # Pause, in seconds, before a package whose check failed is checked again
 RECHECK_DELAY="${AURTOMATOR_RECHECK_DELAY:-60}"
 
@@ -129,7 +133,10 @@ if [[ "$MODE" == "verify" ]]; then
     asset=""
     [[ -z "$asset_regex" ]] || asset=$(awk -F'\t' -v p="$pkg_name" '$1 == p { v = $2 } END { print v }' <<<"${CHECKED[_assets]:-}")
     verify_rc=0
-    if ! validate_pkgver "$version" 2>/dev/null; then
+    if ((SECONDS >= VERIFY_BUDGET)); then
+      verify_rc=1
+      verify_err="verify ran out of its $((VERIFY_BUDGET / 60)) minutes in this run"
+    elif ! validate_pkgver "$version" 2>/dev/null; then
       verify_rc=1
       verify_err="no new version from the check run"
     elif [[ -n "$asset_regex" ]] && ! validate_asset_value "$asset" 2>/dev/null; then
@@ -180,10 +187,8 @@ elif [[ -n "$AURTOMATOR_VERSION" ]]; then
   fi
 fi
 
-# The update failure that the prepare or the verify run recorded for a
-# package the check run found outdated. Both runs share one user with code
-# from every PKGBUILD, so nothing else of theirs is taken, and a package
-# they handed over nothing for fails as well.
+# The update failure that prepare or verify recorded for an outdated package,
+# or one of its own when they handed over nothing. Nothing else is taken.
 handed_failure() {
   local status_dir="${WORK_DIR}/status"
   local file="${status_dir}/$1"
@@ -211,6 +216,10 @@ checked_version() {
   local status="${CHECKED[$1]:-}"
   case "$status" in
     "new_version: "* | "available_downgrade: "* | "new_build: "* | "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
+      if ! validate_pkgver "${status#*: }" 2>/dev/null; then
+        echo "invalid status from the check run" >&2
+        return 1
+      fi
       echo "${status#*: }"
       ;;
     up_to_date) ;;
@@ -304,11 +313,24 @@ run_package() {
           return
         fi
         if [[ -L "${WORK_DIR}/prepared" || ! -d "${WORK_DIR}/prepared/${pkg_name}" ]]; then
-          handed_failure "$pkg_name" >"${STATUS_DIR}/${pkg_name}"
+          # The check run left it for a later run, past the 256 jobs of a run
+          if grep -qxF -e "$pkg_name" <<<"${CHECKED[_deferred]:-}"; then
+            printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
+          else
+            handed_failure "$pkg_name" >"${STATUS_DIR}/${pkg_name}"
+          fi
           return
         fi
         ;;
-      up_to_date | check_failed:* | "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
+      up_to_date | check_failed:*)
+        printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
+        return
+        ;;
+      "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
+        if ! validate_pkgver "${found#*: }" 2>/dev/null; then
+          echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
+          return
+        fi
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         # The issue of a held update lists the notes of its alerts
         [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(fired_alerts "$pkg_file" "$(pkg_get "$pkg_file" '.current // ""')" "${found#held: }" 2>/dev/null)"

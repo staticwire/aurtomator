@@ -60,9 +60,10 @@ write_srcinfo() {
 
 # Helper: bare repo standing in for the AUR repo of <pkg>, holding the given
 # PKGBUILD, .SRCINFO and other files. A git on PATH clones it for any AUR
-# URL and logs that URL to $TEST_TMPDIR/clone-urls. A mirror clone gets
-# $TEST_TMPDIR/upstream.git instead, logged to git-clone-urls. Sets
-# AUR_REMOTE and AUR_BASE.
+# URL and logs that URL to $TEST_TMPDIR/clone-urls. A fetch from an https
+# URL gets $TEST_TMPDIR/upstream.git instead, its URL logged to
+# git-clone-urls and its arguments to git-fetch-args. Sets AUR_REMOTE and
+# AUR_BASE.
 # Usage: make_aur_remote <pkg> <PKGBUILD path> <.SRCINFO path> [file]...
 make_aur_remote() {
   local work="$TEST_TMPDIR/aur-work-$1"
@@ -81,10 +82,11 @@ make_aur_remote() {
   AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
   cat >"$MOCK_DIR/git" <<EOF
 #!/usr/bin/env bash
-if [[ "\$1" == "clone" && " \$* " == *" --mirror "* ]]; then
+if [[ " \$* " == *" fetch "* && "\${@: -2:1}" == https://* ]]; then
   echo "\${@: -2:1}" >>"$TEST_TMPDIR/git-clone-urls"
   echo "\${GIT_ALLOW_PROTOCOL:-unset}" >>"$TEST_TMPDIR/git-allow"
-  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git clone -q --mirror "$TEST_TMPDIR/upstream.git" "\${@: -1}"
+  echo "\$*" >>"$TEST_TMPDIR/git-fetch-args"
+  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git "\${@:1:\$#-2}" "file://$TEST_TMPDIR/upstream.git" "\${@: -1}"
 fi
 if [[ "\$1" == "clone" ]]; then
   echo "\${@: -2:1}" >>"$TEST_TMPDIR/clone-urls"
@@ -781,7 +783,7 @@ current: '1.0.0'"
   write_srcinfo "$PREPARED/.SRCINFO" 1.0.0 1 "$H1" "$H2"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has pkgrel=1, expected 2"* ]]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
@@ -953,9 +955,19 @@ current: '0.9.0'"
   cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has pkgver=1.0.0, expected 1.1.0"* ]]
+  [[ "$output" == *"The prepared files are those of the AUR, which has 1.0.0, not 1.1.0"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+}
+
+@test "publish-pkg: takes only the files of the AUR at the version the AUR has" {
+  setup_publish
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.0.0 2 "sha256sums=('$H3' '$H4')"
+  write_srcinfo "$PREPARED/.SRCINFO" 1.0.0 2 "$H3" "$H4"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
 @test "publish-pkg: checks a prepared .SRCINFO beside the PKGBUILD of the AUR" {
@@ -965,7 +977,7 @@ current: '0.9.0'"
   sed -i 's/^\tpkgdesc = demo$/\tpkgdesc = changed/' "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO line 2 changes a value the PKGBUILD holds as text: pkgdesc = changed, expected pkgdesc = demo"* ]]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
@@ -1123,7 +1135,42 @@ commit_aur_state() {
   setup_verify
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
-  grep -q -- ' --max-filesize 600M --speed-limit 102400 --speed-time 60 -o ' "$TEST_TMPDIR/curl.args"
+  grep -q -- " --max-filesize $((600 * 1024 * 1024)) --speed-limit 102400 --speed-time 60 -o " "$TEST_TMPDIR/curl.args"
+}
+
+# A sparse file stands for the downloads of the package before this one
+@test "_source_file: gives a download what the budget of the package leaves" {
+  local downloads="$TEST_TMPDIR/downloads" left
+  mock_downloads
+  mkdir -p "$downloads" "$TEST_TMPDIR/aur"
+  truncate -s 900M "$downloads/earlier"
+  left=$((1024 * 1024 * 1024 - $(du -sb "$downloads" | cut -f1)))
+  run _source_file https://example.com/demo-1.1.0.tar.gz "$TEST_TMPDIR/aur" "$downloads"
+  [ "$status" -eq 0 ]
+  grep -q -- " --max-filesize $left " "$TEST_TMPDIR/curl.args"
+}
+
+@test "_source_file: downloads nothing once the budget of the package is gone" {
+  local downloads="$TEST_TMPDIR/downloads"
+  mock_downloads
+  mkdir -p "$downloads" "$TEST_TMPDIR/aur"
+  truncate -s 1G "$downloads/earlier"
+  run _source_file https://example.com/demo-1.1.0.tar.gz "$TEST_TMPDIR/aur" "$downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The downloads of the package reach the budget of 1 GiB"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+# curl exits 63 past --max-filesize
+@test "_source_file: names the budget when curl stops at what it leaves" {
+  local downloads="$TEST_TMPDIR/downloads"
+  mkdir -p "$downloads" "$TEST_TMPDIR/aur"
+  truncate -s 900M "$downloads/earlier"
+  printf '#!/usr/bin/env bash\nexit 63\n' >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
+  run _source_file https://example.com/demo-1.1.0.tar.gz "$TEST_TMPDIR/aur" "$downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The downloads of the package pass the budget of 1 GiB at https://example.com/demo-1.1.0.tar.gz"* ]]
 }
 
 # Over http or ftp, the checksum is whatever the network path serves, in
@@ -1144,15 +1191,42 @@ commit_aur_state() {
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
-@test "verify-pkg: has nothing to verify when the prepared files are those of the AUR" {
+@test "verify-pkg: has nothing to verify when the prepared files are those of the AUR at its version" {
   setup_verify
   local work="$TEST_TMPDIR/aur-work-demo"
   sed -i 's/^pkgver=.*/pkgver="1.0.0"/' "$work/PKGBUILD"
   commit_aur_state "quote pkgver"
   cp "$work/PKGBUILD" "$work/.SRCINFO" "$PREPARED/"
-  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 0 ]
   [[ "$output" == *"The prepared files of demo are those of the AUR, nothing to verify"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+# update-pkg.sh hands over the files of the AUR only for the version the
+# AUR has, so any other version is a prepare run that broke
+@test "verify-pkg: refuses the files of the AUR for a version the AUR does not have" {
+  setup_verify
+  cp "$OLD" "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/"
+  mv "$PREPARED/old.SRCINFO" "$PREPARED/.SRCINFO"
+  cp "$OLD" "$PREPARED/PKGBUILD"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The prepared files are those of the AUR, which has 1.0.0, not 1.1.0"* ]]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+}
+
+# A source that changed under the same URL would pass verify with its new
+# checksum, while update-pkg.sh hands over the AUR files at that version
+@test "verify-pkg: takes only the files of the AUR at the version the AUR has" {
+  setup_verify
+  local sum
+  sum=$(printf 'source of %s\n' "https://example.com/demo-1.0.0.tar.gz" | sha256sum | cut -d' ' -f1)
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.0.0 2 "sha256sums=('$sum' '$SUM_LOCAL')"
+  write_srcinfo "$PREPARED/.SRCINFO" 1.0.0 2 "$sum" "$SUM_LOCAL"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
@@ -1163,7 +1237,7 @@ commit_aur_state() {
   sed -i 's/^\tpkgdesc = demo$/\tpkgdesc = changed/' "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO line 2 changes a value the PKGBUILD holds as text: pkgdesc = changed, expected pkgdesc = demo"* ]]
+  [[ "$output" == *"The AUR has 1.0.0 already, so the prepared files must be those of the AUR"* ]]
 }
 
 @test "verify-pkg: refuses a line that keeps the old version the PKGBUILD derives" {
@@ -1363,6 +1437,8 @@ use_source() {
   grep -qx 'https://example.com/demo.git' "$TEST_TMPDIR/git-clone-urls"
   # git follows a redirect only to a protocol it allows
   [ "$(cat "$TEST_TMPDIR/git-allow")" = "https" ]
+  # The tag alone, without the history of the repository
+  grep -q -- ' fetch -q --depth 1 --no-tags https://example.com/demo.git refs/tags/v1.1.0:refs/tags/v1.1.0$' "$TEST_TMPDIR/git-fetch-args"
 }
 
 @test "verify-pkg: checks a git source at a commit as makepkg does" {
@@ -1372,6 +1448,7 @@ use_source() {
   sed -i "s/$SUM_REMOTE/$GIT_SUM/" "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 0 ]
+  grep -q -- " fetch -q --depth 1 --no-tags https://example.com/demo.git $GIT_COMMIT\$" "$TEST_TMPDIR/git-fetch-args"
 }
 
 @test "verify-pkg: refuses a wrong checksum of a git source" {
@@ -1383,13 +1460,13 @@ use_source() {
   [[ "$output" == *"demo.git#tag=v1.1.0"* ]]
 }
 
-@test "verify-pkg: refuses a git source it cannot clone" {
+@test "verify-pkg: refuses a git source it cannot fetch" {
   setup_verify
-  # No make_upstream, so the mirror clone finds no repository
+  # No make_upstream, so the fetch finds no repository
   use_source "demo::git+https://example.com/demo.git#tag=vVER"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Could not clone https://example.com/demo.git"* ]]
+  [[ "$output" == *"Could not fetch tag=v1.1.0 of https://example.com/demo.git"* ]]
 }
 
 @test "verify-pkg: refuses a git tag the repository does not have" {
@@ -1398,7 +1475,32 @@ use_source() {
   use_source "demo::git+https://example.com/demo.git#tag=releaseVER"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Could not archive release1.1.0 of https://example.com/demo.git"* ]]
+  [[ "$output" == *"Could not fetch tag=release1.1.0 of https://example.com/demo.git"* ]]
+}
+
+@test "_git_source_sum: fetches nothing once the budget of the package is gone" {
+  setup_verify
+  make_upstream
+  mkdir "$TEST_TMPDIR/downloads"
+  truncate -s 1G "$TEST_TMPDIR/downloads/earlier"
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.1.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The downloads of the package reach the budget of 1 GiB"* ]]
+  [ ! -e "$TEST_TMPDIR/git-fetch-args" ]
+}
+
+# git counts no bytes before it fetches, so the size is checked after. The
+# shell hashed /usr/bin/git before make_aur_remote wrote the git on PATH.
+@test "_git_source_sum: refuses a fetch that passes the budget of the package" {
+  setup_verify
+  make_upstream
+  mkdir "$TEST_TMPDIR/downloads"
+  truncate -s $((1024 * 1024 * 1024 - 1024)) "$TEST_TMPDIR/downloads/earlier"
+  hash -r
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.1.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The fetch of tag=v1.1.0 of https://example.com/demo.git passes the budget of 1 GiB of the package"* ]]
+  [ -e "$TEST_TMPDIR/git-fetch-args" ]
 }
 
 @test "verify-pkg: refuses a checksum of a git source at a branch" {
@@ -1623,6 +1725,22 @@ alerts:
   [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/out/status/held")" = "held: 29+1" ]
   [ "$(failed_statuses "$TEST_TMPDIR/out/status")" = "0" ]
+}
+
+# Every kind with a version reaches vercmp and the alerts of --prepare
+@test "check-all --prepare: fails a checked status of any kind whose version is unsafe" {
+  local kind
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  stub_script update-pkg.sh 0
+  for kind in new_version available_downgrade new_build downgrade_skipped jump_skipped held pending; do
+    echo "$kind"
+    checked_status pkg "$kind: 2.0](https://evil.example)"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "check_failed: invalid status from the check run" ]
+  done
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
 }
 
 @test "check-all --prepare: prepares no update the check run left in its cooldown" {
@@ -1909,6 +2027,24 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: invalid status from the check run" ]
 }
 
+# --publish keeps these four kinds, and update-readme.sh puts their version
+# into the package table
+@test "check-all --publish: replaces a skipped, held or pending status with an unsafe version" {
+  local kind
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  for kind in downgrade_skipped jump_skipped held pending; do
+    echo "$kind"
+    checked_status pkg "$kind: <b>2.0</b>"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: invalid status from the check run" ]
+    checked_status pkg "$kind: 2.0"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "$kind: 2.0" ]
+  done
+}
+
 @test "check-all --publish: replaces a checked status with extra lines" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
@@ -1937,6 +2073,24 @@ current: '1.0.0'"
   checked_status pkg "new_version: 2.0.0"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
+}
+
+# The name pkg is a prefix of pkg2, so a match of part of a line counts
+@test "check-all --publish: keeps the new version of a package the check run deferred" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  create_test_package "pkg2" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  checked_status pkg2 "new_version: 2.0.0"
+  checked_status _deferred "pkg2"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg2")" = "new_version: 2.0.0" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
@@ -2306,6 +2460,27 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
 }
 
+# The job has 30 minutes, and a package started late still takes up to 330 s
+@test "check-all --verify: starts no package after the time budget of the loop" {
+  setup_check_verify
+  stub_script verify-pkg.sh 0
+  AURTOMATOR_VERIFY_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
+  [ ! -e "$TEST_TMPDIR/out/prepared/pkg" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: verify ran out of its 0 minutes in this run" ]
+}
+
+@test "check-all --verify: gives the loop 20 minutes by default" {
+  run grep -cx 'VERIFY_BUDGET="${AURTOMATOR_VERIFY_BUDGET:-1200}"' "$PROJECT_DIR/scripts/check-all.sh"
+  [ "$output" = "1" ]
+  setup_check_verify
+  stub_script verify-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  grep -qx "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/verify-pkg.sh.args"
+}
+
 @test "check-all --verify: takes out an update that fails, with update_failed" {
   setup_check_verify
   stub_script verify-pkg.sh 1 "checksum mismatch"
@@ -2407,10 +2582,12 @@ current: '1.0.0'"
 
 # === alert_issue_body ===
 
-@test "alert_issue_body: lists every note of a held update" {
+# builder of check writes _alerts, so a mention or a link in it does not
+# render
+@test "alert_issue_body: lists every note of a held update in a code block" {
   echo "held: 29+1" >"$TEST_TMPDIR/demo"
   printf '%s\t%s\t%s\n' demo notice "Create the package for the old major" other hold "Not this one" \
-    demo hold "Raise makedepends java-environment to 28" >"$TEST_TMPDIR/_alerts"
+    demo hold "Raise makedepends to 28 @octocat [x](https://example.invalid)" >"$TEST_TMPDIR/_alerts"
   run alert_issue_body "$TEST_TMPDIR/demo" https://github.com/owner/repo/actions/runs/1
   [ "$status" -eq 0 ]
   expected=$(
@@ -2419,8 +2596,10 @@ Package: `demo`
 Held version: `29+1`
 Run: https://github.com/owner/repo/actions/runs/1
 
-- Create the package for the old major
-- Raise makedepends java-environment to 28
+```
+Create the package for the old major
+Raise makedepends to 28 @octocat [x](https://example.invalid)
+```
 
 Auto-created by update workflow. Publish the version by hand after the edit and set `current` in the package YAML to it. The next run closes this issue.
 EOF
@@ -2447,7 +2626,9 @@ Package: `demo`
 Published version: `29+1`
 Run: https://example.invalid/run
 
-- Create the package for the old major
+```
+Create the package for the old major
+```
 
 Auto-created by update workflow. Close it once the edit is done.
 EOF
@@ -2742,6 +2923,34 @@ EOF
   [ "$output" = "💤 next update 2026-11-12" ]
   run status_label "unknown: 1.0"
   [ "$output" = "✅ tracking" ]
+}
+
+# With publish skipped, the issues job reads the statuses of check as
+# builder wrote them
+@test "clean_statuses: a status that --publish would refuse becomes a check failure" {
+  make_statuses ok=up_to_date failed="check_failed: <b>x</b>" new="new_version: 2.0" day="cooldown: 2026-11-12" \
+    held="held: 1.0\` @octocat [x](https://example.invalid) \`" pending="pending: <b>x</b>" \
+    lines=$'updated: 2.0\n| x |' day2="cooldown: tomorrow" other="exploded: 1.0" _alerts=$'a\thold\tnote'
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/st/ok")" = up_to_date ]
+  [ "$(cat "$TEST_TMPDIR/st/failed")" = "check_failed: <b>x</b>" ]
+  [ "$(cat "$TEST_TMPDIR/st/new")" = "new_version: 2.0" ]
+  [ "$(cat "$TEST_TMPDIR/st/day")" = "cooldown: 2026-11-12" ]
+  for name in held pending lines day2 other; do
+    [ "$(cat "$TEST_TMPDIR/st/$name")" = "check_failed: invalid status from the check run" ]
+  done
+  [ "$(cat "$TEST_TMPDIR/st/_alerts")" = $'a\thold\tnote' ]
+}
+
+@test "clean_statuses: an _upstream of another form than newer or current and a version goes" {
+  make_statuses _upstream="newer: 0.12.0"
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$(cat "$TEST_TMPDIR/st/_upstream")" = "newer: 0.12.0" ]
+  make_statuses _upstream="newer: 0.12.0 [x](https://example.invalid)"
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/st/_upstream" ]
 }
 
 # Helper: writes the statuses given as name=status pairs to $TEST_TMPDIR/st
@@ -4504,7 +4713,7 @@ pkgver_dash: ''"
   echo "$AUR_BASE" >"$PREPARED/base"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 2.4.6 "$PREPARED" --asset "$V246_3"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has pkgrel=1, expected 2"* ]]
+  [[ "$output" == *"The prepared files are those of the AUR, which has 2.4.6 with _deb=$V246_2, not 2.4.6 with _deb=$V246_3"* ]]
   [ "$(yq -r .current_asset "$TEST_TMPDIR/packages/demo.yml")" = "$V246_2" ]
 }
 

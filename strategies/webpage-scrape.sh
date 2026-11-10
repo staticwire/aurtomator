@@ -9,13 +9,13 @@
 #   upstream.url      - page URL to scrape
 #   upstream.pattern  - ERE whose first capture group is the version: 'package-([0-9.]+)\.tar\.gz'
 #   upstream.user_agent - User-Agent in place of aurtomator/1.0 (optional)
+#   upstream.max_answer_mb - the most megabytes of the page, 5 by default (optional)
 
 set -euo pipefail
 
 readonly NAME="${1:?Usage: webpage-scrape.sh <package-name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly MAX_SIZE=5242880 # 5MB
 
 # shellcheck source=../scripts/lib/common.sh
 source "${SCRIPT_DIR}/../scripts/lib/common.sh"
@@ -41,7 +41,8 @@ fi
 if [[ -n "$user_agent" ]]; then
   USER_AGENT=$user_agent
 fi
-page=$(http_get "$url" --max-redirs 5 --max-filesize "$MAX_SIZE") || {
+# A page is at most 5 MB, or upstream.max_answer_mb
+page=$(http_get "$url" --max-redirs 5 --max-filesize "${MAX_ANSWER_MB:-5}M") || {
   echo "Failed to fetch $url" >&2
   exit 1
 }
