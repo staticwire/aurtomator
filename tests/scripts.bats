@@ -4088,6 +4088,249 @@ pkgver_dash: ''"
   [[ "$output" == *"plain has no upstream.asset_regex"* ]]
 }
 
+# === check-arch.sh ===
+
+# Helper: jdk-temurin-ea-bin at 28+22 on the AUR, its YAML with the given
+# lines, and the curl of mock_heads
+temurin_package() {
+  create_test_package jdk-temurin-ea-bin webpage-scrape "upstream:
+  url: https://api.adoptium.net/v3/info/release_names
+  pattern: 'jdk-([0-9]+)'
+$1"
+  arch_pkgbuild "$TEST_TMPDIR/PKGBUILD"
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  make_aur_remote jdk-temurin-ea-bin "$TEST_TMPDIR/PKGBUILD" "$TEST_TMPDIR/.SRCINFO"
+  mock_heads
+}
+
+# Helper: the archive of arch $1 at version $2 answers 404
+archive_missing() {
+  arch_source_url "$1" "$2" >>"$TEST_TMPDIR/missing"
+}
+
+# Helper: run check-arch.sh for jdk-temurin-ea-bin; sets ARCH_RC, and
+# ARCH_OUT to its stdout with a | at the end of each line
+check_arch() {
+  ARCH_RC=0
+  "$TEST_TMPDIR/scripts/check-arch.sh" jdk-temurin-ea-bin "$@" >"$TEST_TMPDIR/arch.out" 2>"$TEST_TMPDIR/arch.err" || ARCH_RC=$?
+  ARCH_OUT=$(sed 's/$/|/' "$TEST_TMPDIR/arch.out")
+}
+
+# Helper: succeeds when time $1 lies at most 120 s from now
+about_now() {
+  local at
+  at=$(date -u -d "$1" +%s) || return 1
+  ((${at} - $(date -u +%s) < 120 && $(date -u +%s) - ${at} < 120))
+}
+
+@test "check-arch: prints two empty lines when every arch answers" {
+  temurin_package "current: 28+22"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  grep -qx 'https://aur.archlinux.org/jdk-temurin-ea-bin.git' "$TEST_TMPDIR/clone-urls"
+  [ "$(sort "$TEST_TMPDIR/heads.log")" = "$(for arch in "${ARCH_ALL[@]}"; do arch_source_url "$arch" 28+23; done | sort)" ]
+}
+
+@test "check-arch: asks nothing with allow_missing_arch: false or pkgver_dash: ''" {
+  local line
+  for line in "allow_missing_arch: false" "pkgver_dash: ''"; do
+    temurin_package "current: 28+22
+$line"
+    archive_missing aarch64 28+23
+    check_arch 28+23
+    [ "$ARCH_RC" -eq 0 ]
+    [ "$ARCH_OUT" = $'|\n|' ]
+    [ ! -e "$TEST_TMPDIR/clone-urls" ] && [ ! -e "$TEST_TMPDIR/heads.log" ] || {
+      echo "asked with $line"
+      return 1
+    }
+    rm -rf "$TEST_TMPDIR/aur-remote" "$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin" "$TEST_TMPDIR/missing"
+  done
+}
+
+@test "check-arch: a missing arch waits 24 h from the run that first saw it" {
+  temurin_package "current: 28+22"
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  [ "$(wc -l <"$TEST_TMPDIR/arch.out")" -eq 1 ]
+  about_now "$(<"$TEST_TMPDIR/arch.out")"
+  grep -q "aarch64" "$TEST_TMPDIR/arch.err"
+}
+
+@test "check-arch: the wait counts from arch_wait of the version" {
+  local since
+  since=$(date -u -d '-23 hours' +%Y-%m-%dT%H:%M:%SZ)
+  temurin_package "current: 28+22
+arch_wait:
+  version: 28+23
+  since: '$since'"
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  [ "$ARCH_OUT" = "$since|" ]
+
+  since=$(date -u -d '-25 hours' +%Y-%m-%dT%H:%M:%SZ)
+  yq -i ".arch_wait.since = \"$since\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = "aarch64|"$'\n'"$since|" ]
+}
+
+@test "check-arch: arch_wait of another version starts a new wait" {
+  temurin_package "current: 28+22
+arch_wait:
+  version: 28+21
+  since: '$(date -u -d '-25 hours' +%Y-%m-%dT%H:%M:%SZ)'"
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  about_now "$(<"$TEST_TMPDIR/arch.out")"
+}
+
+@test "check-arch: a missing x86_64 or every arch missing fails the update as today" {
+  temurin_package "current: 28+22"
+  archive_missing x86_64 28+23
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+
+  aur_arch_commit 28+22 aarch64 riscv64 >/dev/null
+  archive_missing riscv64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+}
+
+@test "check-arch: an arch that is out comes back when its archive answers" {
+  local out
+  temurin_package "current: 28+23"
+  out=$AUR_BASE
+  aur_arch_commit 28+23 x86_64 powerpc64le riscv64 >/dev/null
+  yq -i ".arch_out.aarch64 = \"$out\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  grep -qx "$(arch_source_url aarch64 28+24)" "$TEST_TMPDIR/heads.log"
+
+  archive_missing aarch64 28+24
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+
+  rm "$TEST_TMPDIR/heads.log"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  [ "$(cat "$TEST_TMPDIR/heads.log")" = "$(arch_source_url aarch64 28+23)" ]
+
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+}
+
+@test "check-arch: an arch the maintainer put back is no longer out" {
+  temurin_package "current: 28+22"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  archive_missing aarch64 28+22
+  check_arch 28+22
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  [ ! -e "$TEST_TMPDIR/heads.log" ]
+}
+
+@test "check-arch: a commit of arch_out missing from the AUR fails the check" {
+  temurin_package "current: 28+22
+arch_out:
+  aarch64: '0123456789012345678901234567890123456789'"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 1 ]
+  grep -q "the commit 0123456789012345678901234567890123456789 of arch_out.aarch64 is not in the AUR repo" "$TEST_TMPDIR/arch.err"
+
+  local head
+  head=$(aur_arch_commit 28+23 x86_64 powerpc64le riscv64)
+  yq -i ".arch_out.aarch64 = \"$head\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 1 ]
+  grep -q "the commit $head of arch_out.aarch64 does not build aarch64" "$TEST_TMPDIR/arch.err"
+}
+
+@test "check-arch: after 24 h line 1 names the arches that leave and those that stay out" {
+  temurin_package "current: 28+23
+arch_wait:
+  version: 28+24
+  since: '$(date -u -d '-25 hours' +%Y-%m-%dT%H:%M:%SZ)'"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  aur_arch_commit 28+23 x86_64 powerpc64le riscv64 >/dev/null
+  archive_missing aarch64 28+24
+  archive_missing riscv64 28+24
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$(head -1 "$TEST_TMPDIR/arch.out")" = "riscv64 aarch64" ]
+}
+
+@test "check-arch: a URL without an answer fails the check" {
+  temurin_package "current: 28+22"
+  arch_source_url aarch64 28+23 >"$TEST_TMPDIR/silent"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 1 ]
+  grep -qF "no answer from $(arch_source_url aarch64 28+23)" "$TEST_TMPDIR/arch.err"
+}
+
+@test "check-arch: without the AUR the arches out stay out" {
+  temurin_package "current: 28+22"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  mv "$AUR_REMOTE" "$AUR_REMOTE.gone"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+  [ ! -e "$TEST_TMPDIR/heads.log" ]
+}
+
+@test "check-arch: an arch line it cannot edit leaves the update as it is" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  temurin_package "current: 28+22"
+  sed -i "s/^arch=('x86_64' /arch=('x86_64'\n  /" "$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "two lines"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  [ ! -e "$TEST_TMPDIR/heads.log" ]
+}
+
+@test "check-arch: builds the URLs with the asset values of the PKGBUILD and of --asset" {
+  create_test_package arch-demo github-release "upstream:
+  project: owner/repo
+  asset_regex: '^demo-[0-9.]+-([0-9]+)-x86_64\\.tar\\.gz\$'
+  asset_var: _build
+current: 1.0.0
+current_asset: '7'"
+  # shellcheck disable=SC2016
+  printf '%s\n' 'pkgname=arch-demo' 'pkgver=1.0.0' 'pkgrel=1' '_build=7' "arch=('x86_64' 'aarch64')" \
+    'source_x86_64=("https://example.com/demo-${pkgver}-${_build}-x86_64.tar.gz")' \
+    'source_aarch64=("https://example.com/demo-${pkgver}-${_build}-aarch64.tar.gz")' >"$TEST_TMPDIR/PKGBUILD"
+  printf '%s\n' 'pkgbase = arch-demo' $'\tpkgver = 1.0.0' $'\tpkgrel = 1' $'\tarch = x86_64' $'\tarch = aarch64' \
+    $'\tsource_x86_64 = https://example.com/demo-1.0.0-7-x86_64.tar.gz' \
+    $'\tsource_aarch64 = https://example.com/demo-1.0.0-7-aarch64.tar.gz' '' 'pkgname = arch-demo' >"$TEST_TMPDIR/.SRCINFO"
+  make_aur_remote arch-demo "$TEST_TMPDIR/PKGBUILD" "$TEST_TMPDIR/.SRCINFO"
+  mock_heads
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-arch.sh" arch-demo 1.1.0 --asset 8
+  [ "$status" -eq 0 ]
+  [ "$(sort "$TEST_TMPDIR/heads.log")" = $'https://example.com/demo-1.1.0-8-aarch64.tar.gz\nhttps://example.com/demo-1.1.0-8-x86_64.tar.gz' ]
+
+  # A new asset value of the version the AUR has is a rebuild of every arch
+  rm "$TEST_TMPDIR/heads.log"
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-arch.sh" arch-demo 1.0.0 --asset 8
+  [ "$status" -eq 0 ]
+  [ "$(sort "$TEST_TMPDIR/heads.log")" = $'https://example.com/demo-1.0.0-8-aarch64.tar.gz\nhttps://example.com/demo-1.0.0-8-x86_64.tar.gz' ]
+}
+
 # === check-all.sh: values from release asset names ===
 
 # Helper: a check-asset.sh that logs its arguments to check-asset.args and

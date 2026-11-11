@@ -23,18 +23,18 @@ srcinfo_pkgver() {
 pkgbuild_arch_words() {
   local line_re='^arch=\(([^)]*)\)[[:space:]]*$' word_re="^'([a-z0-9_]+)'$|^\"([a-z0-9_]+)\"$|^([a-z0-9_]+)$"
   local word
-  local -a lines words names=()
-  mapfile -t lines < <(grep -E '^[[:space:]]*arch\+?=' "$1")
-  if ((${#lines[@]} != 1)) || [[ ! "${lines[0]}" =~ $line_re ]]; then
+  local -a arch_lines arch_tokens arch_names=()
+  mapfile -t arch_lines < <(grep -E '^[[:space:]]*arch\+?=' "$1")
+  if ((${#arch_lines[@]} != 1)) || [[ ! "${arch_lines[0]}" =~ $line_re ]]; then
     return 1
   fi
-  read -ra words <<<"${BASH_REMATCH[1]}"
-  for word in "${words[@]}"; do
+  read -ra arch_tokens <<<"${BASH_REMATCH[1]}"
+  for word in "${arch_tokens[@]}"; do
     [[ "$word" =~ $word_re ]] || return 1
-    names+=("${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}")
+    arch_names+=("${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}")
   done
-  ((${#names[@]} > 0)) || return 1
-  printf '%s\n' "${names[@]}"
+  ((${#arch_names[@]} > 0)) || return 1
+  printf '%s\n' "${arch_names[@]}"
 }
 
 # Print an arch line of the words $2... in the quoting of the first word of

@@ -58,46 +58,6 @@ write_srcinfo() {
     "pkgname = demo" >"$1"
 }
 
-# Helper: bare repo standing in for the AUR repo of <pkg>, holding the given
-# PKGBUILD, .SRCINFO and other files. A git on PATH clones it for any AUR
-# URL and logs that URL to $TEST_TMPDIR/clone-urls. A fetch from an https
-# URL gets $TEST_TMPDIR/upstream.git instead, its URL logged to
-# git-clone-urls and its arguments to git-fetch-args. Sets AUR_REMOTE and
-# AUR_BASE.
-# Usage: make_aur_remote <pkg> <PKGBUILD path> <.SRCINFO path> [file]...
-make_aur_remote() {
-  local work="$TEST_TMPDIR/aur-work-$1"
-  AUR_REMOTE="$TEST_TMPDIR/aur-remote/$1.git"
-  git init -q --bare -b master "$AUR_REMOTE"
-  git init -q -b master "$work"
-  cp "$2" "$work/PKGBUILD"
-  cp "$3" "$work/.SRCINFO"
-  if [[ $# -gt 3 ]]; then
-    cp "${@:4}" "$work/"
-  fi
-  git -C "$work" add .
-  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid \
-    -c commit.gpgsign=false commit -qm "aur state"
-  git -C "$work" push -q "$AUR_REMOTE" master
-  AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
-  cat >"$MOCK_DIR/git" <<EOF
-#!/usr/bin/env bash
-if [[ " \$* " == *" fetch "* && "\${@: -2:1}" == https://* ]]; then
-  echo "\${@: -2:1}" >>"$TEST_TMPDIR/git-clone-urls"
-  echo "\${GIT_ALLOW_PROTOCOL:-unset}" >>"$TEST_TMPDIR/git-allow"
-  echo "\$*" >>"$TEST_TMPDIR/git-fetch-args"
-  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git "\${@:1:\$#-2}" "file://$TEST_TMPDIR/upstream.git" "\${@: -1}"
-fi
-if [[ "\$1" == "clone" ]]; then
-  echo "\${@: -2:1}" >>"$TEST_TMPDIR/clone-urls"
-  echo "\${*:2:\$#-3}" >>"$TEST_TMPDIR/clone-opts"
-  exec /usr/bin/git clone -q "\${@:2:\$#-3}" "$AUR_REMOTE" "\${@: -1}"
-fi
-exec /usr/bin/git "\$@"
-EOF
-  chmod +x "$MOCK_DIR/git"
-}
-
 # Helper: add a file to the AUR repo of demo and hand the new commit to the
 # prepared update as its base
 # Usage: aur_add_file <name> <content>
