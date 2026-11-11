@@ -113,6 +113,10 @@ Some upstreams name a release asset with more than the version and rebuild a rel
 
 A `-git` package gets a new version with every upstream commit, and each push makes the AUR helpers of its users build it again. A push of a `git-latest` package therefore waits 7 days after the last one, and the package table shows the day it goes out with a `💤` icon. `cooldown_days` in the package YAML sets other days for any strategy, and `0` turns the wait off. A waiting update goes out with the next run once the `last_updated` line of its package is deleted. Details are in [docs/WORKFLOW.md section 4.7](docs/WORKFLOW.md#47-cooldown).
 
+## Versions without some arches
+
+A package that builds each arch from an archive of its own, as `jdk-temurin-ea-bin` does, can be updated to a release that lacks the archive of one arch. The package shows `⏳` for 24 hours while the runs wait for the archive. Then the version goes out without that arch, and the package table names the arch with a `⚠️` icon until its archive is out and a run puts it back. An issue stays open while an arch is out. A release without the archive of `x86_64` fails as before, and `allow_missing_arch: false` in the package YAML turns the wait and the push without an arch off. Details are in [docs/WORKFLOW.md section 4.8](docs/WORKFLOW.md#48-versions-without-some-arches).
+
 ## Updates of aurtomator
 
 The line under the package table in the README of your repository shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin to a new release at its next check. "Check for updates" under Insights > Dependency graph > Dependabot runs a check at once. A newer release also gets an issue that says how to update, and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
