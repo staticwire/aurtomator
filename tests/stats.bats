@@ -689,8 +689,8 @@ pushes() {
   journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1' '2026-11-01T10:00:00Z,b,tracked,1.0,,1'
   card 2026-11-08
   [ "$status" -eq 0 ]
-  grep -q '<tspan font-weight="600" fill="#1f2328">2</tspan> packages</text>' "$TEST_TMPDIR/card/card.svg"
-  run ! grep -q failing "$TEST_TMPDIR/card/card.svg"
+  grep -q '<tspan font-weight="600" fill="#1f2328">2</tspan> packages <tspan fill="#1a7f37">· 0 failing</tspan></text>' "$TEST_TMPDIR/card/card.svg"
+  grep -q '<tspan fill="#3fb950">· 0 failing</tspan>' "$TEST_TMPDIR/card/card-dark.svg"
   printf '%s\n' '2026-11-07T10:00:00Z,b,check_failed,1.0,,2' >>"$J"
   rm "$TEST_TMPDIR/packages/a.yml"
   card 2026-11-08

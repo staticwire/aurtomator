@@ -1495,7 +1495,7 @@ A run only adds lines to the journal. A line that is not a row, such as one a ha
 
 `stats-card.sh` draws `stats/card.svg` and `stats/card-dark.svg` from the journal for the day of the run. A card is 680 by 356 pixels, in the colors of the light or the dark theme of GitHub:
 
-- The header names the repository and the number of packages in `packages/`. When the last row of a package is a failure, the number of such packages follows in red. The day of the card stands below them, as `updated Nov 8, 2026`, so a card that no run drew again shows its age.
+- The header names the repository and the number of packages in `packages/`. The number of packages whose last row is a failure follows it, in green when it is 0 and in red otherwise. The day of the card stands below them, as `updated Nov 8, 2026`, so a card that no run drew again shows its age.
 - The table counts four things over the last 7, 30 and 365 days, the day of the run included. `Packages updated` counts the packages with at least one push, `Pushes to AUR` the pushes, `New packages` the `added` rows, and `Failed checks` the rows of `check_failed` and `update_failed`. While the journal is younger than a column, the column is headed `since <month> <day>` with the day of the first row.
 - The heatmap shows the pushes of each day of the last 53 weeks, one column for each week from Sunday, as on the profile page of GitHub. The shades have fixed steps at 1, 2, 4 and 6 pushes a day, so one busy day leaves the shades of the other days as they are. A day before the first row of the journal has an outline only, so a day without data looks different from a day without a push.
 

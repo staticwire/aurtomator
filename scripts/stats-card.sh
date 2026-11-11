@@ -101,7 +101,7 @@ END {
   if (length(name) > 32) name = substr(name, 1, 30) "..."
   printf "<text x=\"54\" y=\"35\" font-size=\"18\" font-weight=\"600\" fill=\"%s\">%s</text>\n", tx, name
   printf "<text x=\"656\" y=\"35\" font-size=\"14\" text-anchor=\"end\" fill=\"%s\"><tspan font-weight=\"600\" fill=\"%s\">%d</tspan> %s", mu, tx, packages, plural(packages, "package", "packages")
-  if (failing > 0) printf " <tspan fill=\"%s\">\302\267 %d failing</tspan>", red, failing
+  printf " <tspan fill=\"%s\">\302\267 %d failing</tspan>", (failing > 0 ? red : grn), failing
   print "</text>"
   printf "<text x=\"54\" y=\"54\" font-size=\"12\" fill=\"%s\">AUR packages maintained with aurtomator</text>\n", mu
   # The day of the card, so a card no run has drawn again shows its age
