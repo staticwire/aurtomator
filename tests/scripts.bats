@@ -976,6 +976,166 @@ MOCKCURL
   [[ "$output" == *"Source URL unreachable: https://example.com/test-1.0.0.tar.gz"* ]]
 }
 
+# === arch.sh ===
+
+@test "arch.sh: srcinfo_arches prints the arches of pkgbase alone" {
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  printf '\npkgname = jdk-temurin-ea-doc\n\tarch = any\n' >>"$TEST_TMPDIR/.SRCINFO"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run srcinfo_arches "$TEST_TMPDIR/.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'x86_64\naarch64\npowerpc64le\nriscv64' ]
+}
+
+@test "arch.sh: srcinfo_arch_lines prints the lines of one arch in every section" {
+  local url=https://github.com/adoptium/temurin28-binaries/releases/download/jdk-28+22-ea-beta
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  printf '\tdepends_aarch64 = zlib-ng\n' >>"$TEST_TMPDIR/.SRCINFO"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run srcinfo_arch_lines "$TEST_TMPDIR/.SRCINFO" aarch64
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '\t%s\n' 'arch = aarch64' "source_aarch64 = $url/OpenJDK-jdk_aarch64_linux_hotspot_28_22-ea.tar.gz" \
+    'depends_aarch64 = zlib' "sha256sums_aarch64 = $(printf aarch6428+22 | sha256sum | cut -d' ' -f1)" 'depends_aarch64 = zlib-ng')" ]
+  run srcinfo_arch_lines "$TEST_TMPDIR/.SRCINFO" x86_64
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '\t%s\n' 'arch = x86_64' "source_x86_64 = $url/OpenJDK-jdk_x64_linux_hotspot_28_22-ea.tar.gz" \
+    "sha256sums_x86_64 = $(printf x86_6428+22 | sha256sum | cut -d' ' -f1)")" ]
+}
+
+@test "arch.sh: srcinfo_pkgver prints the pkgver" {
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO" 28+23
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run srcinfo_pkgver "$TEST_TMPDIR/.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = 28+23 ]
+}
+
+@test "arch.sh: pkgbuild_arch_words reads the arch line in any quoting" {
+  local line
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  for line in "arch=('x86_64' 'aarch64')" 'arch=("x86_64" "aarch64")' 'arch=(x86_64 aarch64)' "arch=('x86_64'  \"aarch64\")  "; do
+    printf 'pkgname=demo\n%s\nsource_x86_64=(demo.tar.gz)\n' "$line" >"$TEST_TMPDIR/PKGBUILD"
+    run pkgbuild_arch_words "$TEST_TMPDIR/PKGBUILD"
+    [ "$status" -eq 0 ]
+    [ "$output" = $'x86_64\naarch64' ] || {
+      echo "read: $line"
+      return 1
+    }
+  done
+}
+
+@test "arch.sh: pkgbuild_arch_words refuses an arch line it cannot edit" {
+  local body
+  local -a bodies=(
+    "pkgname=demo"
+    $'arch=(\'x86_64\')\narch=(\'aarch64\')'
+    $'arch=(\'x86_64\')\npackage() {\n  arch=(\'any\')\n}'
+    $'arch=(\'x86_64\')\narch+=(\'aarch64\')'
+    'arch=("$CARCH")'
+    $'arch=(\'x86_64\'\n  \'aarch64\')'
+    'arch=()'
+    "arch=('x86_64') # all"
+    "arch=('x86-64')"
+  )
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  for body in "${bodies[@]}"; do
+    printf '%s\n' "$body" >"$TEST_TMPDIR/PKGBUILD"
+    run pkgbuild_arch_words "$TEST_TMPDIR/PKGBUILD"
+    [ "$status" -eq 1 ] && [ -z "$output" ] || {
+      echo "taken: $body"
+      return 1
+    }
+  done
+}
+
+@test "arch.sh: arch_line writes the words in the quoting of the first word" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  [ "$(arch_line "arch=('x86_64' \"aarch64\")" x86_64 riscv64)" = "arch=('x86_64' 'riscv64')" ]
+  [ "$(arch_line "arch=(\"x86_64\" 'aarch64')" x86_64 riscv64)" = 'arch=("x86_64" "riscv64")' ]
+  [ "$(arch_line "arch=(x86_64 'aarch64')" x86_64 riscv64)" = 'arch=(x86_64 riscv64)' ]
+}
+
+@test "arch.sh: arch_order puts an arch back at its place" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  [ "$(arch_order 'x86_64 powerpc64le riscv64' aarch64 'x86_64 aarch64 powerpc64le riscv64')" = 'x86_64 aarch64 powerpc64le riscv64' ]
+  [ "$(arch_order 'x86_64 riscv64' powerpc64le 'x86_64 aarch64 powerpc64le riscv64')" = 'x86_64 powerpc64le riscv64' ]
+  [ "$(arch_order 'aarch64 riscv64' x86_64 'x86_64 aarch64 riscv64')" = 'x86_64 aarch64 riscv64' ]
+  [ "$(arch_order 'x86_64 aarch64' aarch64 'x86_64 aarch64')" = 'x86_64 aarch64' ]
+}
+
+@test "arch.sh: arch_urls builds the URLs of an arch for a new version" {
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 28+22 28+23 "" "" "" "" ""
+  [ "$status" -eq 0 ]
+  [ "$output" = https://github.com/adoptium/temurin28-binaries/releases/download/jdk-28+23-ea-beta/OpenJDK-jdk_aarch64_linux_hotspot_28_23-ea.tar.gz ]
+}
+
+@test "arch.sh: arch_urls takes the https downloads alone, after a file name" {
+  printf '%s\n' 'pkgbase = demo' $'\tpkgver = 1.2.0' $'\tarch = aarch64' \
+    $'\tsource_aarch64 = demo-1.2.0.tar.gz::https://example.com/v1.2.0/demo-aarch64.tar.gz' \
+    $'\tsource_aarch64 = git+https://example.com/demo.git#tag=v1.2.0' \
+    $'\tsource_aarch64 = http://example.com/v1.2.0/extra.tar.gz' \
+    $'\tsource_aarch64 = demo.patch' $'\tsource_x86_64 = https://example.com/v1.2.0/demo-x86_64.tar.gz' >"$TEST_TMPDIR/.SRCINFO"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 1.2.0 1.3.0 "" "" "" "" ""
+  [ "$status" -eq 0 ]
+  [ "$output" = https://example.com/v1.3.0/demo-aarch64.tar.gz ]
+}
+
+@test "arch.sh: arch_urls replaces an asset value, a dash form and the version in pkgver_format" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  printf '\tsource_aarch64 = %s\n' https://github.com/savonet/liquidsoap/releases/download/v2.4.6/liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_arm64.deb >"$TEST_TMPDIR/.SRCINFO"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 2.4.6 2.5.0 "" "" "" 2.4.6-debian-forky-ocaml5.4.0-3 2.5.0-debian-forky-ocaml5.5.1-1
+  [ "$output" = https://github.com/savonet/liquidsoap/releases/download/v2.5.0/liquidsoap_2.5.0-debian-forky-ocaml5.5.1-1_arm64.deb ]
+  printf '\tsource_aarch64 = %s\n' https://example.com/0.0.1-rc.20/demo-0.0.1-rc.20-aarch64.tar.gz >"$TEST_TMPDIR/.SRCINFO"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 0.0.1_rc.20 0.0.1_rc.21 "" "" _ "" ""
+  [ "$output" = https://example.com/0.0.1-rc.21/demo-0.0.1-rc.21-aarch64.tar.gz ]
+  printf '\tsource_aarch64 = %s\n' https://example.com/build/4215/demo-aarch64.tar.gz >"$TEST_TMPDIR/.SRCINFO"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 4.4215 4.4216 4215 4216 "" "" ""
+  [ "$output" = https://example.com/build/4216/demo-aarch64.tar.gz ]
+}
+
+# Helper: a curl that logs its arguments, prints $CURL_W and exits $CURL_RC
+mock_probe_curl() {
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"$TEST_TMPDIR/curl.args"
+printf '%s' "\$CURL_W"
+exit "\${CURL_RC:-0}"
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+}
+
+@test "arch.sh: probe_url tells a file from a missing one and from no answer" {
+  local entry rc expected
+  local -a cases=(
+    "0|0|200 application/octet-stream"
+    "0|0|399 application/gzip"
+    "0|1|400 application/octet-stream"
+    "0|1|404 text/html; charset=utf-8"
+    "0|1|200 Text/HTML; charset=utf-8"
+    "0|2|000 "
+    "0|2|BASH_VERSINFO[\$(id>$TEST_TMPDIR/pwned)] text/plain"
+    "7|2|000 "
+    "47|2|302 text/plain"
+  )
+  mock_probe_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  for entry in "${cases[@]}"; do
+    rc=0
+    IFS='|' read -r CURL_RC expected CURL_W <<<"$entry"
+    export CURL_RC CURL_W
+    probe_url https://example.com/demo-aarch64.tar.gz || rc=$?
+    [ "$rc" -eq "$expected" ] || {
+      echo "$entry gave $rc"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+  [ "$(head -1 "$TEST_TMPDIR/curl.args")" = "-sIL -o /dev/null -w %{http_code} %{content_type} --max-time 10 --max-redirs 5 https://example.com/demo-aarch64.tar.gz" ]
+}
+
 # === http_get ===
 
 @test "lib.sh: http_get tries a transient failure again" {

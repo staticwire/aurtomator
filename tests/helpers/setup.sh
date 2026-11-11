@@ -64,6 +64,28 @@ ${extra}
 EOF
 }
 
+# Write to $1 the .SRCINFO of a package with an archive per arch, as
+# makepkg --printsrcinfo prints it, at version $2 (default 28+22)
+arch_srcinfo() {
+  local ver="${2:-28+22}" arch file
+  local url="https://github.com/adoptium/temurin28-binaries/releases/download/jdk-${ver}-ea-beta"
+  {
+    printf '%s\n' "pkgbase = jdk-temurin-ea-bin" $'\tpkgdesc = Eclipse Temurin early access JDK' \
+      $'\tpkgver = '"$ver" $'\tpkgrel = 1' $'\turl = https://adoptium.net/'
+    printf '\tarch = %s\n' x86_64 aarch64 powerpc64le riscv64
+    printf '%s\n' $'\tlicense = GPL-2.0-only WITH Classpath-exception-2.0' $'\tdepends = java-runtime-common'
+    for arch in x86_64 aarch64 powerpc64le riscv64; do
+      file=$arch
+      [[ "$arch" != x86_64 ]] || file=x64
+      [[ "$arch" != powerpc64le ]] || file=ppc64le
+      printf '\tsource_%s = %s/OpenJDK-jdk_%s_linux_hotspot_%s-ea.tar.gz\n' "$arch" "$url" "$file" "${ver/+/_}"
+      [[ "$arch" != aarch64 ]] || printf '\tdepends_aarch64 = zlib\n'
+      printf '\tsha256sums_%s = %s\n' "$arch" "$(printf '%s' "$arch$ver" | sha256sum | cut -d' ' -f1)"
+    done
+    printf '\npkgname = jdk-temurin-ea-bin\n'
+  } >"$1"
+}
+
 # Prints how many status files of directory $1 hold check_failed or
 # update_failed
 failed_statuses() {
