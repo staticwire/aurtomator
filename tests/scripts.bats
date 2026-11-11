@@ -1016,19 +1016,20 @@ MOCKCURL
   [ "$output" = $'x86_64\naarch64\npowerpc64le\nriscv64' ]
 }
 
-@test "arch.sh: srcinfo_arch_lines prints the lines of one arch in every section" {
+@test "arch.sh: srcinfo_arch_lines prints the lines of one arch in every section, after the section" {
   local url=https://github.com/adoptium/temurin28-binaries/releases/download/jdk-28+22-ea-beta
+  local base='pkgbase = jdk-temurin-ea-bin' name='pkgname = jdk-temurin-ea-bin'
   arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
   printf '\tdepends_aarch64 = zlib-ng\n' >>"$TEST_TMPDIR/.SRCINFO"
   source "$TEST_TMPDIR/scripts/lib.sh"
   run srcinfo_arch_lines "$TEST_TMPDIR/.SRCINFO" aarch64
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '\t%s\n' 'arch = aarch64' "source_aarch64 = $url/OpenJDK-jdk_aarch64_linux_hotspot_28_22-ea.tar.gz" \
-    'depends_aarch64 = zlib' "sha256sums_aarch64 = $(printf aarch6428+22 | sha256sum | cut -d' ' -f1)" 'depends_aarch64 = zlib-ng')" ]
+  [ "$output" = "$(printf '%s\t\t%s\n' "$base" 'arch = aarch64' "$base" "source_aarch64 = $url/OpenJDK-jdk_aarch64_linux_hotspot_28_22-ea.tar.gz" \
+    "$base" 'depends_aarch64 = zlib' "$base" "sha256sums_aarch64 = $(printf aarch6428+22 | sha256sum | cut -d' ' -f1)" "$name" 'depends_aarch64 = zlib-ng')" ]
   run srcinfo_arch_lines "$TEST_TMPDIR/.SRCINFO" x86_64
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '\t%s\n' 'arch = x86_64' "source_x86_64 = $url/OpenJDK-jdk_x64_linux_hotspot_28_22-ea.tar.gz" \
-    "sha256sums_x86_64 = $(printf x86_6428+22 | sha256sum | cut -d' ' -f1)")" ]
+  [ "$output" = "$(printf '%s\t\t%s\n' "$base" 'arch = x86_64' "$base" "source_x86_64 = $url/OpenJDK-jdk_x64_linux_hotspot_28_22-ea.tar.gz" \
+    "$base" "sha256sums_x86_64 = $(printf x86_6428+22 | sha256sum | cut -d' ' -f1)")" ]
 }
 
 @test "arch.sh: srcinfo_pkgver prints the pkgver" {
@@ -1090,6 +1091,18 @@ MOCKCURL
   [ "$(arch_order 'x86_64 riscv64' powerpc64le 'x86_64 aarch64 powerpc64le riscv64')" = 'x86_64 powerpc64le riscv64' ]
   [ "$(arch_order 'aarch64 riscv64' x86_64 'x86_64 aarch64 riscv64')" = 'x86_64 aarch64 riscv64' ]
   [ "$(arch_order 'x86_64 aarch64' aarch64 'x86_64 aarch64')" = 'x86_64 aarch64' ]
+}
+
+@test "arch.sh: arch_update_words takes out the listed arches it does not keep and puts each arch back by its commit" {
+  local ref="$TEST_TMPDIR/ref"
+  mkdir -p "$ref/aarch64" "$ref/powerpc64le"
+  arch_srcinfo "$ref/aarch64/.SRCINFO"
+  arch_srcinfo "$ref/powerpc64le/.SRCINFO" 28+20 x86_64 powerpc64le aarch64
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  [ "$(arch_update_words 'x86_64 aarch64 riscv64' aarch64 '' '' "$ref")" = 'x86_64 riscv64' ]
+  [ "$(arch_update_words 'x86_64 aarch64 riscv64' 'riscv64 aarch64' aarch64 '' "$ref")" = 'x86_64 aarch64' ]
+  [ "$(arch_update_words 'x86_64 riscv64' '' '' aarch64 "$ref")" = 'x86_64 aarch64 riscv64' ]
+  [ "$(arch_update_words 'x86_64 riscv64' riscv64 '' 'aarch64 powerpc64le' "$ref")" = 'x86_64 powerpc64le aarch64' ]
 }
 
 @test "arch.sh: arch_urls builds the URLs of an arch for a new version" {

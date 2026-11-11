@@ -1735,6 +1735,270 @@ use_source() {
   [ ! -e "$TEST_TMPDIR/clone-urls" ]
 }
 
+# === publish-pkg.sh and verify-pkg.sh --arch-out ===
+
+# Helper: prepare jdk-temurin-ea-bin <version> with --arch-out <arches> from
+# the AUR of setup_arch_prepare, as the prepare job does; sets PREPARED
+prepare_arch() {
+  "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin "$1" --arch-out "$2" --prepare "$TEST_TMPDIR/out" >"$TEST_TMPDIR/prepare.log" 2>&1
+  PREPARED=$ARCH_OUT_DIR
+}
+
+# Helper: a curl that writes to its -o file what arch_sum hashes for the arch
+# and the version of its URL, and logs the URL to downloads.log
+mock_arch_downloads() {
+  cat >"$MOCK_DIR/curl" <<EOF
+#!/usr/bin/env bash
+source "$TESTS_DIR/helpers/setup.sh"
+url="\${@: -1}"
+out=""
+while [[ \$# -gt 1 ]]; do
+  [[ "\$1" == "-o" ]] && out="\$2"
+  shift
+done
+echo "\$url" >>"$TEST_TMPDIR/downloads.log"
+[[ "\$url" =~ jdk-([^/]+)-ea-beta/ ]] || exit 22
+ver=\${BASH_REMATCH[1]}
+for arch in "\${ARCH_ALL[@]}"; do
+  if [[ "\$(arch_source_url "\$arch" "\$ver")" == "\$url" ]]; then
+    printf '%s' "\$arch\$ver" >"\$out"
+    exit 0
+  fi
+done
+exit 22
+EOF
+  chmod +x "$MOCK_DIR/curl"
+}
+
+@test "publish-pkg: pushes an update without the arches of --arch-out" {
+  setup_arch_prepare
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "arch=('x86_64' 'powerpc64le' 'riscv64')"
+  run ! grep -q aarch64 <(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)
+  [ "$(pkg_get "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" .current)" = "28+23" ]
+}
+
+@test "publish-pkg: refuses an arch taken out that --arch-out does not name" {
+  setup_arch_prepare
+  archive_missing aarch64 28+23
+  archive_missing riscv64 28+23
+  prepare_arch 28+23 "aarch64 riscv64"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD has arch=('x86_64' 'powerpc64le'), expected arch=('x86_64' 'powerpc64le' 'riscv64')"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: refuses an arch line in another quoting, order or spacing" {
+  local line
+  setup_arch_prepare
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  cp "$PREPARED/PKGBUILD" "$TEST_TMPDIR/PKGBUILD.prepared"
+  for line in 'arch=(x86_64 powerpc64le riscv64)' "arch=('x86_64' 'riscv64' 'powerpc64le')" "arch=('x86_64'  'powerpc64le' 'riscv64')"; do
+    LINE="$line" awk '/^arch=/ { print ENVIRON["LINE"]; next } { print }' "$TEST_TMPDIR/PKGBUILD.prepared" >"$PREPARED/PKGBUILD"
+    run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+    [ "$status" -eq 1 ] && [[ "$output" == *"Prepared PKGBUILD has $line, expected arch=('x86_64' 'powerpc64le' 'riscv64')"* ]] || {
+      echo "taken: $line"
+      return 1
+    }
+  done
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: pushes an arch of --arch-out that prepare kept" {
+  setup_arch_prepare
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "arch=('x86_64' 'aarch64' 'powerpc64le' 'riscv64')"
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "sha256sums_aarch64=('$(arch_sum aarch64 28+23)')"
+}
+
+@test "publish-pkg: needs no commit for an arch of arch_out that arch=() names again" {
+  setup_arch_prepare
+  GONE="$(printf 'c%.0s' {1..40})" yq -i '.arch_out.aarch64 = strenv(GONE)' "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  prepare_arch 28+23 ""
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out ""
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "arch=('x86_64' 'aarch64' 'powerpc64le' 'riscv64')"
+}
+
+@test "publish-pkg: takes the files of the AUR when no arch moves at the version the AUR has" {
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --arch-out aarch64 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  yq -i '.current = "28+22"' "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$ARCH_OUT_DIR" --arch-out aarch64
+  [ "$status" -eq 2 ]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" .current)" = "28+23" ]
+}
+
+@test "publish-pkg: refuses a changed arch line without --arch-out" {
+  setup_arch_prepare
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: puts an arch out back at a new version" {
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+24 ""
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out ""
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "arch=('x86_64' 'aarch64' 'powerpc64le' 'riscv64')"
+  git -C "$AUR_REMOTE" show HEAD:.SRCINFO | grep -qx $'\tdepends_aarch64 = zlib'
+  git -C "$AUR_REMOTE" show HEAD:.SRCINFO | grep -qxF $'\tsource_aarch64 = '"$(arch_source_url aarch64 28+24)"
+}
+
+@test "publish-pkg: puts an arch out back at the version the AUR has, with its pkgrel" {
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+23 ""
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out ""
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx 'pkgver=28+23'
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx 'pkgrel=1'
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "arch=('x86_64' 'aarch64' 'powerpc64le' 'riscv64')"
+  git -C "$AUR_REMOTE" show HEAD:.SRCINFO | grep -qxF $'\tsource_aarch64 = '"$(arch_source_url aarch64 28+23)"
+}
+
+@test "publish-pkg: refuses an arch put back with a raised pkgrel" {
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+23 ""
+  sed -i 's/^pkgrel=1$/pkgrel=2/' "$PREPARED/PKGBUILD"
+  sed -i 's/^\tpkgrel = 1$/\tpkgrel = 2/' "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD has pkgrel=2, expected 1"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: refuses the files of the AUR when an arch has to come back" {
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  PREPARED=$ARCH_OUT_DIR
+  mkdir -p "$PREPARED"
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD >"$PREPARED/PKGBUILD"
+  git -C "$AUR_REMOTE" show HEAD:.SRCINFO >"$PREPARED/.SRCINFO"
+  echo "$AUR_BASE" >"$PREPARED/base"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The prepared files are those of the AUR, without the change of arch=() to x86_64 aarch64 powerpc64le riscv64"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: refuses an arch put back with other lines than its commit has" {
+  local -a edits=(
+    's/^\tdepends_aarch64 = zlib$/\tdepends_aarch64 = zlib-evil/'
+    's|^\(\tsource_aarch64 = \)https://github.com|\1https://evil.example|'
+    '/^\tdepends_aarch64 = /d'
+    's/^\(\tsha256sums_aarch64 = \).*/\1SKIP/'
+  )
+  local -a reasons=(
+    "Prepared .SRCINFO puts aarch64 back with depends_aarch64 = zlib-evil in pkgbase = jdk-temurin-ea-bin, expected depends_aarch64 = zlib"
+    "Prepared .SRCINFO puts aarch64 back with source_aarch64 = https://evil.example/"
+    "Prepared .SRCINFO has 3 lines of aarch64, the commit of arch_out.aarch64 has 4"
+    "Prepared .SRCINFO puts aarch64 back with sha256sums_aarch64 = SKIP in pkgbase = jdk-temurin-ea-bin, expected sha256sums_aarch64 = a checksum"
+  )
+  local i
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+24 ""
+  cp "$PREPARED/.SRCINFO" "$TEST_TMPDIR/SRCINFO.prepared"
+  for i in "${!edits[@]}"; do
+    sed "${edits[$i]}" "$TEST_TMPDIR/SRCINFO.prepared" >"$PREPARED/.SRCINFO"
+    run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out ""
+    [ "$status" -eq 1 ] && [[ "$output" == *"${reasons[$i]}"* ]] || {
+      echo "taken: ${edits[$i]}"
+      return 1
+    }
+  done
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: refuses a line of an arch put back in another section than its commit has" {
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+24 ""
+  awk '/^\tsha256sums_aarch64 = / { moved = $0; next } { print } /^pkgname = / { print moved }' \
+    "$PREPARED/.SRCINFO" >"$TEST_TMPDIR/SRCINFO.moved"
+  cp "$TEST_TMPDIR/SRCINFO.moved" "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO puts aarch64 back with sha256sums_aarch64 = $(arch_sum aarch64 28+24) in pkgname = jdk-temurin-ea-bin, expected "*" in pkgbase = jdk-temurin-ea-bin"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: refuses an arch put back with other checksum arrays than its commit has" {
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+24 ""
+  sed -i "s/^sha256sums_aarch64=(.*/sha256sums_aarch64=('SKIP')/" "$PREPARED/PKGBUILD"
+  sed -i 's/^\tsha256sums_aarch64 = .*/\tsha256sums_aarch64 = SKIP/' "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD puts aarch64 back with other checksum arrays than the commit of arch_out.aarch64"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: refuses an arch to put back whose commit is not in the AUR repo" {
+  local gone
+  gone=$(printf 'c%.0s' {1..40})
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+24 ""
+  GONE="$gone" yq -i '.arch_out.aarch64 = strenv(GONE)' "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The commit of arch_out.aarch64 is not in the AUR repo: $gone"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "publish-pkg: refuses an --arch-out of another form" {
+  setup_arch_prepare
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out 'aarch64;x'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--arch-out must name arches separated by single spaces"* ]]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--arch-out needs a list of arches, which may be empty"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "verify-pkg: checks an update without the arches of --arch-out and downloads none of theirs" {
+  setup_arch_prepare
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  mock_arch_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  grep -qxF "$(arch_source_url riscv64 28+23)" "$TEST_TMPDIR/downloads.log"
+  run ! grep -q aarch64 "$TEST_TMPDIR/downloads.log"
+}
+
+@test "verify-pkg: downloads the archive of an arch that comes back" {
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+24 ""
+  mock_arch_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out ""
+  [ "$status" -eq 0 ]
+  grep -qxF "$(arch_source_url aarch64 28+24)" "$TEST_TMPDIR/downloads.log"
+}
+
+@test "verify-pkg: refuses a checksum of an arch that comes back that its archive does not have" {
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+24 ""
+  sed -i "s/$(arch_sum aarch64 28+24)/$H1/" "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO"
+  mock_arch_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sha256sums_aarch64 of $(arch_source_url aarch64 28+24) is $H1, the source has $(arch_sum aarch64 28+24)"* ]]
+}
+
 # === check-all.sh --prepare and --publish ===
 
 # Helper: replace a script with a stub that logs its arguments to
@@ -3583,6 +3847,7 @@ pkgname=demo
 pkgver=2.0
 pkgrel=1
 _bin=demo-2.0-x86_64
+arch=('x86_64')
 pkgdesc="A GPL-2.0 licensed tool"
 # provides=("tool=2.0")
   # depends=('old')
@@ -3598,7 +3863,7 @@ package() {
 EOF
   run _pkgbuild_text "$OLD" _bin
   [ "$status" -eq 0 ]
-  [ "$output" = $'pkgname=demo\npkgdesc="A GPL-2.0 licensed tool"\nprovides=("tool=${pkgver}")\n\npackage() {\n  install -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
+  [ "$output" = $'pkgname=demo\narch=(\'x86_64\')\npkgdesc="A GPL-2.0 licensed tool"\nprovides=("tool=${pkgver}")\n\npackage() {\n  install -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
 }
 
 @test "_pkgbuild_text: drops a comment indented with a tab" {
@@ -5050,8 +5315,44 @@ arch_out:
   stub_script publish-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
-  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 1.0.0 $TEST_TMPDIR/out/prepared/pkg" ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 1.0.0 $TEST_TMPDIR/out/prepared/pkg --arch-out " ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "arch_added: 1.0.0 aarch64" ]
+}
+
+@test "check-all --verify: passes the arches out of the check run" {
+  setup_check_verify
+  printf 'pkg\t2.0.0\taarch64\t2026-11-10T09:00:00Z\n' >"$TEST_TMPDIR/.status/_arches"
+  stub_script verify-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg --arch-out aarch64" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
+}
+
+@test "check-all --verify: fails an arch record of another form" {
+  local line
+  stub_script verify-pkg.sh 0
+  for line in $'pkg\t2.0.0\taarch64' $'pkg\t1.0.0\taarch64\t' $'pkg\t2.0.0\tAArch64\t' $'pkg\t2.0.0\taarch64\tsoon'; do
+    setup_check_verify
+    printf '%s\n' "$line" >"$TEST_TMPDIR/.status/_arches"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: invalid arch record from the check run" ] || {
+      echo "taken: ${line@Q}"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
+}
+
+@test "check-all --publish: passes the arches out of the check run" {
+  checked_arch_package 1.0.0 "new_version: 2.0.0" $'pkg\t2.0.0\taarch64\t2026-11-10T09:00:00Z'
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg --arch-out aarch64" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
 }
 
 @test "check-all --prepare, --verify and --publish: refuse an arch_back of another form" {

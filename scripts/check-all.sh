@@ -133,6 +133,8 @@ if [[ "$MODE" == "verify" ]]; then
     asset_regex=$(pkg_get "$pkg_file" '.upstream.asset_regex // ""')
     asset=""
     [[ -z "$asset_regex" ]] || asset=$(awk -F'\t' -v p="$pkg_name" '$1 == p { v = $2 } END { print v }' <<<"${CHECKED[_assets]:-}")
+    arch_record=$(awk -F'\t' -v p="$pkg_name" '$1 == p { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}")
+    arch_out=""
     verify_rc=0
     if ((SECONDS >= VERIFY_BUDGET)); then
       verify_rc=1
@@ -143,10 +145,13 @@ if [[ "$MODE" == "verify" ]]; then
     elif [[ -n "$asset_regex" ]] && ! validate_asset_value "$asset" 2>/dev/null; then
       verify_rc=1
       verify_err="no asset value from the check run"
+    elif [[ -n "$arch_record" ]] && ! arch_out=$(arch_record_out "$arch_record" "$version"); then
+      verify_rc=1
+      verify_err="invalid arch record from the check run"
     else
       err_file=$(mktemp)
       bounded "$UPDATE_TIMEOUT" "${AURTOMATOR_DIR}/scripts/verify-pkg.sh" "$pkg_name" "$version" "$prepared" \
-        ${asset:+--asset} ${asset:+"$asset"} 2>"$err_file" || verify_rc=$?
+        ${asset:+--asset} ${asset:+"$asset"} ${arch_record:+--arch-out} ${arch_record:+"$arch_out"} 2>"$err_file" || verify_rc=$?
       verify_err=$(script_error "$verify_rc" "$err_file" "$UPDATE_TIMEOUT")
       rm -f "$err_file"
     fi
@@ -293,8 +298,7 @@ find_asset() {
 # Set ARCH_OUT to the arches out of an update of $2 (file $1) to version $3, from
 # check-arch.sh or _arches of the check run; a wait or a failure sets the status
 find_arches() {
-  local rc=0 err_file err text first second line version=""
-  local record=$'^[^\t]*\t([^\t]*)\t([^\t]*)\t([^\t]*)$'
+  local rc=0 err_file err text first second line
   ARCH_OUT=""
   ARCH_RECORD=""
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
@@ -305,12 +309,7 @@ find_arches() {
       return 1
     fi
     [[ -n "$line" ]] || return 0
-    if [[ "$line" =~ $record ]]; then
-      version=${BASH_REMATCH[1]}
-      first=${BASH_REMATCH[2]}
-      second=${BASH_REMATCH[3]}
-    fi
-    if [[ "$version" != "$3" ]] || ! arch_record_ok "$first" "$second"; then
+    if ! first=$(arch_record_out "$line" "$3"); then
       echo "check_failed: invalid arch record from the check run" >"${STATUS_DIR}/$2"
       return 1
     fi
@@ -590,7 +589,8 @@ run_package() {
       ;;
     publish)
       log_info "Publishing $pkg_name $latest"
-      cmd=("${AURTOMATOR_DIR}/scripts/publish-pkg.sh" "$pkg_name" "$latest" "${WORK_DIR}/prepared/${pkg_name}" ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"} ${DRY_RUN:+"$DRY_RUN"})
+      cmd=("${AURTOMATOR_DIR}/scripts/publish-pkg.sh" "$pkg_name" "$latest" "${WORK_DIR}/prepared/${pkg_name}" ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"}
+        ${ARCH_RECORD:+--arch-out} ${ARCH_RECORD:+"$ARCH_OUT"} ${DRY_RUN:+"$DRY_RUN"})
       ;;
   esac
 

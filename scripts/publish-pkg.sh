@@ -9,7 +9,10 @@
 # With --asset <value>: the value from the name of a release asset that the
 # check run found, which the line of upstream.asset_var must hold
 #
-# Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]
+# With --arch-out <arches>: the arches out after the update, from the check
+# run, so arch=() may change as update-pkg.sh --arch-out changes it
+#
+# Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]
 #
 # Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version,
 #             3 the AUR moved since the update was prepared
@@ -19,12 +22,14 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 
-readonly PKG_NAME="${1:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]}"
-readonly VERSION="${2:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]}"
-readonly PREPARED="${3:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]}"
+readonly PKG_NAME="${1:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]}"
+readonly VERSION="${2:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]}"
+readonly PREPARED="${3:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]}"
 shift 3
 DRY_RUN=""
 ASSET=""
+ARCH_EDIT=""
+ARCH_OUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)
@@ -39,14 +44,27 @@ while [[ $# -gt 0 ]]; do
       ASSET="$2"
       shift 2
       ;;
+    --arch-out)
+      if [[ $# -lt 2 ]]; then
+        log_err "--arch-out needs a list of arches, which may be empty"
+        exit 1
+      fi
+      ARCH_EDIT=1
+      ARCH_OUT="$2"
+      shift 2
+      ;;
     *)
       log_err "Unknown option: $1"
       exit 1
       ;;
   esac
 done
-readonly DRY_RUN ASSET
+readonly DRY_RUN ASSET ARCH_EDIT ARCH_OUT
 validate_pkgver "$VERSION" || exit 1
+if ! arch_list_ok "$ARCH_OUT"; then
+  log_err "--arch-out must name arches separated by single spaces: ${ARCH_OUT@Q}"
+  exit 1
+fi
 PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
 ASSET_VAR=$(pkg_asset_var "$PKG_FILE") || exit 1
@@ -84,8 +102,14 @@ fi
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
 
+arch_words=""
+if [[ -n "$ARCH_EDIT" ]]; then
+  arch_words=$(prepared_arch_words "$aur_dir" "$aur_files/PKGBUILD" "$PREPARED/PKGBUILD" "$PKG_FILE" \
+    "$ARCH_OUT" "${tmp_dir}/ref") || exit 1
+fi
+
 handed_rc=0
-check_handed_aur_files "$aur_files" "$PREPARED" "$VERSION" "$ASSET_VAR" "$ASSET" || handed_rc=$?
+check_handed_aur_files "$aur_files" "$PREPARED" "$VERSION" "$ASSET_VAR" "$ASSET" "$arch_words" || handed_rc=$?
 if ((handed_rc == 0)); then
   log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
   pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
@@ -99,7 +123,7 @@ if [[ "$prepared_ver" != "$VERSION" ]]; then
   exit 1
 fi
 check_prepared_files "$aur_files" "$PREPARED" "$VERSION" "$(pkgver_dash "$PKG_FILE")" \
-  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" || exit 1
+  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" "$arch_words" "${tmp_dir}/ref" || exit 1
 
 # The clone has no checkout: the index takes the tree of HEAD, and the two
 # prepared files enter it byte for byte. git add would pass them through

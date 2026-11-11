@@ -68,7 +68,7 @@ while [[ $# -gt 0 ]]; do
 done
 readonly DRY_RUN PREPARE_DIR ASSET ARCH_EDIT ARCH_OUT
 validate_pkgver "$NEW_VERSION" || exit 1
-if [[ -n "$ARCH_OUT" && ! "$ARCH_OUT" =~ ^[a-z0-9_]+( [a-z0-9_]+)*$ ]]; then
+if ! arch_list_ok "$ARCH_OUT"; then
   log_err "--arch-out must name arches separated by single spaces: ${ARCH_OUT@Q}"
   exit 1
 fi
@@ -152,25 +152,16 @@ fi
 # arch of arch_out it does not name, at the place the commit of the arch gives
 arch_words=()
 new_words=()
+back=""
 if [[ -n "$ARCH_EDIT" ]]; then
   if ! arch_text=$(pkgbuild_arch_words "${aur_dir}/PKGBUILD"); then
     log_err "--arch-out needs one arch=(...) line of plain arch names in the PKGBUILD"
     exit 1
   fi
   mapfile -t arch_words <<<"$arch_text"
-  for arch in "${arch_words[@]}"; do
-    [[ " $ARCH_OUT " == *" $arch "* ]] || new_words+=("$arch")
-  done
-  while IFS= read -r arch; do
-    [[ -n "$arch" && " $ARCH_OUT " != *" $arch "* && " ${new_words[*]} " != *" $arch "* ]] || continue
-    commit=$(ARCH="$arch" yq -r '.arch_out[strenv(ARCH)]' "$PKG_FILE")
-    if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]] || ! ref=$(git -C "$aur_dir" show "$commit:.SRCINFO" 2>/dev/null); then
-      log_err "The commit of arch_out.$arch is not in the AUR repo: $commit"
-      exit 1
-    fi
-    log_info "Putting $arch back in arch=()"
-    read -ra new_words <<<"$(arch_order "${new_words[*]}" "$arch" "$(srcinfo_arches <(printf '%s\n' "$ref") | tr '\n' ' ')")"
-  done < <(pkg_get "$PKG_FILE" '.arch_out // {} | keys | .[]')
+  back=$(arch_refs "$aur_dir" "${arch_words[*]}" "$PKG_FILE" "$ARCH_OUT" "${tmp_dir}/ref") || exit 1
+  [[ -z "$back" ]] || log_info "Putting $back back in arch=()"
+  read -ra new_words <<<"$(arch_update_words "${arch_words[*]}" "$ARCH_OUT" "" "$back" "${tmp_dir}/ref")"
 fi
 
 # The AUR has this version when pkgver and pkgrel hold the values of the
@@ -198,13 +189,15 @@ sed -i "s/^pkgrel=.*/pkgrel=${pkgrel}/" "${aur_dir}/PKGBUILD"
 skip_arches=""
 if [[ -n "$ARCH_EDIT" ]]; then
   read -ra listed <<<"$ARCH_OUT"
+  kept=""
   for arch in "${listed[@]}"; do
     [[ " ${arch_words[*]} " == *" $arch "* ]] || continue
     if arch_answers "${aur_dir}/PKGBUILD" "$arch"; then
       log_info "The archives of $arch answer, so it stays in arch=()"
-      read -ra new_words <<<"$(arch_order "${new_words[*]}" "$arch" "${arch_words[*]}")"
+      kept+="${kept:+ }$arch"
     fi
   done
+  read -ra new_words <<<"$(arch_update_words "${arch_words[*]}" "$ARCH_OUT" "$kept" "$back" "${tmp_dir}/ref")"
   for arch in "${listed[@]}"; do
     [[ " ${new_words[*]} " == *" $arch "* ]] || skip_arches+="${skip_arches:+ }$arch"
   done
