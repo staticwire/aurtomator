@@ -1202,6 +1202,127 @@ last_updated: '$(date -u -d '1 day' +%F)'"
   [[ "$output" == *"packages/mypkg.yml: last_updated is later than today: $(date -u -d '1 day' +%F)"* ]]
 }
 
+@test "validate: allow_missing_arch true or false passes" {
+  local value
+  for value in true false; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+allow_missing_arch: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $value"
+      return 1
+    }
+  done
+}
+
+@test "validate: allow_missing_arch that is not a boolean rejected" {
+  local value
+  for value in no yes '"false"' 0; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+allow_missing_arch: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"packages/mypkg.yml: allow_missing_arch must be true or false"* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+}
+
+@test "validate: arch_out of arch names and commit ids passes" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+arch_out:
+  aarch64: 3a5f6f12a7c9176a4c87bb402f1a3e938ec04011
+  powerpc64le: '0123456789012345678901234567890123456789'
+  x86_64_v3: \"abcdef0123456789abcdef0123456789abcdef01\""
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: arch_out that is not a map of arch names to commit ids rejected" {
+  local sha=3a5f6f12a7c9176a4c87bb402f1a3e938ec04011 entry expected
+  local -a cases=(
+    "  - aarch64|arch_out must be a map of arch names to commit ids"
+    "  AArch64: $sha|arch_out: an arch name may hold a-z0-9_ only: 'AArch64'"
+    "  'a b': $sha|arch_out: an arch name may hold a-z0-9_ only: 'a b'"
+    "  aarch64: ${sha:1}|arch_out.aarch64 must be a commit id of 40 hex digits: '${sha:1}'"
+    "  aarch64: ${sha^^}|arch_out.aarch64 must be a commit id of 40 hex digits: '${sha^^}'"
+    "  aarch64: HEAD|arch_out.aarch64 must be a commit id of 40 hex digits: 'HEAD'"
+  )
+  for entry in "${cases[@]}"; do
+    expected=${entry#*|}
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+arch_out:
+${entry%%|*}"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"packages/mypkg.yml: $expected"* ]] || {
+      echo "taken: ${entry%%|*}"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+@test "validate: arch_wait of a version and a UTC time passes, quoted or not" {
+  local since
+  for since in '"2026-11-06T11:17:00Z"' 2026-11-06T11:17:00Z; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+arch_wait:
+  version: 28+23
+  since: $since"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $since"
+      return 1
+    }
+  done
+}
+
+@test "validate: arch_wait without a version and a UTC time of the past rejected" {
+  local later entry expected
+  later=$(date -u -d '1 hour' +%Y-%m-%dT%H:%M:%SZ)
+  local -a cases=(
+    "arch_wait: 28+23|arch_wait must be a map with version and since, and no other key"
+    "arch_wait:
+  version: 28+23|arch_wait must be a map with version and since, and no other key"
+    "arch_wait:
+  version: 28+23
+  since: 2026-11-06T11:17:00Z
+  arches: aarch64|arch_wait must be a map with version and since, and no other key"
+    "arch_wait:
+  version: '28 23'
+  since: 2026-11-06T11:17:00Z|arch_wait.version must hold a digit and at most 64 characters of A-Za-z0-9 . _ +: '28 23'"
+    "arch_wait:
+  version: 28+23
+  since: '2026-11-06'|arch_wait.since must be a UTC time YYYY-MM-DDTHH:MM:SSZ: '2026-11-06'"
+    "arch_wait:
+  version: 28+23
+  since: '2026-02-30T11:17:00Z'|arch_wait.since must be a UTC time YYYY-MM-DDTHH:MM:SSZ: '2026-02-30T11:17:00Z'"
+    "arch_wait:
+  version: 28+23
+  since: '$later'|arch_wait.since is later than now: $later"
+  )
+  for entry in "${cases[@]}"; do
+    expected=${entry#*|}
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+${entry%%|*}"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"packages/mypkg.yml: $expected"* ]] || {
+      echo "taken: ${entry%%|*}"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
 @test "validate: alerts with when, from and match pass" {
   create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo

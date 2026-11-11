@@ -20,10 +20,10 @@ _has_nul() {
 
 # Split a PKGBUILD into lines of six kinds, without executing it:
 #   SKEL<TAB>line          every line, with pkgver=, pkgrel=, the asset_var
-#                          line and each top-level checksum array replaced
-#                          by a placeholder
-#   PKGVER|PKGREL|ASSET<TAB>val  the value of a pkgver=, pkgrel= or
-#                          asset_var line
+#                          line, a top-level arch= line and each top-level
+#                          checksum array replaced by a placeholder
+#   PKGVER|PKGREL|ASSET|ARCH<TAB>val  the value of a pkgver=, pkgrel=,
+#                          asset_var or top-level arch= line
 #   SUM<TAB>array<TAB>index<TAB>HASH|SKIP  one line per checksum
 #   SUMVAL<TAB>array<TAB>value  the same checksum with its value
 #   NOTE<TAB>text          a comment in or after a checksum array, or an
@@ -85,6 +85,7 @@ _pkgbuild_parts() {
       print "ASSET\t" substr($0, length(asset) + 2)
       next
     }
+    /^arch=/ { print "SKEL\tARCH"; print "ARCH\t" substr($0, 6); next }
     { print "SKEL\t" $0 }
     END { if (in_sums) print "BAD\tunterminated " name }
   ' "$1"
@@ -109,21 +110,45 @@ _sum_arrays() {
   grep -E $'^(SKEL\tSUMS |SUM\t)' <<<"$1" | sort -s -t $'\t' -k2,2
 }
 
+# Print the lines of _sum_arrays of the parts $1 that belong to the arrays of
+# the arches $2 with $3=keep, or to every other array with $3=drop
+_arch_sum_arrays() {
+  _sum_arrays "$1" | awk -F'\t' -v arches=" $2 " -v mode="$3" '
+    { name = $1 == "SKEL" ? substr($2, 6) : $2; sub(/^[a-z0-9]+sums_?/, "", name) }
+    (name != "" && index(arches, " " name " ") > 0) == (mode == "keep")'
+}
+
+# Print .SRCINFO $1 without the lines of the arches $2 that srcinfo_arch_lines
+# prints, in every section
+_srcinfo_without() {
+  awk -v list="$2" '
+    BEGIN { n = split(list, names, " "); for (i = 1; i <= n; i++) out[names[i]] = 1 }
+    /^\tarch = / { value = substr($0, 9); if (value in out) next }
+    match($0, /^\t[a-z0-9]+_[a-z0-9_]+ = /) {
+      key = substr($0, 2, RLENGTH - 4)
+      sub(/^[a-z0-9]+_/, "", key)
+      if (key in out) next
+    }
+    { print }
+  ' "$1"
+}
+
 # Print the lines of PKGBUILD $1 that a prepared update keeps as they are:
 # all but pkgver=, pkgrel=, the $2= line, checksum arrays and comments
 _pkgbuild_text() {
   _pkgbuild_parts "$1" "${2:-}" | awk '
+    /^ARCH\t/ { print "arch=" substr($0, 6); next }
     !/^SKEL\t/ { next }
     { line = substr($0, 6) }
-    line ~ /^(PKGVER|PKGREL|ASSET|SUMS .*)$/ || line ~ /^[ \t]*#/ { next }
+    line ~ /^(PKGVER|PKGREL|ASSET|ARCH|SUMS .*)$/ || line ~ /^[ \t]*#/ { next }
     { print line }
   '
 }
 
-# update-pkg.sh hands over the files of the AUR when the AUR has the version
-# and the asset value of the update, and only then
-# Args: $1=AUR copy, $2=prepared directory, $3=version, $4=asset_var of the
-#       package, if any, $5=asset value
+# update-pkg.sh hands over the files of the AUR when the AUR has the version,
+# the asset value and the arches of the update, and only then
+# Args: $1=AUR copy, $2=prepared directory, $3=version, $4=asset_var, if any,
+#       $5=asset value, $6=arch words of an update that changes arch=()
 # Returns: 0 for the files of the AUR at its version, 2 for files to check
 #          as an update, 1 otherwise (reason on stderr)
 check_handed_aur_files() {
@@ -133,9 +158,13 @@ check_handed_aur_files() {
   if cmp -s "$1/PKGBUILD" "$2/PKGBUILD" && cmp -s "$1/.SRCINFO" "$2/.SRCINFO"; then
     same=true
   fi
-  if [[ "$aur_ver" == "$3" && "$aur_asset" == "${5:-}" ]]; then
+  if [[ "$aur_ver" == "$3" && "$aur_asset" == "${5:-}" && -z "${6:-}" ]]; then
     [[ "$same" == false ]] || return 0
     log_err "The AUR has ${3}${4:+ with $4=${5:-}} already, so the prepared files must be those of the AUR"
+    return 1
+  fi
+  if [[ "$same" == true && -n "${6:-}" ]]; then
+    log_err "The prepared files are those of the AUR, without the change of arch=() to $6"
     return 1
   fi
   if [[ "$same" == true ]]; then
@@ -145,15 +174,15 @@ check_handed_aur_files() {
   return 2
 }
 
-# Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=expected version,
-#       $4=expected pkgrel (default 1), $5=asset_var of the package, if
-#       any, $6=expected asset value
-# Returns: 0 when the prepared file changes only pkgver (to $3), pkgrel
-#          (to $4), the checksums as updpkgsums writes them and the value of
-#          its one asset_var line (to $6), 1 otherwise (reason on stderr)
+# Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=version, $4=pkgrel (default
+#       1), $5=asset_var, if any, $6=asset value, $7=arch= line the update
+#       writes, if any, $8 and $9=arches whose checksum arrays it drops, adds
+# Returns: 0 when the prepared file changes only pkgver, pkgrel, arch=, the
+#          checksums as updpkgsums writes them and the value of its one
+#          asset_var line, to the values above, 1 otherwise (reason on stderr)
 check_prepared_pkgbuild() {
-  local version="$3" rel="${4:-1}" asset_var="${5:-}" asset="${6:-}"
-  local old_parts new_parts value
+  local version="$3" rel="${4:-1}" asset_var="${5:-}" asset="${6:-}" want_arch="${7:-}"
+  local old_parts new_parts value old_arch new_arch
   local -a assets notes
   if ! old_parts=$(_pkgbuild_parts "$1" "$asset_var") || ! new_parts=$(_pkgbuild_parts "$2" "$asset_var"); then
     log_err "Could not read the PKGBUILD to compare"
@@ -185,7 +214,17 @@ check_prepared_pkgbuild() {
     log_err "Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"
     return 1
   fi
-  if [[ "$(_sum_arrays "$old_parts")" != "$(_sum_arrays "$new_parts")" ]]; then
+  old_arch=$(grep $'^ARCH\t' <<<"$old_parts" || true)
+  new_arch=$(grep $'^ARCH\t' <<<"$new_parts" || true)
+  if [[ -z "$want_arch" && "$new_arch" != "$old_arch" ]]; then
+    log_err "Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"
+    return 1
+  fi
+  if [[ -n "$want_arch" && "$new_arch" != "ARCH"$'\t'"${want_arch#arch=}" ]]; then
+    log_err "Prepared PKGBUILD has arch=${new_arch#ARCH$'\t'}, expected ${want_arch}"
+    return 1
+  fi
+  if [[ "$(_arch_sum_arrays "$old_parts" "${8:-}" drop)" != "$(_arch_sum_arrays "$new_parts" "${9:-}" drop)" ]]; then
     log_err "Prepared PKGBUILD changes the checksum arrays: their names, lengths or SKIP entries differ from the AUR"
     return 1
   fi
@@ -490,9 +529,9 @@ _drop_trailing_blank() {
 # asset value has to change some source URL or checksum.
 # Args: $1=text of the AUR PKGBUILD that the .SRCINFO comes from, as
 #       _pkgbuild_text prints it, $2=AUR .SRCINFO, $3=prepared .SRCINFO,
-#       $4=expected version, $5=pkgver_dash character of the package or
-#       drop, if any, $6=pkgver_format of the package, if any, $7=expected
-#       pkgrel (default 1), $8=old asset value, $9=new asset value
+#       $4=version, $5=pkgver_dash character or drop, $6=pkgver_format,
+#       $7=pkgrel (default 1), $8 and $9=old and new asset value, $10 and
+#       $11=arches whose lines leave the AUR and the prepared copy first
 # Returns: 0 when that holds, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
   local text="$1"
@@ -507,8 +546,8 @@ check_prepared_srcinfo() {
     return 1
   fi
   local -a old_lines new_lines
-  mapfile -t old_lines <"$1"
-  mapfile -t new_lines <"$2"
+  mapfile -t old_lines < <(_srcinfo_without "$1" "${9:-}")
+  mapfile -t new_lines < <(_srcinfo_without "$2" "${10:-}")
   _drop_trailing_blank old_lines
   _drop_trailing_blank new_lines
   if [[ "${#old_lines[@]}" -ne "${#new_lines[@]}" ]]; then
@@ -686,13 +725,14 @@ prepared_base() {
 # Check a prepared PKGBUILD and .SRCINFO against the AUR repo at their base.
 # For a package with asset_var, the old asset value and the pkgrel come
 # from the AUR PKGBUILD, see _asset_pkgrel.
-# Args: $1=AUR repo, $2=prepared dir, $3=expected version,
-#       $4=pkgver_dash character of the package or drop, if any,
-#       $5=pkgver_format of the package, if any, $6=asset_var of the
-#       package, if any, $7=expected asset value
+# Args: $1=AUR repo, $2=prepared dir, $3=version, $4=pkgver_dash character
+#       or drop, $5=pkgver_format, $6=asset_var, $7=asset value, each if any,
+#       $8=arch words of an update that changes arch=(), $9=directory of the
+#       commits of the arches that come back, see arch_refs
 # Returns: 0 when both files pass, 1 otherwise (reason on stderr)
 check_prepared_files() {
-  local f rel old_asset=""
+  local f rel old_asset="" want_arch="" drop="" back=""
+  local -a aur_words=() new_words=()
   # git keeps symlinks, and cp writes through one
   for f in PKGBUILD .SRCINFO; do
     if [[ -L "$1/$f" || ! -f "$1/$f" ]]; then
@@ -705,6 +745,15 @@ check_prepared_files() {
     rel=$(_asset_pkgrel "$1/PKGBUILD" "$6" "$3" "$7") || return 1
     old_asset=$(_asset_line_value "$1/PKGBUILD" "$6" "AUR PKGBUILD")
   fi
-  check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" "$rel" "${6:-}" "${7:-}" &&
-    check_prepared_srcinfo "$(_pkgbuild_text "$1/PKGBUILD" "${6:-}")" "$1/.SRCINFO" "$2/.SRCINFO" "$3" "${4:-}" "${5:-}" "$rel" "$old_asset" "${7:-}"
+  # The arches the update takes out and those it puts back
+  if [[ -n "${8:-}" ]]; then
+    mapfile -t aur_words < <(pkgbuild_arch_words "$1/PKGBUILD")
+    read -ra new_words <<<"$8"
+    want_arch=$(arch_line "$(grep -m1 '^arch=(' "$1/PKGBUILD")" "${new_words[@]}")
+    drop=$(arch_minus "${aur_words[*]}" "$8")
+    back=$(arch_minus "$8" "${aur_words[*]}")
+  fi
+  check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" "$rel" "${6:-}" "${7:-}" "$want_arch" "$drop" "$back" &&
+    check_arches_back "${9:-}" "$2" "$back" "$3" "${4:-}" "${5:-}" "${6:-}" "${7:-}" &&
+    check_prepared_srcinfo "$(_pkgbuild_text "$1/PKGBUILD" "${6:-}")" "$1/.SRCINFO" "$2/.SRCINFO" "$3" "${4:-}" "${5:-}" "$rel" "$old_asset" "${7:-}" "$drop" "$back"
 }

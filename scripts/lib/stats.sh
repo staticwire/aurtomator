@@ -6,7 +6,7 @@
 
 # The first line of the journal, and the pattern of every line after it
 STATS_HEADER='time,package,event,version,previous,run'
-STATS_ROW_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z,[A-Za-z0-9@_+][A-Za-z0-9@._+-]*,(tracked|added|removed|updated|downgrade|rebuilt|held|jump_skipped|downgrade_skipped|pending|check_failed|update_failed|up_to_date)'",[A-Za-z0-9._+]{0,$PKGVER_MAX},[A-Za-z0-9._+]{0,$PKGVER_MAX},[0-9]*\$"
+STATS_ROW_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z,[A-Za-z0-9@_+][A-Za-z0-9@._+-]*,(tracked|added|removed|updated|downgrade|rebuilt|arch_added|held|jump_skipped|downgrade_skipped|pending|check_failed|update_failed|up_to_date)'",[A-Za-z0-9._+]{0,$PKGVER_MAX},[A-Za-z0-9._+]{0,$PKGVER_MAX},[0-9]*\$"
 
 # Fails, with the reason on stderr, when journal $1 or its directory is a
 # link, or the journal is there and no regular file
@@ -50,7 +50,7 @@ stats_last_states() {
 # failure and removed
 stats_class() {
   case "$1" in
-    tracked | added | up_to_date | updated | downgrade | rebuilt) echo ok ;;
+    tracked | added | up_to_date | updated | downgrade | rebuilt | arch_added) echo ok ;;
     *) echo "$1" ;;
   esac
 }
@@ -68,7 +68,11 @@ stats_event() {
       event="${status%%: *}" version="${status#*: }"
       [[ "$version" =~ ^[A-Za-z0-9._+]{1,$PKGVER_MAX}$ ]] || return 1
       ;;
-    "new_version: "* | "available_downgrade: "* | "new_build: "*) return 0 ;;
+    "arch_added: "*)
+      event=arch_added
+      version=$(arch_status_version "${status#arch_added: }") || return 1
+      ;;
+    "new_version: "* | "available_downgrade: "* | "new_build: "* | "arch_back: "*) return 0 ;;
     *) return 1 ;;
   esac
   printf '%s,%s\n' "$event" "$version"
@@ -86,7 +90,7 @@ stats_numbers() {
       if (age < 0) next
       if (!(first > age)) first = age
       last[$2] = $3
-      if ($3 ~ /^(updated|downgrade|rebuilt)$/) {
+      if ($3 ~ /^(updated|downgrade|rebuilt|arch_added)$/) {
         count("pushes")
         pushes[age]++
         for (i = 1; i <= 3; i++) if (age < window[i] && !((i, $2) in pushed)) { pushed[i, $2]; n["packages", i]++ }

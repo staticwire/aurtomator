@@ -147,11 +147,12 @@ for pkg_file in "${pkg_files[@]}"; do
   current=$(pkg_get "$pkg_file" '.current // "-"')
   strategy=$(pkg_get "$pkg_file" .strategy)
   last_updated=$(pkg_get "$pkg_file" '.last_updated // "-"')
+  arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")')
 
   # Determine status from .status/ dir or YAML
   status_file="${STATUS_DIR}/${name}"
   if [[ -f "$status_file" ]]; then
-    status=$(status_label "$(cat "$status_file")")
+    status=$(status_label "$(cat "$status_file")" "$arches_out" "$current")
   elif [[ "$current" == "-" || "$current" == "null" ]]; then
     status="✨ new"
     current="-"

@@ -20,6 +20,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/pkgbuild.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/aur.sh"
 # shellcheck source=lib/prepared.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/prepared.sh"
+# shellcheck source=lib/arch.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arch.sh"
 # shellcheck source=lib/sums.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/sums.sh"
 # shellcheck source=lib/issue.sh

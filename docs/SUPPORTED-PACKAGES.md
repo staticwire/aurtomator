@@ -47,6 +47,8 @@ source_aarch64=("https://example.com/app-${pkgver}-aarch64.tar.gz")
 
 `updpkgsums` handles arch-specific checksum arrays and writes all of them in one block at the place of the first one, so a `sha256sums_<arch>` array next to its `source_<arch>` moves into that block on the first update. Source URL validation covers every `source_<arch>` array. A stable URL pattern is enough.
 
+A release that lacks the archive of one arch would stop the update of every arch at the source check. With `allow_missing_arch`, which is `true` unless the package YAML sets `false`, aurtomator waits 24 hours for the archive, then publishes the version without that arch and puts the arch back once its archive is out, at the same version or with the next one. A version without the archive of `x86_64`, or without the archives of every arch, fails as before. The PKGBUILD needs one `arch=(...)` line of plain arch names at the start of a line, see [WORKFLOW.md section 4.8](WORKFLOW.md#48-versions-without-some-arches).
+
 ### VCS packages (-git) with the git-latest strategy
 
 Packages that track the latest commit of an upstream repository:
@@ -289,7 +291,7 @@ provides=("demo=${pkgver}")
 
 Upstream moves or renames a release, and the old URL now redirects to an HTML error or download page.
 
-**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text. The check covers every `http` and `https` URL, whatever its checksum, and leaves out VCS sources and local files. It reads the PKGBUILD with `CARCH` set, as makepkg does, so a URL built from `$CARCH` is the one makepkg downloads. A source with a `SKIP` checksum is checked too, because no later step downloads it.
+**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text. The check covers every `http` and `https` URL, whatever its checksum, and leaves out VCS sources and local files. It reads the PKGBUILD with `CARCH` set, as makepkg does, so a URL built from `$CARCH` is the one makepkg downloads. A source with a `SKIP` checksum is checked too, because no later step downloads it. An update that takes an arch out of `arch=()` skips the `source_<arch>` array of that arch, see [WORKFLOW.md section 4.8](WORKFLOW.md#48-versions-without-some-arches).
 
 Without this check, `updpkgsums` would hash the HTML page. The checksums would match and the package would fail to install.
 

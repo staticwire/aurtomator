@@ -128,10 +128,13 @@ if [[ "$MODE" == "verify" ]]; then
     version=""
     case "$found" in
       "new_version: "* | "available_downgrade: "* | "new_build: "*) version="${found#*: }" ;;
+      "arch_back: "*) version=$(arch_status_version "${found#arch_back: }") || version="" ;;
     esac
     asset_regex=$(pkg_get "$pkg_file" '.upstream.asset_regex // ""')
     asset=""
     [[ -z "$asset_regex" ]] || asset=$(awk -F'\t' -v p="$pkg_name" '$1 == p { v = $2 } END { print v }' <<<"${CHECKED[_assets]:-}")
+    arch_record=$(awk -F'\t' -v p="$pkg_name" '$1 == p { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}")
+    arch_out=""
     verify_rc=0
     if ((SECONDS >= VERIFY_BUDGET)); then
       verify_rc=1
@@ -142,10 +145,13 @@ if [[ "$MODE" == "verify" ]]; then
     elif [[ -n "$asset_regex" ]] && ! validate_asset_value "$asset" 2>/dev/null; then
       verify_rc=1
       verify_err="no asset value from the check run"
+    elif [[ -n "$arch_record" ]] && ! arch_out=$(arch_record_out "$arch_record" "$version"); then
+      verify_rc=1
+      verify_err="invalid arch record from the check run"
     else
       err_file=$(mktemp)
       bounded "$UPDATE_TIMEOUT" "${AURTOMATOR_DIR}/scripts/verify-pkg.sh" "$pkg_name" "$version" "$prepared" \
-        ${asset:+--asset} ${asset:+"$asset"} 2>"$err_file" || verify_rc=$?
+        ${asset:+--asset} ${asset:+"$asset"} ${arch_record:+--arch-out} ${arch_record:+"$arch_out"} 2>"$err_file" || verify_rc=$?
       verify_err=$(script_error "$verify_rc" "$err_file" "$UPDATE_TIMEOUT")
       rm -f "$err_file"
     fi
@@ -222,6 +228,12 @@ checked_version() {
       fi
       echo "${status#*: }"
       ;;
+    "arch_back: "*)
+      if ! arch_status_version "${status#arch_back: }"; then
+        echo "invalid status from the check run" >&2
+        return 1
+      fi
+      ;;
     up_to_date) ;;
     check_failed:*)
       echo "${status#check_failed: }" >&2
@@ -283,13 +295,84 @@ find_asset() {
   printf '%s\t%s\n' "$2" "$ASSET_VALUE" >>"${STATUS_DIR}/_assets"
 }
 
+# Print the line of package $1 in _arches of the check run
+arch_record_line() {
+  awk -F'\t' -v p="$1" '$1 == p { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}"
+}
+
+# --publish keeps the start of the wait of record line $2 for version $3 in
+# arch_wait of package file $1, until publish-pkg.sh pushes the version
+keep_arch_wait() {
+  if [[ "$MODE" != publish || -z "$2" ]] || ! arch_record_out "$2" "$3" >/dev/null; then
+    return 0
+  fi
+  [[ -z "${2##*$'\t'}" ]] || set_arch_wait "$1" "$3" "${2##*$'\t'}"
+}
+
+# Set ARCH_OUT to the arches out of an update of $2 (file $1) to version $3, from
+# check-arch.sh or _arches of the check run; a wait or a failure sets the status
+find_arches() {
+  local rc=0 err_file err text first second line
+  ARCH_OUT=""
+  ARCH_RECORD=""
+  if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
+    line=$(arch_record_line "$2")
+    if [[ "${CHECKED[$2]:-}" == "pending: "* ]]; then
+      printf '%s\n' "${CHECKED[$2]}" >"${STATUS_DIR}/$2"
+      [[ -z "$line" ]] || printf '%s\n' "$line" >>"${STATUS_DIR}/_arches"
+      return 1
+    fi
+    [[ -n "$line" ]] || return 0
+    if ! first=$(arch_record_out "$line" "$3"); then
+      echo "check_failed: invalid arch record from the check run" >"${STATUS_DIR}/$2"
+      return 1
+    fi
+    ARCH_OUT=$first
+    ARCH_RECORD=1
+    printf '%s\n' "$line" >>"${STATUS_DIR}/_arches"
+    keep_arch_wait "$1" "$line" "$3"
+    return 0
+  fi
+  [[ "$MODE" == check ]] && missing_arch_allowed "$1" || return 0
+  err_file=$(mktemp)
+  text=$(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-arch.sh" "$2" "$3" \
+    ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"} 2>"$err_file") || rc=$?
+  err=$(script_error "$rc" "$err_file" "$CHECK_TIMEOUT")
+  rm -f "$err_file"
+  first=${text%%$'\n'*}
+  second=""
+  [[ "$text" != *$'\n'* ]] || second=${text#*$'\n'}
+  if ((rc == 3)) && valid_time "$text"; then
+    printf '%s\n' "$err" >&2
+    echo "pending: $3" >"${STATUS_DIR}/$2"
+    printf '%s\t%s\t\t%s\n' "$2" "$3" "$text" >>"${STATUS_DIR}/_arches"
+    return 1
+  fi
+  if ((rc == 0)) && arch_record_ok "$first" "$second"; then
+    [[ -z "$err" ]] || printf '%s\n' "$err" >&2
+    ARCH_OUT=$first
+    # A line with neither tells prepare to put back every arch of arch_out
+    if [[ -n "$first$second" || -n "$(pkg_get "$1" '.arch_out // {} | keys | .[]')" ]]; then
+      printf '%s\t%s\t%s\t%s\n' "$2" "$3" "$first" "$second" >>"${STATUS_DIR}/_arches"
+    fi
+    return 0
+  fi
+  ((rc != 0 && rc != 3)) || err="check-arch.sh printed ${text@Q}"
+  log_err "Failed to check $2: $err"
+  echo "check_failed: ${err}" >"${STATUS_DIR}/$2"
+  if ((rc != 124 && rc != 137 && $4 == 1)); then
+    RECHECK+=("$1")
+  fi
+  return 1
+}
+
 # Checks one package, then updates, prepares or publishes it as the mode
 # says, and writes its status. A check that fails fast in a mode that runs
 # the strategies goes on the list for the second pass.
 # Args: $1=package file, $2=pass, 1 or 2
 run_package() {
   local pkg_file="$1" pass="$2"
-  local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex
+  local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false
   local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
   pkg_name=$(pkg_get "$pkg_file" .name)
   # --prepare and --publish keep a wait for the cooldown from the check run
@@ -307,8 +390,8 @@ run_package() {
   if [[ "$MODE" == "publish" ]]; then
     found="${CHECKED[$pkg_name]:-}"
     case "$found" in
-      "new_version: "* | "available_downgrade: "* | "new_build: "*)
-        if ! validate_pkgver "${found#*: }" 2>/dev/null; then
+      "new_version: "* | "available_downgrade: "* | "new_build: "* | "arch_back: "*)
+        if ! checked_version "$pkg_name" >/dev/null 2>&1; then
           echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
           return
         fi
@@ -334,6 +417,7 @@ run_package() {
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         # The issue of a held update lists the notes of its alerts
         [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(fired_alerts "$pkg_file" "$(pkg_get "$pkg_file" '.current // ""')" "${found#held: }" 2>/dev/null)"
+        [[ "$found" != "pending: "* ]] || keep_arch_wait "$pkg_file" "$(arch_record_line "$pkg_name")" "${found#pending: }"
         return
         ;;
       "")
@@ -380,6 +464,22 @@ run_package() {
   if [[ -z "$latest" && -n "$asset_regex" && "$MODE" != "prepare" && "$MODE" != "publish" ]]; then
     find_asset "$pkg_file" "$pkg_name" "$current" "$pass" || return 0
     [[ "$ASSET_VALUE" == "$(pkg_get "$pkg_file" '.current_asset // ""')" ]] || latest="$current"
+  fi
+
+  # An arch out whose archive answers again comes back at the version of the
+  # AUR; --prepare and --publish take it from the status of the check run
+  ARCH_BACK=""
+  ARCH_OUT=""
+  ARCH_RECORD=""
+  if [[ -z "$latest" && "$MODE" == check && -n "$(pkg_get "$pkg_file" '.arch_out // {} | keys | .[]')" ]] &&
+    missing_arch_allowed "$pkg_file"; then
+    find_arches "$pkg_file" "$pkg_name" "$current" "$pass" || return 0
+    arches_read=true
+    ARCH_BACK=$(arches_back "$pkg_file" "$ARCH_OUT")
+    [[ -z "$ARCH_BACK" ]] || latest="$current"
+  elif [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ "${CHECKED[$pkg_name]:-}" == "arch_back: "* ]]; then
+    ARCH_BACK="${CHECKED[$pkg_name]#arch_back: }"
+    ARCH_BACK="${ARCH_BACK#* }"
   fi
 
   if [[ -z "$latest" ]]; then
@@ -459,7 +559,8 @@ run_package() {
     echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
-  if [[ -n "$push_day" && "$TODAY" < "$push_day" ]]; then
+  # An arch that comes back gives no new version, so it does not wait
+  if [[ -n "$push_day" && "$TODAY" < "$push_day" && -z "$ARCH_BACK" ]]; then
     log_info "$pkg_name: ${current:-none} → $latest waits until $push_day"
     echo "cooldown: ${push_day}" >"${STATUS_DIR}/${pkg_name}"
     return
@@ -469,8 +570,14 @@ run_package() {
   if [[ -n "$asset_regex" && -z "$ASSET_VALUE" ]]; then
     find_asset "$pkg_file" "$pkg_name" "$latest" "$pass" || return 0
   fi
+  if [[ "$arches_read" == false ]]; then
+    find_arches "$pkg_file" "$pkg_name" "$latest" "$pass" || return 0
+  fi
 
-  if [[ "$latest" == "$current" ]]; then
+  if [[ -n "$ARCH_BACK" ]]; then
+    available="arch_back: ${latest} ${ARCH_BACK}"
+    pushed="arch_added: ${latest} ${ARCH_BACK}"
+  elif [[ "$latest" == "$current" ]]; then
     available="new_build: ${latest}"
     pushed="rebuilt: ${latest}"
   elif [[ "$is_downgrade" == "true" ]]; then
@@ -493,11 +600,13 @@ run_package() {
       ;;
     prepare)
       log_info "Preparing $pkg_name $latest"
-      cmd=("${AURTOMATOR_DIR}/scripts/update-pkg.sh" "$pkg_name" "$latest" ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"} --prepare "${WORK_DIR}/prepared")
+      cmd=("${AURTOMATOR_DIR}/scripts/update-pkg.sh" "$pkg_name" "$latest" ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"}
+        ${ARCH_RECORD:+--arch-out} ${ARCH_RECORD:+"$ARCH_OUT"} --prepare "${WORK_DIR}/prepared")
       ;;
     publish)
       log_info "Publishing $pkg_name $latest"
-      cmd=("${AURTOMATOR_DIR}/scripts/publish-pkg.sh" "$pkg_name" "$latest" "${WORK_DIR}/prepared/${pkg_name}" ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"} ${DRY_RUN:+"$DRY_RUN"})
+      cmd=("${AURTOMATOR_DIR}/scripts/publish-pkg.sh" "$pkg_name" "$latest" "${WORK_DIR}/prepared/${pkg_name}" ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"}
+        ${ARCH_RECORD:+--arch-out} ${ARCH_RECORD:+"$ARCH_OUT"} ${DRY_RUN:+"$DRY_RUN"})
       ;;
   esac
 
@@ -546,6 +655,17 @@ if ((${#RECHECK[@]} > 0)); then
   sleep "$RECHECK_DELAY"
   for pkg_file in "${RECHECK[@]}"; do
     run_package "$pkg_file" 2
+  done
+fi
+
+# The arches each package lacks after the run, for the issues of arches out
+if [[ "$MODE" == "publish" ]]; then
+  : >"${STATUS_DIR}/_without"
+  for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
+    [[ -f "$pkg_file" ]] || continue
+    arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")')
+    [[ -z "$arches_out" ]] || printf '%s\t%s\t%s\n' "$(pkg_get "$pkg_file" .name)" \
+      "$(pkg_get "$pkg_file" '.current // ""')" "$arches_out" >>"${STATUS_DIR}/_without"
   done
 fi
 

@@ -9,7 +9,10 @@
 # With --asset <value>: the value from the name of a release asset that the
 # check run found, which the line of upstream.asset_var must hold
 #
-# Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]
+# With --arch-out <arches>: the arches out after the update, from the check
+# run, so arch=() may change as update-pkg.sh --arch-out changes it
+#
+# Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]
 #
 # Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version,
 #             3 the AUR moved since the update was prepared
@@ -19,12 +22,14 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 
-readonly PKG_NAME="${1:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]}"
-readonly VERSION="${2:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]}"
-readonly PREPARED="${3:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--dry-run]}"
+readonly PKG_NAME="${1:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]}"
+readonly VERSION="${2:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]}"
+readonly PREPARED="${3:?Usage: publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]}"
 shift 3
 DRY_RUN=""
 ASSET=""
+ARCH_EDIT=""
+ARCH_OUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)
@@ -39,14 +44,27 @@ while [[ $# -gt 0 ]]; do
       ASSET="$2"
       shift 2
       ;;
+    --arch-out)
+      if [[ $# -lt 2 ]]; then
+        log_err "--arch-out needs a list of arches, which may be empty"
+        exit 1
+      fi
+      ARCH_EDIT=1
+      ARCH_OUT="$2"
+      shift 2
+      ;;
     *)
       log_err "Unknown option: $1"
       exit 1
       ;;
   esac
 done
-readonly DRY_RUN ASSET
+readonly DRY_RUN ASSET ARCH_EDIT ARCH_OUT
 validate_pkgver "$VERSION" || exit 1
+if ! arch_list_ok "$ARCH_OUT"; then
+  log_err "--arch-out must name arches separated by single spaces: ${ARCH_OUT@Q}"
+  exit 1
+fi
 PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
 ASSET_VAR=$(pkg_asset_var "$PKG_FILE") || exit 1
@@ -84,11 +102,20 @@ fi
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
 
+arch_words=""
+if [[ -n "$ARCH_EDIT" ]]; then
+  arch_words=$(prepared_arch_words "$aur_dir" "$aur_files/PKGBUILD" "$PREPARED/PKGBUILD" "$PKG_FILE" \
+    "$ARCH_OUT" "${tmp_dir}/ref") || exit 1
+fi
+
 handed_rc=0
-check_handed_aur_files "$aur_files" "$PREPARED" "$VERSION" "$ASSET_VAR" "$ASSET" || handed_rc=$?
+check_handed_aur_files "$aur_files" "$PREPARED" "$VERSION" "$ASSET_VAR" "$ASSET" "$arch_words" || handed_rc=$?
+# The arches of the update, when arch=() is a line of plain names
+final_words=$(pkgbuild_arch_words "${PREPARED}/PKGBUILD" | tr '\n' ' ') || final_words=""
 if ((handed_rc == 0)); then
   log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
   pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
+  arch_state_after "$PKG_FILE" "$final_words" "" "$base"
   exit 2
 fi
 ((handed_rc == 2)) || exit 1
@@ -99,7 +126,7 @@ if [[ "$prepared_ver" != "$VERSION" ]]; then
   exit 1
 fi
 check_prepared_files "$aur_files" "$PREPARED" "$VERSION" "$(pkgver_dash "$PKG_FILE")" \
-  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" || exit 1
+  "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" "$arch_words" "${tmp_dir}/ref" || exit 1
 
 # The clone has no checkout: the index takes the tree of HEAD, and the two
 # prepared files enter it byte for byte. git add would pass them through
@@ -118,11 +145,24 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   exit 0
 fi
 
-# The checks above hold pkgrel to 1, or to the AUR pkgrel plus one for a
-# rebuild
-aur_commit_push "$aur_dir" "$VERSION" "$strategy" "$(sed -n 's/^pkgrel=//p' "${PREPARED}/PKGBUILD" | head -1)" || exit 1
+taken_out=""
+put_back=""
+if [[ -n "$arch_words" ]]; then
+  aur_arches=$(pkgbuild_arch_words "$aur_files/PKGBUILD" | tr '\n' ' ')
+  taken_out=$(arch_minus "$aur_arches" "$arch_words")
+  # Arches put back at the pkgver and pkgrel of the AUR make no new release
+  aur_release="$(_plain_value "$aur_files/PKGBUILD" pkgver)-$(_plain_value "$aur_files/PKGBUILD" pkgrel)"
+  if [[ "$aur_release" == "$VERSION-$(_plain_value "${PREPARED}/PKGBUILD" pkgrel)" ]]; then
+    put_back=$(arch_minus "$arch_words" "$aur_arches")
+  fi
+fi
+
+# The checks above hold pkgrel to 1, to the AUR pkgrel plus one for a rebuild,
+# or to the AUR pkgrel for arches put back
+aur_commit_push "$aur_dir" "$VERSION" "$strategy" "$(sed -n 's/^pkgrel=//p' "${PREPARED}/PKGBUILD" | head -1)" "$put_back" || exit 1
 log_ok "Pushed $PKG_NAME $VERSION to AUR"
 
 pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
-pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
+[[ -n "$put_back" ]] || pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
+arch_state_after "$PKG_FILE" "$final_words" "$taken_out" "$base"
 log_ok "Updated $PKG_FILE with current: $VERSION"

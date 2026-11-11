@@ -852,6 +852,35 @@ MOCKCURL
   grep -q "test-1.0.0-riscv64.tar.gz" "$TEST_TMPDIR/curl-urls.log"
 }
 
+@test "lib.sh: validate_source_urls skips the source arrays of the arches it is given" {
+  cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
+pkgname=test-arches
+pkgver=1.0.0
+pkgrel=1
+arch=('armv7h' 'riscv64')
+source=("https://example.com/test-1.0.0.tar.gz")
+source_armv7h=("https://example.com/test-1.0.0-armv7h.tar.gz")
+source_riscv64=("https://example.com/test-1.0.0-riscv64.tar.gz")
+sha256sums=('abc123')
+sha256sums_armv7h=('abc123')
+sha256sums_riscv64=('abc123')
+EOF
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+echo "\${@: -1}" >>"$TEST_TMPDIR/curl-urls.log"
+printf '200 application/octet-stream'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+  local lib='source "$0/scripts/lib.sh"; validate_source_urls "$1" "$2"'
+  run bash -c "$lib" "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD" "armv7h"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/curl-urls.log")" = $'https://example.com/test-1.0.0.tar.gz\nhttps://example.com/test-1.0.0-riscv64.tar.gz' ]
+  rm "$TEST_TMPDIR/curl-urls.log"
+  run bash -c "$lib" "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD" "riscv64 armv7h"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/curl-urls.log")" = "https://example.com/test-1.0.0.tar.gz" ]
+}
+
 # makepkg sets CARCH, and neovim-nightly-bin builds its URL from it in a
 # case statement. Without CARCH the URL is nvim-linux-.tar.gz, a 404.
 @test "lib.sh: validate_source_urls builds the URLs with CARCH" {
@@ -974,6 +1003,179 @@ MOCKCURL
   CURL_RC=47 CURL_W='302 text/plain' run bash -c 'source "$0/scripts/lib.sh"; validate_source_urls "$1" || exit $?' "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Source URL unreachable: https://example.com/test-1.0.0.tar.gz"* ]]
+}
+
+# === arch.sh ===
+
+@test "arch.sh: srcinfo_arches prints the arches of pkgbase alone" {
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  printf '\npkgname = jdk-temurin-ea-doc\n\tarch = any\n' >>"$TEST_TMPDIR/.SRCINFO"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run srcinfo_arches "$TEST_TMPDIR/.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'x86_64\naarch64\npowerpc64le\nriscv64' ]
+}
+
+@test "arch.sh: srcinfo_arch_lines prints the lines of one arch in every section, after the section" {
+  local url=https://github.com/adoptium/temurin28-binaries/releases/download/jdk-28+22-ea-beta
+  local base='pkgbase = jdk-temurin-ea-bin' name='pkgname = jdk-temurin-ea-bin'
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  printf '\tdepends_aarch64 = zlib-ng\n' >>"$TEST_TMPDIR/.SRCINFO"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run srcinfo_arch_lines "$TEST_TMPDIR/.SRCINFO" aarch64
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\t\t%s\n' "$base" 'arch = aarch64' "$base" "source_aarch64 = $url/OpenJDK-jdk_aarch64_linux_hotspot_28_22-ea.tar.gz" \
+    "$base" 'depends_aarch64 = zlib' "$base" "sha256sums_aarch64 = $(printf aarch6428+22 | sha256sum | cut -d' ' -f1)" "$name" 'depends_aarch64 = zlib-ng')" ]
+  run srcinfo_arch_lines "$TEST_TMPDIR/.SRCINFO" x86_64
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\t\t%s\n' "$base" 'arch = x86_64' "$base" "source_x86_64 = $url/OpenJDK-jdk_x64_linux_hotspot_28_22-ea.tar.gz" \
+    "$base" "sha256sums_x86_64 = $(printf x86_6428+22 | sha256sum | cut -d' ' -f1)")" ]
+}
+
+@test "arch.sh: srcinfo_pkgver prints the pkgver" {
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO" 28+23
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run srcinfo_pkgver "$TEST_TMPDIR/.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = 28+23 ]
+}
+
+@test "arch.sh: pkgbuild_arch_words reads the arch line in any quoting" {
+  local line
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  for line in "arch=('x86_64' 'aarch64')" 'arch=("x86_64" "aarch64")' 'arch=(x86_64 aarch64)' "arch=('x86_64'  \"aarch64\")  "; do
+    printf 'pkgname=demo\n%s\nsource_x86_64=(demo.tar.gz)\n' "$line" >"$TEST_TMPDIR/PKGBUILD"
+    run pkgbuild_arch_words "$TEST_TMPDIR/PKGBUILD"
+    [ "$status" -eq 0 ]
+    [ "$output" = $'x86_64\naarch64' ] || {
+      echo "read: $line"
+      return 1
+    }
+  done
+}
+
+@test "arch.sh: pkgbuild_arch_words refuses an arch line it cannot edit" {
+  local body
+  local -a bodies=(
+    "pkgname=demo"
+    $'arch=(\'x86_64\')\narch=(\'aarch64\')'
+    $'arch=(\'x86_64\')\npackage() {\n  arch=(\'any\')\n}'
+    $'arch=(\'x86_64\')\narch+=(\'aarch64\')'
+    'arch=("$CARCH")'
+    $'arch=(\'x86_64\'\n  \'aarch64\')'
+    'arch=()'
+    "arch=('x86_64') # all"
+    "arch=('x86-64')"
+  )
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  for body in "${bodies[@]}"; do
+    printf '%s\n' "$body" >"$TEST_TMPDIR/PKGBUILD"
+    run pkgbuild_arch_words "$TEST_TMPDIR/PKGBUILD"
+    [ "$status" -eq 1 ] && [ -z "$output" ] || {
+      echo "taken: $body"
+      return 1
+    }
+  done
+}
+
+@test "arch.sh: arch_line writes the words in the quoting of the first word" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  [ "$(arch_line "arch=('x86_64' \"aarch64\")" x86_64 riscv64)" = "arch=('x86_64' 'riscv64')" ]
+  [ "$(arch_line "arch=(\"x86_64\" 'aarch64')" x86_64 riscv64)" = 'arch=("x86_64" "riscv64")' ]
+  [ "$(arch_line "arch=(x86_64 'aarch64')" x86_64 riscv64)" = 'arch=(x86_64 riscv64)' ]
+}
+
+@test "arch.sh: arch_order puts an arch back at its place" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  [ "$(arch_order 'x86_64 powerpc64le riscv64' aarch64 'x86_64 aarch64 powerpc64le riscv64')" = 'x86_64 aarch64 powerpc64le riscv64' ]
+  [ "$(arch_order 'x86_64 riscv64' powerpc64le 'x86_64 aarch64 powerpc64le riscv64')" = 'x86_64 powerpc64le riscv64' ]
+  [ "$(arch_order 'aarch64 riscv64' x86_64 'x86_64 aarch64 riscv64')" = 'x86_64 aarch64 riscv64' ]
+  [ "$(arch_order 'x86_64 aarch64' aarch64 'x86_64 aarch64')" = 'x86_64 aarch64' ]
+}
+
+@test "arch.sh: arch_update_words takes out the listed arches it does not keep and puts each arch back by its commit" {
+  local ref="$TEST_TMPDIR/ref"
+  mkdir -p "$ref/aarch64" "$ref/powerpc64le"
+  arch_srcinfo "$ref/aarch64/.SRCINFO"
+  arch_srcinfo "$ref/powerpc64le/.SRCINFO" 28+20 x86_64 powerpc64le aarch64
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  [ "$(arch_update_words 'x86_64 aarch64 riscv64' aarch64 '' '' "$ref")" = 'x86_64 riscv64' ]
+  [ "$(arch_update_words 'x86_64 aarch64 riscv64' 'riscv64 aarch64' aarch64 '' "$ref")" = 'x86_64 aarch64' ]
+  [ "$(arch_update_words 'x86_64 riscv64' '' '' aarch64 "$ref")" = 'x86_64 aarch64 riscv64' ]
+  [ "$(arch_update_words 'x86_64 riscv64' riscv64 '' 'aarch64 powerpc64le' "$ref")" = 'x86_64 powerpc64le aarch64' ]
+}
+
+@test "arch.sh: arch_urls builds the URLs of an arch for a new version" {
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 28+22 28+23 "" "" "" "" ""
+  [ "$status" -eq 0 ]
+  [ "$output" = https://github.com/adoptium/temurin28-binaries/releases/download/jdk-28+23-ea-beta/OpenJDK-jdk_aarch64_linux_hotspot_28_23-ea.tar.gz ]
+}
+
+@test "arch.sh: arch_urls takes the https downloads alone, after a file name" {
+  printf '%s\n' 'pkgbase = demo' $'\tpkgver = 1.2.0' $'\tarch = aarch64' \
+    $'\tsource_aarch64 = demo-1.2.0.tar.gz::https://example.com/v1.2.0/demo-aarch64.tar.gz' \
+    $'\tsource_aarch64 = git+https://example.com/demo.git#tag=v1.2.0' \
+    $'\tsource_aarch64 = http://example.com/v1.2.0/extra.tar.gz' \
+    $'\tsource_aarch64 = demo.patch' $'\tsource_x86_64 = https://example.com/v1.2.0/demo-x86_64.tar.gz' >"$TEST_TMPDIR/.SRCINFO"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 1.2.0 1.3.0 "" "" "" "" ""
+  [ "$status" -eq 0 ]
+  [ "$output" = https://example.com/v1.3.0/demo-aarch64.tar.gz ]
+}
+
+@test "arch.sh: arch_urls replaces an asset value, a dash form and the version in pkgver_format" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  printf '\tsource_aarch64 = %s\n' https://github.com/savonet/liquidsoap/releases/download/v2.4.6/liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_arm64.deb >"$TEST_TMPDIR/.SRCINFO"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 2.4.6 2.5.0 "" "" "" 2.4.6-debian-forky-ocaml5.4.0-3 2.5.0-debian-forky-ocaml5.5.1-1
+  [ "$output" = https://github.com/savonet/liquidsoap/releases/download/v2.5.0/liquidsoap_2.5.0-debian-forky-ocaml5.5.1-1_arm64.deb ]
+  printf '\tsource_aarch64 = %s\n' https://example.com/0.0.1-rc.20/demo-0.0.1-rc.20-aarch64.tar.gz >"$TEST_TMPDIR/.SRCINFO"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 0.0.1_rc.20 0.0.1_rc.21 "" "" _ "" ""
+  [ "$output" = https://example.com/0.0.1-rc.21/demo-0.0.1-rc.21-aarch64.tar.gz ]
+  printf '\tsource_aarch64 = %s\n' https://example.com/build/4215/demo-aarch64.tar.gz >"$TEST_TMPDIR/.SRCINFO"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 4.4215 4.4216 4215 4216 "" "" ""
+  [ "$output" = https://example.com/build/4216/demo-aarch64.tar.gz ]
+}
+
+# Helper: a curl that logs its arguments, prints $CURL_W and exits $CURL_RC
+mock_probe_curl() {
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"$TEST_TMPDIR/curl.args"
+printf '%s' "\$CURL_W"
+exit "\${CURL_RC:-0}"
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+}
+
+@test "arch.sh: probe_url tells a file from a missing one and from no answer" {
+  local entry rc expected
+  local -a cases=(
+    "0|0|200 application/octet-stream"
+    "0|0|399 application/gzip"
+    "0|1|400 application/octet-stream"
+    "0|1|404 text/html; charset=utf-8"
+    "0|1|200 Text/HTML; charset=utf-8"
+    "0|2|000 "
+    "0|2|BASH_VERSINFO[\$(id>$TEST_TMPDIR/pwned)] text/plain"
+    "7|2|000 "
+    "47|2|302 text/plain"
+  )
+  mock_probe_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  for entry in "${cases[@]}"; do
+    rc=0
+    IFS='|' read -r CURL_RC expected CURL_W <<<"$entry"
+    export CURL_RC CURL_W
+    probe_url https://example.com/demo-aarch64.tar.gz || rc=$?
+    [ "$rc" -eq "$expected" ] || {
+      echo "$entry gave $rc"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+  [ "$(head -1 "$TEST_TMPDIR/curl.args")" = "-sIL -o /dev/null -w %{http_code} %{content_type} --max-time 10 --max-redirs 5 https://example.com/demo-aarch64.tar.gz" ]
 }
 
 # === http_get ===
@@ -1748,6 +1950,21 @@ current: '2.0.0'"
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   grep -qF '<td><a href="https://aur.archlinux.org/pkgbase/pkg-a">pkg-a</a></td>' "$TEST_TMPDIR/README.md"
+}
+
+@test "update-readme: names the arches out of a package in its status" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '28+23'
+arch_out:
+  riscv64: '$(printf 'a%.0s' {1..40})'
+  aarch64: '$(printf 'b%.0s' {1..40})'"
+  echo "up_to_date" >"$TEST_TMPDIR/.status/pkg-a"
+  printf '%s\n' "# test" "<!-- PACKAGES:START -->" "<!-- PACKAGES:END -->" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '<td nowrap>⚠️ 28+23 without riscv64 aarch64</td></tr>' "$TEST_TMPDIR/README.md"
 }
 
 # GitHub keeps nowrap on an HTML table cell, and a Markdown cell takes none
@@ -3928,6 +4145,244 @@ pkgver_dash: ''"
   [[ "$output" == *"plain has no upstream.asset_regex"* ]]
 }
 
+# === check-arch.sh ===
+
+# Helper: jdk-temurin-ea-bin at 28+22 on the AUR, its YAML with the given
+# lines, and the curl of mock_heads
+temurin_package() {
+  create_test_package jdk-temurin-ea-bin webpage-scrape "upstream:
+  url: https://api.adoptium.net/v3/info/release_names
+  pattern: 'jdk-([0-9]+)'
+$1"
+  arch_pkgbuild "$TEST_TMPDIR/PKGBUILD"
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  make_aur_remote jdk-temurin-ea-bin "$TEST_TMPDIR/PKGBUILD" "$TEST_TMPDIR/.SRCINFO"
+  mock_heads
+}
+
+# Helper: run check-arch.sh for jdk-temurin-ea-bin; sets ARCH_RC, and
+# ARCH_OUT to its stdout with a | at the end of each line
+check_arch() {
+  ARCH_RC=0
+  "$TEST_TMPDIR/scripts/check-arch.sh" jdk-temurin-ea-bin "$@" >"$TEST_TMPDIR/arch.out" 2>"$TEST_TMPDIR/arch.err" || ARCH_RC=$?
+  ARCH_OUT=$(sed 's/$/|/' "$TEST_TMPDIR/arch.out")
+}
+
+# Helper: succeeds when time $1 lies at most 120 s from now
+about_now() {
+  local at
+  at=$(date -u -d "$1" +%s) || return 1
+  ((${at} - $(date -u +%s) < 120 && $(date -u +%s) - ${at} < 120))
+}
+
+@test "check-arch: prints two empty lines when every arch answers" {
+  temurin_package "current: 28+22"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  grep -qx 'https://aur.archlinux.org/jdk-temurin-ea-bin.git' "$TEST_TMPDIR/clone-urls"
+  [ "$(sort "$TEST_TMPDIR/heads.log")" = "$(for arch in "${ARCH_ALL[@]}"; do arch_source_url "$arch" 28+23; done | sort)" ]
+}
+
+@test "check-arch: asks nothing with allow_missing_arch: false or pkgver_dash: ''" {
+  local line
+  for line in "allow_missing_arch: false" "pkgver_dash: ''"; do
+    temurin_package "current: 28+22
+$line"
+    archive_missing aarch64 28+23
+    check_arch 28+23
+    [ "$ARCH_RC" -eq 0 ]
+    [ "$ARCH_OUT" = $'|\n|' ]
+    [ ! -e "$TEST_TMPDIR/clone-urls" ] && [ ! -e "$TEST_TMPDIR/heads.log" ] || {
+      echo "asked with $line"
+      return 1
+    }
+    rm -rf "$TEST_TMPDIR/aur-remote" "$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin" "$TEST_TMPDIR/missing"
+  done
+}
+
+@test "check-arch: a missing arch waits 24 h from the run that first saw it" {
+  temurin_package "current: 28+22"
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  [ "$(wc -l <"$TEST_TMPDIR/arch.out")" -eq 1 ]
+  about_now "$(<"$TEST_TMPDIR/arch.out")"
+  grep -q "aarch64" "$TEST_TMPDIR/arch.err"
+}
+
+@test "check-arch: the wait counts from arch_wait of the version" {
+  local since
+  since=$(date -u -d '-23 hours' +%Y-%m-%dT%H:%M:%SZ)
+  temurin_package "current: 28+22
+arch_wait:
+  version: 28+23
+  since: '$since'"
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  [ "$ARCH_OUT" = "$since|" ]
+
+  since=$(date -u -d '-25 hours' +%Y-%m-%dT%H:%M:%SZ)
+  yq -i ".arch_wait.since = \"$since\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = "aarch64|"$'\n'"$since|" ]
+}
+
+@test "check-arch: arch_wait of another version starts a new wait" {
+  temurin_package "current: 28+22
+arch_wait:
+  version: 28+21
+  since: '$(date -u -d '-25 hours' +%Y-%m-%dT%H:%M:%SZ)'"
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  about_now "$(<"$TEST_TMPDIR/arch.out")"
+}
+
+@test "check-arch: a missing x86_64 or every arch missing fails the update as today" {
+  temurin_package "current: 28+22"
+  archive_missing x86_64 28+23
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+
+  aur_arch_commit 28+22 aarch64 riscv64 >/dev/null
+  archive_missing riscv64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+}
+
+@test "check-arch: an arch that is out comes back when its archive answers" {
+  local out
+  temurin_package "current: 28+23"
+  out=$AUR_BASE
+  aur_arch_commit 28+23 x86_64 powerpc64le riscv64 >/dev/null
+  yq -i ".arch_out.aarch64 = \"$out\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  grep -qx "$(arch_source_url aarch64 28+24)" "$TEST_TMPDIR/heads.log"
+
+  archive_missing aarch64 28+24
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+
+  rm "$TEST_TMPDIR/heads.log"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  [ "$(cat "$TEST_TMPDIR/heads.log")" = "$(arch_source_url aarch64 28+23)" ]
+
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+}
+
+@test "check-arch: an arch the maintainer put back is no longer out" {
+  temurin_package "current: 28+22"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  archive_missing aarch64 28+22
+  check_arch 28+22
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  [ ! -e "$TEST_TMPDIR/heads.log" ]
+}
+
+@test "check-arch: a commit of arch_out missing from the AUR fails the check" {
+  temurin_package "current: 28+22
+arch_out:
+  aarch64: '0123456789012345678901234567890123456789'"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 1 ]
+  grep -q "the commit 0123456789012345678901234567890123456789 of arch_out.aarch64 is not in the AUR repo" "$TEST_TMPDIR/arch.err"
+
+  local head
+  head=$(aur_arch_commit 28+23 x86_64 powerpc64le riscv64)
+  yq -i ".arch_out.aarch64 = \"$head\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 1 ]
+  grep -q "the commit $head of arch_out.aarch64 does not build aarch64" "$TEST_TMPDIR/arch.err"
+}
+
+@test "check-arch: after 24 h line 1 names the arches that leave and those that stay out" {
+  temurin_package "current: 28+23
+arch_wait:
+  version: 28+24
+  since: '$(date -u -d '-25 hours' +%Y-%m-%dT%H:%M:%SZ)'"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  aur_arch_commit 28+23 x86_64 powerpc64le riscv64 >/dev/null
+  archive_missing aarch64 28+24
+  archive_missing riscv64 28+24
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$(head -1 "$TEST_TMPDIR/arch.out")" = "riscv64 aarch64" ]
+}
+
+@test "check-arch: a URL without an answer fails the check" {
+  temurin_package "current: 28+22"
+  arch_source_url aarch64 28+23 >"$TEST_TMPDIR/silent"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 1 ]
+  grep -qF "no answer from $(arch_source_url aarch64 28+23)" "$TEST_TMPDIR/arch.err"
+}
+
+@test "check-arch: without the AUR the arches out stay out" {
+  temurin_package "current: 28+22"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  mv "$AUR_REMOTE" "$AUR_REMOTE.gone"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+  [ ! -e "$TEST_TMPDIR/heads.log" ]
+}
+
+@test "check-arch: an arch line it cannot edit leaves the update as it is" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  temurin_package "current: 28+22"
+  sed -i "s/^arch=('x86_64' /arch=('x86_64'\n  /" "$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "two lines"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+  [ ! -e "$TEST_TMPDIR/heads.log" ]
+}
+
+@test "check-arch: builds the URLs with the asset values of the PKGBUILD and of --asset" {
+  create_test_package arch-demo github-release "upstream:
+  project: owner/repo
+  asset_regex: '^demo-[0-9.]+-([0-9]+)-x86_64\\.tar\\.gz\$'
+  asset_var: _build
+current: 1.0.0
+current_asset: '7'"
+  # shellcheck disable=SC2016
+  printf '%s\n' 'pkgname=arch-demo' 'pkgver=1.0.0' 'pkgrel=1' '_build=7' "arch=('x86_64' 'aarch64')" \
+    'source_x86_64=("https://example.com/demo-${pkgver}-${_build}-x86_64.tar.gz")' \
+    'source_aarch64=("https://example.com/demo-${pkgver}-${_build}-aarch64.tar.gz")' >"$TEST_TMPDIR/PKGBUILD"
+  printf '%s\n' 'pkgbase = arch-demo' $'\tpkgver = 1.0.0' $'\tpkgrel = 1' $'\tarch = x86_64' $'\tarch = aarch64' \
+    $'\tsource_x86_64 = https://example.com/demo-1.0.0-7-x86_64.tar.gz' \
+    $'\tsource_aarch64 = https://example.com/demo-1.0.0-7-aarch64.tar.gz' '' 'pkgname = arch-demo' >"$TEST_TMPDIR/.SRCINFO"
+  make_aur_remote arch-demo "$TEST_TMPDIR/PKGBUILD" "$TEST_TMPDIR/.SRCINFO"
+  mock_heads
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-arch.sh" arch-demo 1.1.0 --asset 8
+  [ "$status" -eq 0 ]
+  [ "$(sort "$TEST_TMPDIR/heads.log")" = $'https://example.com/demo-1.1.0-8-aarch64.tar.gz\nhttps://example.com/demo-1.1.0-8-x86_64.tar.gz' ]
+
+  # A new asset value of the version the AUR has is a rebuild of every arch
+  rm "$TEST_TMPDIR/heads.log"
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-arch.sh" arch-demo 1.0.0 --asset 8
+  [ "$status" -eq 0 ]
+  [ "$(sort "$TEST_TMPDIR/heads.log")" = $'https://example.com/demo-1.0.0-8-aarch64.tar.gz\nhttps://example.com/demo-1.0.0-8-x86_64.tar.gz' ]
+}
+
 # === check-all.sh: values from release asset names ===
 
 # Helper: a check-asset.sh that logs its arguments to check-asset.args and
@@ -4101,6 +4556,167 @@ current: '1.0.0'"
   grep -qF '<td nowrap>🔨 1.0.0 rebuild available</td>' "$TEST_TMPDIR/README.md"
   grep -qF '<td nowrap>🔨 1.0.0 rebuilt</td>' "$TEST_TMPDIR/README.md"
   grep -qF '<td nowrap>⏳ 2.0.0 pending</td>' "$TEST_TMPDIR/README.md"
+}
+
+# === check-all.sh: arches out ===
+
+# Helper: a check-arch.sh that logs its arguments to check-arch.args, prints
+# the given text and exits with the given code, 1 with a reason on stderr
+# Usage: stand_in_arch <stdout> [exit code]
+stand_in_arch() {
+  rm -f "$TEST_TMPDIR/scripts/check-arch.sh"
+  printf '#!/usr/bin/env bash\necho "$*" >>%q\nprintf %%s %q\n[[ %s != 1 ]] || echo "AUR unreadable" >&2\nexit %s\n' \
+    "$TEST_TMPDIR/check-arch.args" "$1" "${2:-0}" "${2:-0}" >"$TEST_TMPDIR/scripts/check-arch.sh"
+  chmod +x "$TEST_TMPDIR/scripts/check-arch.sh"
+}
+
+@test "check-all: writes pending and the start of the wait while an arch is missing" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch $'2026-11-11T10:00:00Z\n' 3
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t2.0.0\t\t2026-11-11T10:00:00Z' ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = "pkg 2.0.0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+}
+
+@test "check-all: records the arches that stay out of a new version" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch $'aarch64 riscv64\n2026-11-10T09:00:00Z\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t2.0.0\taarch64 riscv64\t2026-11-10T09:00:00Z' ]
+}
+
+@test "check-all: records nothing for a version that every arch has" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch $'\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+  [ ! -e "$TEST_TMPDIR/.status/_arches" ]
+}
+
+@test "check-all: fails an arch check that prints something else" {
+  local text
+  for text in $'aarch64!\n\n' $'aarch64\nsoon\n' $'\n\nextra\n'; do
+    stand_in_strategy step 2.0.0
+    create_test_package "pkg" "step" "current: '1.0.0'"
+    stand_in_arch "$text"
+    run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ]
+    [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "check_failed: check-arch.sh printed "* ]] || {
+      echo "taken: ${text@Q}"
+      return 1
+    }
+  done
+  stand_in_arch $'soon\n' 3
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: check-arch.sh printed 'soon'" ]
+  [ ! -e "$TEST_TMPDIR/.status/_arches" ]
+}
+
+@test "check-all: passes the asset value of a new version to check-arch" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset 2.0.0-a
+  stand_in_arch $'\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = "pkg 2.0.0 --asset 2.0.0-a" ]
+}
+
+@test "check-all: an arch out whose archive answers comes back at the current version, in a cooldown too" {
+  stand_in_strategy step 1.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'
+last_updated: '$(date -u +%F)'
+cooldown_days: 7
+arch_out:
+  aarch64: '$(printf 'a%.0s' {1..40})'
+  riscv64: '$(printf 'b%.0s' {1..40})'"
+  stand_in_arch $'riscv64\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "arch_back: 1.0.0 aarch64" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t1.0.0\triscv64\t' ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = "pkg 1.0.0" ]
+
+  stand_in_arch $'aarch64 riscv64\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "up_to_date" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t1.0.0\taarch64 riscv64\t' ]
+
+  # Every arch comes back: the line without arches tells prepare so
+  stand_in_arch $'\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "arch_back: 1.0.0 aarch64 riscv64" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t1.0.0\t\t' ]
+}
+
+@test "check-all: asks no arch check in the cooldown of a new version" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'
+last_updated: '$(date -u +%F)'
+cooldown_days: 7"
+  stand_in_arch $'aarch64\n2026-11-10T09:00:00Z\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "cooldown: "* ]]
+  [ ! -e "$TEST_TMPDIR/check-arch.args" ]
+}
+
+@test "check-all: fails the check when check-arch fails, and checks again" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch "" 1
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: AUR unreadable" ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = $'pkg 2.0.0\npkg 2.0.0' ]
+}
+
+@test "check-all: asks no arch check with allow_missing_arch: false or pkgver_dash: ''" {
+  local line version
+  for line in "allow_missing_arch: false" "pkgver_dash: ''"; do
+    for version in 2.0.0 1.0.0; do
+      stand_in_strategy step "$version"
+      create_test_package "pkg" "step" "current: '1.0.0'
+arch_out:
+  aarch64: '$(printf 'a%.0s' {1..40})'
+$line"
+      stand_in_arch $'\n\n'
+      run "$TEST_TMPDIR/scripts/check-all.sh"
+      [ "$status" -eq 0 ]
+      [ ! -e "$TEST_TMPDIR/check-arch.args" ] || {
+        echo "asked with $line at $version"
+        return 1
+      }
+      if [[ "$version" == 1.0.0 ]]; then
+        [ "$(cat "$TEST_TMPDIR/.status/pkg")" = up_to_date ]
+      else
+        [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+      fi
+    done
+  done
+}
+
+@test "check-all --update: runs no arch check" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch $'aarch64\n2026-11-10T09:00:00Z\n'
+  log_update_pkg
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.args")" = "pkg 2.0.0" ]
+  [ ! -e "$TEST_TMPDIR/check-arch.args" ]
 }
 
 # === cooldown ===

@@ -233,7 +233,7 @@ jobs:
           for f in statuses/*; do
             name=${f#statuses/}
             [[ -f "$f" && "$name" =~ $name_re ]] || continue
-            grep -qE '^(new_version|available_downgrade|new_build): ' "$f" || continue
+            grep -qE '^(new_version|available_downgrade|new_build|arch_back): ' "$f" || continue
             if ((${#to_prepare[@]} < 256)); then
               to_prepare+=("$name")
             else
@@ -836,9 +836,11 @@ jobs:
                 "❌ $pkg_name: check failed:check_failed:"*) continue ;;
                 "❌ $pkg_name: check failed:"*) ;;
                 "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
-                  "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "*) ;;
+                  "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "* | \
+                  "❌ $pkg_name: update failed:arch_added: "*) ;;
                 "✋ $pkg_name: update held:up_to_date" | "✋ $pkg_name: update held:updated: "* | \
-                  "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "*) ;;
+                  "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "* | \
+                  "✋ $pkg_name: update held:arch_added: "*) ;;
                 *) continue ;;
               esac
               comment=$(lib close_comment "$status_file" "$RUN_URL")
@@ -869,6 +871,20 @@ jobs:
             done <<<"$open"
           fi
 
+          # An arch issue closes once _without lists its package no more; a run
+          # without publish has no _without and closes none
+          if [[ -f "$STATUS_DIR/_without" ]]; then
+            arched=$(gh issue list --label "arch-missing" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            title_re='^⚠️ ([A-Za-z0-9@_+][A-Za-z0-9@._+-]*): '
+            while read -r number title; do
+              [[ -n "$number" && "$title" =~ $title_re ]] || continue
+              pkg_name=${BASH_REMATCH[1]}
+              awk -F'\t' -v p="$pkg_name" '$1 == p { found = 1 } END { exit !found }' "$STATUS_DIR/_without" && continue
+              comment=$(lib arch_close_comment "$pkg_name" "$RUN_URL")
+              gh issue close "$number" --comment "$comment"
+            done <<<"$arched"
+          fi
+
           # The issue of an aurtomator release closes once VERSION holds it
           # or a newer release is out. A run that could not read the latest
           # release has no _upstream and closes nothing.
@@ -893,7 +909,8 @@ jobs:
           # gh issue list fails in a repository with Issues turned off. A
           # repository like that gets a notice, and any other failure of the
           # list still fails the step.
-          if grep -qsE '^(check_failed|update_failed|held|newer):' "$STATUS_DIR"/* || [[ -s "$STATUS_DIR/_alerts" ]]; then
+          if grep -qsE '^(check_failed|update_failed|held|newer):' "$STATUS_DIR"/* || [[ -s "$STATUS_DIR/_alerts" ]] ||
+            grep -qs . "$STATUS_DIR/_without"; then
             has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
             if [[ "$has_issues" == "false" ]]; then
               echo "::notice::Issues are disabled in $GITHUB_REPOSITORY, so the run opens no issue"
@@ -991,6 +1008,21 @@ jobs:
                 ;;
             esac
           done
+
+          # A package published without some arches has one issue while an arch
+          # is out, whatever version it names
+          if [[ -f "$STATUS_DIR/_without" ]]; then
+            while IFS=$'\t' read -r pkg_name version arches; do
+              [[ -n "$pkg_name" ]] || continue
+              use_label arch-missing e99695 "Published without some arches"
+              if awk -v p="⚠️ $pkg_name: " 'index($0, p) == 1 { found = 1 } END { exit !found }' <<<"${titles[arch-missing]}"; then
+                echo "Issue already open for the arches of $pkg_name"
+                continue
+              fi
+              body=$(lib arch_issue_body "$pkg_name" "$version" "$arches" "$RUN_URL")
+              create_issue arch-missing "⚠️ $pkg_name: $version without $arches" "$body"
+            done <"$STATUS_DIR/_without"
+          fi
 
           # A newer release of aurtomator gets an issue
           upstream=$(cat "$STATUS_DIR/_upstream" 2>/dev/null || true)

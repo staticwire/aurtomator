@@ -133,6 +133,21 @@ lib() {
   done
 }
 
+@test "stats_event: arches put back are a push, and arches back not pushed yet write nothing" {
+  run lib stats_event "arch_added: 28+23 aarch64 riscv64" 28+23
+  [ "$status" -eq 0 ]
+  [ "$output" = 'arch_added,28+23' ]
+  run lib stats_event "arch_back: 28+23 aarch64" 28+23
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run --separate-stderr lib stats_event "arch_added: 28+23" 28+23
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  run --separate-stderr lib stats_event "arch_added: 28+23 a b!" 28+23
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
 @test "stats_event: a current version outside the alphabet is left empty" {
   run lib stats_event up_to_date "-"
   [ "$output" = 'up_to_date,' ]
@@ -167,8 +182,8 @@ lib() {
   [ -z "$output" ]
 }
 
-@test "stats_class: the six ok events share one class" {
-  for event in tracked added up_to_date updated downgrade rebuilt; do
+@test "stats_class: the seven ok events share one class" {
+  for event in tracked added up_to_date updated downgrade rebuilt arch_added; do
     [ "$(lib stats_class "$event")" = ok ]
   done
   for event in held jump_skipped downgrade_skipped pending check_failed update_failed removed; do
@@ -243,11 +258,13 @@ added_rows() {
   st b "downgrade: 1.9"
   pkg c 3.0
   st c "rebuilt: 3.0"
+  pkg d 28+23
+  st d "arch_added: 28+23 aarch64"
   journal '2026-11-08T05:17:41Z,a,tracked,1.0,,42' '2026-11-08T05:17:41Z,b,tracked,2.0,,42' \
-    '2026-11-08T05:17:41Z,c,tracked,3.0,,42'
+    '2026-11-08T05:17:41Z,c,tracked,3.0,,42' '2026-11-08T05:17:41Z,d,tracked,28+23,,42'
   record
   [ "$status" -eq 0 ]
-  [ "$(added_rows)" = $'2026-11-10T05:17:22Z,a,updated,1.1,1.0,44\n2026-11-10T05:17:22Z,b,downgrade,1.9,2.0,44\n2026-11-10T05:17:22Z,c,rebuilt,3.0,3.0,44' ]
+  [ "$(added_rows)" = $'2026-11-10T05:17:22Z,a,updated,1.1,1.0,44\n2026-11-10T05:17:22Z,b,downgrade,1.9,2.0,44\n2026-11-10T05:17:22Z,c,rebuilt,3.0,3.0,44\n2026-11-10T05:17:22Z,d,arch_added,28+23,28+23,44' ]
 }
 
 @test "record-events: a push in the run that creates the journal follows its tracked row" {
@@ -576,6 +593,14 @@ failed 5 5 5
 failing 2
 first 38
 day 0 1" ]
+}
+
+@test "stats_numbers: arches put back count as a push" {
+  journal '2026-11-07T10:00:00Z,a,updated,28+23,28+22,1' '2026-11-08T10:00:00Z,a,arch_added,28+23,28+23,1'
+  run --separate-stderr lib stats_numbers "$J" 2026-11-08
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pushes 2 2 2\npackages 1 1 1\nadded 0 0 0\nfailed 0 0 0\nfailing 0\nfirst 1\nday 0 1\nday 1 1' ]
+  [ -z "$stderr" ]
 }
 
 @test "stats_numbers: a journal without rows has no first day" {

@@ -14,19 +14,21 @@
 # to the line of upstream.asset_var. A new value of the version the AUR
 # has is a rebuild, with the AUR pkgrel plus one.
 #
-# Usage: ./scripts/update-pkg.sh <package-name> <new-version> [--asset <value>] [--dry-run] [--prepare <dir>]
+# Usage: ./scripts/update-pkg.sh <package-name> <new-version> [--asset <value>] [--arch-out <arches>] [--dry-run] [--prepare <dir>]
 
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 
-readonly PKG_NAME="${1:?Usage: update-pkg.sh <package-name> <new-version> [--asset <value>] [--dry-run] [--prepare <dir>]}"
-readonly NEW_VERSION="${2:?Usage: update-pkg.sh <package-name> <new-version> [--asset <value>] [--dry-run] [--prepare <dir>]}"
+readonly PKG_NAME="${1:?Usage: update-pkg.sh <package-name> <new-version> [--asset <value>] [--arch-out <arches>] [--dry-run] [--prepare <dir>]}"
+readonly NEW_VERSION="${2:?Usage: update-pkg.sh <package-name> <new-version> [--asset <value>] [--arch-out <arches>] [--dry-run] [--prepare <dir>]}"
 shift 2
 DRY_RUN=""
 PREPARE_DIR=""
 ASSET=""
+ARCH_EDIT=""
+ARCH_OUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)
@@ -49,14 +51,32 @@ while [[ $# -gt 0 ]]; do
       ASSET="$2"
       shift 2
       ;;
+    --arch-out)
+      if [[ $# -lt 2 ]]; then
+        log_err "--arch-out needs a list of arches, which may be empty"
+        exit 1
+      fi
+      ARCH_EDIT=1
+      ARCH_OUT="$2"
+      shift 2
+      ;;
     *)
       log_err "Unknown option: $1"
       exit 1
       ;;
   esac
 done
-readonly DRY_RUN PREPARE_DIR ASSET
+readonly DRY_RUN PREPARE_DIR ASSET ARCH_EDIT ARCH_OUT
 validate_pkgver "$NEW_VERSION" || exit 1
+if ! arch_list_ok "$ARCH_OUT"; then
+  log_err "--arch-out must name arches separated by single spaces: ${ARCH_OUT@Q}"
+  exit 1
+fi
+# Only publish writes arch_out, which says what an update left out
+if [[ -n "$ARCH_EDIT" && -z "$PREPARE_DIR" ]]; then
+  log_err "--arch-out needs --prepare"
+  exit 1
+fi
 PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
 ASSET_VAR=$(pkg_asset_var "$PKG_FILE") || exit 1
@@ -128,10 +148,27 @@ if [[ -n "$ASSET_VAR" ]]; then
   pkgrel=$(_asset_pkgrel "${aur_dir}/PKGBUILD" "$ASSET_VAR" "$NEW_VERSION" "$ASSET") || exit 1
 fi
 
+# --arch-out takes the arches of its list out of arch=() and puts back each
+# arch of arch_out it does not name, at the place the commit of the arch gives
+arch_words=()
+new_words=()
+back=""
+if [[ -n "$ARCH_EDIT" ]]; then
+  if ! arch_text=$(pkgbuild_arch_words "${aur_dir}/PKGBUILD"); then
+    log_err "--arch-out needs one arch=(...) line of plain arch names in the PKGBUILD"
+    exit 1
+  fi
+  mapfile -t arch_words <<<"$arch_text"
+  back=$(arch_refs "$aur_dir" "${arch_words[*]}" "$PKG_FILE" "$ARCH_OUT" "${tmp_dir}/ref") || exit 1
+  [[ -z "$back" ]] || log_info "Putting $back back in arch=()"
+  read -ra new_words <<<"$(arch_update_words "${arch_words[*]}" "$ARCH_OUT" "" "$back" "${tmp_dir}/ref")"
+fi
+
 # The AUR has this version when pkgver and pkgrel hold the values of the
 # update, as bash reads them; a new asset value raises pkgrel
 if [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgver)" == "$NEW_VERSION" ]] &&
-  [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgrel)" == "$pkgrel" ]]; then
+  [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgrel)" == "$pkgrel" ]] &&
+  [[ "${new_words[*]}" == "${arch_words[*]}" ]]; then
   log_ok "$PKG_NAME already at $NEW_VERSION on AUR, nothing to do"
   if [[ -n "$PREPARE_DIR" ]]; then
     hand_over
@@ -147,6 +184,36 @@ fi
 sed -i "s/^pkgver=.*/pkgver=${NEW_VERSION}/" "${aur_dir}/PKGBUILD"
 sed -i "s/^pkgrel=.*/pkgrel=${pkgrel}/" "${aur_dir}/PKGBUILD"
 
+# An arch of the list whose archives answer, as the PKGBUILD builds their
+# URLs, stays: the check asked other URLs
+skip_arches=""
+if [[ -n "$ARCH_EDIT" ]]; then
+  read -ra listed <<<"$ARCH_OUT"
+  kept=""
+  for arch in "${listed[@]}"; do
+    [[ " ${arch_words[*]} " == *" $arch "* ]] || continue
+    if arch_answers "${aur_dir}/PKGBUILD" "$arch"; then
+      log_info "The archives of $arch answer, so it stays in arch=()"
+      kept+="${kept:+ }$arch"
+    fi
+  done
+  read -ra new_words <<<"$(arch_update_words "${arch_words[*]}" "$ARCH_OUT" "$kept" "$back" "${tmp_dir}/ref")"
+  for arch in "${listed[@]}"; do
+    [[ " ${new_words[*]} " == *" $arch "* ]] || skip_arches+="${skip_arches:+ }$arch"
+  done
+  if ((${#new_words[@]} == 0)); then
+    log_err "--arch-out would leave no arch in arch=()"
+    exit 1
+  fi
+  if [[ "${new_words[*]}" != "${arch_words[*]}" ]]; then
+    NEW_LINE=$(arch_line "$(grep -m1 '^arch=(' "${aur_dir}/PKGBUILD")" "${new_words[@]}")
+    NEW_LINE="$NEW_LINE" awk 'index($0, "arch=(") == 1 && !done { print ENVIRON["NEW_LINE"]; done = 1; next } { print }' \
+      "${aur_dir}/PKGBUILD" >"${tmp_dir}/PKGBUILD.arch"
+    cat "${tmp_dir}/PKGBUILD.arch" >"${aur_dir}/PKGBUILD"
+    log_info "$PKG_NAME $NEW_VERSION builds for ${new_words[*]}"
+  fi
+fi
+
 # =============================================================================
 # UPDATE CHECKSUMS
 # =============================================================================
@@ -154,7 +221,7 @@ sed -i "s/^pkgrel=.*/pkgrel=${pkgrel}/" "${aur_dir}/PKGBUILD"
 # Validate source URLs before downloading. A download with a SKIP checksum
 # is checked too: no later step fetches it, so a URL that answers 404 or an
 # HTML page would reach the AUR.
-if ! validate_source_urls "${aur_dir}/PKGBUILD"; then
+if ! validate_source_urls "${aur_dir}/PKGBUILD" "$skip_arches"; then
   log_err "Source URL validation failed, aborting"
   exit 1
 fi
