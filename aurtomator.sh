@@ -21,6 +21,12 @@ if ! command -v yq >/dev/null; then
   echo "$0 needs yq: https://github.com/mikefarah/yq" >&2
   exit 1
 fi
+# extra/yq of Arch is a jq wrapper and reads jq expressions
+yq_version=$(yq --version 2>&1 || true)
+if [[ "$yq_version" != *mikefarah/yq* ]]; then
+  echo "$0 needs mikefarah/yq, go-yq on Arch, and this yq prints: ${yq_version%%$'\n'*}" >&2
+  exit 1
+fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 workflow=.github/workflows/check-updates.yml
 if [[ ! -f "$root/$workflow" ]]; then
