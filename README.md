@@ -119,7 +119,7 @@ A package that builds each arch from an archive of its own, as `jdk-temurin-ea-b
 
 ## Updates of aurtomator
 
-The line under the package table in the README of your repository shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin to a new release at its next check. "Check for updates" under Insights > Dependency graph > Dependabot runs a check at once. A newer release also gets an issue that says how to update, and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
+The line under the package table in the README of your repository shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin to a new release at its next check. The first run of `check-updates.yml` on the new pin also updates `aurtomator.sh` to that release. "Check for updates" under Insights > Dependency graph > Dependabot runs a check at once. A newer release also gets an issue that says how to update, and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
 
 ## Statistics
 
