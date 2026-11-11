@@ -21,7 +21,7 @@ done
 http_error() {
   [[ "$write_out" != '\n%{url_effective}'* ]] || printf '\n%s' "$url"
   [[ "$write_out" != *'%{onerror}%{stderr}'* ]] ||
-    printf '%s\tThe requested URL returned error: %s\t' "$url" "$1" >&2
+    printf '%s\tThe requested URL returned error: %s\t%s\t' "$url" "$1" "$1" >&2
   exit 22
 }
 

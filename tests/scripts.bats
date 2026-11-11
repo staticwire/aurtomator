@@ -1186,7 +1186,7 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
+  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
 }
 
 # Helper: a curl that writes $CURL_STDERR to stderr, as its -w does on a
@@ -1203,7 +1203,7 @@ MOCKCURL
 @test "lib.sh: http_get names the URL of the last answer and the error" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
-  CURL_RC=22 CURL_STDERR='https://example.com/b\tThe requested URL returned error: 404\t' run http_get https://example.com/a
+  CURL_RC=22 CURL_STDERR='https://example.com/b\tThe requested URL returned error: 404\t404\t' run http_get https://example.com/a
   [ "$status" -eq 22 ]
   [ "$output" = "https://example.com/b: The requested URL returned error: 404" ]
 }
@@ -1213,7 +1213,7 @@ MOCKCURL
 @test "lib.sh: http_get names a Cloudflare challenge" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
-  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 403\tchallenge' run http_get https://example.com/a
+  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 403\t403\tchallenge' run http_get https://example.com/a
   [ "$status" -eq 22 ]
   [ "$output" = "https://example.com/a: The requested URL returned error: 403, a Cloudflare challenge, which only a browser passes" ]
 }
@@ -1236,6 +1236,74 @@ MOCKCURL
   [ "$output" = "curl: option --bad: is unknown" ]
 }
 
+# Helper: a curl that logs its URL and the request in flight to curl.log, and
+# answers a host listed in silent-hosts as curl does after a timeout
+timeout_curl() {
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
+#!/usr/bin/env bash
+url="${*: -1}"
+request=$(paste -sd ' ' "${AURTOMATOR_HOSTS_DIR:-/nonexistent}/request" 2>/dev/null)
+printf '%s|%s\n' "$url" "$request" >>"$TEST_TMPDIR/curl.log"
+host="${url#https://}"
+if grep -qxF -e "${host%%/*}" "$TEST_TMPDIR/silent-hosts" 2>/dev/null; then
+  printf '%s\tOperation timed out after 30000 milliseconds with 0 bytes received\t000\t' "$url" >&2
+  exit 28
+fi
+echo '{}'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+}
+
+@test "lib.sh: http_get remembers a host that gave no answer, and asks it no more" {
+  keep_host_memory
+  timeout_curl
+  echo silent.example >"$TEST_TMPDIR/silent-hosts"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get https://silent.example/a
+  [ "$status" -eq 28 ]
+  [ "$output" = "https://silent.example/a: Operation timed out after 30000 milliseconds with 0 bytes received" ]
+  [ "$(cat "$AURTOMATOR_HOSTS_DIR/silent")" = "silent.example" ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
+  run http_get https://SILENT.example:8443/b
+  [ "$status" -eq 28 ]
+  [ "$output" = "https://SILENT.example:8443/b: silent.example did not answer earlier in this run" ]
+  [ "$(cat "$TEST_TMPDIR/curl.log")" = "https://silent.example/a|https://silent.example/a https://silent.example/a" ]
+}
+
+@test "lib.sh: http_get remembers no host after an answer, a refusal or an HTTP error" {
+  keep_host_memory
+  mock_curl_failure
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  CURL_RC=28 CURL_STDERR='https://slow.example/a\tOperation timed out after 30000 milliseconds with 7 out of 100000 bytes received\t200\t' run http_get https://slow.example/a
+  [ "$status" -eq 28 ]
+  CURL_RC=7 CURL_STDERR='https://refused.example/a\tFailed to connect to refused.example port 443 after 0 ms: Could not connect to server\t000\t' run http_get https://refused.example/a
+  [ "$status" -eq 7 ]
+  CURL_RC=22 CURL_STDERR='https://gone.example/a\tThe requested URL returned error: 404\t404\t' run http_get https://gone.example/a
+  [ "$status" -eq 22 ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/silent" ]
+}
+
+@test "lib.sh: a silent api.github.com leaves github.com alone" {
+  keep_host_memory api.github.com
+  timeout_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get https://github.com/owner/repo
+  [ "$status" -eq 0 ]
+  [ "$(cut -d'|' -f1 "$TEST_TMPDIR/curl.log")" = "https://github.com/owner/repo" ]
+}
+
+@test "lib.sh: without a memory of hosts http_get asks a host again after a timeout" {
+  timeout_curl
+  echo silent.example >"$TEST_TMPDIR/silent-hosts"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get https://silent.example/a
+  [ "$status" -eq 28 ]
+  AURTOMATOR_HOSTS_DIR="$TEST_TMPDIR/none" run http_get https://silent.example/a
+  [ "$status" -eq 28 ]
+  [ "$(wc -l <"$TEST_TMPDIR/curl.log")" -eq 2 ]
+  [ ! -e "$TEST_TMPDIR/none" ]
+}
+
 @test "lib.sh: http_get_json asks curl for the URL of the last answer" {
   cat >"$MOCK_DIR/curl" <<MOCKCURL
 #!/usr/bin/env bash
@@ -1247,13 +1315,13 @@ MOCKCURL
   run http_get_json https://example.com/a
   [ "$status" -eq 0 ]
   [ "$output" = $'[\n  {"name": "v1.0.0"}\n]' ]
-  [ "$(grep -x -A1 -- -w "$TEST_TMPDIR/curl.args" | tail -1)" = '\n%{url_effective}%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated}' ]
+  [ "$(grep -x -A1 -- -w "$TEST_TMPDIR/curl.args" | tail -1)" = '\n%{url_effective}%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated}' ]
 }
 
 @test "lib.sh: http_get_json stops at a failed request" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
-  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 404\t' run http_get_json https://example.com/a
+  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 404\t404\t' run http_get_json https://example.com/a
   [ "$status" -eq 22 ]
   [ "$output" = "https://example.com/a: The requested URL returned error: 404" ]
 }
