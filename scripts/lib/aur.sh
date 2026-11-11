@@ -14,11 +14,14 @@ aur_clone() {
   if [[ "$1" == ssh://* ]]; then
     sleep "${AURTOMATOR_CLONE_DELAY:-2}"
   fi
+  git_request_begin "$1" || return 1
   for attempt in 1 2 3; do
     if git clone "${@:3}" "$1" "$2" 2>&1; then
+      request_end
       return 0
     fi
     if [[ "$attempt" -eq 3 ]]; then
+      request_end
       log_err "Failed to clone AUR repo $1 after 3 attempts"
       return 1
     fi

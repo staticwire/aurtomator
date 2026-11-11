@@ -59,13 +59,37 @@ bounded() {
   fi
 }
 
-# Prints the error of a per-package script: the budget it ran out of, or
-# its stderr. Args: $1=exit code, $2=stderr file, $3=budget in seconds
+# Prints the error of a per-package script: its stderr, or the budget it ran out
+# of and the URL $4 of a request in flight. $1=exit code, $2=stderr, $3=budget
 script_error() {
   case "$1" in
-    124 | 137) echo "timed out after $3 s" ;;
+    124 | 137) echo "${4:+$4: }timed out after $3 s" ;;
     *) cat "$2" ;;
   esac
+}
+
+# Ends the request of a check that exited with $1. After a timeout it prints the
+# URL and remembers the host when one HEAD request of 10 s gets no status either
+request_done() {
+  local url check rc=0 code
+  host_memory || return 0
+  if [[ "$1" == 124 || "$1" == 137 ]] && { read -r url && read -r check; } <"$AURTOMATOR_HOSTS_DIR/request"; then
+    printf '%s\n' "$url"
+    code=$(curl -sI -o /dev/null --max-time 10 --proto '=https' -A "$USER_AGENT" -w '%{http_code}' "$check" 2>/dev/null) || rc=$?
+    if ((rc == 28)) && [[ "$code" == 000 ]]; then
+      remember_host "$url"
+    fi
+  fi
+  : >"$AURTOMATOR_HOSTS_DIR/request"
+}
+
+# Succeeds when a check that failed with exit code $1 and error $2 gets a second
+# pass: none after a timeout, none when the first URL of $2 is on a silent host
+second_pass() {
+  (($1 != 124 && $1 != 137)) || return 1
+  host_memory || return 0
+  [[ "$2" =~ https?://([A-Za-z0-9.-]+) ]] || return 0
+  ! grep -qxF -e "${BASH_REMATCH[1],,}" "$AURTOMATOR_HOSTS_DIR/silent"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -97,6 +121,17 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# The memory of the hosts that did not answer in this run, for the requests of
+# the checks; the modes that run no strategy keep none
+unset AURTOMATOR_HOSTS_DIR
+if [[ "$MODE" == check || "$MODE" == update ]]; then
+  AURTOMATOR_HOSTS_DIR=$(mktemp -d)
+  export AURTOMATOR_HOSTS_DIR
+  trap 'rm -rf "$AURTOMATOR_HOSTS_DIR"' EXIT
+  : >"$AURTOMATOR_HOSTS_DIR/silent"
+  : >"$AURTOMATOR_HOSTS_DIR/request"
+fi
 
 # Status directory for per-package results
 STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
@@ -262,7 +297,7 @@ record_alerts() {
 # failed check does.
 # Args: $1=package file, $2=package name, $3=version, $4=pass, 1 or 2
 find_asset() {
-  local rc=0 err_file err
+  local rc=0 err_file err in_flight
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
     if [[ "${CHECKED[$2]:-}" == "pending: "* ]]; then
       printf '%s\n' "${CHECKED[$2]}" >"${STATUS_DIR}/$2"
@@ -276,7 +311,8 @@ find_asset() {
   else
     err_file=$(mktemp)
     ASSET_VALUE=$(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-asset.sh" "$2" "$3" 2>"$err_file") || rc=$?
-    err=$(script_error "$rc" "$err_file" "$CHECK_TIMEOUT")
+    in_flight=$(request_done "$rc")
+    err=$(script_error "$rc" "$err_file" "$CHECK_TIMEOUT" "$in_flight")
     rm -f "$err_file"
     if ((rc == 3)); then
       printf '%s\n' "$err" >&2
@@ -286,7 +322,7 @@ find_asset() {
     if ((rc != 0)); then
       log_err "Failed to check $2: $err"
       echo "check_failed: ${err}" >"${STATUS_DIR}/$2"
-      if ((rc != 124 && rc != 137 && $4 == 1)); then
+      if (($4 == 1)) && second_pass "$rc" "$err"; then
         RECHECK+=("$1")
       fi
       return 1
@@ -312,7 +348,7 @@ keep_arch_wait() {
 # Set ARCH_OUT to the arches out of an update of $2 (file $1) to version $3, from
 # check-arch.sh or _arches of the check run; a wait or a failure sets the status
 find_arches() {
-  local rc=0 err_file err text first second line
+  local rc=0 err_file err text first second line in_flight
   ARCH_OUT=""
   ARCH_RECORD=""
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
@@ -337,7 +373,8 @@ find_arches() {
   err_file=$(mktemp)
   text=$(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-arch.sh" "$2" "$3" \
     ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"} 2>"$err_file") || rc=$?
-  err=$(script_error "$rc" "$err_file" "$CHECK_TIMEOUT")
+  in_flight=$(request_done "$rc")
+  err=$(script_error "$rc" "$err_file" "$CHECK_TIMEOUT" "$in_flight")
   rm -f "$err_file"
   first=${text%%$'\n'*}
   second=""
@@ -360,7 +397,7 @@ find_arches() {
   ((rc != 0 && rc != 3)) || err="check-arch.sh printed ${text@Q}"
   log_err "Failed to check $2: $err"
   echo "check_failed: ${err}" >"${STATUS_DIR}/$2"
-  if ((rc != 124 && rc != 137 && $4 == 1)); then
+  if (($4 == 1)) && second_pass "$rc" "$err"; then
     RECHECK+=("$1")
   fi
   return 1
@@ -372,7 +409,7 @@ find_arches() {
 # Args: $1=package file, $2=pass, 1 or 2
 run_package() {
   local pkg_file="$1" pass="$2"
-  local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false
+  local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false in_flight
   local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
   pkg_name=$(pkg_get "$pkg_file" .name)
   # --prepare and --publish keep a wait for the cooldown from the check run
@@ -442,13 +479,13 @@ run_package() {
   err_file=$(mktemp)
   check_rc=0
   latest=$("${check_cmd[@]}" 2>"$err_file") || check_rc=$?
+  in_flight=$(request_done "$check_rc")
   if ((check_rc != 0)); then
-    check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT")
+    check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT" "$in_flight")
     rm -f "$err_file"
     log_err "Failed to check $pkg_name: $check_err"
     echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
-    if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded ]] &&
-      ((check_rc != 124 && check_rc != 137)); then
+    if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded ]] && second_pass "$check_rc" "$check_err"; then
       RECHECK+=("$pkg_file")
     fi
     return
@@ -646,10 +683,8 @@ for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   run_package "$pkg_file" 1
 done
 
-# A check that failed fast gets a second try after a pause, by when a
-# failure of the upstream host can be over. A check that ran out of its
-# budget gets none, so a run without network stays within the time limit
-# of its job.
+# A check that failed fast runs again after a pause. After a timeout or on a
+# silent host it does not, so a run without network stays within its time limit
 if ((${#RECHECK[@]} > 0)); then
   log_info "Checking ${#RECHECK[@]} failed package(s) again in ${RECHECK_DELAY} s"
   sleep "$RECHECK_DELAY"

@@ -62,10 +62,13 @@ clone_args=(--bare --quiet --filter=tree:0)
 if [[ -n "$branch" ]]; then
   clone_args+=("--branch=$branch")
 fi
+git_request_begin "$repo_url" || exit 1
 GIT_ALLOW_PROTOCOL=https git clone "${clone_args[@]}" "$repo_url" "$tmp_dir/repo" || {
+  request_end
   echo "Failed to clone $repo_url" >&2
   exit 1
 }
+request_end
 
 if [[ -n "$describe" ]]; then
   # The hash takes as many characters as the hash in current, as below

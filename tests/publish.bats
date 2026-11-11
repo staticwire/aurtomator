@@ -2881,6 +2881,165 @@ EOF
   [ "$(cat "$TEST_TMPDIR/out/status/flaky")" = "check_failed: API down" ]
 }
 
+# === check-all.sh: hosts that did not answer ===
+
+# Helper: packages that check-update.sh checks with one request each, from
+# lines "<package> <hang|sleep|git|http> <url>"; hang starts the request and
+# waits, sleep waits outside a request. curl answers a host of silent-hosts
+# with nothing and one of refused-hosts with a refusal, and git logs its URL.
+host_checks() {
+  local name
+  printf '%s\n' "$@" >"$TEST_TMPDIR/plan"
+  while read -r name _; do
+    create_test_package "$name" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  done <"$TEST_TMPDIR/plan"
+  rm -f "$TEST_TMPDIR/scripts/check-update.sh"
+  cat >"$TEST_TMPDIR/scripts/check-update.sh" <<'STUB'
+#!/usr/bin/env bash
+source "$TEST_TMPDIR/scripts/lib.sh"
+echo "$1" >>"$TEST_TMPDIR/checks"
+echo "${AURTOMATOR_HOSTS_DIR:-unset}" >>"$TEST_TMPDIR/hosts-dirs"
+read -r _ action url < <(grep "^$1 " "$TEST_TMPDIR/plan")
+case "$action" in
+  hang) git_request_begin "$url" && exec sleep 60 ;;
+  sleep) exec sleep 60 ;;
+  git) remote_tags "$url" >/dev/null ;;
+  http) http_get "$url" >/dev/null ;;
+esac
+STUB
+  chmod +x "$TEST_TMPDIR/scripts/check-update.sh"
+  cat >"$MOCK_DIR/git" <<'MOCKGIT'
+#!/usr/bin/env bash
+echo "${*: -1}" >>"$TEST_TMPDIR/git-urls"
+MOCKGIT
+  chmod +x "$MOCK_DIR/git"
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
+#!/usr/bin/env bash
+echo "$*" >>"$TEST_TMPDIR/curl.args"
+url="${*: -1}"
+host="${url#https://}"
+host="${host%%/*}"
+head=false
+if [[ " $* " == *" -sI "* ]]; then
+  head=true
+fi
+if grep -qxF -e "$host" "$TEST_TMPDIR/silent-hosts" 2>/dev/null; then
+  if [[ "$head" == true ]]; then
+    printf 000
+  else
+    printf '%s\tOperation timed out after 30000 milliseconds with 0 bytes received\t000\t' "$url" >&2
+  fi
+  exit 28
+fi
+if grep -qxF -e "$host" "$TEST_TMPDIR/refused-hosts" 2>/dev/null; then
+  printf '%s\tFailed to connect to %s port 443 after 0 ms: Could not connect to server\t000\t' "$url" "$host" >&2
+  exit 7
+fi
+if [[ "$head" == true ]]; then
+  printf 200
+else
+  echo '{}'
+fi
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+}
+
+@test "check-all: a check killed during a request names its URL, and its silent host is asked no more" {
+  host_checks "a hang https://silent.example/a.git" "b git https://silent.example/b.git" "c git https://live.example/c.git"
+  echo silent.example >"$TEST_TMPDIR/silent-hosts"
+  SECONDS=0
+  AURTOMATOR_CHECK_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$SECONDS" -lt 10 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "check_failed: https://silent.example/a.git: timed out after 1 s" ]
+  [ "$(cat "$TEST_TMPDIR/.status/b")" = "check_failed: https://silent.example/b.git: silent.example did not answer earlier in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/c")" = "up_to_date" ]
+  [ "$(cat "$TEST_TMPDIR/git-urls")" = "https://live.example/c.git" ]
+  [ "$(cat "$TEST_TMPDIR/curl.args")" = "-sI -o /dev/null --max-time 10 --proto =https -A aurtomator/1.0 -w %{http_code} https://silent.example/a.git/info/refs?service=git-upload-pack" ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'a\nb\nc' ]
+}
+
+@test "check-all: a host that answers the HEAD check after a kill is asked again" {
+  host_checks "a hang https://live.example/a.git" "b sleep -" "c git https://live.example/c.git"
+  AURTOMATOR_CHECK_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "check_failed: https://live.example/a.git: timed out after 1 s" ]
+  [ "$(cat "$TEST_TMPDIR/.status/b")" = "check_failed: timed out after 1 s" ]
+  [ "$(cat "$TEST_TMPDIR/.status/c")" = "up_to_date" ]
+  [ "$(cat "$TEST_TMPDIR/git-urls")" = "https://live.example/c.git" ]
+  [ "$(grep -c . "$TEST_TMPDIR/curl.args")" -eq 1 ]
+}
+
+@test "check-all: a check that failed on a silent host gets no second pass" {
+  host_checks "a http https://silent.example/a" "b http https://refused.example/b"
+  echo silent.example >"$TEST_TMPDIR/silent-hosts"
+  echo refused.example >"$TEST_TMPDIR/refused-hosts"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'a\nb\nb' ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "check_failed: https://silent.example/a: Operation timed out after 30000 milliseconds with 0 bytes received" ]
+}
+
+@test "check-all: a release check that gave no answer leaves api.github.com out of the checks" {
+  host_checks "a http https://api.github.com/repos/owner/repo/releases/latest"
+  echo api.github.com >"$TEST_TMPDIR/silent-hosts"
+  echo 0.12.0 >"$TEST_TMPDIR/VERSION"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Could not read the latest aurtomator release"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "check_failed: https://api.github.com/repos/owner/repo/releases/latest: api.github.com did not answer earlier in this run" ]
+  [ "$(grep -c . "$TEST_TMPDIR/curl.args")" -eq 1 ]
+}
+
+@test "check-all --update: remembers a host that gave no answer" {
+  host_checks "a http https://silent.example/a" "b http https://silent.example/b"
+  echo silent.example >"$TEST_TMPDIR/silent-hosts"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ "$(grep -c . "$TEST_TMPDIR/curl.args")" -eq 1 ]
+  [ "$(cat "$TEST_TMPDIR/.status/b")" = "check_failed: https://silent.example/b: silent.example did not answer earlier in this run" ]
+}
+
+@test "check-all --prepare, --verify and --publish keep no memory of hosts" {
+  local script
+  setup_check_verify
+  for script in update-pkg.sh verify-pkg.sh publish-pkg.sh; do
+    rm -f "$TEST_TMPDIR/scripts/$script"
+    printf '#!/usr/bin/env bash\necho "%s ${AURTOMATOR_HOSTS_DIR:-unset}" >>"$TEST_TMPDIR/hosts-dirs"\n' "$script" >"$TEST_TMPDIR/scripts/$script"
+    chmod +x "$TEST_TMPDIR/scripts/$script"
+  done
+  keep_host_memory
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/hosts-dirs")" = $'update-pkg.sh unset\nverify-pkg.sh unset\npublish-pkg.sh unset' ]
+}
+
+@test "check-all: removes its memory of hosts at the end of the run" {
+  local dir
+  host_checks "a git https://live.example/a.git"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  dir=$(cat "$TEST_TMPDIR/hosts-dirs")
+  [[ "$dir" == /* ]]
+  [ ! -e "$dir" ]
+}
+
+@test "check-all: the packages of a silent host share one host issue" {
+  host_checks "p1 http https://silent.example/1" "p2 http https://silent.example/2" "p3 http https://silent.example/3" "p4 http https://silent.example/4" "p5 http https://silent.example/5"
+  echo silent.example >"$TEST_TMPDIR/silent-hosts"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c . "$TEST_TMPDIR/curl.args")" -eq 1 ]
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  [ "$(failed_hosts "$TEST_TMPDIR/.status")" = "silent.example p1 p2 p3 p4 p5" ]
+}
+
 # === check-all.sh --verify ===
 
 # Helper: one package with a prepared update, its handed over status and the

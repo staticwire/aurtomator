@@ -39,6 +39,9 @@ setup_test_env() {
   # No pause before an AUR clone, between attempts or before a second check
   export AURTOMATOR_CLONE_DELAY=0 AURTOMATOR_RETRY_DELAY=0 AURTOMATOR_RECHECK_DELAY=0
 
+  # Only the tests that ask for it get a memory of hosts
+  unset AURTOMATOR_HOSTS_DIR
+
   # git reads and writes no global config of the user running the tests
   export GIT_CONFIG_GLOBAL="$TEST_TMPDIR/gitconfig"
 }
@@ -215,4 +218,16 @@ failed_statuses() {
     esac
   done
   echo "$count"
+}
+
+# The memory of hosts that check-all.sh keeps in a run, in $TEST_TMPDIR/hosts,
+# with the given hosts in silent
+keep_host_memory() {
+  export AURTOMATOR_HOSTS_DIR="$TEST_TMPDIR/hosts"
+  mkdir -p "$AURTOMATOR_HOSTS_DIR"
+  : >"$AURTOMATOR_HOSTS_DIR/silent"
+  : >"$AURTOMATOR_HOSTS_DIR/request"
+  if (($#)); then
+    printf '%s\n' "$@" >"$AURTOMATOR_HOSTS_DIR/silent"
+  fi
 }

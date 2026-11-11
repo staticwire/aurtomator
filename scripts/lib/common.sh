@@ -146,9 +146,8 @@ pkg_file() {
 USER_AGENT="aurtomator/1.0"
 
 # What curl writes to stderr on a failure: the URL of the last answer, the
-# error and the cf-mitigated header, which Cloudflare sets to "challenge"
-# on the page of its bot check
-HTTP_FAILURE='%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated}'
+# error, the status (000 without an answer) and the cf-mitigated header
+HTTP_FAILURE='%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated}'
 
 # The most megabytes of one answer: upstream.max_answer_mb of the package,
 # which check-update.sh exports, or 50
@@ -167,6 +166,54 @@ max_answer_mb() {
   printf '%s\n' "$mb"
 }
 
+# The memory of a run of check-all.sh, in AURTOMATOR_HOSTS_DIR: the file silent
+# lists the hosts that did not answer, and request holds the request in flight
+
+# Succeeds in a run that keeps the memory
+host_memory() {
+  [[ -n "${AURTOMATOR_HOSTS_DIR:-}" && -d "$AURTOMATOR_HOSTS_DIR" ]]
+}
+
+# Print the host of https URL $1 in lower case and without the port
+url_host() {
+  [[ "$1" =~ ^https://([A-Za-z0-9.-]+) ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[1],,}"
+}
+
+# Start a request to URL $1, with URL $2 for the HEAD check after a kill. Fails
+# for a host that did not answer earlier in the run, with the reason on stderr
+request_begin() {
+  local host
+  if ! host_memory || ! host=$(url_host "$1"); then
+    return 0
+  fi
+  if grep -qxF -e "$host" "$AURTOMATOR_HOSTS_DIR/silent"; then
+    printf '%s: %s did not answer earlier in this run\n' "$1" "$host" >&2
+    return 1
+  fi
+  printf '%s\n%s\n' "$1" "${2:-$1}" >"$AURTOMATOR_HOSTS_DIR/request"
+}
+
+# request_begin for git URL $1: the HEAD check asks the first URL that git asks
+git_request_begin() {
+  request_begin "$1" "${1%/}/info/refs?service=git-upload-pack"
+}
+
+# End the request that request_begin started
+request_end() {
+  if host_memory; then
+    : >"$AURTOMATOR_HOSTS_DIR/request"
+  fi
+}
+
+# Remember the host of URL $1 as one that did not answer in this run
+remember_host() {
+  local host
+  if host_memory && host=$(url_host "$1"); then
+    printf '%s\n' "$host" >>"$AURTOMATOR_HOSTS_DIR/silent"
+  fi
+}
+
 # Args: $1=URL, the rest: curl options, which come after these and win.
 # curl follows a redirect to plain http by default, so --proto-redir stays.
 _curl_get() {
@@ -180,17 +227,23 @@ _curl_get() {
 # failure prints the URL of the last answer after redirects and the error.
 # Usage: http_get <url> [curl option]...
 http_get() {
-  local failure rc=0 url error mitigated
+  local failure rc=0 url error code mitigated
+  request_begin "$1" || return 28
   # The answer goes out through fd 3, and stderr into failure
   { failure=$(_curl_get "$@" 2>&1 >&3 3>&-); } 3>&1 || rc=$?
+  request_end
   if ((rc == 0)); then
     return 0
   fi
   if [[ "$failure" == *$'\t'* ]]; then
-    IFS=$'\t' read -r url error mitigated <<<"$failure"
+    IFS=$'\t' read -r url error code mitigated <<<"$failure"
     failure="${url}: ${error}"
     if [[ "$mitigated" == challenge ]]; then
       failure+=", a Cloudflare challenge, which only a browser passes"
+    fi
+    # Three attempts without any answer: the run asks this host no more
+    if ((rc == 28)) && [[ "$code" == 000 ]]; then
+      remember_host "$1"
     fi
   elif [[ -z "$failure" ]]; then
     failure="${1}: curl exit ${rc}"
@@ -425,8 +478,12 @@ cooldown_until() {
 # ls-remote over https only and without a terminal prompt
 # Args: $1=HTTPS URL of the repository
 remote_tags() {
+  local rc=0
+  git_request_begin "$1" || return 1
   GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 \
-    git ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||'
+    git ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||' || rc=$?
+  request_end
+  return "$rc"
 }
 
 # Print every tag name of a GitHub repository, with GITHUB_TOKEN when it is

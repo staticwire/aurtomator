@@ -1178,6 +1178,28 @@ MOCKCURL
   [ "$(head -1 "$TEST_TMPDIR/curl.args")" = "-sIL -o /dev/null -w %{http_code} %{content_type} --max-time 10 --max-redirs 5 https://example.com/demo-aarch64.tar.gz" ]
 }
 
+@test "arch.sh: probe_url names its request while curl runs" {
+  keep_host_memory
+  timeout_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  probe_url https://example.com/demo-aarch64.tar.gz || true
+  [ "$(cat "$TEST_TMPDIR/curl.log")" = "https://example.com/demo-aarch64.tar.gz|https://example.com/demo-aarch64.tar.gz https://example.com/demo-aarch64.tar.gz" ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
+}
+
+@test "arch.sh: probe_url asks a silent host nothing and remembers no host after its timeout" {
+  keep_host_memory silent.example
+  mock_probe_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run probe_url https://silent.example/demo-aarch64.tar.gz
+  [ "$status" -eq 2 ]
+  [ "$output" = "https://silent.example/demo-aarch64.tar.gz: silent.example did not answer earlier in this run" ]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+  CURL_RC=28 CURL_W="000 " run probe_url https://slow.example/demo-aarch64.tar.gz
+  [ "$status" -eq 2 ]
+  [ "$(cat "$AURTOMATOR_HOSTS_DIR/silent")" = "silent.example" ]
+}
+
 # === http_get ===
 
 @test "lib.sh: http_get tries a transient failure again" {
@@ -1186,7 +1208,7 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
+  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
 }
 
 # Helper: a curl that writes $CURL_STDERR to stderr, as its -w does on a
@@ -1203,7 +1225,7 @@ MOCKCURL
 @test "lib.sh: http_get names the URL of the last answer and the error" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
-  CURL_RC=22 CURL_STDERR='https://example.com/b\tThe requested URL returned error: 404\t' run http_get https://example.com/a
+  CURL_RC=22 CURL_STDERR='https://example.com/b\tThe requested URL returned error: 404\t404\t' run http_get https://example.com/a
   [ "$status" -eq 22 ]
   [ "$output" = "https://example.com/b: The requested URL returned error: 404" ]
 }
@@ -1213,7 +1235,7 @@ MOCKCURL
 @test "lib.sh: http_get names a Cloudflare challenge" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
-  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 403\tchallenge' run http_get https://example.com/a
+  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 403\t403\tchallenge' run http_get https://example.com/a
   [ "$status" -eq 22 ]
   [ "$output" = "https://example.com/a: The requested URL returned error: 403, a Cloudflare challenge, which only a browser passes" ]
 }
@@ -1236,6 +1258,74 @@ MOCKCURL
   [ "$output" = "curl: option --bad: is unknown" ]
 }
 
+# Helper: a curl that logs its URL and the request in flight to curl.log, and
+# answers a host listed in silent-hosts as curl does after a timeout
+timeout_curl() {
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
+#!/usr/bin/env bash
+url="${*: -1}"
+request=$(paste -sd ' ' "${AURTOMATOR_HOSTS_DIR:-/nonexistent}/request" 2>/dev/null)
+printf '%s|%s\n' "$url" "$request" >>"$TEST_TMPDIR/curl.log"
+host="${url#https://}"
+if grep -qxF -e "${host%%/*}" "$TEST_TMPDIR/silent-hosts" 2>/dev/null; then
+  printf '%s\tOperation timed out after 30000 milliseconds with 0 bytes received\t000\t' "$url" >&2
+  exit 28
+fi
+echo '{}'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+}
+
+@test "lib.sh: http_get remembers a host that gave no answer, and asks it no more" {
+  keep_host_memory
+  timeout_curl
+  echo silent.example >"$TEST_TMPDIR/silent-hosts"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get https://silent.example/a
+  [ "$status" -eq 28 ]
+  [ "$output" = "https://silent.example/a: Operation timed out after 30000 milliseconds with 0 bytes received" ]
+  [ "$(cat "$AURTOMATOR_HOSTS_DIR/silent")" = "silent.example" ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
+  run http_get https://SILENT.example:8443/b
+  [ "$status" -eq 28 ]
+  [ "$output" = "https://SILENT.example:8443/b: silent.example did not answer earlier in this run" ]
+  [ "$(cat "$TEST_TMPDIR/curl.log")" = "https://silent.example/a|https://silent.example/a https://silent.example/a" ]
+}
+
+@test "lib.sh: http_get remembers no host after an answer, a refusal or an HTTP error" {
+  keep_host_memory
+  mock_curl_failure
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  CURL_RC=28 CURL_STDERR='https://slow.example/a\tOperation timed out after 30000 milliseconds with 7 out of 100000 bytes received\t200\t' run http_get https://slow.example/a
+  [ "$status" -eq 28 ]
+  CURL_RC=7 CURL_STDERR='https://refused.example/a\tFailed to connect to refused.example port 443 after 0 ms: Could not connect to server\t000\t' run http_get https://refused.example/a
+  [ "$status" -eq 7 ]
+  CURL_RC=22 CURL_STDERR='https://gone.example/a\tThe requested URL returned error: 404\t404\t' run http_get https://gone.example/a
+  [ "$status" -eq 22 ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/silent" ]
+}
+
+@test "lib.sh: a silent api.github.com leaves github.com alone" {
+  keep_host_memory api.github.com
+  timeout_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get https://github.com/owner/repo
+  [ "$status" -eq 0 ]
+  [ "$(cut -d'|' -f1 "$TEST_TMPDIR/curl.log")" = "https://github.com/owner/repo" ]
+}
+
+@test "lib.sh: without a memory of hosts http_get asks a host again after a timeout" {
+  timeout_curl
+  echo silent.example >"$TEST_TMPDIR/silent-hosts"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get https://silent.example/a
+  [ "$status" -eq 28 ]
+  AURTOMATOR_HOSTS_DIR="$TEST_TMPDIR/none" run http_get https://silent.example/a
+  [ "$status" -eq 28 ]
+  [ "$(wc -l <"$TEST_TMPDIR/curl.log")" -eq 2 ]
+  [ ! -e "$TEST_TMPDIR/none" ]
+}
+
 @test "lib.sh: http_get_json asks curl for the URL of the last answer" {
   cat >"$MOCK_DIR/curl" <<MOCKCURL
 #!/usr/bin/env bash
@@ -1247,15 +1337,55 @@ MOCKCURL
   run http_get_json https://example.com/a
   [ "$status" -eq 0 ]
   [ "$output" = $'[\n  {"name": "v1.0.0"}\n]' ]
-  [ "$(grep -x -A1 -- -w "$TEST_TMPDIR/curl.args" | tail -1)" = '\n%{url_effective}%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%header{cf-mitigated}' ]
+  [ "$(grep -x -A1 -- -w "$TEST_TMPDIR/curl.args" | tail -1)" = '\n%{url_effective}%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated}' ]
 }
 
 @test "lib.sh: http_get_json stops at a failed request" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
-  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 404\t' run http_get_json https://example.com/a
+  CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 404\t404\t' run http_get_json https://example.com/a
   [ "$status" -eq 22 ]
   [ "$output" = "https://example.com/a: The requested URL returned error: 404" ]
+}
+
+# Helper: a git that logs its arguments and the request in flight to git.log,
+# and prints one tag
+logging_git() {
+  cat >"$MOCK_DIR/git" <<'MOCKGIT'
+#!/usr/bin/env bash
+request=$(paste -sd ' ' "${AURTOMATOR_HOSTS_DIR:-/nonexistent}/request" 2>/dev/null)
+printf '%s|%s\n' "$*" "$request" >>"$TEST_TMPDIR/git.log"
+printf 'abc\trefs/tags/v1.0.0\n'
+MOCKGIT
+  chmod +x "$MOCK_DIR/git"
+}
+
+@test "lib.sh: remote_tags and aur_clone name their request and the URL of git for the HEAD check" {
+  keep_host_memory
+  logging_git
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run remote_tags https://git.example/repo.git
+  [ "$status" -eq 0 ]
+  [ "$output" = "v1.0.0" ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
+  run aur_clone https://aur.archlinux.org/pkg.git "$TEST_TMPDIR/aur" --no-checkout
+  [ "$status" -eq 0 ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
+  [ "$(cat "$TEST_TMPDIR/git.log")" = "ls-remote --tags --refs https://git.example/repo.git|https://git.example/repo.git https://git.example/repo.git/info/refs?service=git-upload-pack
+clone --no-checkout https://aur.archlinux.org/pkg.git $TEST_TMPDIR/aur|https://aur.archlinux.org/pkg.git https://aur.archlinux.org/pkg.git/info/refs?service=git-upload-pack" ]
+}
+
+@test "lib.sh: remote_tags and aur_clone ask a silent host nothing" {
+  keep_host_memory git.example aur.archlinux.org
+  logging_git
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run remote_tags https://git.example/repo.git
+  [ "$status" -eq 1 ]
+  [ "$output" = "https://git.example/repo.git: git.example did not answer earlier in this run" ]
+  run aur_clone https://aur.archlinux.org/pkg.git "$TEST_TMPDIR/aur"
+  [ "$status" -eq 1 ]
+  [ "$output" = "https://aur.archlinux.org/pkg.git: aur.archlinux.org did not answer earlier in this run" ]
+  [ ! -e "$TEST_TMPDIR/git.log" ]
 }
 
 # script from util-linux runs the command on a terminal of its own
@@ -4343,6 +4473,17 @@ arch_wait:
   [ ! -e "$TEST_TMPDIR/heads.log" ]
 }
 
+@test "check-arch: with aur.archlinux.org silent the arches out stay out" {
+  temurin_package "current: 28+22"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  keep_host_memory aur.archlinux.org
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+  [ ! -e "$TEST_TMPDIR/clone-urls" ]
+  grep -qF "https://aur.archlinux.org/jdk-temurin-ea-bin.git: aur.archlinux.org did not answer earlier in this run" "$TEST_TMPDIR/arch.err"
+}
+
 @test "check-arch: an arch line it cannot edit leaves the update as it is" {
   local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
   temurin_package "current: 28+22"
@@ -4480,6 +4621,38 @@ current_asset: '$2'}"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: release unreadable" ]
   [ "$(cat "$TEST_TMPDIR/check-asset.args")" = $'pkg 2.0.0\npkg 2.0.0' ]
+}
+
+@test "check-all: an asset lookup that failed on a silent host gets no second pass" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  rm -f "$TEST_TMPDIR/scripts/check-asset.sh"
+  cat >"$TEST_TMPDIR/scripts/check-asset.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$TEST_TMPDIR/check-asset.args"
+echo silent.example >>"$AURTOMATOR_HOSTS_DIR/silent"
+echo "https://silent.example/x: Operation timed out after 30000 milliseconds with 0 bytes received" >&2
+exit 1
+STUB
+  chmod +x "$TEST_TMPDIR/scripts/check-asset.sh"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/check-asset.args")" = "pkg 2.0.0" ]
+}
+
+@test "check-all: an asset lookup killed during a request names its URL" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  rm -f "$TEST_TMPDIR/scripts/check-asset.sh"
+  cat >"$TEST_TMPDIR/scripts/check-asset.sh" <<'STUB'
+#!/usr/bin/env bash
+source "$TEST_TMPDIR/scripts/lib.sh"
+request_begin https://slow.example/x && exec sleep 60
+STUB
+  chmod +x "$TEST_TMPDIR/scripts/check-asset.sh"
+  AURTOMATOR_CHECK_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: https://slow.example/x: timed out after 1 s" ]
 }
 
 @test "check-all: asks no asset value for a held update" {
@@ -4681,6 +4854,38 @@ cooldown_days: 7"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: AUR unreadable" ]
   [ "$(cat "$TEST_TMPDIR/check-arch.args")" = $'pkg 2.0.0\npkg 2.0.0' ]
+}
+
+@test "check-all: an arch check that failed on a silent host gets no second pass" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/check-arch.sh"
+  cat >"$TEST_TMPDIR/scripts/check-arch.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$TEST_TMPDIR/check-arch.args"
+echo silent.example >>"$AURTOMATOR_HOSTS_DIR/silent"
+echo "https://silent.example/x: silent.example did not answer earlier in this run" >&2
+exit 1
+STUB
+  chmod +x "$TEST_TMPDIR/scripts/check-arch.sh"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = "pkg 2.0.0" ]
+}
+
+@test "check-all: an arch check killed during a request names its URL" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/check-arch.sh"
+  cat >"$TEST_TMPDIR/scripts/check-arch.sh" <<'STUB'
+#!/usr/bin/env bash
+source "$TEST_TMPDIR/scripts/lib.sh"
+git_request_begin https://aur.archlinux.org/pkg.git && exec sleep 60
+STUB
+  chmod +x "$TEST_TMPDIR/scripts/check-arch.sh"
+  AURTOMATOR_CHECK_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: https://aur.archlinux.org/pkg.git: timed out after 1 s" ]
 }
 
 @test "check-all: asks no arch check with allow_missing_arch: false or pkgver_dash: ''" {
