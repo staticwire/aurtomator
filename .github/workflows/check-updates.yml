@@ -256,6 +256,13 @@ jobs:
           if [[ -f "$RESULTS/README.md" ]] && ! cmp -s "$RESULTS/README.md" README.md; then
             work=true
           fi
+          # publish commits aurtomator/aurtomator.sh over a regular aurtomator.sh
+          # of the checkout that differs from it
+          release_runner=aurtomator/aurtomator.sh repo_runner=aurtomator.sh
+          if [[ -f "$release_runner" && -f "$repo_runner" && ! -L "$repo_runner" ]] &&
+            ! cmp -s "$release_runner" "$repo_runner"; then
+            work=true
+          fi
           # The windows of the card move with the day, so publish runs also
           # when today's card differs from the committed one
           packages=false
@@ -657,14 +664,31 @@ jobs:
             [[ -f "$file" && ! -L "$file" ]] || continue
             cmp -s -- "$copy" "$file" || changed+=("$file")
           done
+          # aurtomator/aurtomator.sh replaces a regular aurtomator.sh that
+          # differs from it. The step leaves a link and adds no missing file.
+          release_runner=aurtomator/aurtomator.sh repo_runner=aurtomator.sh
+          if [[ -f "$release_runner" && -f "$repo_runner" && ! -L "$repo_runner" ]] &&
+            ! cmp -s "$release_runner" "$repo_runner"; then
+            changed+=("$repo_runner")
+          fi
           if [[ ${#changed[@]} -eq 0 ]]; then
             echo "No changes to commit"
             exit 0
           fi
 
-          MESSAGE="chore: update package versions [skip ci]"
-          if ! printf '%s\n' "${changed[@]}" | grep -qv '^stats/'; then
-            MESSAGE="chore: update package statistics [skip ci]"
+          # The message names aurtomator.sh when the commit holds it
+          files=$(printf '%s\n' "${changed[@]}")
+          if [[ "$files" == "$repo_runner" ]]; then
+            MESSAGE="chore: update aurtomator.sh [skip ci]"
+          else
+            subject="update package versions"
+            if ! grep -vxF "$repo_runner" <<<"$files" | grep -qv '^stats/'; then
+              subject="update package statistics"
+            fi
+            if grep -qxF "$repo_runner" <<<"$files"; then
+              subject+=" and aurtomator.sh"
+            fi
+            MESSAGE="chore: $subject [skip ci]"
           fi
 
           HEAD_SHA=$(gh api "repos/$REPO/git/ref/heads/$BRANCH" --jq '.object.sha')
@@ -692,9 +716,13 @@ jobs:
 
           TREE_ENTRIES="[]"
           for file in "${changed[@]}"; do
+            from="$RESULTS/$file" mode=100644
+            if [[ "$file" == "$repo_runner" ]]; then
+              from=$release_runner mode=100755
+            fi
             # Linux refuses one argument over 128 KiB, so the file goes on
             # stdin
-            BLOB_SHA=$(base64 -w0 -- "$RESULTS/$file" |
+            BLOB_SHA=$(base64 -w0 -- "$from" |
               jq -Rs '{content: ., encoding: "base64"}' |
               gh api "repos/$REPO/git/blobs" \
                 --jq '.sha' \
@@ -703,8 +731,9 @@ jobs:
                 --input -)
             TREE_ENTRIES=$(echo "$TREE_ENTRIES" | jq \
               --arg path "$file" \
+              --arg mode "$mode" \
               --arg sha "$BLOB_SHA" \
-              '. + [{"path": $path, "mode": "100644", "type": "blob", "sha": $sha}]')
+              '. + [{"path": $path, "mode": $mode, "type": "blob", "sha": $sha}]')
           done
 
           TREE_SHA=$(gh api "repos/$REPO/git/trees" \

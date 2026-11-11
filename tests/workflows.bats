@@ -587,11 +587,12 @@ id_of() {
 # Hand over wrote, given as name=status pairs, beside the README of the
 # checkout. The copy of the README in $RESULTS differs from it when
 # $README_CHANGED is set and is missing when $NO_README_COPY is set. sudo and
-# git fail. The day of the card is 2026-11-10. Prints the step outputs.
+# git fail. The day of the card is 2026-11-10. aurtomator/ links to
+# $AURTOMATOR_TREE, this tree by default. Prints the step outputs.
 run_decide_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" results="$BATS_TEST_TMPDIR/results" pair
   mkdir -p "$ws/statuses" "$bin" "$results"
-  ln -sfn "$BATS_TEST_DIRNAME/.." "$ws/aurtomator"
+  ln -sfn "${AURTOMATOR_TREE:-$BATS_TEST_DIRNAME/..}" "$ws/aurtomator"
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/statuses/${pair%%=*}"
   done
@@ -653,6 +654,37 @@ run_decide_step() {
 
 @test "check-updates: Decide counts a missing copy of the README as unchanged" {
   NO_README_COPY=1 run run_decide_step pkg=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+}
+
+# aurtomator/aurtomator.sh is the runner of the release, and aurtomator.sh of
+# the workspace the runner of the repository
+@test "check-updates: Decide publishes a runner of the repository that differs from the runner of the release" {
+  mkdir -p "$BATS_TEST_TMPDIR/ws"
+  echo "old runner" >"$BATS_TEST_TMPDIR/ws/aurtomator.sh"
+  run run_decide_step pkg=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+}
+
+@test "check-updates: Decide leaves an equal runner and a link alone" {
+  mkdir -p "$BATS_TEST_TMPDIR/ws"
+  cp "$BATS_TEST_DIRNAME/../aurtomator.sh" "$BATS_TEST_TMPDIR/ws/aurtomator.sh"
+  run run_decide_step pkg=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  echo "old runner" >"$BATS_TEST_TMPDIR/old"
+  ln -sfn "$BATS_TEST_TMPDIR/old" "$BATS_TEST_TMPDIR/ws/aurtomator.sh"
+  run run_decide_step pkg=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+}
+
+@test "check-updates: Decide leaves the runner when the checkout of aurtomator holds none" {
+  mkdir -p "$BATS_TEST_TMPDIR/ws" "$BATS_TEST_TMPDIR/bare"
+  echo "old runner" >"$BATS_TEST_TMPDIR/ws/aurtomator.sh"
+  AURTOMATOR_TREE="$BATS_TEST_TMPDIR/bare" run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
 }
@@ -2468,6 +2500,100 @@ no_commit() {
   [ "$status" -eq 0 ]
   jq -e '[.tree[].path] == ["stats/card.svg"]' "$GH_LOG.tree"
   grep -qF -- "-f message=chore: update package statistics [skip ci] " "$GH_LOG"
+}
+
+# make_commit_repo with the pairs from $3 on, and aurtomator.sh committed as
+# $1 beside $2 in aurtomator/aurtomator.sh, the runner of the release
+make_runner_repo() {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_commit_repo "${@:3}"
+  printf '%s\n' "$1" >"$ws/aurtomator.sh"
+  git -C "$ws" add aurtomator.sh
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m runner
+  mkdir -p "$ws/aurtomator"
+  printf '%s\n' "$2" >"$ws/aurtomator/aurtomator.sh"
+}
+
+@test "check-updates: the commit step writes the runner of the release over a runner that differs" {
+  make_runner_repo "old runner" "new runner"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '.tree == [{"path": "aurtomator.sh", "mode": "100755", "type": "blob", "sha": "blob"}]' "$GH_LOG.tree"
+  [ "$(jq -r .content "$GH_LOG.blobs" | base64 -d)" = "new runner" ]
+  grep -qF -- "-f message=chore: update aurtomator.sh [skip ci] " "$GH_LOG"
+}
+
+@test "check-updates: the commit step leaves a runner equal to the runner of the release" {
+  make_runner_repo "same runner" "same runner"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "No changes to commit" ]
+  no_commit
+}
+
+@test "check-updates: the commit step adds no runner to a repository without one" {
+  make_commit_repo
+  mkdir -p "$BATS_TEST_TMPDIR/ws/aurtomator"
+  echo "new runner" >"$BATS_TEST_TMPDIR/ws/aurtomator/aurtomator.sh"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "No changes to commit" ]
+  no_commit
+}
+
+@test "check-updates: the commit step leaves the runner when the checkout of aurtomator holds none" {
+  make_runner_repo "old runner" "new runner"
+  mv "$BATS_TEST_TMPDIR/ws/aurtomator/aurtomator.sh" "$BATS_TEST_TMPDIR/ws/aurtomator/gone"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "No changes to commit" ]
+  no_commit
+}
+
+@test "check-updates: the commit step leaves a runner that is a link" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_commit_repo
+  echo "old runner" >"$ws/runner.txt"
+  ln -s runner.txt "$ws/aurtomator.sh"
+  git -C "$ws" add runner.txt aurtomator.sh
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m runner
+  mkdir -p "$ws/aurtomator"
+  echo "new runner" >"$ws/aurtomator/aurtomator.sh"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "No changes to commit" ]
+  no_commit
+}
+
+@test "check-updates: the commit step names the runner beside the package versions" {
+  make_runner_repo "old runner" "new runner" README.md="new table"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[] | [.path, .mode]] == [["README.md", "100644"], ["aurtomator.sh", "100755"]]' "$GH_LOG.tree"
+  grep -qF -- "-f message=chore: update package versions and aurtomator.sh [skip ci] " "$GH_LOG"
+}
+
+@test "check-updates: a commit of stats/ and the runner names both" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_runner_repo "old runner" "new runner" stats/card.svg="new card"
+  mkdir "$ws/stats"
+  echo card >"$ws/stats/card.svg"
+  echo journal >"$ws/stats/events.csv"
+  git -C "$ws" add stats
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m stats
+  cp "$ws/stats/events.csv" "$BATS_TEST_TMPDIR/results/stats/events.csv"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["stats/card.svg", "aurtomator.sh"]' "$GH_LOG.tree"
+  grep -qF -- "-f message=chore: update package statistics and aurtomator.sh [skip ci] " "$GH_LOG"
+}
+
+@test "check-updates: the commit step stops with a notice when the moved head changed aurtomator.sh" {
+  make_runner_repo "old runner" "new runner"
+  GH_HEAD=$MOVED GH_TREE="$(moved_tree aurtomator.sh)" run_commit_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::aurtomator.sh changed on main during the run, so the statuses of this run are not committed"* ]]
+  no_commit
 }
 
 @test "check-updates: the commit step stops when a new file of stats/ appeared on the moved head" {
