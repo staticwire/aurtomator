@@ -1526,7 +1526,7 @@ actionlint
 
 `actionlint` does not check the `run:` blocks of a composite action. The step `shellcheck the actions` takes them from every `.github/actions/*/action.yml` with the `yq` of the runner image and runs `shellcheck -s bash` on them at its default severity, so an unquoted variable fails the step as it fails `actionlint` in a workflow.
 
-The step `shellcheck and shfmt the runner` prints the `aurtomator.sh` script of the template with `tests/helpers/runner-script.sh`, which takes it from [SETUP.md](SETUP.md#the-aurtomatorsh-script), and runs `shellcheck` and `shfmt -d -i 2 -ci` on it.
+The step `shellcheck and shfmt the runner` runs `shellcheck` and `shfmt -d -i 2 -ci` on `aurtomator.sh`, the script that the template and your repository hold, see [SETUP.md](SETUP.md#the-aurtomatorsh-script).
 
 ### 6.2 Test job
 

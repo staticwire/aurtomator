@@ -3,12 +3,7 @@
 load helpers/setup.sh
 
 SETUP_DOC="$BATS_TEST_DIRNAME/../docs/SETUP.md"
-
-# Prints the script aurtomator.sh of the template, as the lint job of CI
-# takes it from docs/SETUP.md
-runner_script() {
-  bash "$BATS_TEST_DIRNAME/helpers/runner-script.sh"
-}
+RUNNER="$BATS_TEST_DIRNAME/../aurtomator.sh"
 
 # Commits the files of a fake aurtomator to the work tree $1: a sample that
 # holds $2, scripts/show-args.sh, which prints what it got and exits with
@@ -63,8 +58,8 @@ setup() {
 
   REPO="$TEST_TMPDIR/repo"
   mkdir -p "$REPO/.github/workflows" "$REPO/packages"
-  runner_script >"$REPO/aurtomator.sh"
-  chmod +x "$REPO/aurtomator.sh"
+  # bashcov counts the lines of the runner in the root through this link
+  ln -s "$RUNNER" "$REPO/aurtomator.sh"
   pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED"
 }
 
@@ -72,12 +67,13 @@ teardown() {
   teardown_test_env
 }
 
-@test "runner: SETUP.md holds the script once" {
-  run grep -A 1 -x '```bash' "$SETUP_DOC"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c -x '#!/usr/bin/env bash' <<<"$output")" -eq 1 ]
-  [ "$(head -n 1 "$REPO/aurtomator.sh")" = "#!/usr/bin/env bash" ]
-  grep -qx 'set -euo pipefail' "$REPO/aurtomator.sh"
+@test "runner: aurtomator.sh in the root is the runner, and SETUP.md holds its curl command" {
+  [ -x "$RUNNER" ]
+  [ "$(head -n 1 "$RUNNER")" = "#!/usr/bin/env bash" ]
+  grep -qx 'set -euo pipefail' "$RUNNER"
+  run grep -c -x '#!/usr/bin/env bash' "$SETUP_DOC"
+  [ "$output" = 0 ]
+  grep -qxF 'curl -fsSL -o aurtomator.sh https://raw.githubusercontent.com/staticwire/aurtomator/vX.Y.Z/aurtomator.sh' "$SETUP_DOC"
 }
 
 @test "runner: prints the sample of the pinned commit" {
