@@ -293,6 +293,87 @@ EOF
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
+# Writes the calling workflow $1, with GOOD put in for the pin at $PINNED
+# and EVIL for a pin of another repository
+shape() {
+  local good="staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED"
+  local evil="evil/aurtomator/.github/workflows/check-updates.yml@eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  sed -e "s|GOOD|$good|g" -e "s|EVIL|$evil|g" <<<"$1" >"$REPO/.github/workflows/check-updates.yml"
+}
+
+@test "runner: stops at a merge key before it fetches" {
+  shape $'x-base: &e\n  uses: EVIL\njobs:\n  check-updates:\n    <<: *e'
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/check-updates.yml holds a merge key (<<)" ]
+  shape $'x-base: &e\n  uses: EVIL\njobs:\n  check-updates:\n    uses: "GOOD"\n    <<: *e'
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/check-updates.yml holds a merge key (<<)" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+@test "runner: stops at a key twice in one mapping before it fetches" {
+  local file
+  for file in $'jobs:\n  check-updates:\n    uses: "GOOD"\n    uses: EVIL' \
+    $'jobs:\n  check-updates:\n    uses: "GOOD"\n  check-updates:\n    uses: EVIL' \
+    $'jobs:\n  check-updates:\n    uses: "GOOD"\njobs:\n  check-updates:\n    uses: EVIL'; do
+    shape "$file"
+    run "$REPO/aurtomator.sh" sample
+    [ "$status" -eq 1 ]
+    [ "$output" = ".github/workflows/check-updates.yml holds a key twice in one mapping" ]
+  done
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+@test "runner: stops at a second YAML document before it fetches" {
+  shape $'jobs:\n  check-updates:\n    uses: EVIL\n---\n- a'
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/check-updates.yml holds more than one YAML document" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+@test "runner: prints the error of yq for a file it cannot read" {
+  printf 'jobs:\n\tcheck-updates:\n' >"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "${lines[0]}" = "yq cannot read .github/workflows/check-updates.yml:" ]
+  [[ "${lines[1]}" == "  Error: "* ]]
+  [ "${#lines[@]}" -eq 2 ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+# The top level is a list, and its block of text holds the uses: line, so
+# check_shape passes the file and yq fails on .jobs
+@test "runner: stops with the error of yq when yq fails to read a pin" {
+  printf -- '- |\n  uses: staticwire/aurtomator/.github/workflows/check-updates.yml@%s # vX.Y.Z\n' "$PINNED" \
+    >"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [[ "${lines[0]}" == "Error: "* ]]
+  [ "${#lines[@]}" -eq 1 ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED"
+  printf -- '- |\n  uses: staticwire/aurtomator/.github/workflows/validate.yml@%s # v1.0.0\n' "$PINNED" \
+    >"$REPO/.github/workflows/validate.yml"
+  cp -r "$REPO/.github/workflows" "$TEST_TMPDIR/before"
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 1 ]
+  [[ "${lines[0]}" == "Error: "* ]]
+  [ "${#lines[@]}" -eq 1 ]
+  diff -r "$TEST_TMPDIR/before" "$REPO/.github/workflows"
+}
+
+@test "runner: reads a file with an anchor and an alias" {
+  printf 'x-secrets: &s\n  KEY: value\njobs:\n  check-updates:\n    uses: %s # vX.Y.Z\n    secrets: *s\n' \
+    "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" >"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+}
+
 # The fetch of each run waits a second, so both find no copy and fetch
 @test "runner: two first runs of a pin at once leave one copy" {
   local bin="$TEST_TMPDIR/slow" one two
@@ -494,6 +575,16 @@ EOF
   run "$REPO/aurtomator.sh" pin v1.1.0
   [ "$status" -eq 1 ]
   [ "${lines[1]}" = "  staticwire/aurtomator/.github/workflows/validate.yml@$PINNED" ]
+  diff -r "$TEST_TMPDIR/before" "$REPO/.github/workflows"
+}
+
+@test "runner: pin stops at a merge key in validate.yml and changes no file" {
+  printf 'x: &v\n  uses: %s\njobs:\n  validate:\n    <<: *v\n' \
+    "staticwire/aurtomator/.github/workflows/validate.yml@$PINNED" >"$REPO/.github/workflows/validate.yml"
+  cp -r "$REPO/.github/workflows" "$TEST_TMPDIR/before"
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/validate.yml holds a merge key (<<)" ]
   diff -r "$TEST_TMPDIR/before" "$REPO/.github/workflows"
 }
 
