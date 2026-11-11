@@ -45,6 +45,9 @@ clean_statuses() {
         "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
         ! validate_pkgver "${status#*: }" 2>/dev/null || continue
         ;;
+      "arch_back: "* | "arch_added: "*)
+        ! arch_status_version "${status#*: }" >/dev/null || continue
+        ;;
     esac
     echo "check_failed: invalid status from the check run" >"$file"
   done

@@ -2903,6 +2903,18 @@ EOF
   [ "$(cat "$TEST_TMPDIR/st/_alerts")" = $'a\thold\tnote' ]
 }
 
+@test "clean_statuses: keeps an arch_back and an arch_added of a version and arch names" {
+  make_statuses back="arch_back: 28+23 aarch64" added="arch_added: 28+23 aarch64 riscv64" bad="arch_added: 28+23 a b!" \
+    bare="arch_added: 28+23" lead="arch_back: x aarch64" wide="arch_back: 28+23  aarch64" alone="arch_back: x86_64"
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/st/back")" = "arch_back: 28+23 aarch64" ]
+  [ "$(cat "$TEST_TMPDIR/st/added")" = "arch_added: 28+23 aarch64 riscv64" ]
+  for name in bad bare lead wide alone; do
+    [ "$(cat "$TEST_TMPDIR/st/$name")" = "check_failed: invalid status from the check run" ]
+  done
+}
+
 @test "clean_statuses: an _upstream of another form than newer or current and a version goes" {
   make_statuses _upstream="newer: 0.12.0"
   run clean_statuses "$TEST_TMPDIR/st"
@@ -4799,6 +4811,111 @@ current_asset: '$1-a'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: no asset value from the check run" ]
+}
+
+# === check-all.sh: arches out after the check run ===
+
+# Helper: pkg at <current> with aarch64 out, the status of the check run
+# for it and the line the check run recorded in _arches, if any
+# Usage: checked_arch_package <current> <status> [record line]
+checked_arch_package() {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '$1'
+arch_out:
+  aarch64: '$(printf 'a%.0s' {1..40})'"
+  checked_status pkg "$2"
+  if [[ -n "${3:-}" ]]; then
+    printf '%s\nother\t9.9\taarch64\t\n' "$3" >"$TEST_TMPDIR/.status/_arches"
+  fi
+}
+
+@test "check-all --prepare: carries the arch record of the check run" {
+  checked_arch_package 1.0.0 "new_version: 2.0.0" $'pkg\t2.0.0\taarch64\t2026-11-10T09:00:00Z'
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/_arches")" = $'pkg\t2.0.0\taarch64\t2026-11-10T09:00:00Z' ]
+}
+
+@test "check-all --prepare: prepares nothing while an arch is pending" {
+  checked_arch_package 1.0.0 "pending: 2.0.0" $'pkg\t2.0.0\t\t2026-11-11T10:00:00Z'
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "pending: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/_arches")" = $'pkg\t2.0.0\t\t2026-11-11T10:00:00Z' ]
+}
+
+@test "check-all --prepare: fails an arch record of another form" {
+  local line
+  stub_script update-pkg.sh 0
+  for line in $'pkg\t2.0.0\taarch64' $'pkg\t1.0.0\taarch64\t' $'pkg\t2.0.0\tAArch64\t' $'pkg\t2.0.0\taarch64\tsoon'; do
+    checked_arch_package 1.0.0 "new_version: 2.0.0" "$line"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "check_failed: invalid arch record from the check run" ] || {
+      echo "taken: ${line@Q}"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+}
+
+@test "check-all --prepare: prepares an arch that comes back at the version the AUR has, in a cooldown too" {
+  checked_arch_package 1.0.0 "arch_back: 1.0.0 aarch64" $'pkg\t1.0.0\t\t'
+  yq -i ".last_updated = \"$(date -u +%F)\" | .cooldown_days = 7" "$TEST_TMPDIR/packages/pkg.yml"
+  stub_script update-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.sh.args")" = "pkg 1.0.0 --prepare $TEST_TMPDIR/out/prepared" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "arch_back: 1.0.0 aarch64" ]
+}
+
+@test "check-all --verify: verifies an arch that comes back at the version of the check run" {
+  setup_check_verify
+  checked_status pkg "arch_back: 1.0.0 aarch64"
+  stub_script verify-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "pkg 1.0.0 $TEST_TMPDIR/out/prepared/pkg" ]
+}
+
+@test "check-all --publish: publishes an arch that comes back as arch_added" {
+  checked_arch_package 1.0.0 "arch_back: 1.0.0 aarch64" $'pkg\t1.0.0\t\t'
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 1.0.0 $TEST_TMPDIR/out/prepared/pkg" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "arch_added: 1.0.0 aarch64" ]
+}
+
+@test "check-all --prepare, --verify and --publish: refuse an arch_back of another form" {
+  local found
+  stub_script update-pkg.sh 0
+  stub_script verify-pkg.sh 0
+  stub_script publish-pkg.sh 0
+  for found in "arch_back: 1.0.0" "arch_back: 1.0.0 a b!" "arch_back: 1.0.0;x aarch64" "arch_back: 1.0.0  aarch64"; do
+    checked_arch_package 1.0.0 "$found" $'pkg\t1.0.0\t\t'
+    mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "check_failed: invalid status from the check run" ]
+    run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: no new version from the check run" ]
+    checked_status pkg "$found"
+    mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: invalid status from the check run" ] || {
+      echo "taken: $found"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+  [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
 }
 
 @test "verify-pkg: refuses a prepared PKGBUILD without the asset line" {

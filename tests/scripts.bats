@@ -4506,6 +4506,167 @@ current: '1.0.0'"
   grep -qF '<td nowrap>⏳ 2.0.0 pending</td>' "$TEST_TMPDIR/README.md"
 }
 
+# === check-all.sh: arches out ===
+
+# Helper: a check-arch.sh that logs its arguments to check-arch.args, prints
+# the given text and exits with the given code, 1 with a reason on stderr
+# Usage: stand_in_arch <stdout> [exit code]
+stand_in_arch() {
+  rm -f "$TEST_TMPDIR/scripts/check-arch.sh"
+  printf '#!/usr/bin/env bash\necho "$*" >>%q\nprintf %%s %q\n[[ %s != 1 ]] || echo "AUR unreadable" >&2\nexit %s\n' \
+    "$TEST_TMPDIR/check-arch.args" "$1" "${2:-0}" "${2:-0}" >"$TEST_TMPDIR/scripts/check-arch.sh"
+  chmod +x "$TEST_TMPDIR/scripts/check-arch.sh"
+}
+
+@test "check-all: writes pending and the start of the wait while an arch is missing" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch $'2026-11-11T10:00:00Z\n' 3
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t2.0.0\t\t2026-11-11T10:00:00Z' ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = "pkg 2.0.0" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+}
+
+@test "check-all: records the arches that stay out of a new version" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch $'aarch64 riscv64\n2026-11-10T09:00:00Z\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t2.0.0\taarch64 riscv64\t2026-11-10T09:00:00Z' ]
+}
+
+@test "check-all: records nothing for a version that every arch has" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch $'\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+  [ ! -e "$TEST_TMPDIR/.status/_arches" ]
+}
+
+@test "check-all: fails an arch check that prints something else" {
+  local text
+  for text in $'aarch64!\n\n' $'aarch64\nsoon\n' $'\n\nextra\n'; do
+    stand_in_strategy step 2.0.0
+    create_test_package "pkg" "step" "current: '1.0.0'"
+    stand_in_arch "$text"
+    run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ]
+    [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "check_failed: check-arch.sh printed "* ]] || {
+      echo "taken: ${text@Q}"
+      return 1
+    }
+  done
+  stand_in_arch $'soon\n' 3
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: check-arch.sh printed 'soon'" ]
+  [ ! -e "$TEST_TMPDIR/.status/_arches" ]
+}
+
+@test "check-all: passes the asset value of a new version to check-arch" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  stand_in_asset 2.0.0-a
+  stand_in_arch $'\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = "pkg 2.0.0 --asset 2.0.0-a" ]
+}
+
+@test "check-all: an arch out whose archive answers comes back at the current version, in a cooldown too" {
+  stand_in_strategy step 1.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'
+last_updated: '$(date -u +%F)'
+cooldown_days: 7
+arch_out:
+  aarch64: '$(printf 'a%.0s' {1..40})'
+  riscv64: '$(printf 'b%.0s' {1..40})'"
+  stand_in_arch $'riscv64\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "arch_back: 1.0.0 aarch64" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t1.0.0\triscv64\t' ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = "pkg 1.0.0" ]
+
+  stand_in_arch $'aarch64 riscv64\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "up_to_date" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t1.0.0\taarch64 riscv64\t' ]
+
+  # Every arch comes back: the line without arches tells prepare so
+  stand_in_arch $'\n\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "arch_back: 1.0.0 aarch64 riscv64" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t1.0.0\t\t' ]
+}
+
+@test "check-all: asks no arch check in the cooldown of a new version" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'
+last_updated: '$(date -u +%F)'
+cooldown_days: 7"
+  stand_in_arch $'aarch64\n2026-11-10T09:00:00Z\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "cooldown: "* ]]
+  [ ! -e "$TEST_TMPDIR/check-arch.args" ]
+}
+
+@test "check-all: fails the check when check-arch fails, and checks again" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch "" 1
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: AUR unreadable" ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = $'pkg 2.0.0\npkg 2.0.0' ]
+}
+
+@test "check-all: asks no arch check with allow_missing_arch: false or pkgver_dash: ''" {
+  local line version
+  for line in "allow_missing_arch: false" "pkgver_dash: ''"; do
+    for version in 2.0.0 1.0.0; do
+      stand_in_strategy step "$version"
+      create_test_package "pkg" "step" "current: '1.0.0'
+arch_out:
+  aarch64: '$(printf 'a%.0s' {1..40})'
+$line"
+      stand_in_arch $'\n\n'
+      run "$TEST_TMPDIR/scripts/check-all.sh"
+      [ "$status" -eq 0 ]
+      [ ! -e "$TEST_TMPDIR/check-arch.args" ] || {
+        echo "asked with $line at $version"
+        return 1
+      }
+      if [[ "$version" == 1.0.0 ]]; then
+        [ "$(cat "$TEST_TMPDIR/.status/pkg")" = up_to_date ]
+      else
+        [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+      fi
+    done
+  done
+}
+
+@test "check-all --update: runs no arch check" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  stand_in_arch $'aarch64\n2026-11-10T09:00:00Z\n'
+  log_update_pkg
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.args")" = "pkg 2.0.0" ]
+  [ ! -e "$TEST_TMPDIR/check-arch.args" ]
+}
+
 # === cooldown ===
 
 # Helper: the UTC date $1 days from today, negative for the past

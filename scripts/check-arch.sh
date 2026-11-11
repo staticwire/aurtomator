@@ -32,10 +32,8 @@ finish() {
   exit 0
 }
 
+missing_arch_allowed "$PKG_FILE" || finish ""
 dash=$(pkgver_dash "$PKG_FILE")
-if [[ "$(pkg_get "$PKG_FILE" '.allow_missing_arch')" == false || "$dash" == drop ]]; then
-  finish ""
-fi
 format=$(pkg_get "$PKG_FILE" '.pkgver_format // ""')
 asset_var=$(pkg_asset_var "$PKG_FILE") || exit 1
 

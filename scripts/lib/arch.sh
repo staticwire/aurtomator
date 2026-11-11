@@ -2,6 +2,36 @@
 # arch.sh - Versions without the archive of some arches, docs/WORKFLOW.md 4.8.
 # Sourced by lib.sh, after prepared.sh.
 
+# Succeeds when package file $1 lets a version go out without some arches
+missing_arch_allowed() {
+  [[ "$(pkg_get "$1" '.allow_missing_arch')" != false && "$(pkgver_dash "$1")" != drop ]]
+}
+
+# Print the version of the value $1 of an arch_back or arch_added status, a
+# version and arch names; fails for a value of another form
+arch_status_version() {
+  [[ "$1" == *" "* && "${1#* }" =~ ^[a-z0-9_]+( [a-z0-9_]+)*$ ]] || return 1
+  validate_pkgver "${1%% *}" 2>/dev/null || return 1
+  printf '%s\n' "${1%% *}"
+}
+
+# Succeeds for the arches $1 and the start $2 of the wait of a line of _arches,
+# each of which may be empty
+arch_record_ok() {
+  [[ -z "$1" || "$1" =~ ^[a-z0-9_]+( [a-z0-9_]+)*$ ]] && { [[ -z "$2" ]] || valid_time "$2"; }
+}
+
+# Print the arches of arch_out of package file $1 that the arches $2 do not
+# name, separated by spaces
+arches_back() {
+  local arch back=""
+  while IFS= read -r arch; do
+    [[ -n "$arch" && " $2 " != *" $arch "* ]] || continue
+    back+="${back:+ }$arch"
+  done < <(pkg_get "$1" '.arch_out // {} | keys | .[]')
+  printf '%s\n' "$back"
+}
+
 # Print the arch values of the pkgbase section of .SRCINFO $1, in order
 srcinfo_arches() {
   awk '/^pkgname = /{exit} /^\tarch = /{print substr($0, 9)}' "$1"
