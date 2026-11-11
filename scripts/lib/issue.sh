@@ -135,3 +135,18 @@ host_close_comment() {
   # shellcheck disable=SC2016
   printf 'Fewer than %s packages of `%s` failed to check in %s.\n' "$HOST_ISSUE_MIN" "$1" "$2"
 }
+
+# Print the body of the issue of package $1, published at version $2 without
+# the arches $3, for run URL $4
+arch_issue_body() {
+  # The backticks are Markdown code around the package, version and arches
+  # shellcheck disable=SC2016
+  printf 'Package: `%s`\nVersion: `%s`\nMissing arches: `%s`\nRun: %s\n\nThe release of this version has no archive for these arches, so the AUR package builds without them. Each run asks for the archives again and puts an arch back once its archive is out.\n\nAuto-created by update workflow. A run closes it when every arch is back.\n' "$1" "$2" "$3" "$4"
+}
+
+# Print the comment for package $1 and run URL $2 on an arch issue a run closes
+arch_close_comment() {
+  # The backticks are Markdown code around the package
+  # shellcheck disable=SC2016
+  printf 'Every arch of `%s` is back as of %s.\n' "$1" "$2"
+}

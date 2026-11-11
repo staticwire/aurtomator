@@ -46,6 +46,10 @@ clean_statuses() {
         [[ "$status" =~ ^(newer|current):\ [0-9]+\.[0-9]+\.[0-9]+$ ]] || rm -f -- "$file"
         continue
         ;;
+      _without)
+        _clean_without "$file"
+        continue
+        ;;
       _*) continue ;;
     esac
     case "$status" in
@@ -61,6 +65,21 @@ clean_statuses() {
     esac
     echo "check_failed: invalid status from the check run" >"$file"
   done
+}
+
+# Keep the lines of _without file $1 that name a package, a version and arches,
+# split by tabs, as check-all.sh --publish writes them
+_clean_without() {
+  local line kept="" version arches re=$'^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*\t([^\t]+)\t([^\t]+)$'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ $re ]] || continue
+    version=${BASH_REMATCH[1]}
+    arches=${BASH_REMATCH[2]}
+    if arch_list_ok "$arches" && validate_pkgver "$version" 2>/dev/null; then
+      kept+="$line"$'\n'
+    fi
+  done <"$1"
+  printf '%s' "$kept" >"$1"
 }
 
 # Print the Markdown summary of a run from status directory $1. An error

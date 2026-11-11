@@ -1848,6 +1848,7 @@ failure_issue_body() { echo "failure_issue_body $*" >>"$BODY_LOG" && echo body; 
 alert_issue_body() { echo "alert_issue_body $*" >>"$BODY_LOG" && echo body; }
 upstream_issue_body() { echo "upstream_issue_body $*" >>"$BODY_LOG" && echo body; }
 host_issue_body() { echo "host_issue_body $*" >>"$BODY_LOG" && echo body; }
+arch_issue_body() { echo "arch_issue_body $*" >>"$BODY_LOG" && echo body; }
 EOF
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
@@ -1877,6 +1878,7 @@ while (($#)); do
         update-held) emoji="✋" ;;
         update-notice) emoji="🔔" ;;
         aurtomator-update) emoji="🚀" ;;
+        arch-missing) emoji="⚠️" ;;
       esac
       shift
       ;;
@@ -2043,6 +2045,41 @@ EOF
   [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
 }
 
+@test "check-updates: the issue step opens an issue for a package published without some arches" {
+  run_issue_step foo=up_to_date _without=$'foo\t28+23\taarch64 riscv64'
+  [ "$status" -eq 0 ]
+  grep -qx 'label create arch-missing --color e99695 --description Published without some arches' "$GH_LOG"
+  grep -qx 'issue create --title ⚠️ foo: 28+23 without aarch64 riscv64 --label arch-missing --body body' "$GH_LOG"
+  [ "$(cat "$BODY_LOG")" = "arch_issue_body foo 28+23 aarch64 riscv64 https://example.invalid/run" ]
+}
+
+@test "check-updates: an open arch issue of the package holds back another one" {
+  GH_TITLES='⚠️ foo: 28+22 without aarch64' run_issue_step _without=$'foo\t28+23\taarch64 riscv64'
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: an open arch issue of another package holds back no issue" {
+  GH_TITLES='⚠️ foo-bar: 1.0 without aarch64' run_issue_step _without=$'foo\t28+23\taarch64'
+  [ "$status" -eq 0 ]
+  grep -q '^issue create --title ⚠️ foo: 28+23 without aarch64 ' "$GH_LOG"
+}
+
+@test "check-updates: the issue step gives a notice for arches out when Issues are disabled" {
+  GH_HAS_ISSUES=false GH_FAIL=1 run_issue_step _without=$'foo\t28+23\taarch64'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
+  run grep -c '^issue ' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step asks GitHub nothing for an empty _without" {
+  run_issue_step foo=up_to_date _without=
+  [ "$status" -eq 0 ]
+  [ ! -s "$GH_LOG" ]
+}
+
 # Prints a name=status pair for each of $1 packages, named $3 and a number,
 # whose check failed on host $2
 host_failures() {
@@ -2132,6 +2169,7 @@ run_close_step() {
   printf 'set -euo pipefail\nsource %q\n' "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" >"$ws/aurtomator/scripts/lib.sh"
   cat >>"$ws/aurtomator/scripts/lib.sh" <<'EOF'
 close_comment() { echo "close_comment $*" >>"$BODY_LOG" && echo comment; }
+arch_close_comment() { echo "arch_close_comment $*" >>"$BODY_LOG" && echo comment; }
 EOF
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
@@ -2149,6 +2187,7 @@ while (($#)); do
         auto-update) emoji="❌" ;;
         update-held) emoji="✋" ;;
         aurtomator-update) emoji="🚀" ;;
+        arch-missing) emoji="⚠️" ;;
       esac
       ;;
   esac
@@ -2727,6 +2766,32 @@ run_bare_issues_step() {
   grep -qx 'issue close 23 --comment Fewer than 5 packages of `gitlab.com` failed to check in https://example.invalid/run.' "$GH_LOG"
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "2" ]
+}
+
+@test "check-updates: closes the arch issue of a package that _without of publish lists no more" {
+  GH_OPEN=$'12 ⚠️ foo: 28+23 without aarch64\n13 ⚠️ bar: 1.0 without riscv64' \
+    run_close_step foo=up_to_date bar=up_to_date _without=$'bar\t1.1\triscv64'
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 12 --comment comment' "$GH_LOG"
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "1" ]
+  [ "$(cat "$BODY_LOG")" = "arch_close_comment foo https://example.invalid/run" ]
+}
+
+@test "check-updates: keeps the arch issues in a run without the _without of publish" {
+  GH_OPEN=$'12 ⚠️ foo: 28+23 without aarch64' run_close_step foo=up_to_date
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
+  run grep -c -- '--label arch-missing' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: closes no arch issue whose title names no package" {
+  GH_OPEN=$'12 ⚠️ foo bar: 1.0 without aarch64\n13 ⚠️ `x`: 1.0 without aarch64\n14 ⚠️ no colon' run_close_step _without=
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "check-updates: the close step lists nothing when Issues are disabled" {

@@ -3195,6 +3195,32 @@ EOF
   [ "${lines[4]}" = "$tail" ]
 }
 
+# === arch_issue_body and arch_close_comment ===
+
+@test "arch_issue_body: names the package, the version, the arches and the run" {
+  run arch_issue_body jdk-temurin-ea-bin 28+23 "aarch64 riscv64" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+Package: `jdk-temurin-ea-bin`
+Version: `28+23`
+Missing arches: `aarch64 riscv64`
+Run: https://example.invalid/run
+
+The release of this version has no archive for these arches, so the AUR package builds without them. Each run asks for the archives again and puts an arch back once its archive is out.
+
+Auto-created by update workflow. A run closes it when every arch is back.
+EOF
+  )
+  [ "$output" = "$expected" ]
+}
+
+@test "arch_close_comment: names the package and the run" {
+  run arch_close_comment jdk-temurin-ea-bin https://example.invalid/run
+  [ "$status" -eq 0 ]
+  [ "$output" = 'Every arch of `jdk-temurin-ea-bin` is back as of https://example.invalid/run.' ]
+}
+
 # === failure_host and failed_hosts ===
 
 @test "failure_host: names the host of the URL that http_get could not read" {
@@ -3420,6 +3446,18 @@ EOF
   run clean_statuses "$TEST_TMPDIR/st"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/st/_upstream" ]
+}
+
+@test "clean_statuses: keeps the lines of _without that name a package, a version and arches" {
+  make_statuses _without=$'foo\t28+23\taarch64 riscv64\nbar baz\t1.0\taarch64\nqux\t1.0 x\taarch64\nquux\t1.0\tAArch64\ncorge\t1.0\t\ngrault\t1.0\taarch64\textra\nfoo-2\t2.0\triscv64'
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/st/_without")" = $'foo\t28+23\taarch64 riscv64\nfoo-2\t2.0\triscv64' ]
+  make_statuses _without=
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_TMPDIR/st/_without" ]
+  [ ! -s "$TEST_TMPDIR/st/_without" ]
 }
 
 # Helper: writes the statuses given as name=status pairs to $TEST_TMPDIR/st
