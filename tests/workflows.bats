@@ -630,6 +630,8 @@ run_decide_step() {
   [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
   run run_decide_step pkg="new_build: 1.0.0" _assets=$'pkg\t1.0.0-b'
   [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
+  run run_decide_step pkg="arch_back: 1.0.0 aarch64" _arches=$'pkg\t1.0.0\t\t'
+  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
 }
 
 @test "check-updates: Decide prepares nothing while an asset is pending" {
@@ -1240,11 +1242,12 @@ make_builder_inputs() {
   echo "name: bar" >"$ws/packages/bar.yml"
   echo "new_version: 3.0" >"$ws/.status/bar"
   printf 'foo\t2.0-x\nbar\t3.0-x\n' >"$ws/.status/_assets"
+  printf 'foo\t2.0\taarch64\t\nbar\t3.0\t\t\n' >"$ws/.status/_arches"
   printf 'bar\tnotice\tNote\n' >"$ws/.status/_alerts"
   PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step check "Check updates"
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
-  [ "$output" = "$(printf '%s\n' ./.status ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
+  [ "$output" = "$(printf '%s\n' ./.status ./.status/_arches ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
 }
 
 @test "run-as-builder: copies nothing of one package through a link" {

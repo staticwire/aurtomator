@@ -233,7 +233,7 @@ jobs:
           for f in statuses/*; do
             name=${f#statuses/}
             [[ -f "$f" && "$name" =~ $name_re ]] || continue
-            grep -qE '^(new_version|available_downgrade|new_build): ' "$f" || continue
+            grep -qE '^(new_version|available_downgrade|new_build|arch_back): ' "$f" || continue
             if ((${#to_prepare[@]} < 256)); then
               to_prepare+=("$name")
             else
