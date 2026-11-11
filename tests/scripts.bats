@@ -852,6 +852,35 @@ MOCKCURL
   grep -q "test-1.0.0-riscv64.tar.gz" "$TEST_TMPDIR/curl-urls.log"
 }
 
+@test "lib.sh: validate_source_urls skips the source arrays of the arches it is given" {
+  cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
+pkgname=test-arches
+pkgver=1.0.0
+pkgrel=1
+arch=('armv7h' 'riscv64')
+source=("https://example.com/test-1.0.0.tar.gz")
+source_armv7h=("https://example.com/test-1.0.0-armv7h.tar.gz")
+source_riscv64=("https://example.com/test-1.0.0-riscv64.tar.gz")
+sha256sums=('abc123')
+sha256sums_armv7h=('abc123')
+sha256sums_riscv64=('abc123')
+EOF
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+echo "\${@: -1}" >>"$TEST_TMPDIR/curl-urls.log"
+printf '200 application/octet-stream'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+  local lib='source "$0/scripts/lib.sh"; validate_source_urls "$1" "$2"'
+  run bash -c "$lib" "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD" "armv7h"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/curl-urls.log")" = $'https://example.com/test-1.0.0.tar.gz\nhttps://example.com/test-1.0.0-riscv64.tar.gz' ]
+  rm "$TEST_TMPDIR/curl-urls.log"
+  run bash -c "$lib" "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD" "riscv64 armv7h"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/curl-urls.log")" = "https://example.com/test-1.0.0.tar.gz" ]
+}
+
 # makepkg sets CARCH, and neovim-nightly-bin builds its URL from it in a
 # case statement. Without CARCH the URL is nvim-linux-.tar.gz, a 404.
 @test "lib.sh: validate_source_urls builds the URLs with CARCH" {
@@ -4101,11 +4130,6 @@ $1"
   arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
   make_aur_remote jdk-temurin-ea-bin "$TEST_TMPDIR/PKGBUILD" "$TEST_TMPDIR/.SRCINFO"
   mock_heads
-}
-
-# Helper: the archive of arch $1 at version $2 answers 404
-archive_missing() {
-  arch_source_url "$1" "$2" >>"$TEST_TMPDIR/missing"
 }
 
 # Helper: run check-arch.sh for jdk-temurin-ea-bin; sets ARCH_RC, and

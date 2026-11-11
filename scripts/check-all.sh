@@ -296,6 +296,7 @@ find_arches() {
   local rc=0 err_file err text first second line version=""
   local record=$'^[^\t]*\t([^\t]*)\t([^\t]*)\t([^\t]*)$'
   ARCH_OUT=""
+  ARCH_RECORD=""
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
     line=$(awk -F'\t' -v p="$2" '$1 == p { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}")
     if [[ "${CHECKED[$2]:-}" == "pending: "* ]]; then
@@ -314,6 +315,7 @@ find_arches() {
       return 1
     fi
     ARCH_OUT=$first
+    ARCH_RECORD=1
     printf '%s\n' "$line" >>"${STATUS_DIR}/_arches"
     return 0
   fi
@@ -453,6 +455,7 @@ run_package() {
   # AUR; --prepare and --publish take it from the status of the check run
   ARCH_BACK=""
   ARCH_OUT=""
+  ARCH_RECORD=""
   if [[ -z "$latest" && "$MODE" == check && -n "$(pkg_get "$pkg_file" '.arch_out // {} | keys | .[]')" ]] &&
     missing_arch_allowed "$pkg_file"; then
     find_arches "$pkg_file" "$pkg_name" "$current" "$pass" || return 0
@@ -582,7 +585,8 @@ run_package() {
       ;;
     prepare)
       log_info "Preparing $pkg_name $latest"
-      cmd=("${AURTOMATOR_DIR}/scripts/update-pkg.sh" "$pkg_name" "$latest" ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"} --prepare "${WORK_DIR}/prepared")
+      cmd=("${AURTOMATOR_DIR}/scripts/update-pkg.sh" "$pkg_name" "$latest" ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"}
+        ${ARCH_RECORD:+--arch-out} ${ARCH_RECORD:+"$ARCH_OUT"} --prepare "${WORK_DIR}/prepared")
       ;;
     publish)
       log_info "Publishing $pkg_name $latest"

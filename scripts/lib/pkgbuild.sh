@@ -165,7 +165,7 @@ audit_pkgbuild() {
 
 # Check that source URLs return files and not HTML error pages.
 # Covers source and every source_<arch> array the PKGBUILD defines.
-# Args: $1=pkgbuild path
+# Args: $1=pkgbuild path, $2=arches whose source arrays it skips, if any
 # Returns: 0=ok, non-zero=errors found
 validate_source_urls() {
   local pkgbuild="$1"
@@ -177,13 +177,14 @@ validate_source_urls() {
   urls=$(CARCH="${CARCH:-$(uname -m)}" bash -c '
     source "$1" 2>/dev/null
     for arr in source $(compgen -A variable | grep "^source_"); do
+      [[ " $2 " != *" ${arr#source_} "* ]] || continue
       declare -n ref="$arr"
       for s in "${ref[@]}"; do
         url="${s##*::}"
         [[ "$url" == http* ]] && [[ "$url" != git+* ]] && echo "$url"
       done
     done
-  ' -- "$pkgbuild" 2>/dev/null || true)
+  ' -- "$pkgbuild" "${2:-}" 2>/dev/null || true)
 
   [[ -z "$urls" ]] && return 0
 
@@ -227,6 +228,23 @@ validate_source_urls() {
     return 1
   fi
   return 0
+}
+
+# Succeeds when every http URL of source_$2 of PKGBUILD $1, as makepkg builds
+# it for that arch, answers a HEAD request with a file
+arch_answers() {
+  local url urls
+  urls=$(CARCH="$2" bash -c '
+    source "$1" 2>/dev/null
+    declare -n ref="source_$2"
+    for s in "${ref[@]}"; do
+      url="${s##*::}"
+      [[ "$url" == http* ]] && [[ "$url" != git+* ]] && echo "$url"
+    done
+  ' -- "$1" "$2" 2>/dev/null || true)
+  while IFS= read -r url; do
+    [[ -z "$url" ]] || probe_url "$url" || return 1
+  done <<<"$urls"
 }
 
 # Check if PKGBUILD has a # Maintainer: line, warn if missing

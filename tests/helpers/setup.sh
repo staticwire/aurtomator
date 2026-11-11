@@ -179,6 +179,11 @@ aur_arch_commit() {
   git -C "$AUR_REMOTE" rev-parse HEAD
 }
 
+# The archive of arch $1 at version $2 answers 404 to the curl of mock_heads
+archive_missing() {
+  arch_source_url "$1" "$2" >>"$TEST_TMPDIR/missing"
+}
+
 # A curl that answers a HEAD request with 404 for a URL in $TEST_TMPDIR/missing,
 # with no status for one in silent and with a file otherwise; logs to heads.log
 mock_heads() {
