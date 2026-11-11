@@ -235,8 +235,8 @@ current: 28+22"
   grep -qx 'pkgver=28+23' "$ARCH_OUT_DIR/PKGBUILD"
   grep -qx "arch=('x86_64' 'powerpc64le' 'riscv64')" "$ARCH_OUT_DIR/PKGBUILD"
   grep -q '^source_aarch64=' "$ARCH_OUT_DIR/PKGBUILD"
-  ! grep -q '^sha256sums_aarch64=' "$ARCH_OUT_DIR/PKGBUILD"
-  ! grep -q aarch64 "$ARCH_OUT_DIR/.SRCINFO"
+  run ! grep -q '^sha256sums_aarch64=' "$ARCH_OUT_DIR/PKGBUILD"
+  run ! grep -q aarch64 "$ARCH_OUT_DIR/.SRCINFO"
   grep -qx $'\tarch = riscv64' "$ARCH_OUT_DIR/.SRCINFO"
   [ "$(cat "$ARCH_OUT_DIR/base")" = "$AUR_BASE" ]
 }
