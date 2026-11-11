@@ -391,6 +391,14 @@ EOF
   [ "$output" = "5" ]
 }
 
+@test "ci: lint has 10 minutes and test 30" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs.lint["timeout-minutes"]' "$ci"
+  [ "$output" = "10" ]
+  run yq '.jobs.test["timeout-minutes"]' "$ci"
+  [ "$output" = "30" ]
+}
+
 # === release-please.yml ===
 
 RELEASE="$GITHUB_DIR/workflows/release-please.yml"

@@ -1514,7 +1514,7 @@ For a private repository, the raw URL needs a token that can read the contents o
 
 ### 6.1 Lint job
 
-`ubuntu-latest`, 5-minute timeout. It installs `shellcheck` from apt, and `shfmt` v3.14.1 and `actionlint` v1.7.12 with `go install`, then runs:
+`ubuntu-latest`, 10-minute timeout. It installs `shellcheck` from apt, and `shfmt` v3.14.1 and `actionlint` v1.7.12 with `go install`, then runs:
 
 ```bash
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
@@ -1530,7 +1530,7 @@ The step `shellcheck and shfmt the runner` runs `shellcheck` and `shfmt -d -i 2 
 
 ### 6.2 Test job
 
-15-minute timeout. It runs in the image that the `image` job of `ci.yml` reads. That job is the `image` job of [5.2](#52-permissions-and-container) without `Check the pin`, and its checkout takes the commit of the run. It upgrades `archlinux-keyring`, installs `bash bats git go-yq jq curl openssh namcap ruby ruby-erb` and the gems `bashcov` 4.0.0 and `simplecov-cobertura` 4.0.0 with the two gems they need, `simplecov` 1.3.2 and `rexml` 3.4.4. `gem install` names each of the four with its version and resolves no dependency, because gem takes the newest release of a dependency it resolves, and that release would run in a required check. Then it runs:
+30-minute timeout. It runs in the image that the `image` job of `ci.yml` reads. That job is the `image` job of [5.2](#52-permissions-and-container) without `Check the pin`, and its checkout takes the commit of the run. It upgrades `archlinux-keyring`, installs `bash bats git go-yq jq curl openssh namcap ruby ruby-erb` and the gems `bashcov` 4.0.0 and `simplecov-cobertura` 4.0.0 with the two gems they need, `simplecov` 1.3.2 and `rexml` 3.4.4. `gem install` names each of the four with its version and resolves no dependency, because gem takes the newest release of a dependency it resolves, and that release would run in a required check. Then it runs:
 
 ```bash
 bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
