@@ -1818,13 +1818,83 @@ EOF
   git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "sha256sums_aarch64=('$(arch_sum aarch64 28+23)')"
 }
 
-@test "publish-pkg: needs no commit for an arch of arch_out that arch=() names again" {
+@test "publish-pkg: needs no commit for an arch of arch_out that arch=() names again, and drops it" {
   setup_arch_prepare
   GONE="$(printf 'c%.0s' {1..40})" yq -i '.arch_out.aarch64 = strenv(GONE)' "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   prepare_arch 28+23 ""
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out ""
   [ "$status" -eq 0 ]
   git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "arch=('x86_64' 'aarch64' 'powerpc64le' 'riscv64')"
+  [ "$(pkg_get "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" 'has("arch_out")')" = false ]
+}
+
+@test "publish-pkg: keeps the base of an update without an arch in arch_out, and drops arch_wait" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  setup_arch_prepare
+  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" log -1 --format=%s)" = "28+23 release from webpage-scrape" ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
+  [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
+  [ "$(pkg_get "$yml" .last_updated)" = "$(date -u +%Y-%m-%d)" ]
+}
+
+@test "publish-pkg: drops an arch that comes back at a new version from arch_out" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  prepare_arch 28+24 ""
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out ""
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" log -1 --format=%s)" = "28+24 release from webpage-scrape" ]
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+  [ "$(pkg_get "$yml" .current)" = "28+24" ]
+  [ "$(pkg_get "$yml" .last_updated)" = "$(date -u +%Y-%m-%d)" ]
+}
+
+@test "publish-pkg: adds an arch to the version the AUR has with its own message and keeps last_updated" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  yq -i '.last_updated = "2026-11-01"' "$yml"
+  prepare_arch 28+23 ""
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out ""
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" log -1 --format=%s)" = "Add aarch64 to 28+23" ]
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+  [ "$(pkg_get "$yml" .last_updated)" = "2026-11-01" ]
+}
+
+@test "publish-pkg: keeps the commit of an arch that stays out" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" first
+  setup_arch_prepare x86_64 powerpc64le
+  first=$(pkg_get "$yml" .arch_out.riscv64)
+  archive_missing riscv64 28+24
+  prepare_arch 28+24 riscv64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out riscv64
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "arch=('x86_64' 'aarch64' 'powerpc64le')"
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "riscv64=$first" ]
+}
+
+@test "publish-pkg: drops an arch that arch=() of the AUR names again when the AUR has the update" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  setup_arch_prepare
+  COMMIT="$AUR_BASE" yq -i '.arch_out.aarch64 = strenv(COMMIT)' "$yml"
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+22 --arch-out "" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+22 "$ARCH_OUT_DIR" --arch-out ""
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+}
+
+@test "publish-pkg: drops arch_wait after a push without --arch-out" {
+  setup_publish
+  yq -i '.arch_wait = {"version": "1.1.0", "since": "2026-11-10T09:00:00Z"}' "$TEST_TMPDIR/packages/demo.yml"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" 'has("arch_wait")')" = false ]
 }
 
 @test "publish-pkg: takes the files of the AUR when no arch moves at the version the AUR has" {
@@ -5255,6 +5325,7 @@ arch_out:
   [ "$(cat "$TEST_TMPDIR/update-pkg.sh.args")" = "pkg 2.0.0 --arch-out aarch64 --prepare $TEST_TMPDIR/out/prepared" ]
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
   [ "$(cat "$TEST_TMPDIR/out/status/_arches")" = $'pkg\t2.0.0\taarch64\t2026-11-10T09:00:00Z' ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" 'has("arch_wait")')" = false ]
 }
 
 @test "check-all --prepare: passes no --arch-out without a line of the package in _arches" {
@@ -5317,6 +5388,7 @@ arch_out:
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 1.0.0 $TEST_TMPDIR/out/prepared/pkg --arch-out " ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "arch_added: 1.0.0 aarch64" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" 'has("arch_wait")')" = false ]
 }
 
 @test "check-all --verify: passes the arches out of the check run" {
@@ -5343,6 +5415,58 @@ arch_out:
     }
   done
   [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
+}
+
+@test "check-all --publish: writes arch_wait for a package that waits for an arch" {
+  checked_arch_package 1.0.0 "pending: 2.0.0" $'pkg\t2.0.0\t\t2026-11-11T10:00:00Z'
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" '.arch_wait.version + " " + .arch_wait.since')" = "2.0.0 2026-11-11T10:00:00Z" ]
+}
+
+@test "check-all --publish: keeps an arch_wait that holds the version and its start" {
+  checked_arch_package 1.0.0 "pending: 2.0.0" $'pkg\t2.0.0\t\t2026-11-10T09:00:00Z'
+  yq -i '.arch_wait = {"version": "2.0.0", "since": "2026-11-10T09:00:00Z"}' "$TEST_TMPDIR/packages/pkg.yml"
+  cp "$TEST_TMPDIR/packages/pkg.yml" "$TEST_TMPDIR/pkg.yml.before"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  cmp "$TEST_TMPDIR/pkg.yml.before" "$TEST_TMPDIR/packages/pkg.yml"
+}
+
+@test "check-all --publish: writes arch_wait for an update without an arch that it could not push" {
+  checked_arch_package 1.0.0 "new_version: 2.0.0" $'pkg\t2.0.0\taarch64\t2026-11-10T09:00:00Z'
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 1 "push failed"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: push failed" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" '.arch_wait.version + " " + .arch_wait.since')" = "2.0.0 2026-11-10T09:00:00Z" ]
+}
+
+@test "check-all --publish: lists each package with an arch out in _without" {
+  checked_arch_package 1.0.0 up_to_date
+  yq -i ".arch_out.riscv64 = \"$(printf 'b%.0s' {1..40})\"" "$TEST_TMPDIR/packages/pkg.yml"
+  create_test_package "other" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  checked_status other up_to_date
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_without")" = $'pkg\t1.0.0\taarch64 riscv64' ]
+}
+
+@test "check-all --publish: writes an empty _without when no package has an arch out" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg up_to_date
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_TMPDIR/.status/_without" ]
+  [ ! -s "$TEST_TMPDIR/.status/_without" ]
 }
 
 @test "check-all --publish: passes the arches out of the check run" {

@@ -40,6 +40,46 @@ arch_record_out() {
   printf '%s\n' "$first"
 }
 
+# Print the arches of the list $1 that the list $2 does not name
+arch_minus() {
+  local arch rest=""
+  local -a arches
+  read -ra arches <<<"$1"
+  for arch in "${arches[@]}"; do
+    [[ " $2 " == *" $arch "* ]] || rest+="${rest:+ }$arch"
+  done
+  printf '%s\n' "$rest"
+}
+
+# Write arch_wait of package file $1 for version $2 since $3, unless it holds
+# them already
+set_arch_wait() {
+  [[ "$(pkg_get "$1" '.arch_wait.version // ""')" != "$2" || "$(pkg_get "$1" '.arch_wait.since // ""')" != "$3" ]] || return 0
+  VERSION="$2" SINCE="$3" yq -i '.arch_wait = {"version": strenv(VERSION), "since": strenv(SINCE)}' "$1"
+}
+
+# Write the arch state of package file $1 after an update to the arch words $2
+# that leaves out the arches $3 of AUR commit $4; a published version needs no wait
+arch_state_after() {
+  local arch
+  local -a keys out_arches
+  mapfile -t keys < <(pkg_get "$1" '.arch_out // {} | keys | .[]')
+  for arch in "${keys[@]}"; do
+    [[ -n "$arch" && " $2 " == *" $arch "* ]] || continue
+    ARCH="$arch" yq -i 'del(.arch_out[strenv(ARCH)])' "$1"
+  done
+  read -ra out_arches <<<"$3"
+  for arch in "${out_arches[@]}"; do
+    ARCH="$arch" COMMIT="$4" yq -i '.arch_out[strenv(ARCH)] = strenv(COMMIT)' "$1"
+  done
+  if [[ "$(pkg_get "$1" 'has("arch_out") and (.arch_out | length) == 0')" == true ]]; then
+    yq -i 'del(.arch_out)' "$1"
+  fi
+  if [[ "$(pkg_get "$1" 'has("arch_wait")')" == true ]]; then
+    yq -i 'del(.arch_wait)' "$1"
+  fi
+}
+
 # Print the arches of arch_out of package file $1 that the arches $2 do not
 # name, separated by spaces
 arches_back() {

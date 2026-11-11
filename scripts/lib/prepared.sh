@@ -731,7 +731,7 @@ prepared_base() {
 #       commits of the arches that come back, see arch_refs
 # Returns: 0 when both files pass, 1 otherwise (reason on stderr)
 check_prepared_files() {
-  local f rel old_asset="" want_arch="" drop="" back="" arch
+  local f rel old_asset="" want_arch="" drop="" back=""
   local -a aur_words=() new_words=()
   # git keeps symlinks, and cp writes through one
   for f in PKGBUILD .SRCINFO; do
@@ -750,12 +750,8 @@ check_prepared_files() {
     mapfile -t aur_words < <(pkgbuild_arch_words "$1/PKGBUILD")
     read -ra new_words <<<"$8"
     want_arch=$(arch_line "$(grep -m1 '^arch=(' "$1/PKGBUILD")" "${new_words[@]}")
-    for arch in "${aur_words[@]}"; do
-      [[ " $8 " == *" $arch "* ]] || drop+="${drop:+ }$arch"
-    done
-    for arch in "${new_words[@]}"; do
-      [[ " ${aur_words[*]} " == *" $arch "* ]] || back+="${back:+ }$arch"
-    done
+    drop=$(arch_minus "${aur_words[*]}" "$8")
+    back=$(arch_minus "$8" "${aur_words[*]}")
   fi
   check_prepared_pkgbuild "$1/PKGBUILD" "$2/PKGBUILD" "$3" "$rel" "${6:-}" "${7:-}" "$want_arch" "$drop" "$back" &&
     check_arches_back "${9:-}" "$2" "$back" "$3" "${4:-}" "${5:-}" "${6:-}" "${7:-}" &&

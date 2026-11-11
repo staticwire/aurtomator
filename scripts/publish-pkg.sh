@@ -110,9 +110,12 @@ fi
 
 handed_rc=0
 check_handed_aur_files "$aur_files" "$PREPARED" "$VERSION" "$ASSET_VAR" "$ASSET" "$arch_words" || handed_rc=$?
+# The arches of the update, when arch=() is a line of plain names
+final_words=$(pkgbuild_arch_words "${PREPARED}/PKGBUILD" | tr '\n' ' ') || final_words=""
 if ((handed_rc == 0)); then
   log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
   pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
+  arch_state_after "$PKG_FILE" "$final_words" "" "$base"
   exit 2
 fi
 ((handed_rc == 2)) || exit 1
@@ -142,11 +145,24 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   exit 0
 fi
 
-# The checks above hold pkgrel to 1, or to the AUR pkgrel plus one for a
-# rebuild
-aur_commit_push "$aur_dir" "$VERSION" "$strategy" "$(sed -n 's/^pkgrel=//p' "${PREPARED}/PKGBUILD" | head -1)" || exit 1
+taken_out=""
+put_back=""
+if [[ -n "$arch_words" ]]; then
+  aur_arches=$(pkgbuild_arch_words "$aur_files/PKGBUILD" | tr '\n' ' ')
+  taken_out=$(arch_minus "$aur_arches" "$arch_words")
+  # Arches put back at the pkgver and pkgrel of the AUR make no new release
+  aur_release="$(_plain_value "$aur_files/PKGBUILD" pkgver)-$(_plain_value "$aur_files/PKGBUILD" pkgrel)"
+  if [[ "$aur_release" == "$VERSION-$(_plain_value "${PREPARED}/PKGBUILD" pkgrel)" ]]; then
+    put_back=$(arch_minus "$arch_words" "$aur_arches")
+  fi
+fi
+
+# The checks above hold pkgrel to 1, to the AUR pkgrel plus one for a rebuild,
+# or to the AUR pkgrel for arches put back
+aur_commit_push "$aur_dir" "$VERSION" "$strategy" "$(sed -n 's/^pkgrel=//p' "${PREPARED}/PKGBUILD" | head -1)" "$put_back" || exit 1
 log_ok "Pushed $PKG_NAME $VERSION to AUR"
 
 pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
-pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
+[[ -n "$put_back" ]] || pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
+arch_state_after "$PKG_FILE" "$final_words" "$taken_out" "$base"
 log_ok "Updated $PKG_FILE with current: $VERSION"

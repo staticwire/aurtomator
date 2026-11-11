@@ -77,15 +77,17 @@ aur_export() {
 # PKGBUILD and .SRCINFO. The message names the pkgrel of a rebuild, as in
 # "2.4.6-2 release from github-tag".
 # Args: $1=clone directory, $2=version, $3=strategy (for the commit message),
-#       $4=pkgrel, 1 by default
+#       $4=pkgrel, 1 by default, $5=arches put back, for "Add <arches> to <version>"
 aur_commit_push() {
-  local dir="$1" version="$2" attempt delay="${AURTOMATOR_RETRY_DELAY:-5}"
+  local dir="$1" version="$2" message attempt delay="${AURTOMATOR_RETRY_DELAY:-5}"
   [[ "${4:-1}" == 1 ]] || version+="-$4"
+  message="$version release from $3"
+  [[ -z "${5:-}" ]] || message="Add $5 to $version"
   log_info "Pushing to AUR"
   git -C "$dir" config user.name "${GIT_AUTHOR_NAME:-aurtomator}"
   git -C "$dir" config user.email "${GIT_AUTHOR_EMAIL:-aurtomator@users.noreply.github.com}"
   git -C "$dir" config commit.gpgsign false
-  git -C "$dir" commit -m "$version release from $3" || {
+  git -C "$dir" commit -m "$message" || {
     log_err "git commit failed in $dir"
     return 1
   }

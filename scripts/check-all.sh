@@ -295,6 +295,20 @@ find_asset() {
   printf '%s\t%s\n' "$2" "$ASSET_VALUE" >>"${STATUS_DIR}/_assets"
 }
 
+# Print the line of package $1 in _arches of the check run
+arch_record_line() {
+  awk -F'\t' -v p="$1" '$1 == p { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}"
+}
+
+# --publish keeps the start of the wait of record line $2 for version $3 in
+# arch_wait of package file $1, until publish-pkg.sh pushes the version
+keep_arch_wait() {
+  if [[ "$MODE" != publish || -z "$2" ]] || ! arch_record_out "$2" "$3" >/dev/null; then
+    return 0
+  fi
+  [[ -z "${2##*$'\t'}" ]] || set_arch_wait "$1" "$3" "${2##*$'\t'}"
+}
+
 # Set ARCH_OUT to the arches out of an update of $2 (file $1) to version $3, from
 # check-arch.sh or _arches of the check run; a wait or a failure sets the status
 find_arches() {
@@ -302,7 +316,7 @@ find_arches() {
   ARCH_OUT=""
   ARCH_RECORD=""
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
-    line=$(awk -F'\t' -v p="$2" '$1 == p { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}")
+    line=$(arch_record_line "$2")
     if [[ "${CHECKED[$2]:-}" == "pending: "* ]]; then
       printf '%s\n' "${CHECKED[$2]}" >"${STATUS_DIR}/$2"
       [[ -z "$line" ]] || printf '%s\n' "$line" >>"${STATUS_DIR}/_arches"
@@ -316,6 +330,7 @@ find_arches() {
     ARCH_OUT=$first
     ARCH_RECORD=1
     printf '%s\n' "$line" >>"${STATUS_DIR}/_arches"
+    keep_arch_wait "$1" "$line" "$3"
     return 0
   fi
   [[ "$MODE" == check ]] && missing_arch_allowed "$1" || return 0
@@ -402,6 +417,7 @@ run_package() {
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         # The issue of a held update lists the notes of its alerts
         [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(fired_alerts "$pkg_file" "$(pkg_get "$pkg_file" '.current // ""')" "${found#held: }" 2>/dev/null)"
+        [[ "$found" != "pending: "* ]] || keep_arch_wait "$pkg_file" "$(arch_record_line "$pkg_name")" "${found#pending: }"
         return
         ;;
       "")
@@ -639,6 +655,17 @@ if ((${#RECHECK[@]} > 0)); then
   sleep "$RECHECK_DELAY"
   for pkg_file in "${RECHECK[@]}"; do
     run_package "$pkg_file" 2
+  done
+fi
+
+# The arches each package lacks after the run, for the issues of arches out
+if [[ "$MODE" == "publish" ]]; then
+  : >"${STATUS_DIR}/_without"
+  for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
+    [[ -f "$pkg_file" ]] || continue
+    arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")')
+    [[ -z "$arches_out" ]] || printf '%s\t%s\t%s\n' "$(pkg_get "$pkg_file" .name)" \
+      "$(pkg_get "$pkg_file" '.current // ""')" "$arches_out" >>"${STATUS_DIR}/_without"
   done
 fi
 
