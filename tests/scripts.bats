@@ -4623,6 +4623,38 @@ current_asset: '$2'}"
   [ "$(cat "$TEST_TMPDIR/check-asset.args")" = $'pkg 2.0.0\npkg 2.0.0' ]
 }
 
+@test "check-all: an asset lookup that failed on a silent host gets no second pass" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  rm -f "$TEST_TMPDIR/scripts/check-asset.sh"
+  cat >"$TEST_TMPDIR/scripts/check-asset.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$TEST_TMPDIR/check-asset.args"
+echo silent.example >>"$AURTOMATOR_HOSTS_DIR/silent"
+echo "https://silent.example/x: Operation timed out after 30000 milliseconds with 0 bytes received" >&2
+exit 1
+STUB
+  chmod +x "$TEST_TMPDIR/scripts/check-asset.sh"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/check-asset.args")" = "pkg 2.0.0" ]
+}
+
+@test "check-all: an asset lookup killed during a request names its URL" {
+  stand_in_strategy step 2.0.0
+  asset_package 1.0.0 1.0.0-a
+  rm -f "$TEST_TMPDIR/scripts/check-asset.sh"
+  cat >"$TEST_TMPDIR/scripts/check-asset.sh" <<'STUB'
+#!/usr/bin/env bash
+source "$TEST_TMPDIR/scripts/lib.sh"
+request_begin https://slow.example/x && exec sleep 60
+STUB
+  chmod +x "$TEST_TMPDIR/scripts/check-asset.sh"
+  AURTOMATOR_CHECK_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: https://slow.example/x: timed out after 1 s" ]
+}
+
 @test "check-all: asks no asset value for a held update" {
   stand_in_strategy step 29+1
   create_test_package "pkg" "step" "upstream:
@@ -4822,6 +4854,38 @@ cooldown_days: 7"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: AUR unreadable" ]
   [ "$(cat "$TEST_TMPDIR/check-arch.args")" = $'pkg 2.0.0\npkg 2.0.0' ]
+}
+
+@test "check-all: an arch check that failed on a silent host gets no second pass" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/check-arch.sh"
+  cat >"$TEST_TMPDIR/scripts/check-arch.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$TEST_TMPDIR/check-arch.args"
+echo silent.example >>"$AURTOMATOR_HOSTS_DIR/silent"
+echo "https://silent.example/x: silent.example did not answer earlier in this run" >&2
+exit 1
+STUB
+  chmod +x "$TEST_TMPDIR/scripts/check-arch.sh"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/check-arch.args")" = "pkg 2.0.0" ]
+}
+
+@test "check-all: an arch check killed during a request names its URL" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/check-arch.sh"
+  cat >"$TEST_TMPDIR/scripts/check-arch.sh" <<'STUB'
+#!/usr/bin/env bash
+source "$TEST_TMPDIR/scripts/lib.sh"
+git_request_begin https://aur.archlinux.org/pkg.git && exec sleep 60
+STUB
+  chmod +x "$TEST_TMPDIR/scripts/check-arch.sh"
+  AURTOMATOR_CHECK_TIMEOUT=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: https://aur.archlinux.org/pkg.git: timed out after 1 s" ]
 }
 
 @test "check-all: asks no arch check with allow_missing_arch: false or pkgver_dash: ''" {
