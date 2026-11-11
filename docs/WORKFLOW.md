@@ -1177,7 +1177,7 @@ After the push, each arch taken out goes to `arch_out` with `base`. After the pu
 
 `update-readme.sh` passes the arches of `arch_out` and `current` of each package to `status_label`, which changes the labels of `up_to_date` and `updated` alone: a failure, a new version and a wait keep theirs. Several arches stand in the order of `arch_out`, separated by spaces. The run summary of [5.6](#56-issues) shows each status with its label alone.
 
-A package with a line in `.status/_without` gets an issue titled `⚠️ <package>: <version> without <arches>` with the label `arch-missing`, see [5.6](#56-issues).
+A package with a line in `.status/_without` gets an issue titled `⚠️ <package>: <version> without <arches>` with the label `arch-missing`, see [5.6](#56-issues). The journal of [5.9](#59-statistics) writes the push that puts arches back as `arch_added`, a push like the others on the card, and writes no row for `arch_back`.
 
 `check-all.sh --update` and `update-pkg.sh` without `--prepare`, the local updates of [7.5](#75-push-an-update) and [7.6](#76-check-all-packages), run no `check-arch.sh` and write no `arch_out`: a missing archive stops them as before.
 
@@ -1411,7 +1411,7 @@ The step creates each label the first time it needs it and lists the open issues
 
 The job runs also when the package table stays the same, so an issue follows the statuses of every run. A package that starts failing gets its issue in that run, and an issue closed while the package still fails comes back in the next run.
 
-The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the run and shows the new status in a code block, as the issue body shows the error. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade` or `rebuilt`, so the version is in the AUR. An open `✋ <package>: update held` closes on the same statuses, so a failed check keeps it open. An open `❌ <host>: <count> packages failed to check` closes when fewer than 5 packages of the host failed to check, with the comment ``Fewer than 5 packages of `<host>` failed to check in <url>.``, and each of those packages that still fails gets an issue of its own in `Create issues` of the same run. An open `🚀 aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` at the pin has reached the latest release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. An open `⚠️ <package>: <version> without <arches>` closes when `.status/_without` has no line for the package, with the comment ``Every arch of `<package>` is back as of <url>.``, and a run without `.status/_without`, which `publish` writes, closes none of them. An open `❌ Check AUR Package Updates failed`, which [5.7](#57-failed-runs) opens, closes with the comment `Run <url> succeeded.` when `prepare` and `verify` succeeded or were skipped, since the step itself runs only after a `check` that succeeded and a `publish` that succeeded or was skipped. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It runs neither after a failed step nor after a failed `publish`, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
+The step before it, `Close resolved issues`, closes the issue of a package that recovered, with a comment that names the run and shows the new status in a code block, as the issue body shows the error. An open `❌ <package>: check failed` closes when the status is anything but `check_failed`. An open `❌ <package>: update failed` closes when the status is `up_to_date`, `updated`, `downgrade`, `rebuilt` or `arch_added`, so the version is in the AUR. An open `✋ <package>: update held` closes on the same statuses, so a failed check keeps it open. An open `❌ <host>: <count> packages failed to check` closes when fewer than 5 packages of the host failed to check, with the comment ``Fewer than 5 packages of `<host>` failed to check in <url>.``, and each of those packages that still fails gets an issue of its own in `Create issues` of the same run. An open `🚀 aurtomator <release> available` closes when `.status/_upstream` holds anything but `newer: <release>`: `VERSION` at the pin has reached the latest release, or a newer one is out and gets its own issue. A run without `.status/_upstream` closes none of them. An open `⚠️ <package>: <version> without <arches>` closes when `.status/_without` has no line for the package, with the comment ``Every arch of `<package>` is back as of <url>.``, and a run without `.status/_without`, which `publish` writes, closes none of them. An open `❌ Check AUR Package Updates failed`, which [5.7](#57-failed-runs) opens, closes with the comment `Run <url> succeeded.` when `prepare` and `verify` succeeded or were skipped, since the step itself runs only after a `check` that succeeded and a `publish` that succeeded or was skipped. The close step comes first because an open issue of a package holds back a new one: a package whose check passes and whose update fails gets its check issue closed and an update issue opened in the same run. It runs neither after a failed step nor after a failed `publish`, so a status that `publish` did not write closes nothing, and with Issues turned off it does nothing.
 
 ### 5.7 Failed runs
 
@@ -1465,7 +1465,7 @@ The rows hold no free text. The error of a failure stays in its issue and in the
 
 | Event | Written for |
 |---|---|
-| `updated`, `downgrade`, `rebuilt` | A push to the AUR, as the status of the same name |
+| `updated`, `downgrade`, `rebuilt`, `arch_added` | A push to the AUR, as the status of the same name |
 | `held`, `jump_skipped`, `downgrade_skipped`, `pending` | A wait: the update to `version` does not go out yet |
 | `check_failed`, `update_failed` | A failure |
 | `up_to_date` | A package at its version again after a wait or a failure, or at the first version known of it |
@@ -1473,7 +1473,7 @@ The rows hold no free text. The error of a failure stays in its issue and in the
 | `added` | A package whose YAML is new |
 | `removed` | A package whose YAML is gone |
 
-The statuses of an update that is not out yet, `new_version`, `available_downgrade` and `new_build`, write no row. A wait for the cooldown, `cooldown: <date>`, counts as `up_to_date` at the version of the package, see [4.7](#47-cooldown).
+The statuses of an update that is not out yet, `new_version`, `available_downgrade`, `new_build` and `arch_back`, write no row. A wait for the cooldown, `cooldown: <date>`, counts as `up_to_date` at the version of the package, see [4.7](#47-cooldown).
 
 `record-events.sh` compares the final status of each package with the last row of the package:
 

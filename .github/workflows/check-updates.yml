@@ -836,9 +836,11 @@ jobs:
                 "❌ $pkg_name: check failed:check_failed:"*) continue ;;
                 "❌ $pkg_name: check failed:"*) ;;
                 "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
-                  "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "*) ;;
+                  "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "* | \
+                  "❌ $pkg_name: update failed:arch_added: "*) ;;
                 "✋ $pkg_name: update held:up_to_date" | "✋ $pkg_name: update held:updated: "* | \
-                  "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "*) ;;
+                  "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "* | \
+                  "✋ $pkg_name: update held:arch_added: "*) ;;
                 *) continue ;;
               esac
               comment=$(lib close_comment "$status_file" "$RUN_URL")

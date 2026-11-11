@@ -2643,11 +2643,11 @@ run_bare_issues_step() {
 }
 
 @test "check-updates: closes the update issue of a package that reached the AUR" {
-  GH_OPEN=$'12 ❌ foo: update failed\n13 ❌ bar: update failed\n14 ❌ baz: update failed\n15 ❌ qux: update failed' \
-    run_close_step foo=up_to_date bar="updated: 2.0.0" baz="downgrade: 1.0.0" qux="rebuilt: 1.0.0"
+  GH_OPEN=$'12 ❌ foo: update failed\n13 ❌ bar: update failed\n14 ❌ baz: update failed\n15 ❌ qux: update failed\n16 ❌ quux: update failed' \
+    run_close_step foo=up_to_date bar="updated: 2.0.0" baz="downgrade: 1.0.0" qux="rebuilt: 1.0.0" quux="arch_added: 1.0.0 aarch64"
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
-  [ "$output" = "4" ]
+  [ "$output" = "5" ]
 }
 
 @test "check-updates: keeps the update issue of a package that has not reached the AUR" {
@@ -2720,11 +2720,11 @@ run_bare_issues_step() {
 }
 
 @test "check-updates: closes the held issue of a package whose version reached the AUR" {
-  GH_OPEN=$'12 ✋ foo: update held\n13 ✋ bar: update held\n14 ✋ baz: update held\n15 ✋ qux: update held' \
-    run_close_step foo=up_to_date bar="updated: 2.0.0" baz="downgrade: 1.0.0" qux="rebuilt: 1.0.0"
+  GH_OPEN=$'12 ✋ foo: update held\n13 ✋ bar: update held\n14 ✋ baz: update held\n15 ✋ qux: update held\n16 ✋ quux: update held' \
+    run_close_step foo=up_to_date bar="updated: 2.0.0" baz="downgrade: 1.0.0" qux="rebuilt: 1.0.0" quux="arch_added: 1.0.0 aarch64"
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
-  [ "$output" = "4" ]
+  [ "$output" = "5" ]
 }
 
 # An outage of upstream or a rate limit must not close the issue, or the next

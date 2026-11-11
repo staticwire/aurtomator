@@ -115,7 +115,7 @@ record_package() {
   last=$(stats_class "${EVENT[$name]}")
   class=$(stats_class "$event")
   case "$event" in
-    updated | downgrade | rebuilt)
+    updated | downgrade | rebuilt | arch_added)
       add_row "$name" "$event" "$version" "$before"
       ;;
     up_to_date)
