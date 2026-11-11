@@ -12,6 +12,11 @@
 #   allow_downgrade - true publishes a version lower than current
 #   allow_version_jump - true publishes a version whose first number has
 #                     at least two digits more than that of current
+#   allow_missing_arch - true, the default, publishes a version whose
+#                     release lacks the archive of an arch without that
+#                     arch after a wait of 24 h, and puts it back when the
+#                     archive appears; false fails the update as for any
+#                     other missing source, see docs/WORKFLOW.md 4.8
 #   cooldown_days   - the days a push waits after the last one, 0 to 365;
 #                     without it 7 for git-latest and 0 for the others,
 #                     see docs/WORKFLOW.md 4.7
@@ -36,6 +41,13 @@
 #                  from it
 #   current_asset - value from a release asset name of the last push, for a
 #                   package with upstream.asset_var
+#
+# Written by the runs while a version lacks the archive of an arch, see
+# docs/WORKFLOW.md 4.8:
+#   arch_wait    - version and since, the time a run first saw that version
+#                  without the archive
+#   arch_out     - the arches a push left out, each with the AUR commit
+#                  whose .SRCINFO still holds its lines
 #
 # Strategies:
 #   github-release   GitHub Releases API

@@ -23,7 +23,7 @@ done
 readonly VALID_STRATEGIES
 
 # The top-level keys that the scripts read
-readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump cooldown_days alerts upstream"
+readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump allow_missing_arch arch_wait arch_out cooldown_days alerts upstream"
 
 # The upstream keys that each strategy reads, in the order of the strategy
 # table of README.md. A test compares them with the keys the scripts name.
@@ -244,7 +244,7 @@ validate_pkg() {
   # --- Optional fields ---
 
   local flag flag_tag
-  for flag in allow_downgrade allow_version_jump; do
+  for flag in allow_downgrade allow_version_jump allow_missing_arch; do
     flag_tag=$(pkg_get "$file" ".${flag} | tag")
     if [[ "$flag_tag" != "!!null" && "$flag_tag" != "!!bool" ]]; then
       log_err "$shown: $flag must be true or false"
@@ -299,6 +299,48 @@ validate_pkg() {
   elif [[ "$last_updated" > "$(date -u +%F)" ]]; then
     log_err "$shown: last_updated is later than today: $last_updated"
     ((errors++))
+  fi
+
+  local out_tag arch commit
+  out_tag=$(pkg_get "$file" '.arch_out | tag')
+  if [[ "$out_tag" == "!!map" ]]; then
+    mapfile -t keys < <(pkg_get "$file" '.arch_out | keys | .[]')
+    for arch in "${keys[@]}"; do
+      commit=$(ARCH="$arch" yq -r '.arch_out[strenv(ARCH)]' "$file")
+      if [[ ! "$arch" =~ ^[a-z0-9_]+$ ]]; then
+        log_err "$shown: arch_out: an arch name may hold a-z0-9_ only: ${arch@Q}"
+        ((errors++))
+      elif [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+        log_err "$shown: arch_out.$arch must be a commit id of 40 hex digits: ${commit@Q}"
+        ((errors++))
+      fi
+    done
+  elif [[ "$out_tag" != "!!null" ]]; then
+    log_err "$shown: arch_out must be a map of arch names to commit ids"
+    ((errors++))
+  fi
+
+  local wait_tag wait_version since
+  wait_tag=$(pkg_get "$file" '.arch_wait | tag')
+  if [[ "$wait_tag" != "!!null" ]]; then
+    if [[ "$wait_tag" != "!!map" || $(pkg_get "$file" '.arch_wait | keys | sort | join(" ")') != "since version" ]]; then
+      log_err "$shown: arch_wait must be a map with version and since, and no other key"
+      ((errors++))
+    else
+      wait_version=$(pkg_get "$file" '.arch_wait.version')
+      since=$(pkg_get "$file" '.arch_wait.since')
+      if ! validate_pkgver "$wait_version" 2>/dev/null; then
+        log_err "$shown: arch_wait.version must hold a digit and at most 64 characters of A-Za-z0-9 . _ +: ${wait_version@Q}"
+        ((errors++))
+      fi
+      if ! valid_time "$since"; then
+        log_err "$shown: arch_wait.since must be a UTC time YYYY-MM-DDTHH:MM:SSZ: ${since@Q}"
+        ((errors++))
+      elif [[ "$since" > "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ]]; then
+        log_err "$shown: arch_wait.since is later than now: $since"
+        ((errors++))
+      fi
+    fi
   fi
 
   local pkgver_format="" formatted

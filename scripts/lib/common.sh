@@ -391,6 +391,11 @@ valid_date() {
   [[ "$(date -u -d "$1" +%F 2>/dev/null)" == "$1" ]]
 }
 
+# Succeeds when $1 is a real UTC time in the form YYYY-MM-DDTHH:MM:SSZ
+valid_time() {
+  [[ "$(date -u -d "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" == "$1" ]]
+}
+
 # Prints the first day, YYYY-MM-DD, on which package file $1 may be pushed
 # again, or nothing without a cooldown. Returns 1 when a field is not valid.
 cooldown_until() {
