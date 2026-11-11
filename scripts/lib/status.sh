@@ -4,11 +4,21 @@
 #
 # Sourced by lib.sh.
 
-# Print the label of package status $1
+# Print the label of package status $1, with the arches out $2 of the package
+# at its version $3
 status_label() {
+  local value="${1#*: }"
   case "$1" in
-    up_to_date) echo "✅ up to date" ;;
-    updated:*) echo "📦 updated to ${1#updated: }" ;;
+    up_to_date)
+      if [[ -n "${2:-}" ]]; then
+        echo "⚠️ ${3:-} without $2"
+      else
+        echo "✅ up to date"
+      fi
+      ;;
+    updated:*) echo "📦 updated to ${1#updated: }${2:+ without $2}" ;;
+    arch_back:*) echo "✨ ${value#* } for ${value%% *} available" ;;
+    arch_added:*) echo "📦 ${value#* } added to ${value%% *}" ;;
     new_version:*) echo "✨ ${1#new_version: } available" ;;
     downgrade:*) echo "🔻 downgraded to ${1#downgrade: }" ;;
     available_downgrade:*) echo "🔻 ${1#available_downgrade: } available (downgrade)" ;;

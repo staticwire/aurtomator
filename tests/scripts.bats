@@ -1952,6 +1952,21 @@ current: '2.0.0'"
   grep -qF '<td><a href="https://aur.archlinux.org/pkgbase/pkg-a">pkg-a</a></td>' "$TEST_TMPDIR/README.md"
 }
 
+@test "update-readme: names the arches out of a package in its status" {
+  create_test_package "pkg-a" "github-release" "upstream:
+  project: owner/repo
+current: '28+23'
+arch_out:
+  riscv64: '$(printf 'a%.0s' {1..40})'
+  aarch64: '$(printf 'b%.0s' {1..40})'"
+  echo "up_to_date" >"$TEST_TMPDIR/.status/pkg-a"
+  printf '%s\n' "# test" "<!-- PACKAGES:START -->" "<!-- PACKAGES:END -->" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '<td nowrap>⚠️ 28+23 without riscv64 aarch64</td></tr>' "$TEST_TMPDIR/README.md"
+}
+
 # GitHub keeps nowrap on an HTML table cell, and a Markdown cell takes none
 @test "update-readme: keeps strategy, date and status on one line" {
   create_test_package "pkg-a" "github-release" "upstream:

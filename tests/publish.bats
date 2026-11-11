@@ -3371,6 +3371,17 @@ EOF
   [ "$output" = "✅ tracking" ]
 }
 
+@test "status_label: names the arches out of a package" {
+  [ "$(status_label "updated: 28+23" aarch64 28+23)" = "📦 updated to 28+23 without aarch64" ]
+  [ "$(status_label up_to_date "aarch64 riscv64" 28+23)" = "⚠️ 28+23 without aarch64 riscv64" ]
+  [ "$(status_label "arch_back: 28+23 aarch64" "" 28+23)" = "✨ aarch64 for 28+23 available" ]
+  [ "$(status_label "arch_added: 28+23 aarch64 riscv64" powerpc64le 28+23)" = "📦 aarch64 riscv64 added to 28+23" ]
+  [ "$(status_label "new_version: 28+24" aarch64 28+23)" = "✨ 28+24 available" ]
+  [ "$(status_label "check_failed: boom" aarch64 28+23)" = "❌ failed" ]
+  [ "$(status_label up_to_date "" 28+23)" = "✅ up to date" ]
+  [ "$(status_label "updated: 28+24" "" 28+24)" = "📦 updated to 28+24" ]
+}
+
 # With publish skipped, the issues job reads the statuses of check as
 # builder wrote them
 @test "clean_statuses: a status that --publish would refuse becomes a check failure" {
