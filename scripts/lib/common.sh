@@ -194,6 +194,11 @@ request_begin() {
   printf '%s\n%s\n' "$1" "${2:-$1}" >"$AURTOMATOR_HOSTS_DIR/request"
 }
 
+# request_begin for git URL $1: the HEAD check asks the first URL that git asks
+git_request_begin() {
+  request_begin "$1" "${1%/}/info/refs?service=git-upload-pack"
+}
+
 # End the request that request_begin started
 request_end() {
   if host_memory; then
@@ -473,8 +478,12 @@ cooldown_until() {
 # ls-remote over https only and without a terminal prompt
 # Args: $1=HTTPS URL of the repository
 remote_tags() {
+  local rc=0
+  git_request_begin "$1" || return 1
   GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 \
-    git ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||'
+    git ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||' || rc=$?
+  request_end
+  return "$rc"
 }
 
 # Print every tag name of a GitHub repository, with GITHUB_TOKEN when it is

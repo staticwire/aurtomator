@@ -1033,6 +1033,30 @@ EOF
   [ "$(cat "$TEST_TMPDIR/git-clone")" = "https https://github.com/owner/repo.git" ]
 }
 
+@test "git-latest: asks a silent host nothing" {
+  fake_git_upstream
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git"
+  keep_host_memory git.example.com
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://git.example.com/repo.git: git.example.com did not answer earlier in this run"* ]]
+  [ ! -e "$TEST_TMPDIR/git-clone" ]
+}
+
+@test "git-latest: ends its request after the clone" {
+  fake_git_upstream
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git"
+  keep_host_memory
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ -s "$TEST_TMPDIR/git-clone" ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
+}
+
 # A bare clone of googleapis/mcp-toolbox, 1.4 GB, does not fit in the time of
 # a check. The strategy reads commits and tags only.
 @test "git-latest: clones without trees" {

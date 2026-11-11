@@ -1178,6 +1178,28 @@ MOCKCURL
   [ "$(head -1 "$TEST_TMPDIR/curl.args")" = "-sIL -o /dev/null -w %{http_code} %{content_type} --max-time 10 --max-redirs 5 https://example.com/demo-aarch64.tar.gz" ]
 }
 
+@test "arch.sh: probe_url names its request while curl runs" {
+  keep_host_memory
+  timeout_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  probe_url https://example.com/demo-aarch64.tar.gz || true
+  [ "$(cat "$TEST_TMPDIR/curl.log")" = "https://example.com/demo-aarch64.tar.gz|https://example.com/demo-aarch64.tar.gz https://example.com/demo-aarch64.tar.gz" ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
+}
+
+@test "arch.sh: probe_url asks a silent host nothing and remembers no host after its timeout" {
+  keep_host_memory silent.example
+  mock_probe_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run probe_url https://silent.example/demo-aarch64.tar.gz
+  [ "$status" -eq 2 ]
+  [ "$output" = "https://silent.example/demo-aarch64.tar.gz: silent.example did not answer earlier in this run" ]
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
+  CURL_RC=28 CURL_W="000 " run probe_url https://slow.example/demo-aarch64.tar.gz
+  [ "$status" -eq 2 ]
+  [ "$(cat "$AURTOMATOR_HOSTS_DIR/silent")" = "silent.example" ]
+}
+
 # === http_get ===
 
 @test "lib.sh: http_get tries a transient failure again" {
@@ -1324,6 +1346,46 @@ MOCKCURL
   CURL_RC=22 CURL_STDERR='https://example.com/a\tThe requested URL returned error: 404\t404\t' run http_get_json https://example.com/a
   [ "$status" -eq 22 ]
   [ "$output" = "https://example.com/a: The requested URL returned error: 404" ]
+}
+
+# Helper: a git that logs its arguments and the request in flight to git.log,
+# and prints one tag
+logging_git() {
+  cat >"$MOCK_DIR/git" <<'MOCKGIT'
+#!/usr/bin/env bash
+request=$(paste -sd ' ' "${AURTOMATOR_HOSTS_DIR:-/nonexistent}/request" 2>/dev/null)
+printf '%s|%s\n' "$*" "$request" >>"$TEST_TMPDIR/git.log"
+printf 'abc\trefs/tags/v1.0.0\n'
+MOCKGIT
+  chmod +x "$MOCK_DIR/git"
+}
+
+@test "lib.sh: remote_tags and aur_clone name their request and the URL of git for the HEAD check" {
+  keep_host_memory
+  logging_git
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run remote_tags https://git.example/repo.git
+  [ "$status" -eq 0 ]
+  [ "$output" = "v1.0.0" ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
+  run aur_clone https://aur.archlinux.org/pkg.git "$TEST_TMPDIR/aur" --no-checkout
+  [ "$status" -eq 0 ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
+  [ "$(cat "$TEST_TMPDIR/git.log")" = "ls-remote --tags --refs https://git.example/repo.git|https://git.example/repo.git https://git.example/repo.git/info/refs?service=git-upload-pack
+clone --no-checkout https://aur.archlinux.org/pkg.git $TEST_TMPDIR/aur|https://aur.archlinux.org/pkg.git https://aur.archlinux.org/pkg.git/info/refs?service=git-upload-pack" ]
+}
+
+@test "lib.sh: remote_tags and aur_clone ask a silent host nothing" {
+  keep_host_memory git.example aur.archlinux.org
+  logging_git
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run remote_tags https://git.example/repo.git
+  [ "$status" -eq 1 ]
+  [ "$output" = "https://git.example/repo.git: git.example did not answer earlier in this run" ]
+  run aur_clone https://aur.archlinux.org/pkg.git "$TEST_TMPDIR/aur"
+  [ "$status" -eq 1 ]
+  [ "$output" = "https://aur.archlinux.org/pkg.git: aur.archlinux.org did not answer earlier in this run" ]
+  [ ! -e "$TEST_TMPDIR/git.log" ]
 }
 
 # script from util-linux runs the command on a terminal of its own
@@ -4409,6 +4471,17 @@ arch_wait:
   [ "$ARCH_RC" -eq 0 ]
   [ "$ARCH_OUT" = $'aarch64|\n|' ]
   [ ! -e "$TEST_TMPDIR/heads.log" ]
+}
+
+@test "check-arch: with aur.archlinux.org silent the arches out stay out" {
+  temurin_package "current: 28+22"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  keep_host_memory aur.archlinux.org
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+  [ ! -e "$TEST_TMPDIR/clone-urls" ]
+  grep -qF "https://aur.archlinux.org/jdk-temurin-ea-bin.git: aur.archlinux.org did not answer earlier in this run" "$TEST_TMPDIR/arch.err"
 }
 
 @test "check-arch: an arch line it cannot edit leaves the update as it is" {
