@@ -65,7 +65,7 @@ echo "$version"
    shfmt -d -i 2 -ci strategies/my-strategy.sh
    ```
 
-9. **Docs:** the strategies table in `README.md`, a section in this file, and an example in `packages/example.yml.sample`.
+9. **Docs:** the strategies table in `README.md`, a section in `site/src/content/docs/strategies.md`, and an example in `packages/example.yml.sample`.
 
 ## Functions in lib/common.sh
 
@@ -80,8 +80,8 @@ echo "$version"
 | `to_pkgver <version> <dash> <format>` | Prints the pkgver of an upstream version, with `pkgver_dash` and `pkgver_format` applied. `<dash>` is the output of `pkgver_dash`, and an empty `<dash>` or `<format>` leaves that step out |
 | `pkg_asset_var <file>`          | Prints the `upstream.asset_var` of a package or nothing, returns 1 for a name that is not a variable name starting with `_` |
 | `require_cmd <cmd>`             | Exits 1 if the command is not in `PATH`             |
-| `http_get <url> [curl option]...` | Fetches a URL with `curl`, see 8.3                |
-| `http_get_json <url> [curl option]...` | `http_get` for an API that answers JSON, see 8.3 |
+| `http_get <url> [curl option]...` | Fetches a URL with `curl`, see [Checklist](#checklist)                |
+| `http_get_json <url> [curl option]...` | `http_get` for an API that answers JSON, see [Checklist](#checklist) |
 | `github_api <url>`              | `http_get` with an `Authorization` header from `GITHUB_TOKEN` when it is set |
 | `github_release_matching <api> <ere> <pages> [stable] [version] [template]` | Prints a release whose tag matches the ERE, as JSON, from the pages of 100 releases up to the first one with fewer than 100, at most `<pages>` pages: the one published last, or with `version` the one with the newest version that the template gives. `stable` leaves out pre-releases. The arguments keep their places, so a call with `version` and without `stable` passes an empty fourth argument |
 | `github_tags <owner/repo>`      | `remote_tags` of a GitHub repository, with `GITHUB_TOKEN` when it is set |

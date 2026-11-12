@@ -75,7 +75,7 @@ For a private repository, the raw URL needs a token that can read the contents o
 
 ## Statistics card
 
-The package block starts with the cards that **Record statistics** of `publish` draws in `stats/`, see [Statistics](/aurtomator/features/statistics/):
+The package block starts with the cards that **Record statistics** of `publish` draws in `stats/`, see [The card](#the-card):
 
 ```html
 <a href="stats/events.csv">

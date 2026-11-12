@@ -10,7 +10,7 @@ sudo pacman -S --needed git curl go-yq pacman-contrib namcap
 sudo pacman -S --needed bats jq openssh shellcheck shfmt actionlint
 ```
 
-The commands of 7.2 to 7.6 run in your repository through its script `aurtomator.sh`. It runs the scripts of aurtomator at the commit the calling workflows pin, so a local run uses the strategies and the checks of the version a run in CI uses, see [The aurtomator.sh script](/aurtomator/setup/#the-aurtomatorsh-script).
+The commands of the next four sections and of [Draft a package](/aurtomator/add-a-package/#draft-a-package) run in your repository through its script `aurtomator.sh`. It runs the scripts of aurtomator at the commit the calling workflows pin, so a local run uses the strategies and the checks of the version a run in CI uses, see [The aurtomator.sh script](/aurtomator/setup/#the-aurtomatorsh-script).
 
 A script takes the packages, `.status/`, `.aurtomator.conf` and `README.md` from the working directory, or from `AURTOMATOR_DATA_DIR` when it is set, and stops with `AURTOMATOR_DATA_DIR is not a directory: <value>` when that names no directory. `./aurtomator.sh` sets `AURTOMATOR_DATA_DIR` to your repository and `AURTOMATOR_RUNNER` to the path it was run by. When `AURTOMATOR_RUNNER` is set, the commands that `setup.sh` and `draft.sh` print start with it, as `./aurtomator.sh setup verify` does.
 
@@ -72,7 +72,7 @@ The last line is a summary:
 
 ## Running BATS tests
 
-The tests here and the linters of 7.8 check aurtomator itself, and run in the root of a clone of aurtomator:
+The tests here and the linters of [Linting locally](#linting-locally) check aurtomator itself, and run in the root of a clone of aurtomator:
 
 ```bash
 # Run all tests
