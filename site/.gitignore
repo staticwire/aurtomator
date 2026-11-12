@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.astro/
+src/assets/
+public/favicon.svg
+public/favicon-32.png
+public/apple-touch-icon.png
+public/demo/
