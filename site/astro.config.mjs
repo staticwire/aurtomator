@@ -22,7 +22,8 @@ export default defineConfig({
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/aurtomator/apple-touch-icon.png' } },
       ],
       social: [{ icon: 'github', label: 'GitHub', href: repo }],
-      components: { PageTitle: './src/components/PageTitle.astro' },
+      customCss: ['./src/styles/custom.css'],
+      components: { PageTitle: './src/components/PageTitle.astro', SocialIcons: './src/components/SocialIcons.astro' },
       plugins: [starlightLinksValidator(), starlightLlmsTxt()],
       sidebar: [
         { label: 'Start', items: ['overview', 'setup', 'add-a-package', 'gpg-signing'] },

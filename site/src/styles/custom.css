@@ -1,0 +1,14 @@
+/* The blue of the logo, in the colors of the README buttons. */
+:root,
+::backdrop {
+  --sl-color-accent-low: #0f2a3d;
+  --sl-color-accent: #1793d1;
+  --sl-color-accent-high: #7cc6ee;
+}
+
+:root[data-theme='light'],
+[data-theme='light'] ::backdrop {
+  --sl-color-accent-low: #e6f3fb;
+  --sl-color-accent: #0f6fa6;
+  --sl-color-accent-high: #0f2a3d;
+}
