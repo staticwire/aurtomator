@@ -30,7 +30,7 @@ By where the upstream publishes releases:
 - **GitHub rate limit:** the GitHub strategies send `GITHUB_TOKEN` when it is set in the environment. The `check-updates` workflow sets it to the workflow token, which allows 1,000 requests per hour per repository. Without a token, the limit is 60 requests per hour. `github-tag` reads the tags with `git ls-remote`, outside this limit.
 - **Retries:** a request that a strategy sends with curl tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. The git calls of `git-latest`, `github-tag` and `git-tag` make one attempt. A check that still fails within its time budget runs once more after the other packages and a pause of 60 seconds. A failure on both tries fails the package for that run.
 - **Answer size:** a request that a strategy sends with curl reads at most 50 MB of one answer, and `webpage-scrape` at most 5 MB of its page. `upstream.max_answer_mb`, a whole number from 1 to 500, sets another limit for one package. A larger answer fails the check.
-- **Tag strategies take only `v1.2.3` and `1.2.3` by default:** without `tag_version_regex`, `github-tag`, `gitlab-tag`, `gitea-tag` and `git-tag` leave out every other tag, `latest`, `1.0.0-rc1` and `1.0.0rc1` included. `tag_version_regex` replaces that filter. They pick the newest version by `vercmp`, the order of pacman, which places `1.0.0rc1` below `1.0.0`. The comparison drops a dash before a letter, so `1.0.0-rc1` is below `1.0.0` as well, and a regex that lets pre-release tags through picks the release once it is out. A plain number is of that form too, so a repository that tags its releases `13` and `14` and its builds `2026102100` gives the build; `check-all.sh` holds such a step as a version jump, see [Downgrades and version jumps](/aurtomator/features/downgrades/), and `tag_version_regex: '^([0-9]{1,3})$'` keeps the releases.
+- **Tag strategies take only `v1.2.3` and `1.2.3` by default:** without `tag_version_regex`, `github-tag`, `gitlab-tag`, `gitea-tag` and `git-tag` leave out every other tag, `latest`, `1.0.0-rc1` and `1.0.0rc1` included. `tag_version_regex` replaces that filter. They pick the newest version by `vercmp`, the order of pacman, which places `1.0.0rc1` below `1.0.0`. The comparison drops a dash before a letter, so `1.0.0-rc1` is below `1.0.0` as well, and a regex that lets pre-release tags through picks the release once it is out. A plain number is of that form too, so a repository that tags its releases `13` and `14` and its builds `2026102100` gives the build; `check-all.sh` holds such a step as a version jump, see [Downgrades and version jumps](/features/downgrades/), and `tag_version_regex: '^([0-9]{1,3})$'` keeps the releases.
 - **`gitlab-tag` and `gitea-tag` fetch at most 100 and 50 tags:** there is no pagination. `git-tag` with the `.git` URL of the project reads every tag, and `gitea-release` reads the releases, up to 500 with `tag_version_regex`.
 - **`gitlab-tag` has no authentication:** private GitLab projects cannot be queried.
 
@@ -48,7 +48,7 @@ Some sites answer a client without a browser with a check page in place of the d
     pattern: 'Version: ([0-9.]+)'
   ```
 
-- **A check of the site itself:** forge.soutade.fr redirects every request without its cookie to a page that asks "Are you Human?", the API, git and the archives alike. `gitea-tag` and `gitlab-tag` fail with the URL of that page, and the source check refuses the archives as HTML, see [Source URL returns HTML](/aurtomator/supported-packages/#source-url-returns-html-blocked). aurtomator sends no cookie, so a package whose upstream sits behind such a check, as libgourou, is not supported.
+- **A check of the site itself:** forge.soutade.fr redirects every request without its cookie to a page that asks "Are you Human?", the API, git and the archives alike. `gitea-tag` and `gitlab-tag` fail with the URL of that page, and the source check refuses the archives as HTML, see [Source URL returns HTML](/supported-packages/#source-url-returns-html-blocked). aurtomator sends no cookie, so a package whose upstream sits behind such a check, as libgourou, is not supported.
 
 ## Upstream sources not covered
 
@@ -71,8 +71,8 @@ A strategy is a bash script in `strategies/`. It takes the package name, reads i
 | `upstream.project`           | yes      | `owner/repo` format                 |
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, see below |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex` (default: `\1`), see below |
-| `upstream.asset_regex`       | no       | ERE whose one capture group is a value from an asset name of the release, see [Values from release asset names](/aurtomator/features/asset-values/) |
-| `upstream.asset_var`         | with `asset_regex` | The PKGBUILD variable that holds that value, see [Values from release asset names](/aurtomator/features/asset-values/) |
+| `upstream.asset_regex`       | no       | ERE whose one capture group is a value from an asset name of the release, see [Values from release asset names](/features/asset-values/) |
+| `upstream.asset_var`         | with `asset_regex` | The PKGBUILD variable that holds that value, see [Values from release asset names](/features/asset-values/) |
 
 **Version:** reads `.tag_name` of the latest release and strips a leading `v`. The endpoint skips drafts and pre-releases. When it answers 404, the strategy reads the release list to say why: a list of pre-releases only gets a message that names `github-nightly` with `nightly_tag_regex`, an empty list one that names `github-tag`.
 
@@ -133,10 +133,10 @@ upstream:
 | `upstream.project`           | yes      | `owner/repo` format                      |
 | `upstream.tag_version_regex` | no       | ERE whose first capture group is the version, replaces the default filter |
 | `upstream.tag_version_replace` | no     | The version built from the groups of `tag_version_regex`, see [github-release](#github-release) |
-| `upstream.asset_regex`       | no       | ERE whose one capture group is a value from an asset name of the release of the tag, see [Values from release asset names](/aurtomator/features/asset-values/) |
-| `upstream.asset_var`         | with `asset_regex` | The PKGBUILD variable that holds that value, see [Values from release asset names](/aurtomator/features/asset-values/) |
+| `upstream.asset_regex`       | no       | ERE whose one capture group is a value from an asset name of the release of the tag, see [Values from release asset names](/features/asset-values/) |
+| `upstream.asset_var`         | with `asset_regex` | The PKGBUILD variable that holds that value, see [Values from release asset names](/features/asset-values/) |
 
-**Version:** reads every tag in one request, outside the API rate limit. Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names the field. `tag_version_regex` keeps the tags it matches instead. The strategy strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the newest version by `vercmp`, the order of pacman: `1.0.0rc1` is below `1.0.0`. The comparison drops a dash before a letter, as `pkgver_dash: ''` does, so `1.0.0-rc1` is below `1.0.0` too, and takes any other dash for a dot, so `2025-04-03` compares as `2025.04.03`. With `pkgver_dash` `_` or `.`, pacman puts `1.0.0_rc1` above `1.0.0`, so `1.0.0` then shows as a skipped downgrade, see [Package YAML](/aurtomator/package-yaml/).
+**Version:** reads every tag in one request, outside the API rate limit. Without `tag_version_regex`, it keeps the tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out, and a project without such a tag fails the check with a message that names the field. `tag_version_regex` keeps the tags it matches instead. The strategy strips a leading `v`, or applies `tag_version_regex` and `tag_version_replace`, and returns the newest version by `vercmp`, the order of pacman: `1.0.0rc1` is below `1.0.0`. The comparison drops a dash before a letter, as `pkgver_dash: ''` does, so `1.0.0-rc1` is below `1.0.0` too, and takes any other dash for a dot, so `2025-04-03` compares as `2025.04.03`. With `pkgver_dash` `_` or `.`, pacman puts `1.0.0_rc1` above `1.0.0`, so `1.0.0` then shows as a skipped downgrade, see [Package YAML](/package-yaml/).
 
 **Authentication:** when `GITHUB_TOKEN` is set in the environment, git sends it to `github.com` as `Authorization: Basic` with the user `x-access-token`, which a private repository needs. The header reaches git through `GIT_CONFIG_*` variables, so the token does not appear on a command line. git allows only `https` and asks for no password on the terminal.
 
@@ -251,7 +251,7 @@ upstream:
 
 **Upstream:** one GitHub release by tag (`/repos/{owner}/{repo}/releases/tags/{tag}`) and the `updated_at` of the assets listed in the package YAML.
 
-**When to use:** releases whose tag never moves while the assets behind it are replaced, such as a model zoo or a rolling download tag. A PKGBUILD for such a release points at fixed URLs, so an update changes `pkgver`, `pkgrel` and the checksums and nothing else. Nightly binaries fit as well, such as the `nightly` tag of `wezterm/wezterm`. The PKGBUILD has no `pkgver()`, because the audit blocks one with this strategy, and `pkgver` holds the date, see [pkgver() with the wrong strategy](/aurtomator/supported-packages/#pkgver-with-the-wrong-strategy-blocked).
+**When to use:** releases whose tag never moves while the assets behind it are replaced, such as a model zoo or a rolling download tag. A PKGBUILD for such a release points at fixed URLs, so an update changes `pkgver`, `pkgrel` and the checksums and nothing else. Nightly binaries fit as well, such as the `nightly` tag of `wezterm/wezterm`. The PKGBUILD has no `pkgver()`, because the audit blocks one with this strategy, and `pkgver` holds the date, see [pkgver() with the wrong strategy](/supported-packages/#pkgver-with-the-wrong-strategy-blocked).
 
 **YAML fields:**
 
@@ -369,7 +369,7 @@ With `upstream.describe`, the strategy prints what the `git describe` recipes of
 
 `current` must be empty or of the form the strategy prints: `r<count>.<hash>`, or `<tag>.r<count>.g<hash>` with `upstream.describe`. `validate-pkg.sh` refuses any other. `vercmp` reads `1.4.0.r47.g0bbf5ad` as newer than every `r<count>.<hash>`. Without `upstream.describe`, a `current` of the `git describe` form would make each check a downgrade, and the package would never update. With `upstream.describe`, a `current` of the form `r<count>.<hash>` would make the next check an update, even on the same commit.
 
-Every new commit upstream is a new version. A push of a `git-latest` package waits 7 days after the last one, unless `cooldown_days` sets other days, see [Cooldown](/aurtomator/features/cooldown/).
+Every new commit upstream is a new version. A push of a `git-latest` package waits 7 days after the last one, unless `cooldown_days` sets other days, see [Cooldown](/features/cooldown/).
 
 The clone runs with `GIT_ALLOW_PROTOCOL=https`. A URL in a package YAML that comes with a pull request therefore cannot read a local repository or connect to an ssh host with the SSH key of the machine that runs the check, and a redirect cannot move the clone to http.
 
@@ -486,7 +486,7 @@ upstream:
   registry: serde
 ```
 
-A semver pre-release such as `1.0.0-beta.24` holds a dash, so `validate-pkg.sh` refuses `prerelease: true` without `pkgver_dash`, see [Package YAML](/aurtomator/package-yaml/). pijul gives `1.0.0.beta.24` with:
+A semver pre-release such as `1.0.0-beta.24` holds a dash, so `validate-pkg.sh` refuses `prerelease: true` without `pkgver_dash`, see [Package YAML](/package-yaml/). pijul gives `1.0.0.beta.24` with:
 
 ```yaml
 name: pijul
@@ -497,7 +497,7 @@ upstream:
 pkgver_dash: .
 ```
 
-`1.0.0` sorts below `1.0.0.beta.24`, so when pijul 1.0.0 comes out, the check skips it as a downgrade, see the note on pre-releases in [Package YAML](/aurtomator/package-yaml/). With `pkgver_dash: ''`, pijul gives `1.0.0beta.24`, which `vercmp` puts below `1.0.0`.
+`1.0.0` sorts below `1.0.0.beta.24`, so when pijul 1.0.0 comes out, the check skips it as a downgrade, see the note on pre-releases in [Package YAML](/package-yaml/). With `pkgver_dash: ''`, pijul gives `1.0.0beta.24`, which `vercmp` puts below `1.0.0`.
 
 ### repology
 
@@ -511,7 +511,7 @@ pkgver_dash: .
 |---------------------|----------|--------------------------------------------------------------|
 | `upstream.repology` | no       | Repology project name. Defaults to the package `name`.       |
 
-**Version:** returns the version of the first entry with `status == "newest"` outside the AUR. The AUR entries are left out, because for a package of ours they hold our own version. When only the AUR is newest, the strategy returns the newest `outdated` version outside the AUR by `vercmp`, and a `current` above it reads as a downgrade, see [Downgrades and version jumps](/aurtomator/features/downgrades/). The version is the normalized `version` field of Repology: the OpenBSD entry of qodem gives `1.0.1`, and its `origversion` is `1.0.1p1`. The request sends `User-Agent: aurtomator/1.0`, as Repology asks.
+**Version:** returns the version of the first entry with `status == "newest"` outside the AUR. The AUR entries are left out, because for a package of ours they hold our own version. When only the AUR is newest, the strategy returns the newest `outdated` version outside the AUR by `vercmp`, and a `current` above it reads as a downgrade, see [Downgrades and version jumps](/features/downgrades/). The version is the normalized `version` field of Repology: the OpenBSD entry of qodem gives `1.0.1`, and its `origversion` is `1.0.1p1`. The request sends `User-Agent: aurtomator/1.0`, as Repology asks.
 
 The version lags behind upstream until a distribution other than the AUR packages the new release. A project that Repology does not know, such as `wingide` in place of `wing-ide`, fails the check with `Project <name> not found on Repology`. A project with no `newest` or `outdated` entry outside the AUR fails with `No version found on Repology for <name> outside the AUR`.
 
@@ -553,7 +553,7 @@ strategy: repology
 | `upstream.archpkg` | no       | Package name in the official repos. Defaults to the package `name`. |
 | `upstream.testing` | no       | `true` also reads `core-testing`, `extra-testing` and `multilib-testing`. Default `false`. |
 
-**Version:** reads the entries of `core`, `extra` and `multilib` and takes the newest by `vercmp`, the epoch included. It prints its `pkgver`, the version without `epoch` and `pkgrel`: ffmpeg `2:9.0.2-2` gives `9.0.2`. When the official package raises its epoch, as `1:2.0` to `2:1.0`, the strategy gives `1.0` after `2.0`, and the check skips it as a downgrade, see [Downgrades and version jumps](/aurtomator/features/downgrades/). aurtomator does not write an `epoch`: the maintainer raises it in the AUR package, publishes `1.0` by hand and sets `current` to it. A package without an entry in these repositories fails with `Package not found in core, extra, multilib: <name>`. A rebuild in the official repos raises only `pkgrel`, so it gives no new version, and an update of this strategy never raises `pkgrel` alone, see [Packages needing a pkgrel bump](/aurtomator/supported-packages/#packages-needing-a-pkgrel-bump).
+**Version:** reads the entries of `core`, `extra` and `multilib` and takes the newest by `vercmp`, the epoch included. It prints its `pkgver`, the version without `epoch` and `pkgrel`: ffmpeg `2:9.0.2-2` gives `9.0.2`. When the official package raises its epoch, as `1:2.0` to `2:1.0`, the strategy gives `1.0` after `2.0`, and the check skips it as a downgrade, see [Downgrades and version jumps](/features/downgrades/). aurtomator does not write an `epoch`: the maintainer raises it in the AUR package, publishes `1.0` by hand and sets `current` to it. A package without an entry in these repositories fails with `Package not found in core, extra, multilib: <name>`. A rebuild in the official repos raises only `pkgrel`, so it gives no new version, and an update of this strategy never raises `pkgrel` alone, see [Packages needing a pkgrel bump](/supported-packages/#packages-needing-a-pkgrel-bump).
 
 With `testing: true` the strategy also reads `core-testing`, `extra-testing` and `multilib-testing`. It takes the build in testing while that build is newer than the stable one, and the stable build otherwise. A build that moves from testing to the stable repository keeps its version and gives no new update. `gnome-unstable` and `kde-unstable` stay out. `validate-pkg.sh` refuses a `testing` that is not `true` or `false`, and `testing` with another strategy.
 

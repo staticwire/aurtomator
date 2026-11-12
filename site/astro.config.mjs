@@ -8,8 +8,7 @@ import starlightLlmsTxt from 'starlight-llms-txt';
 const repo = 'https://github.com/staticwire/aurtomator';
 
 export default defineConfig({
-  site: 'https://staticwire.github.io',
-  base: '/aurtomator',
+  site: 'https://aurtomator.dev',
   integrations: [
     mermaid(),
     starlight({
@@ -18,8 +17,8 @@ export default defineConfig({
       logo: { light: './src/assets/lockup-light.svg', dark: './src/assets/lockup-dark.svg', alt: 'aurtomator', replacesTitle: true },
       favicon: '/favicon.svg',
       head: [
-        { tag: 'link', attrs: { rel: 'icon', href: '/aurtomator/favicon-32.png', sizes: '32x32' } },
-        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/aurtomator/apple-touch-icon.png' } },
+        { tag: 'link', attrs: { rel: 'icon', href: '/favicon-32.png', sizes: '32x32' } },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
       ],
       social: [{ icon: 'github', label: 'GitHub', href: repo }],
       customCss: ['./src/styles/custom.css'],

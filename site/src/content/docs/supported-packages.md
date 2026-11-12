@@ -27,7 +27,7 @@ source_aarch64=("https://example.com/app-${pkgver}-aarch64.tar.gz")
 
 `updpkgsums` handles arch-specific checksum arrays and writes all of them in one block at the place of the first one, so a `sha256sums_<arch>` array next to its `source_<arch>` moves into that block on the first update. Source URL validation covers every `source_<arch>` array. A stable URL pattern is enough.
 
-A release that lacks the archive of one arch would stop the update of every arch at the source check. With `allow_missing_arch`, which is `true` unless the package YAML sets `false`, aurtomator waits 24 hours for the archive, then publishes the version without that arch and puts the arch back once its archive is out, at the same version or with the next one. A version without the archive of `x86_64`, or without the archives of every arch, fails as before. The PKGBUILD needs one `arch=(...)` line of plain arch names at the start of a line, see [Versions without some arches](/aurtomator/features/missing-arches/).
+A release that lacks the archive of one arch would stop the update of every arch at the source check. With `allow_missing_arch`, which is `true` unless the package YAML sets `false`, aurtomator waits 24 hours for the archive, then publishes the version without that arch and puts the arch back once its archive is out, at the same version or with the next one. A version without the archive of `x86_64`, or without the archives of every arch, fails as before. The PKGBUILD needs one `arch=(...)` line of plain arch names at the start of a line, see [Versions without some arches](/features/missing-arches/).
 
 ### VCS packages (-git) with the git-latest strategy
 
@@ -41,7 +41,7 @@ upstream:
   project: group/project
 ```
 
-`git-latest` makes a bare clone and computes `r{count}.{hash}`, for example `r435.abc1234`, the usual AUR format for `-git` versions. aurtomator writes this value to `pkgver=`, skips `SKIP` checksums and pushes. By default, a push waits 7 days after the last one, see [Cooldown](/aurtomator/features/cooldown/). A source pinned to `#branch=` needs `upstream.branch` with the same branch, or the count and the hash come from the default branch.
+`git-latest` makes a bare clone and computes `r{count}.{hash}`, for example `r435.abc1234`, the usual AUR format for `-git` versions. aurtomator writes this value to `pkgver=`, skips `SKIP` checksums and pushes. By default, a push waits 7 days after the last one, see [Cooldown](/features/cooldown/). A source pinned to `#branch=` needs `upstream.branch` with the same branch, or the count and the hash come from the default branch.
 
 A `pkgver()` function in the PKGBUILD is fine when it produces the same format. The hash takes as many characters as the hash in `current`. A `pkgver()` that follows the `git describe` recipe of the Arch package guidelines, such as `1.4.0.r47.g0bbf5ad`, needs `upstream.describe`: `tags` for `git describe --long --tags`, `annotated` without `--tags`, and `upstream.tag_prefix` for a prefix the recipe cuts off the tag, as `sed 's/^v//'`. `vercmp` reads that form as newer than every `r{count}.{hash}`, so `validate-pkg.sh` refuses a `current` of the other form. A `pkgver()` that counts the commits in another way, as hyprland-git does with `git rev-list --count --cherry-pick`, gives a count the strategy does not reproduce. A user who builds the package later gets a newer value when upstream has moved on, as with every `-git` package on the AUR.
 
@@ -76,7 +76,7 @@ sha256sums=('abc123def456...'
 
 makepkg gives `SKIP` to every source whose file name ends in `.sig`, `.sign` or `.asc`, and `updpkgsums` writes that `SKIP` again. When every `SKIP` of the PKGBUILD belongs to such a source, aurtomator runs steps 5 to 7 as for a package without `SKIP`, and the other sources get new checksums. For a source with a name before `::`, makepkg reads that name and not the URL.
 
-aurtomator does not check the signature. It runs `makepkg --verifysource` with `--skippgpcheck`, and verify skips every `SKIP`, see step 5 of verify in [Prepare and publish](/aurtomator/internals/update-process/#prepare-and-publish).
+aurtomator does not check the signature. It runs `makepkg --verifysource` with `--skippgpcheck`, and verify skips every `SKIP`, see step 5 of verify in [Prepare and publish](/internals/update-process/#prepare-and-publish).
 
 ### Non-standard tag formats (tag_version_regex)
 
@@ -88,9 +88,9 @@ upstream:
   tag_version_regex: '^release-v?([0-9.]+)-stable$'
 ```
 
-The first capture group of the ERE is the version, whatever the format of the tag, for example `0.1.8-stable`, `release-v2.3.0` or `app/v1.5.0`. bash takes the group, so the regex may hold `|`, in a group after the version: `^v?([0-9.]+)(-stable|)$`. With `github-release`, the regex also picks the release of one product in a repository that releases several, see [github-release](/aurtomator/strategies/#github-release).
+The first capture group of the ERE is the version, whatever the format of the tag, for example `0.1.8-stable`, `release-v2.3.0` or `app/v1.5.0`. bash takes the group, so the regex may hold `|`, in a group after the version: `^v?([0-9.]+)(-stable|)$`. With `github-release`, the regex also picks the release of one product in a repository that releases several, see [github-release](/strategies/#github-release).
 
-`tag_version_replace` builds the version from more than one group, with `\1` to `\9`. For the date tag `2026-09-10`, `'^([0-9]{4})-([0-9]{2})-([0-9]{2})$'` with `'\1.\2.\3'` gives `2026.09.10`. See [github-release](/aurtomator/strategies/#github-release).
+`tag_version_replace` builds the version from more than one group, with `\1` to `\9`. For the date tag `2026-09-10`, `'^([0-9]{4})-([0-9]{2})-([0-9]{2})$'` with `'\1.\2.\3'` gives `2026.09.10`. See [github-release](/strategies/#github-release).
 
 ### Versions with a dash (pkgver_dash)
 
@@ -104,7 +104,7 @@ upstream:
 pkgver_dash: _
 ```
 
-`check-update.sh` replaces every `-` in the output of the strategy, whatever the strategy, and the PKGBUILD turns it back where a source URL needs it, as nodejs-inshellisense does with `${pkgver//_/-}`. The `.SRCINFO` check of verify and publish counts that form as the version. A pre-release in this form, such as `1.0.0.beta.24`, sorts above its final release, so the final release is skipped as a downgrade, and the AUR package needs an `epoch`, which aurtomator does not write. `_` and `.` are allowed, and `vercmp` reads them the same. `''` is allowed too and drops the dash: `2.5.0-rc1` becomes `2.5.0rc1`, which sorts below `2.5.0`, so the final release needs no epoch, and the PKGBUILD puts the dash back as in `${pkgver/rc/-rc}`, see [Package YAML](/aurtomator/package-yaml/). `crates` with `prerelease: true` needs the field, see [crates](/aurtomator/strategies/#crates).
+`check-update.sh` replaces every `-` in the output of the strategy, whatever the strategy, and the PKGBUILD turns it back where a source URL needs it, as nodejs-inshellisense does with `${pkgver//_/-}`. The `.SRCINFO` check of verify and publish counts that form as the version. A pre-release in this form, such as `1.0.0.beta.24`, sorts above its final release, so the final release is skipped as a downgrade, and the AUR package needs an `epoch`, which aurtomator does not write. `_` and `.` are allowed, and `vercmp` reads them the same. `''` is allowed too and drops the dash: `2.5.0-rc1` becomes `2.5.0rc1`, which sorts below `2.5.0`, so the final release needs no epoch, and the PKGBUILD puts the dash back as in `${pkgver/rc/-rc}`, see [Package YAML](/package-yaml/). `crates` with `prerelease: true` needs the field, see [crates](/strategies/#crates).
 
 ### Versions with text around the upstream version (pkgver_format)
 
@@ -119,7 +119,7 @@ upstream:
 pkgver_format: '4.%s'
 ```
 
-`check-update.sh` puts the output of the strategy in place of `%s`, whatever the strategy, and the PKGBUILD cuts the text off where a source URL needs the upstream version, as with `${pkgver#4.}`. The `.SRCINFO` check of verify and publish counts the upstream version inside the old and the new `pkgver` as the version. See [Package YAML](/aurtomator/package-yaml/).
+`check-update.sh` puts the output of the strategy in place of `%s`, whatever the strategy, and the PKGBUILD cuts the text off where a source URL needs the upstream version, as with `${pkgver#4.}`. The `.SRCINFO` check of verify and publish counts the upstream version inside the old and the new `pkgver` as the version. See [Package YAML](/package-yaml/).
 
 ### Release asset names with more than the version (asset_regex)
 
@@ -147,7 +147,7 @@ source_x86_64=("${_release}/liquidsoap_${_deb}_amd64.deb")
 source_aarch64=("${_release}/liquidsoap_${_deb}_arm64.deb")
 ```
 
-The check finds the one asset of the release of the new version that `asset_regex` matches and writes its capture group to the `_deb=` line. The group takes the whole variable part, version included, so a release candidate whose asset name holds no `rc` needs nothing more. It has to take enough of the asset name to occur only where the PKGBUILD uses it, never as the version or other text of a line. A new value of the version the AUR has is published as a rebuild with the next `pkgrel`. The download keeps the upstream name, which holds the value: a name such as `${pkgname}-${pkgver}-amd64.deb::<url>` stays the same through a rebuild, and makepkg then takes the old file from the build directory and fails on its checksum. Only `github-tag` and `github-release` take `asset_regex`. See [Values from release asset names](/aurtomator/features/asset-values/).
+The check finds the one asset of the release of the new version that `asset_regex` matches and writes its capture group to the `_deb=` line. The group takes the whole variable part, version included, so a release candidate whose asset name holds no `rc` needs nothing more. It has to take enough of the asset name to occur only where the PKGBUILD uses it, never as the version or other text of a line. A new value of the version the AUR has is published as a rebuild with the next `pkgrel`. The download keeps the upstream name, which holds the value: a name such as `${pkgname}-${pkgver}-amd64.deb::<url>` stays the same through a rebuild, and makepkg then takes the old file from the build directory and fails on its checksum. Only `github-tag` and `github-release` take `asset_regex`. See [Values from release asset names](/features/asset-values/).
 
 ### Nightly and prerelease packages
 
@@ -158,9 +158,9 @@ The check finds the one asset of the release of the new version that `asset_rege
 - **Separate nightly repo**, for example yt-dlp-nightly-builds. It reads `/releases/latest`, which skips pre-releases, so a repository that files its nightlies as pre-releases, such as ruffle, needs dated tags.
 - **Channel filter**, for example the brave-browser Nightly channel
 
-The version comes from the tag name, the release body, the tag date or the publish date. `strategies/github-nightly.sh` lists the fields. A release that keeps its tag and its publish date while its assets are replaced, such as the `nightly` release of `wezterm/wezterm`, published in 2019, is tracked by the date of the assets with `github-asset`, see [pkgver() with the wrong strategy](#pkgver-with-the-wrong-strategy-blocked). `date_format` sets the form of the two dates, `YYYY.MM.DD` by default, and `'%Y%m%d'` fits a `pkgver` such as `20251213`. See [github-nightly](/aurtomator/strategies/#github-nightly).
+The version comes from the tag name, the release body, the tag date or the publish date. `strategies/github-nightly.sh` lists the fields. A release that keeps its tag and its publish date while its assets are replaced, such as the `nightly` release of `wezterm/wezterm`, published in 2019, is tracked by the date of the assets with `github-asset`, see [pkgver() with the wrong strategy](#pkgver-with-the-wrong-strategy-blocked). `date_format` sets the form of the two dates, `YYYY.MM.DD` by default, and `'%Y%m%d'` fits a `pkgver` such as `20251213`. See [github-nightly](/strategies/#github-nightly).
 
-A fixed tag keeps its download URL, so a PKGBUILD can save the download under a name with the date, as `neovim-nightly-bin` does with `_date="$(date -u +%Y%m%d)"` and `"$_pkgname-$_date.tar.gz::<url>"`. This works when the checksum of that source is `SKIP`: only the digits of the name may change from one update to the next. See step 5 of publish in [Prepare and publish](/aurtomator/internals/update-process/#prepare-and-publish).
+A fixed tag keeps its download URL, so a PKGBUILD can save the download under a name with the date, as `neovim-nightly-bin` does with `_date="$(date -u +%Y%m%d)"` and `"$_pkgname-$_date.tar.gz::<url>"`. This works when the checksum of that source is `SKIP`: only the digits of the name may change from one update to the next. See step 5 of publish in [Prepare and publish](/internals/update-process/#prepare-and-publish).
 
 ### Split packages
 
@@ -205,7 +205,7 @@ upstream:
     - wezterm-nightly.Ubuntu24.04.tar.xz
 ```
 
-A URL built from `$pkgver`, such as `releases/download/${pkgver}/` for the tag `continuous`, would point at a tag named after the date, which does not exist. The source URL check stops that bump on the 404, see [Source URL returns HTML](#source-url-returns-html-blocked). A version that a project publishes as a text asset is read with `webpage-scrape`, see [webpage-scrape](/aurtomator/strategies/#webpage-scrape).
+A URL built from `$pkgver`, such as `releases/download/${pkgver}/` for the tag `continuous`, would point at a tag named after the date, which does not exist. The source URL check stops that bump on the 404, see [Source URL returns HTML](#source-url-returns-html-blocked). A version that a project publishes as a text asset is read with `webpage-scrape`, see [webpage-scrape](/strategies/#webpage-scrape).
 
 ### Mixed SKIP and real checksums (BLOCKED)
 
@@ -227,7 +227,7 @@ sha256sums=('SKIP'
 
 A PKGBUILD whose sources take the version from another variable, as with `_pkgver=2025-04-03` and `pkgver="${_pkgver//-/.}"`, a download URL without the version, such as `https://example.org/download/latest/player.tar.zst`, whose file has not changed, or a VCS source pinned to a commit the version does not set, as with `source=("git+https://example.org/player.git#commit=$_commit")`. The version in the name a download is saved under does not count, as in `"player-$pkgver.zip::https://example.org/archive/$_commit.zip"`.
 
-**Detection:** the `.SRCINFO` check refuses a new `pkgver` when no source URL, the part after `::`, and no checksum changed and a download over `http`, `https` or `ftp` has a real checksum, or a VCS source is pinned by `#commit=`, `#tag=` or `#revision=`. It checks this for each architecture, the common sources counting for all of them, so a `source_aarch64` built from its own `_armver` is refused while `source_x86_64` follows `pkgver`. A download saved under the new version from the URL and the checksum of the old one is refused even when another source changes. A VCS pin that stays counts only when nothing else changes: a pin next to a LICENSE fetched from the tag passes. Verify and publish run it, and `update-pkg.sh` runs it before the commit. See step 5 of publish in [Prepare and publish](/aurtomator/internals/update-process/#prepare-and-publish).
+**Detection:** the `.SRCINFO` check refuses a new `pkgver` when no source URL, the part after `::`, and no checksum changed and a download over `http`, `https` or `ftp` has a real checksum, or a VCS source is pinned by `#commit=`, `#tag=` or `#revision=`. It checks this for each architecture, the common sources counting for all of them, so a `source_aarch64` built from its own `_armver` is refused while `source_x86_64` follows `pkgver`. A download saved under the new version from the URL and the checksum of the old one is refused even when another source changes. A VCS pin that stays counts only when nothing else changes: a pin next to a LICENSE fetched from the tag passes. Verify and publish run it, and `update-pkg.sh` runs it before the commit. See step 5 of publish in [Prepare and publish](/internals/update-process/#prepare-and-publish).
 
 `sed` sets only `pkgver`. When the sources stay the same, `updpkgsums` hashes the old files again, and makepkg checks out the same pin, so the new version would hold the old files.
 
@@ -250,13 +250,13 @@ upstream:
 pkgver_dash: .
 ```
 
-The `.SRCINFO` check accepts a derived variable whose text is one of the forms of the version listed in step 5 of publish in [Prepare and publish](/aurtomator/internals/update-process/#prepare-and-publish). A source that needs data the version does not hold, such as a commit hash or a build number, cannot be derived from `pkgver` and needs a manual update.
+The `.SRCINFO` check accepts a derived variable whose text is one of the forms of the version listed in step 5 of publish in [Prepare and publish](/internals/update-process/#prepare-and-publish). A source that needs data the version does not hold, such as a commit hash or a build number, cannot be derived from `pkgver` and needs a manual update.
 
 ### Lines the check cannot read from the PKGBUILD (BLOCKED)
 
 A line of `.SRCINFO` other than `pkgver`, `pkgrel`, `source` and the checksums that holds the version, where the PKGBUILD writes the value with an escaped character, `{a,b}` or `$'...'`, takes the version from a variable that does not follow `pkgver`, or derives the value from `pkgver` and also writes its text elsewhere outside a comment line. A comment after code counts as text.
 
-**Detection:** the `.SRCINFO` check looks up the value of each such line, the part after ` = `, in the text of the AUR PKGBUILD without its `pkgver=` and `pkgrel=` lines, the line of `upstream.asset_var`, its checksum arrays and its comment lines. A line whose value that text holds must stay as it is, and any other line must take the new version. A prepared line that differs stops the update, and the message names the line the check expected. Publish and verify run it, and `update-pkg.sh` runs it before the commit. See step 5 of publish in [Prepare and publish](/aurtomator/internals/update-process/#prepare-and-publish).
+**Detection:** the `.SRCINFO` check looks up the value of each such line, the part after ` = `, in the text of the AUR PKGBUILD without its `pkgver=` and `pkgrel=` lines, the line of `upstream.asset_var`, its checksum arrays and its comment lines. A line whose value that text holds must stay as it is, and any other line must take the new version. A prepared line that differs stops the update, and the message names the line the check expected. Publish and verify run it, and `update-pkg.sh` runs it before the commit. See step 5 of publish in [Prepare and publish](/internals/update-process/#prepare-and-publish).
 
 Verify and publish never run the PKGBUILD, so the check reads only its text. In these forms the text leads it to expect another line than makepkg writes, and a correct update stops.
 
@@ -271,7 +271,7 @@ provides=("demo=${pkgver}")
 
 Upstream moves or renames a release, and the old URL now redirects to an HTML error or download page.
 
-**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text. The check covers every `http` and `https` URL, whatever its checksum, and leaves out VCS sources and local files. It reads the PKGBUILD with `CARCH` set, as makepkg does, so a URL built from `$CARCH` is the one makepkg downloads. A source with a `SKIP` checksum is checked too, because no later step downloads it. An update that takes an arch out of `arch=()` skips the `source_<arch>` array of that arch, see [Versions without some arches](/aurtomator/features/missing-arches/).
+**Detection:** `validate_source_urls()` sends a HEAD request to every URL in `source` and in each `source_<arch>` array and follows up to 5 redirects. curl reports the status and the `Content-Type` of the last response. A status of 400 or above, a missing status, or `Content-Type: text/html` in any letter case blocks the update. The script does not parse the headers itself, because the server chose that text. The check covers every `http` and `https` URL, whatever its checksum, and leaves out VCS sources and local files. It reads the PKGBUILD with `CARCH` set, as makepkg does, so a URL built from `$CARCH` is the one makepkg downloads. A source with a `SKIP` checksum is checked too, because no later step downloads it. An update that takes an arch out of `arch=()` skips the `source_<arch>` array of that arch, see [Versions without some arches](/features/missing-arches/).
 
 Without this check, `updpkgsums` would hash the HTML page. The checksums would match and the package would fail to install.
 
@@ -279,7 +279,7 @@ Without this check, `updpkgsums` would hash the HTML page. The checksums would m
 
 A real checksum for a download over `http` or `ftp`, for a git source over another protocol than `https`, for an `hg` or `bzr` source at a pin makepkg hashes, or for a `fossil` source.
 
-**Detection:** the verify job computes every checksum other than `SKIP` again from its source, as makepkg does. It downloads over `https` only and clones git sources over `https` only, so any other checksum stops the update. See step 5 of verify in [Prepare and publish](/aurtomator/internals/update-process/#prepare-and-publish).
+**Detection:** the verify job computes every checksum other than `SKIP` again from its source, as makepkg does. It downloads over `https` only and clones git sources over `https` only, so any other checksum stops the update. See step 5 of verify in [Prepare and publish](/internals/update-process/#prepare-and-publish).
 
 **Correct approach:** use the `https` URL of the download where the host serves one. A package that needs one of the other sources needs a manual update.
 
@@ -297,11 +297,11 @@ Packages whose PKGBUILD sets `epoch` to a value other than 0.
 
 ## Not supported (not detected)
 
-aurtomator cannot detect these cases. The maintainer has to watch for them. When the version that needs the change is known in advance, such as a new major of a JDK that needs a newer boot JDK in `makedepends`, an alert in the package YAML pauses the update at that version or reports it, see [Update alerts](/aurtomator/features/update-alerts/).
+aurtomator cannot detect these cases. The maintainer has to watch for them. When the version that needs the change is known in advance, such as a new major of a JDK that needs a newer boot JDK in `makedepends`, an alert in the package YAML pauses the update at that version or reports it, see [Update alerts](/features/update-alerts/).
 
 ### Packages needing a pkgrel bump
 
-When `pkgver` stays the same and the PKGBUILD changes (dependency fix, build flag, patch update), `pkgrel` has to be incremented. aurtomator sets `pkgrel=1` for a new version, and raises `pkgrel` alone only for a rebuild that changes a value from a release asset name, see [Values from release asset names](/aurtomator/features/asset-values/). Any other pkgrel-only bump needs a human decision.
+When `pkgver` stays the same and the PKGBUILD changes (dependency fix, build flag, patch update), `pkgrel` has to be incremented. aurtomator sets `pkgrel=1` for a new version, and raises `pkgrel` alone only for a rebuild that changes a value from a release asset name, see [Values from release asset names](/features/asset-values/). Any other pkgrel-only bump needs a human decision.
 
 ### Packages with changing source URLs
 
@@ -320,7 +320,7 @@ aurtomator does not modify `depends`, `makedepends` or `optdepends`. When a new 
 
 ### Packages requiring epoch
 
-When upstream changes its versioning scheme, for example from CalVer to SemVer, and the new version compares lower than the old one, `epoch` is needed. aurtomator cannot tell such a version from a downgrade. It skips the version unless the package YAML sets `allow_downgrade: true`, see [Downgrades and version jumps](/aurtomator/features/downgrades/), and it never sets `epoch`. It warns about an `epoch` the PKGBUILD already has, see [Packages with an epoch](#packages-with-an-epoch-warning). Setting it cannot be undone and needs maintainer judgment.
+When upstream changes its versioning scheme, for example from CalVer to SemVer, and the new version compares lower than the old one, `epoch` is needed. aurtomator cannot tell such a version from a downgrade. It skips the version unless the package YAML sets `allow_downgrade: true`, see [Downgrades and version jumps](/features/downgrades/), and it never sets `epoch`. It warns about an `epoch` the PKGBUILD already has, see [Packages with an epoch](#packages-with-an-epoch-warning). Setting it cannot be undone and needs maintainer judgment.
 
 ### Packages with version-dependent install scripts
 

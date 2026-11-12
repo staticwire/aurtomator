@@ -16,7 +16,7 @@ Required:
 Optional:
 
 - `gh` (GitHub CLI) sets the GitHub Secrets for you. Without it, you set them in the web UI. Both paths are described below.
-- A GPG key, to sign AUR commits. See [GPG signing](/aurtomator/gpg-signing/).
+- A GPG key, to sign AUR commits. See [GPG signing](/gpg-signing/).
 - `namcap`, to lint PKGBUILDs before pushing.
 
 Install everything at once:
@@ -50,7 +50,7 @@ The badge URLs name `validate.yml` and `check-updates.yml` in your repository, s
 
 ### Statistics
 
-The first run with a package adds `stats/` to your repository: `events.csv`, the journal of every change of state of your packages, and `card.svg` and `card-dark.svg`, the card at the top of the package block of the README. The card shows the packages updated, the pushes to the AUR, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The journal starts with that run, with one `tracked` row for each package, and holds nothing from before it. The first run of each day commits the card of the new day. See [Statistics](/aurtomator/features/statistics/) for the events of the journal and for reading it in Google Sheets or Grafana.
+The first run with a package adds `stats/` to your repository: `events.csv`, the journal of every change of state of your packages, and `card.svg` and `card-dark.svg`, the card at the top of the package block of the README. The card shows the packages updated, the pushes to the AUR, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The journal starts with that run, with one `tracked` row for each package, and holds nothing from before it. The first run of each day commits the card of the new day. See [Statistics](/features/statistics/) for the events of the journal and for reading it in Google Sheets or Grafana.
 
 ## The calling workflows
 
@@ -109,7 +109,7 @@ jobs:
 
 The pin after `@` is the SHA of a release tag of aurtomator, and the comment after it names that release. All three `uses:` lines carry the same pin. A tag can be moved and a SHA cannot, so a run always gets the code of that release. `./aurtomator.sh pin vX.Y.Z` moves the pin of the three lines to a release, see [The aurtomator.sh script](#the-aurtomatorsh-script). To move it by hand, `git ls-remote https://github.com/staticwire/aurtomator refs/tags/vX.Y.Z` prints the SHA of a tag, and that SHA and the new `# vX.Y.Z` go into the three lines. Dependabot opens the pull request that moves the pin to a new release at its next check. To run that check at once, open Insights > Dependency graph > Dependabot, click "Recent update jobs" and then "Check for updates". The group `aurtomator` in `.github/dependabot.yml` puts the three `uses:` lines into that one pull request. The `cooldown` entry of the same file exempts them from the 3 days that Dependabot otherwise waits after a release. The `Validate packages` run of that pull request checks your packages with the validator of the new release before the merge. After the merge, [`./aurtomator.sh`](#the-aurtomatorsh-script) runs the scripts of the new release, and the first run of `check-updates.yml` on the new pin updates `aurtomator.sh` itself to that release.
 
-A calling job sets the permissions of the token for the whole called workflow, and a job of the called workflow can lower them but cannot raise them. `check-updates` grants `contents: write` for the commit of the package versions, the README, `stats/` and `aurtomator.sh`, and `issues: write` for the issues it opens and closes. `notify` grants `actions: read` to list the failed jobs of the run, and `issues: write` to open its issue. `check-updates.yml` has no workflow-level `permissions`, so each job gets its own block and nothing more. `validate.yml` has one job, and its workflow-level `contents: read` covers that job. A calling job that grants less than this makes GitHub reject the file before any job starts, see [Invalid workflow file](/aurtomator/help/troubleshooting/#invalid-workflow-file-a-nested-job-requests-more-permissions).
+A calling job sets the permissions of the token for the whole called workflow, and a job of the called workflow can lower them but cannot raise them. `check-updates` grants `contents: write` for the commit of the package versions, the README, `stats/` and `aurtomator.sh`, and `issues: write` for the issues it opens and closes. `notify` grants `actions: read` to list the failed jobs of the run, and `issues: write` to open its issue. `check-updates.yml` has no workflow-level `permissions`, so each job gets its own block and nothing more. `validate.yml` has one job, and its workflow-level `contents: read` covers that job. A calling job that grants less than this makes GitHub reject the file before any job starts, see [Invalid workflow file](/help/troubleshooting/#invalid-workflow-file-a-nested-job-requests-more-permissions).
 
 ## The aurtomator.sh script
 
@@ -217,7 +217,7 @@ With GPG signing, also create:
 |-------------------|------------------------------------------------------------|
 | `GPG_SIGNING_KEY` | Output of `gpg --export-secret-subkeys --armor '<subkey-id>!'` |
 
-That output works in CI only for a key without a passphrase. For a key with one, `./aurtomator.sh setup gpg secrets` prints a passphrase-free copy, see [Passphrase stripping](/aurtomator/gpg-signing/#passphrase-stripping-3-pinentry-dialogs).
+That output works in CI only for a key without a passphrase. For a key with one, `./aurtomator.sh setup gpg secrets` prints a passphrase-free copy, see [Passphrase stripping](/gpg-signing/#passphrase-stripping-3-pinentry-dialogs).
 
 ### 5. Run verify
 

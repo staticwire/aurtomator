@@ -2,7 +2,7 @@
 title: Statistics
 ---
 
-A repository with a package keeps the history of its packages in `stats/events.csv`, a journal that `publish` adds to, and its README shows a card drawn from the journal. Root runs the two scripts in **Record statistics** of `publish`, see [Steps](/aurtomator/internals/workflow/#steps): `record-events.sh` writes the journal, and `stats-card.sh` draws the card. When either fails, the run commits the README and the package YAMLs without `stats/`.
+A repository with a package keeps the history of its packages in `stats/events.csv`, a journal that `publish` adds to, and its README shows a card drawn from the journal. Root runs the two scripts in **Record statistics** of `publish`, see [Steps](/internals/workflow/#steps): `record-events.sh` writes the journal, and `stats-card.sh` draws the card. When either fails, the run commits the README and the package YAMLs without `stats/`.
 
 ## The journal
 
@@ -38,7 +38,7 @@ The rows hold no free text. The error of a failure stays in its issue and in the
 | `added` | A package whose YAML is new |
 | `removed` | A package whose YAML is gone |
 
-The statuses of an update that is not out yet, `new_version`, `available_downgrade`, `new_build` and `arch_back`, write no row. A wait for the cooldown, `cooldown: <date>`, counts as `up_to_date` at the version of the package, see [Cooldown](/aurtomator/features/cooldown/).
+The statuses of an update that is not out yet, `new_version`, `available_downgrade`, `new_build` and `arch_back`, write no row. A wait for the cooldown, `cooldown: <date>`, counts as `up_to_date` at the version of the package, see [Cooldown](/features/cooldown/).
 
 `record-events.sh` compares the final status of each package with the last row of the package:
 

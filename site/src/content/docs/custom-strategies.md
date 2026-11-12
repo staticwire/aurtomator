@@ -9,9 +9,9 @@ Your repository holds no strategies. A run takes them from `strategies/` of aurt
 - **Input:** one positional argument, the package name.
 - **Success:** the version on stdout as one line, exit code 0.
 - **Failure:** an error on stderr, a non-zero exit code.
-- **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`, a version of more than 64 characters, and a version without a digit, such as `latest`. `pkgver_dash` replaces the dashes before that check, see [Package YAML](/aurtomator/package-yaml/).
+- **Version format:** `check-update.sh` rejects a version with any character outside `A-Za-z0-9._+`, a version of more than 64 characters, and a version without a digit, such as `latest`. `pkgver_dash` replaces the dashes before that check, see [Package YAML](/package-yaml/).
 
-The script can rely on `yq` and `curl`. `scripts/lib/common.sh` provides YAML helpers, `http_get` for requests and logging. It sets `AURTOMATOR_DIR` to the root of the checkout of aurtomator and `AURTOMATOR_DATA_DIR` to the directory with the packages, see [Prerequisites](/aurtomator/develop/local-testing/#prerequisites).
+The script can rely on `yq` and `curl`. `scripts/lib/common.sh` provides YAML helpers, `http_get` for requests and logging. It sets `AURTOMATOR_DIR` to the root of the checkout of aurtomator and `AURTOMATOR_DATA_DIR` to the directory with the packages, see [Prerequisites](/develop/local-testing/#prerequisites).
 
 ## Template
 
@@ -53,7 +53,7 @@ echo "$version"
 
 1. **Location:** `strategies/<name>.sh`, executable (`chmod +x`). `<name>` is the value of the YAML `strategy` field.
 2. **Header:** `set -euo pipefail`, then source `scripts/lib/common.sh` for `pkg_file`, `pkg_get` and logging. `tests/strategies.bats` runs every strategy with `common.sh` as the only file of `scripts/`.
-3. **HTTP:** `http_get <url> [curl option]...` from `common.sh`. It runs `curl -sfL --max-time 30` and tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. `-f` fails on HTTP errors and `-L` follows redirects, over https only: `--proto '=https' --proto-redir '=https'`. An answer is at most `MAX_ANSWER_MB` megabytes, 50 by default, through `--max-filesize`, and an option of the caller comes after these and wins. Every request sends the User-Agent in `USER_AGENT`, `aurtomator/1.0` by default. A failed request prints the URL of the last answer and the error of curl to stderr, and names a Cloudflare challenge, which only a browser passes. In a run of `check-all.sh`, `http_get` remembers the host of a request that ends with curl exit 28 and the status `000`, and fails a later request to that host at once ([Update process](/aurtomator/internals/update-process/)). `http_get_json` fails also on an answer that is not a JSON object or array, such as the HTML page of a bot check after a redirect, and names the URL of that answer. A test in `tests/strategies.bats` fails when a strategy calls `curl` itself.
+3. **HTTP:** `http_get <url> [curl option]...` from `common.sh`. It runs `curl -sfL --max-time 30` and tries a timeout, a refused connection and an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more, 5 seconds apart. `-f` fails on HTTP errors and `-L` follows redirects, over https only: `--proto '=https' --proto-redir '=https'`. An answer is at most `MAX_ANSWER_MB` megabytes, 50 by default, through `--max-filesize`, and an option of the caller comes after these and wins. Every request sends the User-Agent in `USER_AGENT`, `aurtomator/1.0` by default. A failed request prints the URL of the last answer and the error of curl to stderr, and names a Cloudflare challenge, which only a browser passes. In a run of `check-all.sh`, `http_get` remembers the host of a request that ends with curl exit 28 and the status `000`, and fails a later request to that host at once ([Update process](/internals/update-process/)). `http_get_json` fails also on an answer that is not a JSON object or array, such as the HTML page of a bot check after a redirect, and names the URL of that answer. A test in `tests/strategies.bats` fails when a strategy calls `curl` itself.
 4. **Result:** check for an empty string and for `null` from `yq`.
 5. **Prefix:** strip a leading `v` with `${version#v}` when upstream tags look like `v1.0.0`.
 6. **Validation:** in `scripts/validate-pkg.sh`, add a line to `UPSTREAM_KEYS` with the `upstream` keys the strategy reads, at its place in the strategy table of `README.md`, and the checks of its required fields. Without the line, `validate-pkg.sh` refuses every YAML of the strategy that has an `upstream` key, and `tests/validate-pkg.bats` fails. The name of the strategy needs no entry: every script in `strategies/` is a valid strategy.
@@ -109,7 +109,7 @@ The logging functions write to stderr and omit ANSI colors when stderr is not a 
 
 ## YAML conventions for custom strategies
 
-Put the settings of the strategy under `upstream`, with descriptive names. List them in the header of the strategy script and in the line of the strategy in `UPSTREAM_KEYS`, see [Checklist](#checklist). `validate-pkg.sh` refuses an `upstream` key that the strategy of the package does not read, see [Package YAML](/aurtomator/package-yaml/).
+Put the settings of the strategy under `upstream`, with descriptive names. List them in the header of the strategy script and in the line of the strategy in `UPSTREAM_KEYS`, see [Checklist](#checklist). `validate-pkg.sh` refuses an `upstream` key that the strategy of the package does not read, see [Package YAML](/package-yaml/).
 
 ```yaml
 name: my-package

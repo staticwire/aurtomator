@@ -48,7 +48,7 @@ A comparison that finds the current version newer than the latest one (`vercmp "
 - `available_downgrade: 1.2.0` → `🔻 1.2.0 available (downgrade)`
 - `downgrade: 1.2.0` → `🔻 downgraded to 1.2.0`
 
-None of the three is a failure, and the statistics card counts a pushed downgrade as a push, see [Statistics](/aurtomator/features/statistics/).
+None of the three is a failure, and the statistics card counts a pushed downgrade as a push, see [Statistics](/features/statistics/).
 
 ## Version jumps
 

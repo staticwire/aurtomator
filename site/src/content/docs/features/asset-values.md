@@ -37,7 +37,7 @@ A tag appears before its release. liquidsoap uploads the assets of a release to 
 | `new_build: 2.4.6` | `🔨 2.4.6 rebuild available` | A new value of the version the AUR has, not pushed yet |
 | `rebuilt: 2.4.6` | `🔨 2.4.6 rebuilt` | The rebuild was pushed to the AUR |
 
-None of the three counts among the failing packages of the statistics card, see [Statistics](/aurtomator/features/statistics/).
+None of the three counts among the failing packages of the statistics card, see [Statistics](/features/statistics/).
 
 `update-pkg.sh`, `verify-pkg.sh` and `publish-pkg.sh` take the value with `--asset <value>`, and `check-all.sh` passes it. A package with `upstream.asset_var` needs it, and any other package refuses it. The value starts with a letter or a digit and holds only `A-Za-z0-9 . _ + ~ -`, because bash expands a tilde at the start of an assignment: `_deb=~root` gives the home directory of `root`. `update-pkg.sh` writes the value to the line of `upstream.asset_var`. `verify-pkg.sh` and `publish-pkg.sh` refuse a prepared line with another value than their `--asset`, as they refuse a `pkgver` other than `<version>`.
 
@@ -49,7 +49,7 @@ The AUR `PKGBUILD` must hold exactly one line of `upstream.asset_var`, and its v
 | the same version | another value, a rebuild | the AUR `pkgrel` plus one, for an integer AUR `pkgrel` only |
 | the same version | the same value | as in the AUR, so publish finds nothing to push |
 
-In `.SRCINFO`, each old value in a line stands for the new one, and the parts of the line between the values follow the rules of the version in step 5 of [Prepare and publish](/aurtomator/internals/update-process/#prepare-and-publish). A new value has to change a source URL or a checksum.
+In `.SRCINFO`, each old value in a line stands for the new one, and the parts of the line between the values follow the rules of the version in step 5 of [Prepare and publish](/internals/update-process/#prepare-and-publish). A new value has to change a source URL or a checksum.
 
 The check finds the value by its text. Only the PKGBUILD shows which occurrence of that text is the value, and verify and publish never run it. The text of the value therefore has to occur in a line only where the PKGBUILD writes the value. When it is also the version or other text of the line, as a lone revision `3` would be, the line splits in the wrong places and publish refuses correct updates. The capture group takes enough of the asset name to rule that out. Release v4.0.1 of `kyutai-labs/pocket-tts` names its Linux binary `pocket-tts-3.3.0-x86_64-unknown-linux-gnu.tar.gz`, by the version of its Rust crate. A value of `3.3.0` alone would be the same text as `pkgver` in a release where the two versions are equal, so the group takes the name of the binary with it:
 

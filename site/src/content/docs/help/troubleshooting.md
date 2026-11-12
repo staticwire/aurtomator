@@ -18,7 +18,7 @@ title: Troubleshooting
 
 **Cause:** no known hosts file holds a key of aur.archlinux.org. The check runs ssh with `-F /dev/null` and `BatchMode=yes`: it reads `~/.ssh/known_hosts`, `~/.ssh/known_hosts2`, `/etc/ssh/ssh_known_hosts` and `/etc/ssh/ssh_known_hosts2` alone, never a `UserKnownHostsFile` of `~/.ssh/config`, and it accepts no new host key. CI accepts none either: it brings the host key of the AUR in its own `known_hosts`.
 
-**Fix:** run the command of [step 3](/aurtomator/setup/#3-test-ssh-access) once. ssh shows the fingerprint of the host key: compare it with the fingerprints under "Submitting Packages" on the home page of <https://aur.archlinux.org>, and answer `yes` only when they match. ssh then saves the key to `~/.ssh/known_hosts`.
+**Fix:** run the command of [step 3](/setup/#3-test-ssh-access) once. ssh shows the fingerprint of the host key: compare it with the fingerprints under "Submitting Packages" on the home page of <https://aur.archlinux.org>, and answer `yes` only when they match. ssh then saves the key to `~/.ssh/known_hosts`.
 
 ## GPG: No secret key / unusable secret key
 
@@ -40,7 +40,7 @@ title: Troubleshooting
 2. Check that the token has the `repo` scope: `gh auth status`
 3. A fine-grained token needs write access to "Secrets" on the repository.
 
-Without `gh`, set the secrets in the web UI: see [Manual setup](/aurtomator/setup/#manual-setup-without-gh-cli).
+Without `gh`, set the secrets in the web UI: see [Manual setup](/setup/#manual-setup-without-gh-cli).
 
 ## Secrets not set / workflow fails with missing secret
 
@@ -50,7 +50,7 @@ Without `gh`, set the secrets in the web UI: see [Manual setup](/aurtomator/setu
 
 1. Open Settings > Secrets and variables > Actions in your repository. It lists `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`.
 2. Run `./aurtomator.sh setup secrets` to push them again.
-3. The `check-updates` job of `.github/workflows/check-updates.yml` passes each secret by name, as [The calling workflows](/aurtomator/setup/#the-calling-workflows) shows. `secrets: inherit` passes none to aurtomator, see [Required](/aurtomator/setup/#required).
+3. The `check-updates` job of `.github/workflows/check-updates.yml` passes each secret by name, as [The calling workflows](/setup/#the-calling-workflows) shows. `secrets: inherit` passes none to aurtomator, see [Required](/setup/#required).
 
 ## Invalid workflow file: a nested job requests more permissions
 
@@ -62,7 +62,7 @@ The nested job '<job>' is requesting '<permissions>', but is only allowed '<perm
 
 **Cause:** The calling job grants less than a job of the called workflow requests. A called workflow can lower the permissions of the calling job but cannot raise them.
 
-**Fix:** Give each job of the calling workflow the `permissions` block that [The calling workflows](/aurtomator/setup/#the-calling-workflows) shows: `contents: write` and `issues: write` for `check-updates`, `actions: read` and `issues: write` for `notify`, and `contents: read` in `validate.yml`.
+**Fix:** Give each job of the calling workflow the `permissions` block that [The calling workflows](/setup/#the-calling-workflows) shows: `contents: write` and `issues: write` for `check-updates`, `actions: read` and `issues: write` for `notify`, and `contents: read` in `validate.yml`.
 
 ## check-update.sh fails: "Strategy not found"
 
@@ -71,7 +71,7 @@ The nested job '<job>' is requesting '<permissions>', but is only allowed '<perm
 **Fixes:**
 
 1. `./aurtomator.sh validate-pkg my-package` lists the strategies of the pinned release when the `strategy` field names none of them.
-2. A strategy that a newer release of aurtomator adds needs the pin of that release, see [The calling workflows](/aurtomator/setup/#the-calling-workflows).
+2. A strategy that a newer release of aurtomator adds needs the pin of that release, see [The calling workflows](/setup/#the-calling-workflows).
 
 ## update-pkg.sh fails: "No PKGBUILD found"
 
