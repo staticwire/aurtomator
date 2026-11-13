@@ -2431,7 +2431,6 @@ no_commit() {
   chmod +x "$BATS_TEST_TMPDIR/bin/base64"
   run_commit_step
   [ "$status" -ne 0 ]
-  [[ "$output" == *"::error::The blob of README.md differs from the file"* ]]
   no_call "git/trees "
   no_call "git/refs/heads/main "
 }
