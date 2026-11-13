@@ -378,10 +378,12 @@ current: '0.9.0'"
   cmp "$TEST_TMPDIR/demo.yml.before" "$TEST_TMPDIR/packages/demo.yml"
 }
 
+# The push whose YAML commit was lost starts the cooldown no later than today
 @test "update-pkg: syncs the YAML when the AUR has the version" {
   create_test_package "demo" "github-nightly" "upstream:
   project: owner/repo
-current: '0.9.0'"
+current: '0.9.0'
+last_updated: '2020-01-01'"
   write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
@@ -390,6 +392,7 @@ current: '0.9.0'"
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.0.0
   [ "$status" -eq 2 ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .last_updated)" = "$(date -u +%Y-%m-%d)" ]
 }
 
 @test "update-pkg: writes current when the AUR already has the version" {
@@ -1019,7 +1022,8 @@ current: '1.0.0'"
 @test "publish-pkg: syncs the YAML when the AUR already has the version" {
   create_test_package "demo" "github-release" "upstream:
   project: owner/repo
-current: '0.9.0'"
+current: '0.9.0'
+last_updated: '2020-01-01'"
   write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 "$H1" "$H2"
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
@@ -1033,6 +1037,7 @@ current: '0.9.0'"
   [ "$status" -eq 2 ]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .last_updated)" = "$(date -u +%Y-%m-%d)" ]
 }
 
 @test "publish-pkg: syncs the YAML when the AUR has the version in quotes" {

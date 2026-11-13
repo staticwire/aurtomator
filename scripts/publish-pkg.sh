@@ -99,6 +99,11 @@ check_handed_aur_files "$aur_files" "$PREPARED" "$VERSION" "$ASSET_VAR" "$ASSET"
 final_words=$(pkgbuild_arch_words "${PREPARED}/PKGBUILD" | tr '\n' ' ') || final_words=""
 if ((handed_rc == 0)); then
   log_ok "$PKG_NAME already at $VERSION on AUR, nothing to do"
+  # The AUR got this version without a commit of this YAML, so the cooldown of the
+  # next version starts today
+  if [[ "$(pkg_get "$PKG_FILE" '.current // ""')" != "$VERSION" ]]; then
+    pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
+  fi
   pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
   arch_state_after "$PKG_FILE" "$final_words" "" "$base"
   exit 2

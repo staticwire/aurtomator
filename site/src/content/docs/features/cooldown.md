@@ -15,7 +15,7 @@ upstream:
 cooldown_days: 14
 ```
 
-The days count from `last_updated`, the UTC date that each push writes to the package YAML. After a push on 2026-11-05 with 7 days, the next push goes out with the first run on 2026-11-12. A package without `last_updated` does not wait, so a new package goes out at once. Delete the `last_updated` line to push a waiting update with the next run. A run started by hand waits as a scheduled run does.
+The days count from `last_updated`, the UTC date that each push writes to the package YAML. A run that finds the new version already on the AUR, as after a push whose commit of the YAML was lost, writes the date of that run. After a push on 2026-11-05 with 7 days, the next push goes out with the first run on 2026-11-12. A package without `last_updated` does not wait, so a new package goes out at once. Delete the `last_updated` line to push a waiting update with the next run. A run started by hand waits as a scheduled run does.
 
 Every push waits: a new version, an allowed downgrade and a rebuild for a new asset value. An arch put back at the version the AUR has does not wait, see [Versions without some arches](/features/missing-arches/). The strategy still runs in every run, so a broken upstream shows at once. A skipped downgrade, a skipped version jump and a held update keep their own status.
 
