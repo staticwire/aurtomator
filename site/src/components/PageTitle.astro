@@ -1,0 +1,27 @@
+---
+import Default from '@astrojs/starlight/components/PageTitle.astro';
+
+const { entry } = Astro.locals.starlightRoute;
+const markdown = `# ${entry.data.title}\n\n${entry.body ?? ''}`;
+---
+
+<div class="title-row">
+  <Default />
+  <button class="copy-page" type="button" data-markdown={markdown}>Copy page</button>
+</div>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>('button.copy-page')) {
+    button.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(button.dataset.markdown ?? '');
+      button.textContent = 'Copied';
+      setTimeout(() => (button.textContent = 'Copy page'), 2000);
+    });
+  }
+</script>
+
+<style>
+  .title-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .copy-page { flex: none; border: 1px solid var(--sl-color-gray-5); border-radius: 0.4rem; padding: 0.25rem 0.75rem; background: transparent; color: var(--sl-color-gray-2); font-size: var(--sl-text-sm); cursor: pointer; }
+  .copy-page:hover { color: var(--sl-color-white); border-color: var(--sl-color-gray-3); }
+</style>

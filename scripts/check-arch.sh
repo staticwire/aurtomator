@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: check-arch.sh <package> <version> [--asset <value>], docs/WORKFLOW.md 4.8
+# Usage: check-arch.sh <package> <version> [--asset <value>], see https://aurtomator.dev/features/missing-arches/
 # Prints the arches out after an update and the start of their wait; exit 3 waits
 
 set -euo pipefail

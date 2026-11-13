@@ -3255,13 +3255,23 @@ aurtomator 0.7.0 is out, and this repository runs 0.6.0.
 To update: Insights > Dependency graph > Dependabot > Recent update jobs > Check for updates. Dependabot opens the pull request that moves the pin. The first run on the new pin also updates `aurtomator.sh` to this release.
 
 Release notes: https://github.com/staticwire/aurtomator/releases/tag/v0.7.0
-Manual update: https://github.com/staticwire/aurtomator/blob/main/docs/SETUP.md#the-calling-workflows
+Manual update: https://aurtomator.dev/setup/#the-calling-workflows
 Run: https://example.invalid/run
 
 Auto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.
 EOF
   )
   [ "$output" = "$expected" ]
+}
+
+@test "upstream_issue_body: a fork links the setup page in its own repository" {
+  echo "0.6.0" >"$TEST_TMPDIR/VERSION"
+  echo "newer: 0.7.0" >"$TEST_TMPDIR/_upstream"
+  AURTOMATOR_UPSTREAM=someone/aurtomator
+  run upstream_issue_body "$TEST_TMPDIR/_upstream" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\nRelease notes: https://github.com/someone/aurtomator/releases/tag/v0.7.0\n'* ]]
+  [[ "$output" == *$'\nManual update: https://github.com/someone/aurtomator/blob/main/site/src/content/docs/setup.md#the-calling-workflows\n'* ]]
 }
 
 # === failure_issue_body ===

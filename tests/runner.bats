@@ -2,7 +2,7 @@
 
 load helpers/setup.sh
 
-SETUP_DOC="$BATS_TEST_DIRNAME/../docs/SETUP.md"
+SETUP_DOC="$BATS_TEST_DIRNAME/../site/src/content/docs/setup.md"
 RUNNER="$BATS_TEST_DIRNAME/../aurtomator.sh"
 
 # Commits the files of a fake aurtomator to the work tree $1: a sample that
@@ -67,7 +67,7 @@ teardown() {
   teardown_test_env
 }
 
-@test "runner: aurtomator.sh in the root is the runner, and SETUP.md holds its curl command" {
+@test "runner: aurtomator.sh in the root is the runner, and the Setup page holds its curl command" {
   [ -x "$RUNNER" ]
   [ "$(head -n 1 "$RUNNER")" = "#!/usr/bin/env bash" ]
   grep -qx 'set -euo pipefail' "$RUNNER"

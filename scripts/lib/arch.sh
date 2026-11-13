@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# arch.sh - Versions without the archive of some arches, docs/WORKFLOW.md 4.8.
+# arch.sh - Versions without the archive of some arches, see https://aurtomator.dev/features/missing-arches/
 # Sourced by lib.sh, after prepared.sh.
 
 # Succeeds when package file $1 lets a version go out without some arches

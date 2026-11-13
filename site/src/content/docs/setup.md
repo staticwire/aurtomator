@@ -1,4 +1,6 @@
-# Setup Guide
+---
+title: Setup
+---
 
 ## Prerequisites
 
@@ -6,7 +8,7 @@ Required:
 
 - Arch Linux, or an Arch-based system with `makepkg` and `updpkgsums`
 - `git`
-- `yq`: the [Go version by mikefarah](https://github.com/mikefarah/yq), not the Python wrapper, which the scripts and `aurtomator.sh` refuse
+- `yq`: the [Go version by mikefarah](https://github.com/mikefarah/yq), not the Python wrapper around `jq`
 - `ssh-keygen` from `openssh`
 - `curl`
 - An AUR account at <https://aur.archlinux.org> with at least one package you maintain
@@ -14,7 +16,7 @@ Required:
 Optional:
 
 - `gh` (GitHub CLI) sets the GitHub Secrets for you. Without it, you set them in the web UI. Both paths are described below.
-- A GPG key, to sign AUR commits. See [GPG signing](#gpg-signing-optional).
+- A GPG key, to sign AUR commits. See [GPG signing](/gpg-signing/).
 - `namcap`, to lint PKGBUILDs before pushing.
 
 Install everything at once:
@@ -48,7 +50,7 @@ The badge URLs name `validate.yml` and `check-updates.yml` in your repository, s
 
 ### Statistics
 
-The first run with a package adds `stats/` to your repository: `events.csv`, the journal of every change of state of your packages, and `card.svg` and `card-dark.svg`, the card at the top of the package block of the README. The card shows the packages updated, the pushes to the AUR, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The journal starts with that run, with one `tracked` row for each package, and holds nothing from before it. The first run of each day commits the card of the new day. See [WORKFLOW.md](WORKFLOW.md#59-statistics) for the events of the journal and for reading it in Google Sheets or Grafana.
+The first run with a package adds `stats/` to your repository: `events.csv`, the journal of every change of state of your packages, and `card.svg` and `card-dark.svg`, the card at the top of the package block of the README. The card shows the packages updated, the pushes to the AUR, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The journal starts with that run, with one `tracked` row for each package, and holds nothing from before it. The first run of each day commits the card of the new day. See [Statistics](/features/statistics/) for the events of the journal and for reading it in Google Sheets or Grafana.
 
 ## The calling workflows
 
@@ -107,7 +109,7 @@ jobs:
 
 The pin after `@` is the SHA of a release tag of aurtomator, and the comment after it names that release. All three `uses:` lines carry the same pin. A tag can be moved and a SHA cannot, so a run always gets the code of that release. `./aurtomator.sh pin vX.Y.Z` moves the pin of the three lines to a release, see [The aurtomator.sh script](#the-aurtomatorsh-script). To move it by hand, `git ls-remote https://github.com/staticwire/aurtomator refs/tags/vX.Y.Z` prints the SHA of a tag, and that SHA and the new `# vX.Y.Z` go into the three lines. Dependabot opens the pull request that moves the pin to a new release at its next check. To run that check at once, open Insights > Dependency graph > Dependabot, click "Recent update jobs" and then "Check for updates". The group `aurtomator` in `.github/dependabot.yml` puts the three `uses:` lines into that one pull request. The `cooldown` entry of the same file exempts them from the 3 days that Dependabot otherwise waits after a release. The `Validate packages` run of that pull request checks your packages with the validator of the new release before the merge. After the merge, [`./aurtomator.sh`](#the-aurtomatorsh-script) runs the scripts of the new release, and the first run of `check-updates.yml` on the new pin updates `aurtomator.sh` itself to that release.
 
-A calling job sets the permissions of the token for the whole called workflow, and a job of the called workflow can lower them but cannot raise them. `check-updates` grants `contents: write` for the commit of the package versions, the README, `stats/` and `aurtomator.sh`, and `issues: write` for the issues it opens and closes. `notify` grants `actions: read` to list the failed jobs of the run, and `issues: write` to open its issue. `check-updates.yml` has no workflow-level `permissions`, so each job gets its own block and nothing more. `validate.yml` has one job, and its workflow-level `contents: read` covers that job. A calling job that grants less than this makes GitHub reject the file before any job starts, see [Invalid workflow file](#invalid-workflow-file-a-nested-job-requests-more-permissions).
+A calling job sets the permissions of the token for the whole called workflow, and a job of the called workflow can lower them but cannot raise them. `check-updates` grants `contents: write` for the commit of the package versions, the README, `stats/` and `aurtomator.sh`, and `issues: write` for the issues it opens and closes. `notify` grants `actions: read` to list the failed jobs of the run, and `issues: write` to open its issue. `check-updates.yml` has no workflow-level `permissions`, so each job gets its own block and nothing more. `validate.yml` has one job, and its workflow-level `contents: read` covers that job. A calling job that grants less than this makes GitHub reject the file before any job starts, see [Invalid workflow file](/help/troubleshooting/#invalid-workflow-file-a-nested-job-requests-more-permissions).
 
 ## The aurtomator.sh script
 
@@ -130,7 +132,7 @@ The `uses:` line of `.github/workflows/check-updates.yml` that names `check-upda
 
 Before that fetch, the script warns when no tag of the repository points to the pinned commit. GitHub serves a commit of any fork of a repository under the name of that repository too, so a `uses:` line that names `staticwire/aurtomator` can pin a commit that is not in aurtomator. The warning shows only when the script runs. Before you merge a pull request that moves the pin, `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
 
-The script needs mikefarah/yq and stops with any other `yq`, such as the Python wrapper. Before it reads a pin, it stops when `.github/workflows/check-updates.yml` holds more than one YAML document, a merge key `<<` or a key twice in one mapping, or when `yq` cannot read the file. `pin` checks `.github/workflows/validate.yml` the same way. The checks allow anchors and aliases.
+The script needs mikefarah/yq and stops with any other `yq`, such as the Python wrapper around `jq`. Before it reads a pin, it stops when `.github/workflows/check-updates.yml` holds more than one YAML document, a merge key `<<` or a key twice in one mapping, or when `yq` cannot read the file. `pin` checks `.github/workflows/validate.yml` the same way. The checks allow anchors and aliases.
 
 `./aurtomator.sh pin vX.Y.Z` moves the pin to a release. It reads the commit of that tag with `git ls-remote`, puts it and `# vX.Y.Z` into every `uses:` line of the pinned repository in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. Before it changes a file, it stops when the tag names no commit SHA, or when `yq` reads a pin of the repository in one of the two files that is on no such line, as a pin in quotes is. It fetches nothing. The next run of the script fetches the release, and CI takes it once the two files are committed and pushed.
 
@@ -215,7 +217,7 @@ With GPG signing, also create:
 |-------------------|------------------------------------------------------------|
 | `GPG_SIGNING_KEY` | Output of `gpg --export-secret-subkeys --armor '<subkey-id>!'` |
 
-That output works in CI only for a key without a passphrase. For a key with one, `./aurtomator.sh setup gpg secrets` prints a passphrase-free copy, see [Passphrase stripping](#passphrase-stripping-3-pinentry-dialogs).
+That output works in CI only for a key without a passphrase. For a key with one, `./aurtomator.sh setup gpg secrets` prints a passphrase-free copy, see [Passphrase stripping](/gpg-signing/#passphrase-stripping-3-pinentry-dialogs).
 
 ### 5. Run verify
 
@@ -224,66 +226,6 @@ That output works in CI only for a key without a passphrase. For a key with one,
 ```
 
 The steps above write no `.aurtomator.conf`, so `verify` takes your name, your email and the key from these options and saves them for the next run. With GPG signing, add `--gpg-key <subkey-id>`. It checks identity, SSH access, and GPG signing when configured. With `gh` available, it also checks the GitHub repo of `origin`: its secrets, that Issues are on, and that `check-updates.yml` and `validate.yml` are active workflows, as [Required](#required) asks. An `origin` that is not a repository on github.com counts as a failed check. Two findings are warnings and count as no failure: an open `❌ Check AUR Package Updates failed` issue, which the next run without a failed job closes, and a pin to a version of aurtomator other than its latest release. When a check fails, the others still run, and `verify` then prints how many failed and exits with status 1.
-
-## GPG signing (optional)
-
-aurtomator works without GPG. With it, every AUR commit is signed with your key, and AUR users can check the signature with `git log --show-signature`. The signing key is stored as a CI secret, so a leak of the CI secrets exposes it as well. A dedicated subkey limits the damage: you revoke the subkey and keep your master key. The setup script refuses a master key, which certifies the others and stays on your machine, so pass the ID of the subkey marked `[S]`.
-
-### Create a dedicated signing subkey
-
-```bash
-# List your master key fingerprint
-gpg --list-keys --keyid-format long your-email@example.com
-
-# Add an ed25519 signing subkey, valid for 1 year
-gpg --quick-add-key <master-key-fingerprint> ed25519 sign 1y
-
-# Find the new subkey ID
-gpg --list-keys --keyid-format long your-email@example.com
-# Look for the line starting with "sub" with [S] capability
-```
-
-### Export for CI
-
-With `gh`, the setup script does this. By hand, for a key without a passphrase:
-
-```bash
-gpg --export-secret-subkeys --armor '<subkey-id>!'
-```
-
-The `!` exports that subkey alone. Without it, gpg exports every secret subkey of the key, an encryption subkey included.
-
-Paste the full output, including the `-----BEGIN PGP PRIVATE KEY BLOCK-----` and `-----END PGP PRIVATE KEY BLOCK-----` lines, as the `GPG_SIGNING_KEY` secret.
-
-### Configure in setup
-
-Pass the key ID:
-
-```bash
-./aurtomator.sh setup --gpg-key <subkey-id>
-```
-
-Or run the GPG step and answer `y` to "Enable GPG commit signing? (y/N)":
-
-```bash
-./aurtomator.sh setup gpg
-```
-
-### Passphrase stripping (3 pinentry dialogs)
-
-CI needs a key without a passphrase. When your subkey has one, the setup script makes a passphrase-free copy in a temporary keyring, and three pinentry dialogs open:
-
-| Dialog | What to enter | Why |
-|--------|--------------|-----|
-| **1st** | Your current passphrase | Exports the signing subkey from your main keyring |
-| **2nd** | Your current passphrase again | Unlocks the key in the temporary keyring |
-| **3rd** | Leave empty, press OK | Sets an empty passphrase on the copy for CI |
-
-The second dialog asks again because the temporary keyring runs its own GPG agent, and that agent has not cached the passphrase. The passphrase only goes through pinentry: it never appears in shell variables, command arguments, environment variables or pipes.
-
-Your original key is not modified. With `gh`, the copy is stored as the `GPG_SIGNING_KEY` secret. Without `gh`, the script prints the copy for you to paste as that secret. The temporary keyring is deleted right after, and also when the script stops early: on an error, on `Ctrl-C` or when its terminal closes.
-
-The copy exists only while the script runs, so the `gpg` and `secrets` steps have to run together: `./aurtomator.sh setup gpg secrets`. Run alone, `secrets` does not set `GPG_SIGNING_KEY` for a key with a passphrase and prints that command.
 
 ## Setup script reference
 
@@ -364,151 +306,6 @@ A re-run of `./aurtomator.sh setup` loads this file first and does not ask again
 
 The scripts that read the file, `setup.sh`, `update-pkg.sh` and `publish-pkg.sh`, stop when git tracks `.aurtomator.conf`. A tracked file takes the place of the ignored one at a checkout or a merge, so a pull request that adds it would choose the key the `secrets` step uploads and the name and email of your AUR commits. Check the values of such a file, then `git rm --cached .aurtomator.conf` takes it out of the repository and keeps it on disk. Before the `secrets` step sets the secrets, it prints each value and the file of the SSH key.
 
-## Adding your first package
-
-### 1. Draft the YAML
-
-```bash
-./aurtomator.sh draft my-package
-```
-
-It reads the `.SRCINFO` of the package in the AUR, writes `packages/my-package.yml` with a strategy, its `upstream` fields and `current`, and runs steps 3 and 4 below on that file, see [WORKFLOW.md](WORKFLOW.md#72-draft-a-package). When no rule matches the url or a source of the package, it writes nothing. Then write the file from the example:
-
-```bash
-./aurtomator.sh sample > packages/my-package.yml
-```
-
-### 2. Edit the YAML
-
-```yaml
-name: my-package
-strategy: github-release
-upstream:
-  project: owner/repo
-```
-
-`name` is the `pkgbase` on the AUR, the name of its git repository. It is the package name, except for a split package: liblinear with `pkgname=(liblinear python-liblinear)` has the `name` `liblinear`, and `python-liblinear` has no YAML of its own.
-
-[docs/WORKFLOW.md](WORKFLOW.md) has YAML examples for all 16 strategies.
-
-### 3. Validate the config
-
-```bash
-./aurtomator.sh validate-pkg my-package
-```
-
-It checks the YAML syntax, the required fields and the fields each strategy needs.
-
-### 4. Test the version check
-
-```bash
-./aurtomator.sh check-update my-package
-```
-
-It runs the strategy and prints the latest upstream version. Without a `current` field in the YAML, it also reports that no current version is set.
-
-### 5. Test the update (dry run)
-
-```bash
-./aurtomator.sh update-pkg my-package 1.2.3 --dry-run
-```
-
-It clones the AUR repo, sets `pkgver`, regenerates checksums and `.SRCINFO`, runs `namcap` when it is installed, and shows the PKGBUILD diff **without pushing**. It changes no file of your repository: when the AUR already has the version, it says so and stops.
-
-The dry run runs the PKGBUILD of the AUR on your machine before it stops: the audit, the check of the source URLs, `namcap` and `makepkg --printsrcinfo` source it, as `updpkgsums` and `makepkg --verifysource` do for a package with checksums, and your SSH key is in reach of that code. When someone else can push to the AUR package, read its PKGBUILD first.
-
-### 6. Push and let CI take over
-
-Commit the package YAML and push to your repository. The push to `main` runs `Validate packages`. `Check AUR Package Updates` runs on the schedule `17 * * * *` of `.github/workflows/check-updates.yml`, and GitHub starts only part of those runs: in October 2026 a repository with this schedule got about five a day, one every five hours. Actions > Check AUR Package Updates > Run workflow starts a run at once, through `workflow_dispatch`. A run started by hand from a branch other than the default one reads the package YAMLs of that branch, pushes their updates to the AUR, and commits its results to that branch. The schedule runs on the default branch only.
-
 ## Pull requests to your repository
 
 `Validate packages` runs `validate-pkg.sh --all` on a pull request, so it checks the YAMLs of `packages/` and no other file. A pull request that changes `aurtomator.sh` runs its code on your machine at the next `./aurtomator.sh` command after you check it out or merge it. One that changes a calling workflow changes what CI runs with your secrets after the merge: the `uses:` line of `check-updates.yml` names the workflow that gets `AUR_SSH_KEY` and `GPG_SIGNING_KEY`. Read these files in the diff before you merge, and check a new pin as [The aurtomator.sh script](#the-aurtomatorsh-script) describes. `setup.sh`, `update-pkg.sh` and `publish-pkg.sh` stop on a `.aurtomator.conf` that git tracks, see [Configuration file](#configuration-file).
-
-## Troubleshooting
-
-### SSH: Permission denied (publickey)
-
-**Symptom:** `ssh aur@aur.archlinux.org` returns `Permission denied`.
-
-**Causes:**
-
-1. The public key is not on your AUR account. Add it under My Account > SSH Public Key on <https://aur.archlinux.org>.
-2. SSH picks the wrong key. Offer that key alone: `ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org`
-3. The key file permissions are too open. Fix them with `chmod 600 ~/.ssh/aur_ed25519`.
-
-### SSH: Host key verification failed
-
-**Symptom:** `./aurtomator.sh setup verify` prints `Host key verification failed.` under `SSH: cannot connect to aur.archlinux.org`.
-
-**Cause:** no known hosts file holds a key of aur.archlinux.org. The check runs ssh with `-F /dev/null` and `BatchMode=yes`: it reads `~/.ssh/known_hosts`, `~/.ssh/known_hosts2`, `/etc/ssh/ssh_known_hosts` and `/etc/ssh/ssh_known_hosts2` alone, never a `UserKnownHostsFile` of `~/.ssh/config`, and it accepts no new host key. CI accepts none either: it brings the host key of the AUR in its own `known_hosts`.
-
-**Fix:** run the command of [step 3](#3-test-ssh-access) once. ssh shows the fingerprint of the host key: compare it with the fingerprints under "Submitting Packages" on the home page of <https://aur.archlinux.org>, and answer `yes` only when they match. ssh then saves the key to `~/.ssh/known_hosts`.
-
-### GPG: No secret key / unusable secret key
-
-**Symptom:** `gpg --sign` fails with "No secret key" or "Unusable secret key".
-
-**Causes:**
-
-1. The key ID is wrong. List your keys: `gpg --list-secret-keys --keyid-format long`
-2. The subkey expired. Check with `gpg --list-keys <key-id>` and extend it with `gpg --quick-set-expire <master-key-fingerprint> 1y <subkey-fingerprint>`. CI holds the copy of the key made before, so `./aurtomator.sh setup gpg secrets` sets the secret again.
-3. The key is in another keyring, for example under a different `GNUPGHOME`.
-
-### gh: not logged in / authentication failed
-
-**Symptom:** `gh auth status` fails or `gh secret set` returns 403.
-
-**Fixes:**
-
-1. Run `gh auth login` and complete the flow.
-2. Check that the token has the `repo` scope: `gh auth status`
-3. A fine-grained token needs write access to "Secrets" on the repository.
-
-Without `gh`, set the secrets in the web UI: see [Manual setup](#manual-setup-without-gh-cli).
-
-### Secrets not set / workflow fails with missing secret
-
-**Symptom:** The `publish` job fails in `Setup AUR SSH` with `The secret AUR_SSH_KEY is empty`, or with SSH key errors.
-
-**Fixes:**
-
-1. Open Settings > Secrets and variables > Actions in your repository. It lists `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`.
-2. Run `./aurtomator.sh setup secrets` to push them again.
-3. The `check-updates` job of `.github/workflows/check-updates.yml` passes each secret by name, as [The calling workflows](#the-calling-workflows) shows. `secrets: inherit` passes none to aurtomator, see [Required](#required).
-
-### Invalid workflow file: a nested job requests more permissions
-
-**Symptom:** A run of a calling workflow fails before any job starts, with `Invalid workflow file` and a line of this form:
-
-```text
-The nested job '<job>' is requesting '<permissions>', but is only allowed '<permissions>'
-```
-
-**Cause:** The calling job grants less than a job of the called workflow requests. A called workflow can lower the permissions of the calling job but cannot raise them.
-
-**Fix:** Give each job of the calling workflow the `permissions` block that [The calling workflows](#the-calling-workflows) shows: `contents: write` and `issues: write` for `check-updates`, `actions: read` and `issues: write` for `notify`, and `contents: read` in `validate.yml`.
-
-### check-update.sh fails: "Strategy not found"
-
-**Symptom:** `Strategy not found or not executable:` followed by the path of `strategies/<strategy>.sh` in aurtomator.
-
-**Fixes:**
-
-1. `./aurtomator.sh validate-pkg my-package` lists the strategies of the pinned release when the `strategy` field names none of them.
-2. A strategy that a newer release of aurtomator adds needs the pin of that release, see [The calling workflows](#the-calling-workflows).
-
-### update-pkg.sh fails: "No PKGBUILD found"
-
-**Symptom:** The clone succeeds, and the script reports `No PKGBUILD found in AUR repo`.
-
-**Cause:** The package does not exist on the AUR yet. aurtomator updates **existing** AUR packages and does not create new ones. Push your first PKGBUILD to the AUR by hand.
-
-### updpkgsums fails
-
-**Symptom:** `Required command not found: updpkgsums`, or `updpkgsums failed` with a refusal to push.
-
-**Causes:**
-
-1. `updpkgsums` is not installed. Install it with `sudo pacman -S --needed pacman-contrib`.
-2. A download fails that the URL check before `updpkgsums` does not cover: a source that is not an `http` or `https` URL, or a server that answers a `HEAD` request and refuses the download. A source URL that does not resolve after the version bump stops the update earlier, with `Source URL validation failed, aborting`. Check the `source=()` array.

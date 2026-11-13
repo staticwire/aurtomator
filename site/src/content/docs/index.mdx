@@ -1,0 +1,23 @@
+---
+title: Automated AUR package updates
+template: splash
+hero:
+  title: aurtomator
+  tagline: Automated AUR package updates
+  image:
+    light: ../../assets/icon-light.svg
+    dark: ../../assets/icon-dark.svg
+    alt: A blue box with packing tape on a gold orbit
+  actions:
+    - text: Setup
+      link: /setup/
+      icon: right-arrow
+    - text: Supported packages
+      link: /supported-packages/
+      variant: secondary
+    - text: Strategies
+      link: /strategies/
+      variant: secondary
+---
+
+aurtomator does the routine work of an AUR maintainer: it finds a new upstream version, bumps `pkgver`, updates the checksums and `.SRCINFO` and pushes to the AUR. It runs a few times a day in GitHub Actions of your own repository, made from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed), where each package is one YAML file. A package it cannot update gets an issue.

@@ -1,6 +1,6 @@
 # Contributing to aurtomator
 
-aurtomator holds the scripts, the strategies and the reusable workflows. A user repository, created from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed), holds the package YAMLs and calls the workflows of aurtomator at a pinned SHA, see [docs/SETUP.md](docs/SETUP.md#the-calling-workflows). A run takes the scripts and the strategies from aurtomator at that SHA, so a fix or a new strategy comes here by pull request.
+aurtomator holds the scripts, the strategies and the reusable workflows. A user repository, created from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed), holds the package YAMLs and calls the workflows of aurtomator at a pinned SHA, see [The calling workflows](https://aurtomator.dev/setup/#the-calling-workflows). A run takes the scripts and the strategies from aurtomator at that SHA, so a fix or a new strategy comes here by pull request.
 
 ## Before opening a PR
 
@@ -46,7 +46,7 @@ bats tests/ --recursive
 
 CI runs the suite under bashcov, as `bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive`. bashcov passes `errexit`, `nounset` and `pipefail` to every script a test starts, so a mock has to work under `set -euo pipefail`.
 
-`ci.yml` also calls the reusable workflows of the same commit: the job `validate` calls `validate.yml`, and the job `pipeline` calls `check-updates.yml` with aurtomator itself as the repository of the packages, see [docs/WORKFLOW.md section 6.4](docs/WORKFLOW.md#64-validate-and-pipeline-jobs). A pull request from a fork of aurtomator gets a read-only token, so `pipeline` runs only for a push and for a pull request from a branch of aurtomator.
+`ci.yml` also calls the reusable workflows of the same commit: the job `validate` calls `validate.yml`, and the job `pipeline` calls `check-updates.yml` with aurtomator itself as the repository of the packages, see [Validate and pipeline jobs](https://aurtomator.dev/develop/ci/#validate-and-pipeline-jobs). A pull request from a fork of aurtomator gets a read-only token, so `pipeline` runs only for a push and for a pull request from a branch of aurtomator.
 
 ## PR workflow
 
@@ -65,7 +65,7 @@ The workflow runs release-please with the token of a GitHub App installed on the
 1. Create `strategies/<name>.sh`. It takes the package name as its only argument, reads the package config with `pkg_get`, prints one version string to stdout and exits non-zero on failure. Start from the closest existing strategy.
 2. In `scripts/validate-pkg.sh`, add a line to `UPSTREAM_KEYS` with the `upstream` keys the strategy reads, at its place in the strategy table of `README.md`, and the checks of its required fields. Without the line, `validate-pkg.sh` refuses every YAML of the strategy that has an `upstream` key. The name of the strategy needs no entry: every script in `strategies/` is a valid strategy.
 3. Add tests to `tests/strategies.bats`, grouped by strategy, and the API fixtures they need to `tests/helpers/mock-curl.sh`.
-4. Document the strategy in the strategies table in `README.md` and in `docs/WORKFLOW.md`.
+4. Document the strategy in the strategies table in `README.md` and in `site/src/content/docs/strategies.md`.
 5. Add a usage example to `packages/example.yml.sample`.
 6. Run the full local check before opening the PR.
 

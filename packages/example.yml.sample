@@ -16,10 +16,11 @@
 #                     release lacks the archive of an arch without that
 #                     arch after a wait of 24 h, and puts it back when the
 #                     archive appears; false fails the update as for any
-#                     other missing source, see docs/WORKFLOW.md 4.8
+#                     other missing source, see
+#                     https://aurtomator.dev/features/missing-arches/
 #   cooldown_days   - the days a push waits after the last one, 0 to 365;
 #                     without it 7 for git-latest and 0 for the others,
-#                     see docs/WORKFLOW.md 4.7
+#                     see https://aurtomator.dev/features/cooldown/
 #   pkgver_dash     - _ or ., stands for each - of the upstream version,
 #                     which pkgver cannot hold; the PKGBUILD turns it back
 #                     where a URL needs the dash, as in ${pkgver//_/-}.
@@ -30,20 +31,22 @@
 #                     the PKGBUILD cuts the text off where a URL needs the
 #                     build, as in ${pkgver#4.}
 #   alerts          - rules for steps of upstream that need a hand edit,
-#                     see the example below and docs/WORKFLOW.md 4.5
+#                     see the example below and
+#                     https://aurtomator.dev/features/update-alerts/
 #
 # Written by update-pkg.sh or publish-pkg.sh after every push. Set current by
 # hand only to the version the AUR has: for a new package, as the git-latest
-# example of docs/WORKFLOW.md 3.7 does, and after a hand publish of a held
-# update (4.5).
+# example of https://aurtomator.dev/strategies/#git-latest does, and after a
+# hand publish of a held update, as https://aurtomator.dev/features/update-alerts/
+# describes.
 #   current      - last pushed version
 #   last_updated - date of the last push, YYYY-MM-DD; the cooldown counts
 #                  from it
 #   current_asset - value from a release asset name of the last push, for a
 #                   package with upstream.asset_var
 #
-# Written by the runs while a version lacks the archive of an arch, see
-# docs/WORKFLOW.md 4.8:
+# Written by the runs while a version lacks the archive of an arch
+# (https://aurtomator.dev/features/missing-arches/):
 #   arch_wait    - version and since, the time a run first saw that version
 #                  without the archive
 #   arch_out     - the arches a push left out, each with the AUR commit
@@ -67,8 +70,9 @@
 #   kde-tarball      download.kde.org directory listing
 #   webpage-scrape   any HTTPS page + regex
 #
-# docs/SUPPORTED-PACKAGES.md covers package types, limitations and safety rules.
-# docs/WORKFLOW.md covers strategy details and writing a custom strategy.
+# https://aurtomator.dev/supported-packages/ covers package types, limitations
+# and safety rules. https://aurtomator.dev/strategies/ covers strategy details,
+# and https://aurtomator.dev/custom-strategies/ covers writing a custom one.
 
 # =============================================================================
 # MINIMAL EXAMPLE
@@ -104,7 +108,8 @@ upstream:
 # the release of the new version. Exactly one has to match, and its capture
 # group goes to the asset_var line of the PKGBUILD, as
 # _deb=2.5.0-debian-forky-ocaml5.5.1-1. A new value of the version the AUR
-# has is pushed as a rebuild with the next pkgrel. See docs/WORKFLOW.md 4.6.
+# has is pushed as a rebuild with the next pkgrel, as
+# https://aurtomator.dev/features/asset-values/ describes.
 #
 # upstream:
 #   project: savonet/liquidsoap

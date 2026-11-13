@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # stats-card.sh - Draw card.svg and card-dark.svg, the statistics card of
-# the README, from the event journal, see Statistics in docs/WORKFLOW.md
+# the README, from the event journal, see https://aurtomator.dev/features/statistics/
 
 set -euo pipefail
 # shellcheck source=lib.sh

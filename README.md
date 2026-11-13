@@ -1,9 +1,25 @@
-# aurtomator
+<p align="center">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg"><source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg"><img alt="aurtomator" src="assets/logo-light.svg" width="300"></picture>
+</p>
 
-[![Lint & Test](https://github.com/staticwire/aurtomator/actions/workflows/ci.yml/badge.svg)](https://github.com/staticwire/aurtomator/actions/workflows/ci.yml) [![codecov](https://codecov.io/github/staticwire/aurtomator/graph/badge.svg)](https://codecov.io/github/staticwire/aurtomator) [![Bash](https://img.shields.io/badge/bash-5%2B-green?logo=gnubash&logoColor=white)](https://www.gnu.org/software/bash/) [![AUR](https://img.shields.io/badge/AUR-automation-1793d1?logo=archlinux&logoColor=white)](https://aur.archlinux.org/) [![License](https://img.shields.io/badge/license-BSD--3--Clause-lightgrey?logo=opensourceinitiative&logoColor=white)](LICENSE)
+<p align="center">Automated AUR package updates</p>
 
-Automated AUR package updates from a single GitHub repo.  
-Create a repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) and drop in your packages. Its workflows call the pipeline of aurtomator at a pinned commit.
+aurtomator does the routine work of an AUR maintainer: it finds a new upstream version, bumps `pkgver`, updates the checksums and `.SRCINFO` and pushes to the AUR. It runs a few times a day in GitHub Actions of your own repository, made from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed), where each package is one YAML file. A package it cannot update gets an issue.
+
+<p align="center">
+  <a href="https://github.com/staticwire/aurtomator/actions/workflows/ci.yml"><img alt="Lint &amp; Test" src="https://github.com/staticwire/aurtomator/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://codecov.io/github/staticwire/aurtomator"><img alt="Coverage" src="https://codecov.io/github/staticwire/aurtomator/graph/badge.svg"></a>
+  <a href="https://github.com/staticwire/aurtomator/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/staticwire/aurtomator?logo=github&amp;logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: BSD-3-Clause" src="https://img.shields.io/badge/license-BSD--3--Clause-lightgrey?logo=opensourceinitiative&amp;logoColor=white"></a>
+  <a href="https://www.gnu.org/software/bash/"><img alt="Bash 5 or later" src="https://img.shields.io/badge/bash-5%2B-green?logo=gnubash&amp;logoColor=white"></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/button-quick-start-dark.svg"><source media="(prefers-color-scheme: light)" srcset="assets/button-quick-start-light.svg"><img alt="Quick start" src="assets/button-quick-start-light.svg"></picture></a>
+  <a href="https://aurtomator.dev/setup/"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/button-setup-guide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="assets/button-setup-guide-light.svg"><img alt="Setup guide" src="assets/button-setup-guide-light.svg"></picture></a>
+  <a href="https://aurtomator.dev/supported-packages/"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/button-supported-packages-dark.svg"><source media="(prefers-color-scheme: light)" srcset="assets/button-supported-packages-light.svg"><img alt="Supported packages" src="assets/button-supported-packages-light.svg"></picture></a>
+  <a href="https://aurtomator.dev/overview/"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/button-workflow-reference-dark.svg"><source media="(prefers-color-scheme: light)" srcset="assets/button-workflow-reference-light.svg"><img alt="Workflow reference" src="assets/button-workflow-reference-light.svg"></picture></a>
+</p>
 
 ## How it works
 
@@ -20,11 +36,11 @@ graph LR
     C --> D
 ```
 
-Each package has a YAML config pointing to an upstream source. Your repository holds these configs and calls the pipeline of aurtomator. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so the steps before the push run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs, and in a PKGBUILD it changes nothing but `pkgver`, `pkgrel`, the checksums and a value from a release asset name, see [Limitations](#limitations). A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow. When the checks of 5 or more packages fail on one host in a run, those packages share one issue.
+Each package has a YAML config pointing to an upstream source. Your repository holds these configs and calls the pipeline of aurtomator. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so the steps before the push run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs, and [Limitations](#limitations) lists the lines of a PKGBUILD that it changes. A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow. When the checks of 5 or more packages fail on one host in a run, those packages share one issue.
 
 ## Quick start
 
-1. Create your repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) with [Use this template](https://github.com/staticwire/aurtomator-seed/generate). Check that Issues are enabled in its settings, and that `Check AUR Package Updates` and `Validate packages` are enabled in its Actions tab ([why?](docs/SETUP.md#after-creating-the-repository)).
+1. Create your repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) with [Use this template](https://github.com/staticwire/aurtomator-seed/generate). Check that Issues are enabled in its settings, and that `Check AUR Package Updates` and `Validate packages` are enabled in its Actions tab ([why?](https://aurtomator.dev/setup/#after-creating-the-repository)).
 2. Clone your repository:
 
    ```bash
@@ -32,7 +48,7 @@ Each package has a YAML config pointing to an upstream source. Your repository h
    cd <repository>
    ```
 
-3. Set up the git identity of your AUR commits, the AUR SSH key and the GitHub secrets ([details](docs/SETUP.md)):
+3. Set up the git identity of your AUR commits, the AUR SSH key and the GitHub secrets ([details](https://aurtomator.dev/setup/)):
 
    ```bash
    ./aurtomator.sh setup
@@ -44,7 +60,9 @@ Each package has a YAML config pointing to an upstream source. Your repository h
    ./aurtomator.sh draft <name>
    ```
 
-   It reads the `.SRCINFO` of the package in the AUR, writes `packages/<name>.yml` with a strategy and its `upstream` fields, and runs `validate-pkg` and `check-update` on that file, see [docs/WORKFLOW.md](docs/WORKFLOW.md#72-draft-a-package). When no rule matches the url or a source of the package, it writes nothing. Then write the file from the sample, with `name: <name>`, a `strategy` and its `upstream` fields, see [Strategies](#strategies), and check it:
+   ![./aurtomator.sh draft hello-bin writes packages/hello-bin.yml with the github-release strategy, validates it and finds the update from 1.4.2 to 2.0.0](assets/demo/draft.gif)
+
+   It reads the `.SRCINFO` of the package in the AUR, writes `packages/<name>.yml` with a strategy and its `upstream` fields, and runs `validate-pkg` and `check-update` on that file, see [Draft a package](https://aurtomator.dev/add-a-package/#draft-a-package). When no rule matches the url or a source of the package, it writes nothing. Then write the file from the sample, with `name: <name>`, a `strategy` and its `upstream` fields, see [Strategies](#strategies), and check it:
 
    ```bash
    ./aurtomator.sh sample > packages/<name>.yml
@@ -53,7 +71,7 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 
 5. Commit and push. The workflows do the rest. The schedule starts a run a few times a day, and Actions > Check AUR Package Updates > Run workflow starts one at once.
 
-`./aurtomator.sh` runs the scripts of aurtomator at the version your workflows pin, see [docs/SETUP.md](docs/SETUP.md#the-aurtomatorsh-script). Without [gh CLI](https://cli.github.com/), `setup` prints how to set the secrets by hand. GPG signing of the AUR commits is optional.
+`./aurtomator.sh` runs the scripts of aurtomator at the version your workflows pin, see [The aurtomator.sh script](https://aurtomator.dev/setup/#the-aurtomatorsh-script). Without [gh CLI](https://cli.github.com/), `setup` prints how to set the secrets by hand. GPG signing of the AUR commits is optional.
 
 ## Strategies
 
@@ -78,62 +96,41 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 | `webpage-scrape`   | URL + regex         | Anything not covered above             |
 | `kde-tarball`      | download.kde.org    | KDE projects, Plasma and Gear too      |
 
-See [docs/WORKFLOW.md](docs/WORKFLOW.md) for strategy details, YAML examples, and how to write custom strategies.
+See [Strategies](https://aurtomator.dev/strategies/) for strategy details and YAML examples, and [Custom strategies](https://aurtomator.dev/custom-strategies/) for how to write one.
 
 ## Limitations
 
-aurtomator only sets `pkgver` and `pkgrel`, updates checksums and `.SRCINFO`, and sets a value from a release asset name where the package YAML asks for one. `pkgrel` goes back to 1 for a new version, and a rebuild with a new asset value raises it by one. It does not build packages or check dependencies. These cases are detected and blocked:
+In a PKGBUILD, aurtomator changes these lines and no others:
 
-- **`pkgver()` with the wrong strategy**: use `git-latest` for VCS packages
-- **A `SKIP` next to a real checksum of a remote source**: `updpkgsums` runs for the real checksum and would turn such a `SKIP` into a hash, which the check of the prepared files refuses. A `SKIP` that makepkg gives itself does not count: that of a signature (`.sig`, `.sign`, `.asc`), of an svn source, and of a git, hg or bzr source without a pin makepkg hashes, see [docs/SUPPORTED-PACKAGES.md](docs/SUPPORTED-PACKAGES.md#mixed-skip-and-real-checksums-blocked)
-- **Sources that do not follow `pkgver`**: when a download has a real checksum or a VCS source is pinned, a bump has to change a source URL or a checksum for each architecture, or the new version would hold the old files. Make `pkgver` the literal and derive the other variable from it
-- **Lines the check cannot read from the PKGBUILD**: a line of `.SRCINFO` that holds the version must keep a value the PKGBUILD writes as text and take the new version where the PKGBUILD derives it. A value written with an escaped character, `{a,b}` or `$'...'`, or taken from a variable that does not follow `pkgver`, stops the update. Write such a value as plain text or derive it from `pkgver`
-- **Source URLs returning HTML** or an error status: a HEAD request checks every `http` and `https` source, also one with a `SKIP` checksum
-- **Checksums verify cannot compute**: a real checksum of a download over `http` or `ftp`, of a git source over another protocol than `https`, of an `hg` or `bzr` source at a pin makepkg hashes, or of a `fossil` source stops the update, see [docs/SUPPORTED-PACKAGES.md](docs/SUPPORTED-PACKAGES.md#checksums-verify-cannot-compute-blocked)
+- `pkgver`, to the new version
+- `pkgrel`, to 1 for a new version, or one up when upstream rebuilds the same version under a new file name
+- the checksums
+- the variable that `upstream.asset_var` names, when upstream puts more than the version into its file names, as liquidsoap does in `liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb`
+- `arch=()`, when a release lacks the archive of an arch other than `x86_64`
+
+It writes `.SRCINFO` from the result with `makepkg --printsrcinfo`. It does not build packages or check dependencies. These cases are detected and blocked:
+
+- [`pkgver()` with the wrong strategy](https://aurtomator.dev/supported-packages/#pkgver-with-the-wrong-strategy-blocked)
+- [A `SKIP` next to a real checksum of a remote source](https://aurtomator.dev/supported-packages/#mixed-skip-and-real-checksums-blocked)
+- [Sources that do not follow `pkgver`](https://aurtomator.dev/supported-packages/#sources-that-do-not-follow-pkgver-blocked)
+- [Lines the check cannot read from the PKGBUILD](https://aurtomator.dev/supported-packages/#lines-the-check-cannot-read-from-the-pkgbuild-blocked)
+- [Source URLs returning HTML or an error status](https://aurtomator.dev/supported-packages/#source-url-returns-html-blocked)
+- [Checksums verify cannot compute](https://aurtomator.dev/supported-packages/#checksums-verify-cannot-compute-blocked)
 
 Patches in `source=()` trigger a warning and are not blocked.
 
-[docs/SUPPORTED-PACKAGES.md](docs/SUPPORTED-PACKAGES.md) has the full breakdown, including safe and unsafe failure modes and a comparison with other tools.
+[Supported packages](https://aurtomator.dev/supported-packages/) has the full breakdown, including safe and unsafe failure modes.
 
-## Downgrades
+## Features
 
-aurtomator publishes a version older than the tracked one only when the package YAML sets `allow_downgrade: true`. Without it, the downgrade is skipped: the latest release of a GitHub project can be a maintenance release of an older line. A downgrade is logged with the literal keyword `DOWNGRADE` and shown in the package table with a `🔻` icon. The statistics card counts it as a push. Details are in [docs/WORKFLOW.md section 4.3](docs/WORKFLOW.md#43-downgrade-behavior).
-
-An update whose first number has at least two digits more than that of the tracked version, such as `13 → 2026102100`, is skipped the same way unless the package YAML sets `allow_version_jump: true`. Such a step is more often another version scheme of the upstream, as build tags next to release tags, than a release. It is shown with a `🔺` icon.
-
-## Update alerts
-
-A package YAML can name the versions that need a hand edit of the PKGBUILD, such as a new major that needs a newer build dependency. An alert with `hold: true` pauses the update at such a version, shown with a `✋` icon, and opens an issue with the note until the maintainer publishes the version by hand. Without `hold`, the update goes on, and an issue with the note opens after the push. Details are in [docs/WORKFLOW.md section 4.5](docs/WORKFLOW.md#45-update-alerts).
-
-## Values from release asset names
-
-Some upstreams name a release asset with more than the version and rebuild a release under a new name, as liquidsoap does with `liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb`. With `upstream.asset_regex` and `upstream.asset_var`, a run takes that value from the release of the new version and writes it to its line in the PKGBUILD. A new value of the current version is pushed as a rebuild with the next `pkgrel`, shown with a `🔨` icon. While the release or its asset is not out yet, the package shows `⏳` for up to a day. Details are in [docs/WORKFLOW.md section 4.6](docs/WORKFLOW.md#46-values-from-release-asset-names).
-
-## Cooldown
-
-A `-git` package gets a new version with every upstream commit, and each push makes the AUR helpers of its users build it again. A push of a `git-latest` package therefore waits 7 days after the last one, and the package table shows the day it goes out with a `💤` icon. `cooldown_days` in the package YAML sets other days for any strategy, and `0` turns the wait off. A waiting update goes out with the next run once the `last_updated` line of its package is deleted. Details are in [docs/WORKFLOW.md section 4.7](docs/WORKFLOW.md#47-cooldown).
-
-## Versions without some arches
-
-A package that builds each arch from an archive of its own, as `jdk-temurin-ea-bin` does, can be updated to a release that lacks the archive of one arch. The package shows `⏳` for 24 hours while the runs wait for the archive. Then the version goes out without that arch, and the package table names the arch with a `⚠️` icon until its archive is out and a run puts it back. An issue stays open while an arch is out. A release without the archive of `x86_64` fails as before, and `allow_missing_arch: false` in the package YAML turns the wait and the push without an arch off. Details are in [docs/WORKFLOW.md section 4.8](docs/WORKFLOW.md#48-versions-without-some-arches).
-
-## Updates of aurtomator
-
-The line under the package table in the README of your repository shows the version a run uses, which is `VERSION` of aurtomator at the SHA the calling workflows pin. Dependabot opens the pull request that moves the pin to a new release at its next check. To run that check at once, open Insights > Dependency graph > Dependabot, click "Recent update jobs" and then "Check for updates". The first run of `check-updates.yml` on the new pin also updates `aurtomator.sh` to that release. A newer release also gets an issue that says how to update, and a link on that line. A run closes the issue once the pin of the calling workflows names that release, or once a newer release is out. Details are in [docs/WORKFLOW.md section 5.8](docs/WORKFLOW.md#58-version-of-aurtomator).
-
-## Statistics
-
-Your repository keeps a journal of every change of state of its packages in `stats/events.csv`: pushes, waits, failures, recoveries, and packages added and removed. Its README shows a card drawn from the journal above the package table, with the packages updated, the pushes to the AUR, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The card names the day it was drawn, and a click on it opens the journal. Google Sheets and Grafana read the journal from its URL. Details are in [docs/WORKFLOW.md section 5.9](docs/WORKFLOW.md#59-statistics).
-
-## Resource usage
-
-All packages run in one workflow run. `check` and `issues` run every time, `prepare` and `verify` only for a new version or a rebuild, and `publish` for those, a change in the README, and once a day for the statistics card. Each of these jobs starts its own Arch container and installs its packages. SSH and GPG are set up once per run, in `publish`, and only when a package goes to the AUR. A version check is a few API requests per package, or a bare clone for `git-latest`.
-
-## Documentation
-
-- [Setup guide](docs/SETUP.md): first-time configuration, prerequisites, troubleshooting
-- [Supported packages](docs/SUPPORTED-PACKAGES.md): what works, what does not, safety rules
-- [Workflow reference](docs/WORKFLOW.md): strategies, update process, CI pipeline, local testing, custom strategies
+- [Downgrades](https://aurtomator.dev/features/downgrades/): a version older than the tracked one goes out only with `allow_downgrade: true`, and a version whose first number has at least two digits more only with `allow_version_jump: true`.
+- [Update alerts](https://aurtomator.dev/features/update-alerts/): an alert in the package YAML names a version that needs a hand edit of the PKGBUILD, and holds the update there or opens an issue with its note after the push.
+- [Values from release asset names](https://aurtomator.dev/features/asset-values/): for an upstream that puts more than the version into its file names, a run writes that part to its variable in the PKGBUILD, and a new value of the same version goes out as a rebuild.
+- [Cooldown](https://aurtomator.dev/features/cooldown/): a push of a `git-latest` package waits 7 days after the last one, and `cooldown_days` sets other days for any strategy.
+- [Versions without some arches](https://aurtomator.dev/features/missing-arches/): a release that lacks the archive of an arch other than `x86_64` goes out without that arch after 24 hours, and a run puts the arch back once its archive is out.
+- [Updates of aurtomator](https://aurtomator.dev/features/aurtomator-updates/): Dependabot opens the pull request that moves the pin of your workflows to a new release, and a newer release also gets an issue.
+- [Statistics](https://aurtomator.dev/features/statistics/): your repository keeps a journal of every change of state of its packages, and its README shows a card drawn from it.
+- [Resource usage](https://aurtomator.dev/internals/workflow/#permissions-and-container): all packages share one workflow run, and only a new version or a rebuild starts the jobs that prepare and verify a package.
 
 ## Alternatives
 

@@ -23,7 +23,7 @@ Fixes #<!-- issue number --> <!-- or "N/A" if this PR does not track an issue --
 - [ ] `actionlint` passes locally
 - [ ] `bats tests/ --recursive` passes
 - [ ] New scripts or strategies have BATS tests
-- [ ] New strategies are documented in `README.md` and `docs/WORKFLOW.md`
+- [ ] New strategies are documented in `README.md` and `site/src/content/docs/strategies.md`
 - [ ] GitHub Actions changes pin by commit SHA with a version comment
 
 ## Notes for the reviewer

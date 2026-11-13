@@ -1,0 +1,48 @@
+/* The blue of the logo, in the colors of the README buttons. */
+:root,
+::backdrop {
+  --sl-color-accent-low: #0f2a3d;
+  --sl-color-accent: #1793d1;
+  --sl-color-accent-high: #7cc6ee;
+}
+
+:root[data-theme='light'],
+[data-theme='light'] ::backdrop {
+  --sl-color-accent-low: #e6f3fb;
+  --sl-color-accent: #0f6fa6;
+  --sl-color-accent-high: #0f2a3d;
+}
+
+/* A wide text column, for the tables and the demo GIF. */
+:root {
+  --sl-content-width: 80rem;
+}
+
+/* The search box takes the free width of the header. */
+site-search button[data-open-modal] {
+  max-width: none;
+}
+
+/* Code in a table cell stays on one line. On a narrower screen it wraps anywhere,
+   so a long URL leaves room for the other columns. */
+.sl-markdown-content td code {
+  white-space: nowrap;
+}
+
+@media (max-width: 100rem) {
+  .sl-markdown-content td code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* The theme picker shows a half circle for Auto in place of the laptop of Starlight. */
+starlight-theme-select:has(option[value='auto']:checked) svg.label-icon {
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M12 2a10 10 0 1 0 0 20a10 10 0 0 0 0-20Zm0 2v16a8 8 0 0 1 0-16Z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+starlight-theme-select:has(option[value='auto']:checked) svg.label-icon > * {
+  display: none;
+}
