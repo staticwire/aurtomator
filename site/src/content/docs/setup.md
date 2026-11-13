@@ -8,7 +8,7 @@ Required:
 
 - Arch Linux, or an Arch-based system with `makepkg` and `updpkgsums`
 - `git`
-- `yq`: the [Go version by mikefarah](https://github.com/mikefarah/yq), not the Python wrapper, which the scripts and `aurtomator.sh` refuse
+- `yq`: the [Go version by mikefarah](https://github.com/mikefarah/yq), not the Python wrapper around `jq`
 - `ssh-keygen` from `openssh`
 - `curl`
 - An AUR account at <https://aur.archlinux.org> with at least one package you maintain
@@ -132,7 +132,7 @@ The `uses:` line of `.github/workflows/check-updates.yml` that names `check-upda
 
 Before that fetch, the script warns when no tag of the repository points to the pinned commit. GitHub serves a commit of any fork of a repository under the name of that repository too, so a `uses:` line that names `staticwire/aurtomator` can pin a commit that is not in aurtomator. The warning shows only when the script runs. Before you merge a pull request that moves the pin, `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
 
-The script needs mikefarah/yq and stops with any other `yq`, such as the Python wrapper. Before it reads a pin, it stops when `.github/workflows/check-updates.yml` holds more than one YAML document, a merge key `<<` or a key twice in one mapping, or when `yq` cannot read the file. `pin` checks `.github/workflows/validate.yml` the same way. The checks allow anchors and aliases.
+The script needs mikefarah/yq and stops with any other `yq`, such as the Python wrapper around `jq`. Before it reads a pin, it stops when `.github/workflows/check-updates.yml` holds more than one YAML document, a merge key `<<` or a key twice in one mapping, or when `yq` cannot read the file. `pin` checks `.github/workflows/validate.yml` the same way. The checks allow anchors and aliases.
 
 `./aurtomator.sh pin vX.Y.Z` moves the pin to a release. It reads the commit of that tag with `git ls-remote`, puts it and `# vX.Y.Z` into every `uses:` line of the pinned repository in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. Before it changes a file, it stops when the tag names no commit SHA, or when `yq` reads a pin of the repository in one of the two files that is on no such line, as a pin in quotes is. It fetches nothing. The next run of the script fetches the release, and CI takes it once the two files are committed and pushed.
 
