@@ -1619,6 +1619,24 @@ use_source() {
   [ -e "$TEST_TMPDIR/git-fetch-args" ]
 }
 
+# The pack goes into one file under a size limit of the budget left, and a stall ends
+# the fetch as it ends a download
+@test "_git_source_sum: stops a fetch at the budget left" {
+  setup_verify
+  make_upstream
+  head -c 300000 /dev/urandom >"$TEST_TMPDIR/upstream-work/blob"
+  tag_upstream "$TEST_TMPDIR/upstream-work" v1.2.0 2026-01-03T00:00:00Z
+  git -C "$TEST_TMPDIR/upstream-work" push -q "$TEST_TMPDIR/upstream.git" refs/tags/v1.2.0
+  mkdir "$TEST_TMPDIR/downloads"
+  truncate -s $((1024 * 1024 * 1024 - 100 * 1024)) "$TEST_TMPDIR/downloads/earlier"
+  hash -r
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.2.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The fetch of tag=v1.2.0 of https://example.com/demo.git passes the budget of 1 GiB of the package"* ]]
+  grep -q -- '-c fetch.unpackLimit=1 -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 -C ' "$TEST_TMPDIR/git-fetch-args"
+  (($(cat "$TEST_TMPDIR/git-fetch-ulimit") <= 100))
+}
+
 @test "verify-pkg: refuses a checksum of a git source at a branch" {
   setup_verify
   make_upstream
