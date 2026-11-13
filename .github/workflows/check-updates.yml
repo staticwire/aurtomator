@@ -687,6 +687,8 @@ jobs:
             subject="update package versions"
             if ! grep -vxF "$repo_runner" <<<"$files" | grep -qv '^stats/'; then
               subject="update package statistics"
+            elif ! grep -q '^packages/' <<<"$files"; then
+              subject="update package statuses"
             fi
             if grep -qxF "$repo_runner" <<<"$files"; then
               subject+=" and aurtomator.sh"
