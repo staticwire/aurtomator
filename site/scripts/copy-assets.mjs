@@ -13,4 +13,4 @@ mkdirSync(to('public/demo/'), { recursive: true });
 for (const name of ['favicon.svg', 'favicon-32.png', 'apple-touch-icon.png']) {
   copyFileSync(from(name), to(`public/${name}`));
 }
-// copyFileSync(from('demo/draft.gif'), to('public/demo/draft.gif'));
+copyFileSync(from('demo/draft.gif'), to('public/demo/draft.gif'));

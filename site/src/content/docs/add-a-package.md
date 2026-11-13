@@ -63,6 +63,8 @@ Commit the package YAML and push to your repository. The push to `main` runs `Va
 ./aurtomator.sh draft my-package
 ```
 
+![./aurtomator.sh draft hello-bin writes packages/hello-bin.yml with the github-release strategy, validates it and finds the update from 1.4.2 to 2.0.0](/demo/draft.gif)
+
 The command writes a first `packages/my-package.yml` from the AUR. The argument must have the form of a package name, and an existing `packages/my-package.yml` stops the command and stays as it is. It clones the AUR repository of the package with `--depth 1` and without a checkout, so no attribute or filter of that repository applies, and reads its `.SRCINFO` from the commit as data: `pkgver`, `epoch`, `url` and every `source` and `source_<arch>` of the pkgbase section, in their order. It never reads or runs the PKGBUILD. The AUR serves an empty repository for an unknown name, so a clone without `.SRCINFO` stops the command with `No AUR package my-package`, and a `.SRCINFO` that is a link stops it as well. A `pkgver` with a character outside `A-Za-z0-9._+` or without a digit stops it before it writes the file.
 
 The first source that a rule matches decides. The rules read the URL after a `<file>::` prefix, without its query and its fragment, and a local file and a signature (`.sig`, `.asc`, `.sign`) match none:
