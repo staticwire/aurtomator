@@ -3150,22 +3150,22 @@ EOF
 @test "notify-failure: keeps a branch name with backticks inside its code span" {
   RUN_BRANCH='fix`@owner``' GH_JOBS=check run_notify_step
   [ "$status" -eq 0 ]
-  grep -qF 'on ``` fix`@owner`` ``` failed in check' "$GH_LOG"
+  grep -qF 'on ``` fix`@owner`` ``` failed in `check`' "$GH_LOG"
 }
 
 @test "notify-failure: opens an issue that names the run and its failed jobs" {
-  GH_JOBS="check, publish" run_notify_step
+  GH_JOBS=$'check\npublish' run_notify_step
   [ "$status" -eq 0 ]
   grep -q '^issue create --title ❌ Check AUR Package Updates failed --label auto-update --body ' "$GH_LOG"
   grep -q 'https://example.invalid/runs/7' "$GH_LOG"
-  grep -q 'failed in check, publish' "$GH_LOG"
+  grep -qF 'failed in `check`, `publish`' "$GH_LOG"
   grep -q 'until a run succeeds, and that run closes this issue\.$' "$GH_LOG"
 }
 
 @test "notify-failure: names the jobs that failed or timed out" {
   GH_JOBS_JSON='{"jobs":[{"name":"check","conclusion":"failure"},{"name":"verify","conclusion":"timed_out"},{"name":"publish","conclusion":"skipped"},{"name":"status","conclusion":"success"}]}' run_notify_step
   [ "$status" -eq 0 ]
-  grep -q 'failed in check, verify' "$GH_LOG"
+  grep -qF 'failed in `check`, `verify`' "$GH_LOG"
 }
 
 # GitHub gives a job stopped by timeout-minutes the conclusion `cancelled`, as one canceled by hand
@@ -3175,8 +3175,15 @@ EOF
     {"name":"check-updates / prepare (demo)","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:02:00Z"},
     {"name":"check-updates / status","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:09:10Z"}]}' run_notify_step
   [ "$status" -eq 0 ]
-  grep -q 'failed in check-updates / check, check-updates / status\.$' "$GH_LOG"
+  grep -qF 'failed in `check-updates / check`, `check-updates / status`.' "$GH_LOG"
   grep -q -- '--paginate' "$GH_LOG"
+}
+
+# The AUR takes a package name that starts with @, which outside a code span mentions a user
+@test "notify-failure: names a failed job of a package in a code span" {
+  GH_JOBS_JSON='{"jobs":[{"name":"check-updates / prepare (@owner)","conclusion":"failure"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  grep -qF 'failed in `check-updates / prepare (@owner)`.' "$GH_LOG"
 }
 
 @test "notify-failure: opens nothing for jobs canceled before their timeout-minutes" {

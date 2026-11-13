@@ -54,7 +54,9 @@ jobs:
             echo "::notice::No job of the run failed, so the canceled run gets no issue"
             exit 0
           else
-            failed=$(sed ':a;N;$!ba;s/\n/, /g' <<<"$names")
+            # The name of a matrix job holds a package name, and a code span keeps an @ in it from
+            # mentioning a user; a package name holds no backtick
+            failed="\`$(sed ':a;N;$!ba;s/\n/`, `/g' <<<"$names")\`"
           fi
 
           # A code span ends at a run of as many backticks as it opens with, so its fence outruns every
