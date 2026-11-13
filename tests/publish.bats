@@ -1635,6 +1635,8 @@ use_source() {
   [[ "$output" == *"The fetch of tag=v1.2.0 of https://example.com/demo.git passes the budget of 1 GiB of the package"* ]]
   grep -q -- '-c fetch.unpackLimit=1 -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 -C ' "$TEST_TMPDIR/git-fetch-args"
   (($(cat "$TEST_TMPDIR/git-fetch-ulimit") <= 100))
+  # SIGXFSZ would end git with a core dump
+  [ "$(cat "$TEST_TMPDIR/git-fetch-traps")" = "trap -- '' SIGXFSZ" ]
 }
 
 @test "verify-pkg: refuses a checksum of a git source at a branch" {

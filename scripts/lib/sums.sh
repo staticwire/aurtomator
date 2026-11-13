@@ -132,9 +132,9 @@ _git_source_sum() {
       log_err "Could not fetch ${fragment} of $url"
       return 1
     fi
-    # The pack goes into one file under a size limit of the budget left, and a stall ends
-    # the fetch as it ends a download
-    if ! (ulimit -f "$((left / 1024))" && GIT_ALLOW_PROTOCOL=https git -c fetch.unpackLimit=1 \
+    # The pack goes into one file under a size limit of the budget left, and a stall ends the
+    # fetch as it ends a download; an ignored SIGXFSZ makes a write past the limit fail, no dump
+    if ! (trap '' XFSZ && ulimit -f "$((left / 1024))" && GIT_ALLOW_PROTOCOL=https git -c fetch.unpackLimit=1 \
       -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 -C "$dir" fetch -q --depth 1 --no-tags "$url" "$refspec"); then
       if (($(du -sb -- "$dir" | cut -f1) >= left / 1024 * 1024)); then
         log_err "The fetch of ${fragment} of $url passes the budget of 1 GiB of the package"

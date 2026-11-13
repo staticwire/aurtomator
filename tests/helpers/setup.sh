@@ -92,6 +92,7 @@ if [[ " \$* " == *" fetch "* && "\${@: -2:1}" == https://* ]]; then
   echo "\${GIT_ALLOW_PROTOCOL:-unset}" >>"$TEST_TMPDIR/git-allow"
   echo "\$*" >>"$TEST_TMPDIR/git-fetch-args"
   ulimit -f >>"$TEST_TMPDIR/git-fetch-ulimit"
+  trap -p XFSZ >>"$TEST_TMPDIR/git-fetch-traps"
   exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git "\${@:1:\$#-2}" "file://$TEST_TMPDIR/upstream.git" "\${@: -1}"
 fi
 if [[ "\$1" == "clone" ]]; then
