@@ -33,9 +33,10 @@ publish() {
   git clone -q --bare "$2" "$TEST_TMPDIR/github/$1"
 }
 
-# Writes the calling workflow of the repository with the uses: line $1
+# Writes the calling workflow of the repository with the uses: line $1 and the release $2 after it,
+# v1.0.0 by default
 pin() {
-  printf 'jobs:\n  check-updates:\n    uses: %s # vX.Y.Z\n' "$1" >"$REPO/.github/workflows/check-updates.yml"
+  printf 'jobs:\n  check-updates:\n    uses: %s # %s\n' "$1" "${2:-v1.0.0}" >"$REPO/.github/workflows/check-updates.yml"
 }
 
 setup() {
@@ -110,7 +111,7 @@ teardown() {
   run "$REPO/aurtomator.sh" sample
   [ "$output" = "name: pinned" ]
 
-  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP"
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP" v1.1.0
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 0 ]
   [ "$output" = "name: tip" ]
@@ -126,7 +127,7 @@ teardown() {
   forked=$(commit_aurtomator "$TEST_TMPDIR/fork" forked)
   git -C "$TEST_TMPDIR/fork" tag v9.0.0
   publish someone/aurtomator-fork "$TEST_TMPDIR/fork"
-  pin "someone/aurtomator-fork/.github/workflows/check-updates.yml@$forked"
+  pin "someone/aurtomator-fork/.github/workflows/check-updates.yml@$forked" v9.0.0
 
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 0 ]
@@ -143,7 +144,8 @@ teardown() {
 }
 
 @test "runner: a failed fetch leaves nothing in the cache" {
-  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@0123456789abcdef0123456789abcdef01234567"
+  printf '#!/usr/bin/env bash\nfor a; do [[ "$a" != fetch ]] || exit 1; done\nexec /usr/bin/git "$@"\n' >"$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/git"
 
   run "$REPO/aurtomator.sh" sample
   [ "$status" -ne 0 ]
@@ -240,7 +242,7 @@ teardown() {
 jobs:
   check-updates:
     # was: uses: someone/aurtomator-fork/.github/workflows/check-updates.yml@$TIP # vX.Y.Z
-    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED # vX.Y.Z
+    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED # v1.0.0
     # was: uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP # vX.Y.Z
 EOF
   run "$REPO/aurtomator.sh" sample
@@ -409,7 +411,7 @@ shape() {
 }
 
 @test "runner: reads a file with an anchor and an alias" {
-  printf 'x-secrets: &s\n  KEY: value\njobs:\n  check-updates:\n    uses: %s # vX.Y.Z\n    secrets: *s\n' \
+  printf 'x-secrets: &s\n  KEY: value\njobs:\n  check-updates:\n    uses: %s # v1.0.0\n    secrets: *s\n' \
     "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" >"$REPO/.github/workflows/check-updates.yml"
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 0 ]
@@ -466,26 +468,46 @@ shape() {
 }
 
 # GitHub serves the commits of every fork under the name of the parent
-@test "runner: warns when no tag of the repository is at the pin" {
+@test "runner: refuses a pin that is not the commit of the release after it" {
   local untagged annotated
   untagged=$(commit_aurtomator "$TEST_TMPDIR/work" untagged)
   annotated=$(commit_aurtomator "$TEST_TMPDIR/work" annotated)
   git -C "$TEST_TMPDIR/work" -c user.name=t -c user.email=t@example.com tag -a v1.2.0 -m release "$annotated"
   publish staticwire/aurtomator "$TEST_TMPDIR/work"
 
-  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$untagged"
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$untagged" v1.0.0
   run "$REPO/aurtomator.sh" sample
-  [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "Warning: no tag of staticwire/aurtomator points to $untagged, check where the pin comes from" ]
-  [ "${lines[1]}" = "name: untagged" ]
-  # The copy is there, and the check runs before a fetch only
-  run "$REPO/aurtomator.sh" sample
-  [ "$output" = "name: untagged" ]
+  [ "$status" -eq 1 ]
+  [ "$output" = "The pin $untagged in .github/workflows/check-updates.yml is not the commit of v1.0.0 of staticwire/aurtomator; ./aurtomator.sh pin vX.Y.Z pins the commit of a release" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 
-  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$annotated"
+  # The commit of an older release under the name of a newer one
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v1.1.0
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "The pin $PINNED in .github/workflows/check-updates.yml is not the commit of v1.1.0 of staticwire/aurtomator; ./aurtomator.sh pin vX.Y.Z pins the commit of a release" ]
+
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$annotated" v1.2.0
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 0 ]
   [ "$output" = "name: annotated" ]
+}
+
+@test "runner: refuses a pin without the release after it" {
+  printf 'jobs:\n  check-updates:\n    uses: %s\n' "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" \
+    >"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "Write the release after the pin in .github/workflows/check-updates.yml, as ./aurtomator.sh pin vX.Y.Z does: @$PINNED # vX.Y.Z" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+@test "runner: names the repository whose tags it cannot list" {
+  rm -rf "$TEST_TMPDIR/github/staticwire/aurtomator"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "${lines[-1]}" = "Could not list the tags of staticwire/aurtomator" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
 @test "runner: the first run of a pin removes the copies made over 30 days ago" {

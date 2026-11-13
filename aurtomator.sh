@@ -89,13 +89,22 @@ if [[ ${#read_pins[@]} -ne 1 || "${read_pins[0]}" != "$repo/.github/workflows/ch
   exit 1
 fi
 
+# Print the commit of the tag $1 of the repository; an annotated tag names its
+# commit on the line of <tag>^{}
+tag_commit() {
+  git ls-remote --tags "https://github.com/$repo" |
+    awk -v ref="refs/tags/$1" '$2 == ref || $2 == ref "^{}" { sha = $1 } END { print sha }'
+}
+
 if [[ "${1:-}" == pin ]]; then
   if [[ $# -ne 2 || ! "$2" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Usage: $0 pin vX.Y.Z" >&2
     exit 1
   fi
-  # An annotated tag names its commit on the line of <tag>^{}
-  new=$(git ls-remote --tags "https://github.com/$repo" | awk -v ref="refs/tags/$2" '$2 == ref || $2 == ref "^{}" { sha = $1 } END { print sha }')
+  if ! new=$(tag_commit "$2"); then
+    echo "Could not list the tags of $repo" >&2
+    exit 1
+  fi
   if [[ -z "$new" ]]; then
     echo "No tag $2 in $repo" >&2
     exit 1
@@ -129,9 +138,21 @@ fi
 
 copy="${XDG_CACHE_HOME:-$HOME/.cache}/aurtomator/$sha"
 if [[ ! -d "$copy" ]]; then
-  # GitHub serves the commits of every fork under the name of its parent
-  if [[ $'\n'"$(git ls-remote --tags "https://github.com/$repo")" != *$'\n'"$sha"* ]]; then
-    echo "Warning: no tag of $repo points to $sha, check where the pin comes from" >&2
+  # GitHub serves the commits of every fork under the name of its parent, so a
+  # pin runs only as the commit of the release written after it
+  release_re="@${sha}[[:space:]]+#[[:space:]]*(v[0-9]+[.][0-9]+[.][0-9]+)([[:space:]]|\$)"
+  if [[ ! "${pins[0]}" =~ $release_re ]]; then
+    echo "Write the release after the pin in $workflow, as ./aurtomator.sh pin vX.Y.Z does: @$sha # vX.Y.Z" >&2
+    exit 1
+  fi
+  tag="${BASH_REMATCH[1]}"
+  if ! tagged=$(tag_commit "$tag"); then
+    echo "Could not list the tags of $repo" >&2
+    exit 1
+  fi
+  if [[ "$tagged" != "$sha" ]]; then
+    echo "The pin $sha in $workflow is not the commit of $tag of $repo; ./aurtomator.sh pin vX.Y.Z pins the commit of a release" >&2
+    exit 1
   fi
   mkdir -p "${copy%/*}"
   tmp="$(mktemp -d "$copy.XXXXXX")"
