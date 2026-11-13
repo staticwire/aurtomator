@@ -106,6 +106,11 @@ _git_source_sum() {
     log_err "Cannot check the checksum of $entry: makepkg hashes a git source only at a tag or commit"
     return 1
   fi
+  # makepkg finds a short id in its full clone, and git fetch takes a full one only
+  if [[ "${fragment%%=*}" == commit && ! "$ref" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]]; then
+    log_err "Cannot check the checksum of $entry: git fetches a commit by its full id only"
+    return 1
+  fi
   if [[ -z "$name" || "$name" == */* || "$name" == . || "$name" == .. ]]; then
     log_err "Cannot check the checksum of $entry"
     return 1

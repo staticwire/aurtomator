@@ -1556,6 +1556,17 @@ use_source() {
   grep -q -- " fetch -q --depth 1 --no-tags https://example.com/demo.git $GIT_COMMIT\$" "$TEST_TMPDIR/git-fetch-args"
 }
 
+# makepkg finds a short id in its full clone, and git fetch takes a full one only
+@test "verify-pkg: names the cause for a git source at a short commit id" {
+  setup_verify
+  make_upstream
+  use_source "git+https://example.com/demo.git#commit=${GIT_COMMIT:0:12}"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"#commit=${GIT_COMMIT:0:12}: git fetches a commit by its full id only"* ]]
+  [ ! -e "$TEST_TMPDIR/git-fetch-args" ]
+}
+
 @test "verify-pkg: refuses a wrong checksum of a git source" {
   setup_verify
   make_upstream
