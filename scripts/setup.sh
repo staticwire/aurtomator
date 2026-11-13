@@ -117,12 +117,18 @@ origin_repo() {
 
 # load_config of lib/config.sh reads each value in this form
 save_config() {
-  {
-    printf 'GIT_AUTHOR_NAME=%s\n' "${GIT_AUTHOR_NAME@Q}"
-    printf 'GIT_AUTHOR_EMAIL=%s\n' "${GIT_AUTHOR_EMAIL@Q}"
-    printf 'GPG_KEY_ID=%s\n' "${GPG_KEY_ID@Q}"
-    printf 'AUR_SSH_KEY=%s\n' "${AUR_SSH_KEY@Q}"
-  } >"$CONFIG_FILE"
+  local name value
+  for name in GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GPG_KEY_ID AUR_SSH_KEY; do
+    if [[ "${!name}" == *[[:cntrl:]]* ]]; then
+      fail "$name holds a control character, which .aurtomator.conf cannot keep"
+      return 1
+    fi
+  done
+  # Single quotes in every locale, since ${value@Q} writes $'...' for some values
+  for name in GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GPG_KEY_ID AUR_SSH_KEY; do
+    value="${!name}"
+    printf "%s='%s'\n" "$name" "${value//\'/\'\\\'\'}"
+  done >"$CONFIG_FILE"
 }
 
 setup_identity() {

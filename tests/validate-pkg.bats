@@ -248,6 +248,17 @@ current: '$current'"
   [[ "$output" == *"upstream.host must be a host name, with a port or none: 'gitlab.com@127.0.0.1'"* ]]
 }
 
+# Under en_US.UTF-8 a bracket range of bash takes the letters that sort between its ends
+@test "validate: refuses a host outside ASCII under any locale" {
+  locale -a | grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  create_test_package "mypkg" "gitlab-tag" "upstream:
+  host: gıtlab.com
+  project: owner/repo"
+  LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.host must be a host name, with a port or none: \$'g\\304\\261tlab.com'"* ]]
+}
+
 @test "validate: no value holds a control character" {
   local value
   for value in '"https://example.invalid/x\e]0;PWNED\ay"' '"main\rx"' '"https://example.invalid/\u009b2J"'; do

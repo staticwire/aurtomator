@@ -1567,6 +1567,28 @@ use_source() {
   [ ! -e "$TEST_TMPDIR/git-fetch-args" ]
 }
 
+# Under en_US.UTF-8 the range [0-9a-fA-F] of bash takes letters such as à
+@test "verify-pkg: refuses a commit id outside ASCII under any locale" {
+  locale -a | grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  setup_verify
+  make_upstream
+  use_source "git+https://example.com/demo.git#commit=à$(printf 'a%.0s' {1..39})"
+  LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"git fetches a commit by its full id only"* ]]
+  [ ! -e "$TEST_TMPDIR/git-fetch-args" ]
+}
+
+# The checks before it read the prepared files in the C locale, where U+2003 is no space
+@test "verify-pkg: reads the prepared .SRCINFO in the C locale" {
+  setup_verify
+  printf '\t\xe2\x80\x83source = https://example.com/other.tar.gz\n' |
+    tee -a "$TEST_TMPDIR/aur-work-demo/.SRCINFO" >>"$PREPARED/.SRCINFO"
+  commit_aur_state "a line that starts with U+2003"
+  LANG=C.UTF-8 run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+}
+
 @test "verify-pkg: refuses a wrong checksum of a git source" {
   setup_verify
   make_upstream
@@ -1906,6 +1928,71 @@ EOF
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
   [ "$status" -eq 2 ]
   [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+}
+
+# A co-maintainer can push the version during the wait and leave arches out on purpose
+@test "publish-pkg: writes no arch_out on a sync of a version that a person pushed" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  setup_arch_prepare
+  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  aur_arch_commit 28+23 x86_64 aarch64 >/dev/null
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+  [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
+}
+
+@test "publish-pkg: writes arch_out from a lost push under a later push of the version" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  setup_arch_prepare
+  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  cp "$yml" "$TEST_TMPDIR/yml.before"
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  cp "$TEST_TMPDIR/yml.before" "$yml"
+  mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
+  # A person pushes the version again with another pkgdesc before the next run
+  git -C "$work" pull -q --ff-only "$AUR_REMOTE" master
+  sed -i 's/early access JDK/early access JDK build/' "$work/PKGBUILD" "$work/.SRCINFO"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam 28+23
+  git -C "$work" push -q "$AUR_REMOTE" master
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
+  [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
+}
+
+# The AUR takes a .SRCINFO that lags its PKGBUILD, and check-arch.sh refuses a commit of
+# arch_out whose .SRCINFO does not build the arch
+@test "publish-pkg: writes to arch_out only the arches the .SRCINFO of the commit builds" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  setup_arch_prepare
+  arch_srcinfo "$work/.SRCINFO" 28+22 x86_64 aarch64 riscv64
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam 28+22
+  git -C "$work" push -q "$AUR_REMOTE" master
+  AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
+  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  cp "$yml" "$TEST_TMPDIR/yml.before"
+  archive_missing aarch64 28+23
+  archive_missing powerpc64le 28+23
+  prepare_arch 28+23 "aarch64 powerpc64le"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out "aarch64 powerpc64le"
+  [ "$status" -eq 0 ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
+  # The same on a sync after a lost YAML commit
+  cp "$TEST_TMPDIR/yml.before" "$yml"
+  mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
 }
 
 @test "publish-pkg: drops an arch that comes back at a new version from arch_out" {
@@ -4293,6 +4380,57 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "check_prepared_srcinfo: shows the control character of a refused line" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  sed -i $'s/^\tlicense = MIT$/\tlicense = MIT\r/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"does not follow the version as the PKGBUILD does: \$'license = MIT\\r', expected license = MIT" ]]
+}
+
+# A package with arch=(any) builds on each arch of pkgbase, from the sources of that arch
+@test "check_prepared_srcinfo: takes the arches of pkgbase alone" {
+  split_srcinfo() {
+    printf '%s\n' 'pkgbase = foo' $'\tpkgver = '"$2" $'\tpkgrel = 1' $'\tarch = x86_64' $'\tarch = aarch64' \
+      $'\tsource = LICENSE::https://example.org/LICENSE' $'\tsha256sums = cccc' \
+      $'\tsource_x86_64 = https://example.org/foo-'"$2"'-x86_64.tar.gz' $'\tsha256sums_x86_64 = '"$3" \
+      $'\tsource_aarch64 = https://example.org/foo-'"$2"'-aarch64.tar.gz' $'\tsha256sums_aarch64 = '"$4" \
+      '' 'pkgname = foo' '' 'pkgname = foo-docs' $'\tarch = any' >"$1"
+  }
+  split_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 aaaa dddd
+  split_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 bbbb eeee
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+  # An arch of pkgbase without a new source is still refused
+  split_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 bbbb dddd
+  sed -i 's/foo-2.0-aarch64/foo-1.0-aarch64/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+}
+
+# makepkg writes a value that holds $pkgver-$pkgrel with the pkgrel of the update
+@test "check_prepared_srcinfo: accepts a value with the pkgrel of the update" {
+  rel_srcinfo() {
+    printf '%s\n' 'pkgbase = foo' $'\tpkgver = '"$2" $'\tpkgrel = '"$3" $'\tarch = x86_64' \
+      $'\tsource = https://example.org/foo-'"$2"'.tar.gz' $'\tsha256sums = '"$4" \
+      '' 'pkgname = foo' $'\tdepends = foo-common='"$2-$3" '' 'pkgname = foo-common' >"$1"
+  }
+  rel_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 3 aaaa
+  rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 1 bbbb
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+  # A rebuild of the version raises pkgrel
+  rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.0 4 aaaa
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0 "" "" 4
+  [ "$status" -eq 0 ]
+  # A pkgrel other than that of the update is refused
+  rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 1 bbbb
+  sed -i 's/foo-common=2.0-1/foo-common=2.0-5/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+}
+
 # Helper: .SRCINFO with the given pkgver and one more line
 # Usage: write_srcinfo_line <path> <pkgver> <line>
 write_srcinfo_line() {
@@ -5009,7 +5147,7 @@ write_srcinfo_arch() {
   sed -i $'s/^\tsha256sums = '"$H4"'$/\tb2sums = '"$H4"'/' "$TEST_TMPDIR/new.SRCINFO"
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO line 11 has another key than the AUR copy: "$'\t'"b2sums = $H4"* ]]
+  [[ "$output" == *"Prepared .SRCINFO line 11 has another key than the AUR copy: b2sums = $H4"* ]]
 }
 
 # A .SRCINFO without pkgver gives no old version, and the empty string

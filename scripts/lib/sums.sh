@@ -177,6 +177,8 @@ _source_sum() {
 # Args: $1=AUR repo, $2=prepared dir, $3=empty directory for the downloads
 # Returns: 0 when every checksum matches, 1 otherwise (reason on stderr)
 verify_prepared_sums() {
+  # The checks before it read the prepared files in the C locale, where U+2003 is no space
+  local -x LC_ALL=C
   local aur_dir="$1" prepared="$2" downloads="$3"
   local -A srcinfo=() pkgbuild=()
   local -a lines=() keys=() sums=() sources=()

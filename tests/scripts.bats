@@ -2403,7 +2403,7 @@ load_config_values() {
   bash -c 'source "$1/scripts/lib.sh" && load_config && printf "%s\n" "$GIT_AUTHOR_NAME" "$GIT_AUTHOR_EMAIL" "$GPG_KEY_ID" "$AUR_SSH_KEY"' _ "$TEST_TMPDIR"
 }
 
-# setup.sh writes ${value@Q}, and before 0.3.0 wrote double quotes
+# setup.sh writes single quotes, and before 0.3.0 wrote double quotes
 @test "lib.sh: load_config reads the four values as data" {
   cat >"$TEST_TMPDIR/.aurtomator.conf" <<'EOF'
 # written by hand

@@ -105,6 +105,8 @@ The pin after `@` is the SHA of a release tag of aurtomator, and the comment nam
 
 `./aurtomator.sh pin vX.Y.Z` moves the three pins to a release, see [The aurtomator.sh script](#the-aurtomatorsh-script). By hand, `git ls-remote https://github.com/staticwire/aurtomator refs/tags/vX.Y.Z` prints the SHA of a tag for the three lines. Dependabot opens one pull request for the three lines at its next weekly check: the template groups them as `aurtomator` and excludes them from the cooldown. Insights > Dependency graph > Dependabot > "Recent update jobs" > "Check for updates" runs the check at once. `Validate packages` checks your packages with the validator of the new release on that pull request. After the merge, `./aurtomator.sh` runs the scripts of the new release, and the first run on the new pin updates `aurtomator.sh` itself.
 
+GitHub serves a commit of any fork of aurtomator under the name `staticwire/aurtomator` too, so a pin can name code that no release holds, and the jobs on GitHub run that code with the secrets of your repository. Before you merge a pull request that moves the pins and does not come from Dependabot, check that the `git ls-remote` command above prints the pin for the release its comment names. `./aurtomator.sh` makes the same check before it fetches a pin.
+
 A calling job sets the permissions of the token for the whole called workflow, and a called job can lower them but cannot raise them. `check-updates` grants `contents: write` for its commit and `issues: write` for its issues. `notify` grants `actions: read` to list the failed jobs and `issues: write` for its issue. A calling job that grants less makes GitHub reject the file before any job starts, see [Invalid workflow file](/help/troubleshooting/#invalid-workflow-file-a-nested-job-requests-more-permissions).
 
 ## The aurtomator.sh script
@@ -126,7 +128,7 @@ A command is `sample`, `pin` or the name of a script of `scripts/` without `.sh`
 
 The pin comes from the one `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA, and a pin in a comment changes nothing. The script also reads the file with `yq`, as GitHub does, and stops unless the jobs call `check-updates.yml` once, at the pin of that line: a pin in quotes, on the next line or through an alias stops it, and so does a `uses:` line inside a block of text. It stops as well on a file with two YAML documents, a merge key `<<` or a key twice in one mapping.
 
-The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or `$XDG_CACHE_HOME/aurtomator/<sha>`, and removes the copies fetched more than 30 days ago. Before the fetch it warns when no tag of `staticwire/aurtomator` points to the commit: GitHub serves a commit of any fork under the name of the repository too. `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
+The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or `$XDG_CACHE_HOME/aurtomator/<sha>`, and removes the copies fetched more than 30 days ago. Before the fetch it stops unless the pin is the commit of the release written after it, as in `@<sha> # vX.Y.Z`: GitHub serves a commit of any fork under the name of the repository too. `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
 
 The script needs mikefarah/yq 4.40.1 or newer, and names the version of any other `yq` it finds.
 
