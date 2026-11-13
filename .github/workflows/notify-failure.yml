@@ -56,6 +56,7 @@ jobs:
           else
             # The name of a matrix job holds a package name, and a code span keeps an @ in it from
             # mentioning a user; a package name holds no backtick
+            # shellcheck disable=SC2016
             failed="\`$(sed ':a;N;$!ba;s/\n/`, `/g' <<<"$names")\`"
           fi
 
