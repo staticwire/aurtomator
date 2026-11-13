@@ -134,7 +134,7 @@ audit_pkgbuild() {
     log_err "BLOCKED: SKIP checksums mixed with real hashes for remote sources."
     log_err "  updpkgsums runs for the real hashes and would turn the SKIP of these sources into a hash, which the check of the prepared files refuses:"
     printf '    %s\n' "${fixed[@]}" >&2
-    log_err "  Run updpkgsums once and push the PKGBUILD with these hashes to the AUR, see \"Mixed SKIP and real checksums\" in docs/SUPPORTED-PACKAGES.md."
+    log_err "  Run updpkgsums once and push the PKGBUILD with these hashes to the AUR, see https://aurtomator.dev/supported-packages/#mixed-skip-and-real-checksums-blocked"
     fatals=$((fatals + 1))
   fi
 

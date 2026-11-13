@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # record-events.sh - Write the event journal with a row for each state
-# change of a package in the run, see Statistics in docs/WORKFLOW.md
+# change of a package in the run, see https://aurtomator.dev/features/statistics/
 
 set -euo pipefail
 # shellcheck source=lib.sh

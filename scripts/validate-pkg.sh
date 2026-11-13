@@ -473,8 +473,8 @@ validate_pkg() {
     fi
   fi
 
-  # A value from the name of a release asset, see section 4.6 of
-  # docs/WORKFLOW.md. $regex|^ matches the empty string and fills
+  # A value from the name of a release asset, see https://aurtomator.dev/features/asset-values/
+  # $regex|^ matches the empty string and fills
   # BASH_REMATCH with every group of the regex.
   local asset_regex_tag asset_var_tag asset_regex current_asset groups=0
   asset_regex_tag=$(pkg_get "$file" '.upstream.asset_regex | tag')

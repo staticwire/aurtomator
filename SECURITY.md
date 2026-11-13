@@ -7,7 +7,7 @@
 | latest release | yes |
 | older releases | no |
 
-There are no backports. A user repository calls the workflows of aurtomator at a pinned SHA, the SHA of a release tag. It is expected to move the pin to the latest release, and Dependabot opens the pull request that moves it, see [docs/SETUP.md](docs/SETUP.md#the-calling-workflows). Unreleased `main` is not supported.
+There are no backports. A user repository calls the workflows of aurtomator at a pinned SHA, the SHA of a release tag. It is expected to move the pin to the latest release, and Dependabot opens the pull request that moves it, see [The calling workflows](https://aurtomator.dev/setup/#the-calling-workflows). Unreleased `main` is not supported.
 
 ## Reporting a vulnerability
 

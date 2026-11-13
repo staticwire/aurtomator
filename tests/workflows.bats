@@ -3251,10 +3251,10 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   [ "$output" = "10" ]
 }
 
-SETUP_DOC="$BATS_TEST_DIRNAME/../docs/SETUP.md"
+SETUP_DOC="$BATS_TEST_DIRNAME/../site/src/content/docs/setup.md"
 
 # Prints the inside of fenced yaml block $1, 1 or 2, of the section "The
-# calling workflows" in docs/SETUP.md
+# calling workflows" of the Setup page of the site
 calling_workflow() {
   local text
   text=$(sed -n '/^## The calling workflows$/,/^## /p' "$SETUP_DOC")
@@ -3266,7 +3266,7 @@ calling_workflow() {
 
 # The template repository is created from these two blocks, with the pin
 # of a release in place of <sha> and vX.Y.Z
-@test "template: the calling workflows in SETUP.md pin the three files and grant what the jobs need" {
+@test "template: the calling workflows of the Setup page pin the three files and grant what the jobs need" {
   local check="$BATS_TEST_TMPDIR/check-updates.yml" validate="$BATS_TEST_TMPDIR/validate.yml"
   local workflows=staticwire/aurtomator/.github/workflows
   calling_workflow 1 >"$check"
