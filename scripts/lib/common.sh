@@ -92,7 +92,7 @@ to_pkgver() {
 # Print upstream.asset_var of package file $1, or fail for a name that does not
 # match ^_[A-Za-z0-9_]+$. The name reaches a sed command and an awk program.
 pkg_asset_var() {
-  local var
+  local var LC_ALL=C
   var=$(pkg_get "$1" '.upstream.asset_var // ""')
   if [[ -n "$var" && ! "$var" =~ ^_[A-Za-z0-9_]+$ ]]; then
     log_err "$1: upstream.asset_var must be a name that starts with _: ${var@Q}"
@@ -159,6 +159,8 @@ has_control() {
 # Print the host of https URL $1 in lower case. A URL with a user name or a
 # port gives none, since curl contacts another host or port than the name
 url_host() {
+  # A UTF-8 locale other than C.UTF-8 lets [A-Za-z] take letters such as é
+  local LC_ALL=C
   [[ "$1" =~ ^https://([A-Za-z0-9.-]+)([/?#]|$) ]] || return 1
   printf '%s\n' "${BASH_REMATCH[1],,}"
 }

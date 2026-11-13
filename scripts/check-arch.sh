@@ -6,6 +6,8 @@ set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
+# A UTF-8 locale widens [a-z], and grep leaves out a line with a byte that is no UTF-8
+export LC_ALL=C
 
 readonly USAGE="Usage: check-arch.sh <package> <version> [--asset <value>]"
 readonly PKG_NAME="${1:?$USAGE}"

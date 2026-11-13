@@ -276,6 +276,7 @@ _update_pkgrel() {
 # Args: $1=AUR PKGBUILD, $2=asset_var, $3=version, $4=asset value
 # Returns: 1 for a refused asset_var line, or a rebuild of a pkgrel that is no integer
 _asset_pkgrel() {
+  local -x LC_ALL=C
   local old_asset old_rel
   old_asset=$(_asset_line_value "$1" "$2" "AUR PKGBUILD") || return 1
   if [[ "$3" != "$(_plain_value "$1" pkgver)" ]]; then

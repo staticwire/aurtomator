@@ -1321,6 +1321,31 @@ MOCKCURL
   [ "$output" = codeberg.org ]
 }
 
+# Under a UTF-8 locale other than C.UTF-8, [a-z] in [[ =~ ]] takes letters such as é
+@test "lib.sh: the name checks take ASCII alone under a UTF-8 locale" {
+  locale -a 2>/dev/null | command grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  LC_ALL=en_US.UTF-8 run url_host 'https://é.example/x'
+  [ "$status" -eq 1 ]
+  create_test_package "mypkg" "github-asset" "upstream:
+  project: owner/repo
+  asset_var: _aé
+arch_out:
+  é: $(printf 'a%.0s' {1..40})"
+  LC_ALL=en_US.UTF-8 run pkg_asset_var "$TEST_TMPDIR/packages/mypkg.yml"
+  [ "$status" -eq 1 ]
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+arch_out:
+  é: $(printf 'a%.0s' {1..40})"
+  LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/check-arch.sh" mypkg 1.0.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"arch_out must map arch names to commit ids of 40 hex digits"* ]]
+  LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/draft.sh" 'é'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Usage"* ]]
+}
+
 @test "lib.sh: a request with a user name in its URL remembers no host" {
   keep_host_memory
   timeout_curl

@@ -17,7 +17,7 @@ else
 fi
 
 # The name reaches a URL and a path, so it has the form of a package name
-if [[ $# -ne 1 || ! "$1" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]; then
+if [[ $# -ne 1 ]] || ! (LC_ALL=C && [[ "$1" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
   echo "$USAGE" >&2
   exit 1
 fi
