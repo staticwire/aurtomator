@@ -288,6 +288,25 @@ EOF
   grep -qx "GIT_AUTHOR_EMAIL='jane@example.com'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
+# ${value@Q} writes $'...' for a letter outside ASCII under the C locale, which load_config refuses
+@test "setup identity: saves a name that load_config reads back under the C locale" {
+  LC_ALL=C run "$TEST_TMPDIR/scripts/setup.sh" identity \
+    --git-name "José O'Neil" --git-email "jose@example.com" --non-interactive
+  [ "$status" -eq 0 ]
+  grep -qxF "GIT_AUTHOR_NAME='José O'\''Neil'" "$TEST_TMPDIR/.aurtomator.conf"
+  run bash -c 'source "$1/scripts/lib.sh" && load_config && printf "%s\n" "$GIT_AUTHOR_NAME"' _ "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "José O'Neil" ]
+}
+
+@test "setup identity: refuses a name with a control character" {
+  run "$TEST_TMPDIR/scripts/setup.sh" identity \
+    --git-name $'Jane\tDoe' --git-email "jane@example.com" --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GIT_AUTHOR_NAME holds a control character, which .aurtomator.conf cannot keep"* ]]
+  [ ! -e "$TEST_TMPDIR/.aurtomator.conf" ]
+}
+
 @test "setup identity: fails without git name in non-interactive" {
   # Override HOME to prevent git config --global detection
   HOME="$TEST_TMPDIR/emptyhome" run "$TEST_TMPDIR/scripts/setup.sh" identity \

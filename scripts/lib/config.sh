@@ -4,8 +4,8 @@
 #
 # Sourced by lib.sh and by setup.sh.
 
-# Print the value of a text that ${value@Q} wrote, or of one in double
-# quotes without $, ` and \, as older versions of the setup wrote it
+# Print the value of a text in single quotes, as setup.sh writes it, or of one
+# in double quotes without $, ` and \, as older versions of the setup wrote it
 _config_value() {
   local single="^'[^']*('\\\\''[^']*)*'\$" double='^"([^"$`\]*)"$' body
   if [[ "$1" =~ $double ]]; then
