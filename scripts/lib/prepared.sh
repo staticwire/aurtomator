@@ -135,6 +135,8 @@ _pkgbuild_text() {
 # Returns: 0 for the files of the AUR at its version, 2 for files to check
 #          as an update, 1 otherwise (reason on stderr)
 check_handed_aur_files() {
+  # Under a UTF-8 locale grep leaves out a line with a byte that is no UTF-8
+  local -x LC_ALL=C
   local aur_ver aur_asset="" same=false
   aur_ver=$(_plain_value "$1/PKGBUILD" pkgver)
   [[ -z "${4:-}" ]] || aur_asset=$(_plain_value "$1/PKGBUILD" "$4")
@@ -274,6 +276,7 @@ _update_pkgrel() {
 # Args: $1=AUR PKGBUILD, $2=asset_var, $3=version, $4=asset value
 # Returns: 1 for a refused asset_var line, or a rebuild of a pkgrel that is no integer
 _asset_pkgrel() {
+  local -x LC_ALL=C
   local old_asset old_rel
   old_asset=$(_asset_line_value "$1" "$2" "AUR PKGBUILD") || return 1
   if [[ "$3" != "$(_plain_value "$1" pkgver)" ]]; then
@@ -646,6 +649,8 @@ prepared_base() {
 #       commits of the arches that come back, see arch_refs
 # Returns: 0 when both files pass, 1 otherwise (reason on stderr)
 check_prepared_files() {
+  # Under a UTF-8 locale grep leaves out a line with a byte that is no UTF-8
+  local -x LC_ALL=C
   local f rel old_asset="" want_arch="" drop="" back=""
   local -a aur_words=() new_words=()
   # git keeps symlinks, and cp writes through one

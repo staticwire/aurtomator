@@ -595,6 +595,11 @@ run_decide_step() {
   ln -sfn "${AURTOMATOR_TREE:-$BATS_TEST_DIRNAME/..}" "$ws/aurtomator"
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/statuses/${pair%%=*}"
+    # An outdated package has its YAML, except one named in $NO_YAML
+    if [[ "${pair#*=}" =~ ^(new_version|available_downgrade|new_build|arch_back): && " ${NO_YAML:-} " != *" ${pair%%=*} "* ]]; then
+      mkdir -p "$ws/packages"
+      printf 'name: %s\n' "${pair%%=*}" >"$ws/packages/${pair%%=*}.yml"
+    fi
   done
   echo "table" >"$ws/README.md"
   if [[ -z "${NO_README_COPY:-}" ]]; then
@@ -614,13 +619,13 @@ run_decide_step() {
 @test "check-updates: Decide prepares when a package is outdated" {
   run run_decide_step pkg="new_version: 2.0.0" other=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
   run run_decide_step pkg="available_downgrade: 1.0.0"
-  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
   run run_decide_step pkg="new_build: 1.0.0" _assets=$'pkg\t1.0.0-b'
-  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
   run run_decide_step pkg="arch_back: 1.0.0 aarch64" _arches=$'pkg\t1.0.0\t\t'
-  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
 }
 
 @test "check-updates: Decide prepares nothing while an asset is pending" {
@@ -693,14 +698,21 @@ run_decide_step() {
   run run_decide_step b="new_version: 2.0.0" a="available_downgrade: 1.0.0" c="new_build: 1.0.0" \
     d=up_to_date e="pending: 2.0.0" f="check_failed: down" _assets=$'c\t1.0.0-b'
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["a","b","c"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a","b","c"]' ]
   [ ! -e "$BATS_TEST_TMPDIR/ws/statuses/_deferred" ]
 }
 
 @test "check-updates: Decide lists no name that Hand over would not take" {
   run run_decide_step "bad name=new_version: 2.0.0" "-x=new_version: 2.0.0" pkg="new_version: 2.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=false\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+}
+
+# builder of check writes the statuses, so a name without a package YAML would start a job
+@test "check-updates: Decide prepares no name without a package YAML" {
+  NO_YAML="ghost a0" run run_decide_step ghost="new_version: 2.0.0" a0="arch_back: 1.0.0 aarch64" pkg="new_version: 2.0.0"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
 }
 
 # GitHub starts at most 256 jobs from one matrix
@@ -2277,7 +2289,10 @@ case "$endpoint" in
       [$blobs[].path | split("/") | range(1; length) as $i | .[:$i] | join("/")] | unique |
       {sha: "tree-of-head", tree: (map({path: ., type: "tree", sha: "0000000000000000000000000000000000000000"}) + $blobs)}' <<<"$GH_TREE")
     ;;
-  repos/owner/fork/git/blobs) json='{"sha": "blob"}' ;;
+  repos/owner/fork/git/blobs)
+    sha=$(tail -n 1 "$GH_LOG.blobs" | jq -r .content | command -p base64 -d | git hash-object --stdin)
+    json="{\"sha\": \"$sha\"}"
+    ;;
   repos/owner/fork/git/trees)
     echo "inputs: $inputs" >>"$GH_LOG"
     json='{"sha": "tree"}'
@@ -2336,7 +2351,7 @@ no_commit() {
   [ "$status" -eq 0 ]
   grep -qx "inputs: 1" "$GH_LOG"
   no_call "base_tree="
-  jq -e '.base_tree == "tree-of-head" and .tree == [{"path": "README.md", "mode": "100644", "type": "blob", "sha": "blob"}]' "$GH_LOG.tree"
+  jq -e --arg sha "$(git hash-object --stdin <"$BATS_TEST_TMPDIR/results/README.md")" '.base_tree == "tree-of-head" and .tree == [{"path": "README.md", "mode": "100644", "type": "blob", "sha": $sha}]' "$GH_LOG.tree"
 }
 
 @test "check-updates: the commit step commits on a moved head that left its files alone" {
@@ -2406,6 +2421,18 @@ no_commit() {
   grep -qx "api repos/owner/fork/git/blobs --jq .sha --method POST -H Content-Type: application/json --input -" "$GH_LOG"
   jq -r 'select(.encoding == "base64") | .content' "$GH_LOG.blobs" | base64 -d | cmp - "$journal"
   jq -e '[.tree[].path] == ["stats/events.csv"]' "$GH_LOG.tree"
+}
+
+# Without pipefail a failed base64 hands jq no input, and gh writes an empty blob
+@test "check-updates: the commit step stops on a blob that differs from the file" {
+  make_commit_repo README.md="new table"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/sh\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/base64"
+  chmod +x "$BATS_TEST_TMPDIR/bin/base64"
+  run_commit_step
+  [ "$status" -ne 0 ]
+  no_call "git/trees "
+  no_call "git/refs/heads/main "
 }
 
 # A blob would turn a tracked link into a file
@@ -2480,7 +2507,7 @@ make_runner_repo() {
   make_runner_repo "old runner" "new runner"
   run_commit_step
   [ "$status" -eq 0 ]
-  jq -e '.tree == [{"path": "aurtomator.sh", "mode": "100755", "type": "blob", "sha": "blob"}]' "$GH_LOG.tree"
+  jq -e --arg sha "$(git hash-object --stdin <"$BATS_TEST_TMPDIR/ws/aurtomator/aurtomator.sh")" '.tree == [{"path": "aurtomator.sh", "mode": "100755", "type": "blob", "sha": $sha}]' "$GH_LOG.tree"
   [ "$(jq -r .content "$GH_LOG.blobs" | base64 -d)" = "new runner" ]
   grep -qF -- "-f message=chore: update aurtomator.sh [skip ci] " "$GH_LOG"
 }

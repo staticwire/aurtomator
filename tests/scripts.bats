@@ -1321,6 +1321,60 @@ MOCKCURL
   [ "$output" = codeberg.org ]
 }
 
+# check-all.sh runs no validate-pkg.sh, and the name reaches the paths of statuses
+@test "check-all: skips a package whose name is not its file name" {
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo"
+  sed -i 's|^name: mypkg$|name: ../escape|' "$TEST_TMPDIR/packages/mypkg.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [[ "$output" == *"packages/mypkg.yml: name '../escape' must equal the file name"* ]]
+  [ ! -e "$TEST_TMPDIR/escape" ]
+  [ ! -e "$TEST_TMPDIR/.status/mypkg" ]
+}
+
+@test "check-update: refuses a strategy that is no plain name" {
+  create_test_package "mypkg" "../../escape" "upstream:
+  project: owner/repo"
+  run "$TEST_TMPDIR/scripts/check-update.sh" mypkg
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mypkg: strategy must be a plain name: '../../escape'"* ]]
+}
+
+@test "check-arch: refuses an arch_out that names no full commit id" {
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+arch_out:
+  aarch64: abc123"
+  run "$TEST_TMPDIR/scripts/check-arch.sh" mypkg 1.0.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mypkg: arch_out must map arch names to commit ids of 40 hex digits"* ]]
+}
+
+# Under a UTF-8 locale other than C.UTF-8, [a-z] in [[ =~ ]] takes letters such as é
+@test "lib.sh: the name checks take ASCII alone under a UTF-8 locale" {
+  locale -a 2>/dev/null | command grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  LC_ALL=en_US.UTF-8 run url_host 'https://é.example/x'
+  [ "$status" -eq 1 ]
+  create_test_package "mypkg" "github-asset" "upstream:
+  project: owner/repo
+  asset_var: _aé
+arch_out:
+  é: $(printf 'a%.0s' {1..40})"
+  LC_ALL=en_US.UTF-8 run pkg_asset_var "$TEST_TMPDIR/packages/mypkg.yml"
+  [ "$status" -eq 1 ]
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+arch_out:
+  é: $(printf 'a%.0s' {1..40})"
+  LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/check-arch.sh" mypkg 1.0.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"arch_out must map arch names to commit ids of 40 hex digits"* ]]
+  LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/draft.sh" 'é'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Usage"* ]]
+}
+
 @test "lib.sh: a request with a user name in its URL remembers no host" {
   keep_host_memory
   timeout_curl
@@ -2326,6 +2380,21 @@ current: '1.0.0'"
   run require_cmd yq
   [ "$status" -eq 1 ]
   [[ "$output" == *"yq is older than the scripts need, and this one prints: yq (https://github.com/mikefarah/yq/) version 4.12.0"* ]]
+}
+
+# validate-pkg.sh reads every scalar with the kind operator of yq 4.40.1
+@test "lib.sh: require_cmd yq refuses a mikefarah/yq without kind" {
+  local real
+  real=$(command -v yq)
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then' \
+    '  echo "yq (https://github.com/mikefarah/yq/) version 4.35.2"' '  exit 0' 'fi' \
+    'case "$*" in *kind*) echo "Error: unknown operator kind" >&2 && exit 1 ;; esac' \
+    "exec $real \"\$@\"" >"$MOCK_DIR/yq"
+  chmod +x "$MOCK_DIR/yq"
+  run require_cmd yq
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"yq is older than the scripts need, and this one prints: yq (https://github.com/mikefarah/yq/) version 4.35.2"* ]]
 }
 
 # Prints the four values that load_config of lib.sh reads from the

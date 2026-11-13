@@ -223,6 +223,8 @@ jobs:
             name=${f#statuses/}
             [[ -f "$f" && "$name" =~ $name_re ]] || continue
             grep -qE '^(new_version|available_downgrade|new_build|arch_back): ' "$f" || continue
+            # builder writes the statuses, so a name takes a prepare job only with its YAML
+            [[ -f "packages/$name.yml" ]] || continue
             if ((${#to_prepare[@]} < 256)); then
               to_prepare+=("$name")
             else
@@ -706,6 +708,11 @@ jobs:
                 --method POST \
                 -H "Content-Type: application/json" \
                 --input -)
+            # Without pipefail a failed base64 hands jq no input, and gh writes an empty blob
+            if [[ "$BLOB_SHA" != "$(git_ws hash-object --stdin <"$from")" ]]; then
+              echo "::error::The blob of $file differs from the file"
+              exit 1
+            fi
             TREE_ENTRIES=$(echo "$TREE_ENTRIES" | jq \
               --arg path "$file" \
               --arg mode "$mode" \

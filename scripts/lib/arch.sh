@@ -112,6 +112,8 @@ srcinfo_pkgver() {
 # Print the words of the one top-level arch=(...) line of PKGBUILD $1, one a
 # line; fails for any other arch line or a word that is no plain arch name
 pkgbuild_arch_words() {
+  # Under a UTF-8 locale grep leaves out a line with a byte that is no UTF-8
+  local -x LC_ALL=C
   local line_re='^arch=\(([^)]*)\)[[:space:]]*$' word_re="^'([a-z0-9_]+)'$|^\"([a-z0-9_]+)\"$|^([a-z0-9_]+)$"
   local word
   local -a arch_lines arch_tokens arch_names=()
@@ -204,6 +206,8 @@ arch_update_words() {
 # Print the arch words prepared PKGBUILD $3 must have with the arches out $5 of
 # package file $4, if not those of $2 of AUR repo $1; arch_refs fills $6
 prepared_arch_words() {
+  # Under a UTF-8 locale grep leaves out a line with a byte that is no UTF-8
+  local -x LC_ALL=C
   local text back kept="" arch words
   local -a aur_words new_words=()
   if ! text=$(pkgbuild_arch_words "$2"); then

@@ -378,10 +378,12 @@ current: '0.9.0'"
   cmp "$TEST_TMPDIR/demo.yml.before" "$TEST_TMPDIR/packages/demo.yml"
 }
 
+# The push whose YAML commit was lost starts the cooldown no later than today
 @test "update-pkg: syncs the YAML when the AUR has the version" {
   create_test_package "demo" "github-nightly" "upstream:
   project: owner/repo
-current: '0.9.0'"
+current: '0.9.0'
+last_updated: '2020-01-01'"
   write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
@@ -390,6 +392,7 @@ current: '0.9.0'"
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.0.0
   [ "$status" -eq 2 ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .last_updated)" = "$(date -u +%Y-%m-%d)" ]
 }
 
 @test "update-pkg: writes current when the AUR already has the version" {
@@ -1019,7 +1022,8 @@ current: '1.0.0'"
 @test "publish-pkg: syncs the YAML when the AUR already has the version" {
   create_test_package "demo" "github-release" "upstream:
   project: owner/repo
-current: '0.9.0'"
+current: '0.9.0'
+last_updated: '2020-01-01'"
   write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 "$H1" "$H2"
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
@@ -1033,6 +1037,7 @@ current: '0.9.0'"
   [ "$status" -eq 2 ]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .last_updated)" = "$(date -u +%Y-%m-%d)" ]
 }
 
 @test "publish-pkg: syncs the YAML when the AUR has the version in quotes" {
@@ -1551,6 +1556,17 @@ use_source() {
   grep -q -- " fetch -q --depth 1 --no-tags https://example.com/demo.git $GIT_COMMIT\$" "$TEST_TMPDIR/git-fetch-args"
 }
 
+# makepkg finds a short id in its full clone, and git fetch takes a full one only
+@test "verify-pkg: names the cause for a git source at a short commit id" {
+  setup_verify
+  make_upstream
+  use_source "git+https://example.com/demo.git#commit=${GIT_COMMIT:0:12}"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"#commit=${GIT_COMMIT:0:12}: git fetches a commit by its full id only"* ]]
+  [ ! -e "$TEST_TMPDIR/git-fetch-args" ]
+}
+
 @test "verify-pkg: refuses a wrong checksum of a git source" {
   setup_verify
   make_upstream
@@ -1601,6 +1617,26 @@ use_source() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"The fetch of tag=v1.1.0 of https://example.com/demo.git passes the budget of 1 GiB of the package"* ]]
   [ -e "$TEST_TMPDIR/git-fetch-args" ]
+}
+
+# The pack goes into one file under a size limit of the budget left, and a stall ends
+# the fetch as it ends a download
+@test "_git_source_sum: stops a fetch at the budget left" {
+  setup_verify
+  make_upstream
+  head -c 300000 /dev/urandom >"$TEST_TMPDIR/upstream-work/blob"
+  tag_upstream "$TEST_TMPDIR/upstream-work" v1.2.0 2026-01-03T00:00:00Z
+  git -C "$TEST_TMPDIR/upstream-work" push -q "$TEST_TMPDIR/upstream.git" refs/tags/v1.2.0
+  mkdir "$TEST_TMPDIR/downloads"
+  truncate -s $((1024 * 1024 * 1024 - 100 * 1024)) "$TEST_TMPDIR/downloads/earlier"
+  hash -r
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.2.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The fetch of tag=v1.2.0 of https://example.com/demo.git passes the budget of 1 GiB of the package"* ]]
+  grep -q -- '-c fetch.unpackLimit=1 -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 -C ' "$TEST_TMPDIR/git-fetch-args"
+  (($(cat "$TEST_TMPDIR/git-fetch-ulimit") <= 100))
+  # SIGXFSZ would end git with a core dump
+  [ "$(cat "$TEST_TMPDIR/git-fetch-traps")" = "trap -- '' SIGXFSZ" ]
 }
 
 @test "verify-pkg: refuses a checksum of a git source at a branch" {
@@ -2027,6 +2063,29 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"--arch-out needs a list of arches, which may be empty"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+@test "verify-pkg: needs a list after --arch-out" {
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$TEST_TMPDIR/out/demo" --arch-out
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--arch-out needs a list of arches, which may be empty"* ]]
+}
+
+@test "prepared_arch_words: needs one plain arch line in the AUR PKGBUILD" {
+  printf '%s\n' "pkgname=demo" "arch=('x86_64'" "  'aarch64')" >"$TEST_TMPDIR/aur.PKGBUILD"
+  run prepared_arch_words "$TEST_TMPDIR" "$TEST_TMPDIR/aur.PKGBUILD" "$TEST_TMPDIR/aur.PKGBUILD" "$TEST_TMPDIR/demo.yml" aarch64
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--arch-out needs one arch=(...) line of plain arch names in the PKGBUILD"* ]]
+}
+
+@test "_git_source_sum: refuses a fetched source that git archive cannot read" {
+  local url=https://example.com/demo.git fragment=tag=v1.1.0
+  setup_verify
+  mkdir "$TEST_TMPDIR/downloads"
+  git init -q --bare "$TEST_TMPDIR/downloads/$(printf '%s#%s' "$url" "$fragment" | sha256sum | cut -d' ' -f1).git"
+  run _git_source_sum "demo::git+$url#$fragment" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not archive v1.1.0 of $url"* ]]
 }
 
 @test "verify-pkg: checks an update without the arches of --arch-out and downloads none of theirs" {
@@ -3059,6 +3118,25 @@ current: '1.0.0'"
   grep -qx "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/verify-pkg.sh.args"
   [ -d "$TEST_TMPDIR/out/prepared/pkg" ]
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
+}
+
+# Slow sources early in the list would take the budget of the same packages in every run
+@test "check-all --verify: starts the loop at another package each hour" {
+  local name
+  for name in a b c; do
+    create_test_package "$name" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+    mkdir -p "$TEST_TMPDIR/out/prepared/$name" "$TEST_TMPDIR/out/status"
+    echo "new_version: 2.0.0" >"$TEST_TMPDIR/out/status/$name"
+    checked_status "$name" "new_version: 2.0.0"
+  done
+  stub_script verify-pkg.sh 0
+  printf '%s\n' '#!/bin/sh' 'if [ "$*" = "-u +%s" ]; then echo 7200; else exec /usr/bin/date "$@"; fi' >"$MOCK_DIR/date"
+  chmod +x "$MOCK_DIR/date"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cut -d ' ' -f 1 "$TEST_TMPDIR/verify-pkg.sh.args" | tr '\n' ' ')" = "c a b " ]
 }
 
 # The job has 30 minutes, and a package started late still takes up to 330 s
@@ -4958,6 +5036,28 @@ write_srcinfo_arch() {
   run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"PKGBUILD in the AUR repo is missing, a symlink or not a regular file"* ]]
+}
+
+# The CI image sets LANG=C.UTF-8, where grep leaves out a line with a byte that is no UTF-8
+@test "check_prepared_files: refuses an added line with a byte that is no UTF-8" {
+  local p="$TEST_TMPDIR/prepared/PKGBUILD"
+  mkdir "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared"
+  write_pkgbuild "$TEST_TMPDIR/aur/PKGBUILD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
+  write_srcinfo "$TEST_TMPDIR/aur/.SRCINFO" 1.0.0 1 "$H1" "$H2"
+  write_pkgbuild "$p" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  head -n -1 "$p" >"$p.new"
+  printf '  echo added # \xff\n}\n' >>"$p.new"
+  mv "$p.new" "$p"
+  write_srcinfo "$TEST_TMPDIR/prepared/.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  LC_ALL=C.UTF-8 run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+}
+
+@test "pkgbuild_arch_words: refuses a second arch line with a byte that is no UTF-8" {
+  printf '%s\n' "pkgname=demo" "arch=('x86_64')" $'arch+=(\'aarch64\') # \xff' >"$TEST_TMPDIR/PKGBUILD"
+  LC_ALL=C.UTF-8 run pkgbuild_arch_words "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 1 ]
 }
 
 # === values from release asset names ===

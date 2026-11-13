@@ -80,7 +80,7 @@ _source_file() {
 # archive of the ref, fetched alone, with export-subst and export-ignore off
 # Args: $1=source entry of a .SRCINFO, $2=algorithm, $3=AUR repo, $4=download directory
 _git_source_sum() {
-  local entry="$1" url="${1#*::}" name fragment="" ref dir sum refspec
+  local entry="$1" url="${1#*::}" name fragment="" ref dir sum refspec left
   local -x GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/etc/makepkg.d/gitconfig
   url="${url#git+}"
   if [[ "$url" == *#* ]]; then
@@ -106,6 +106,11 @@ _git_source_sum() {
     log_err "Cannot check the checksum of $entry: makepkg hashes a git source only at a tag or commit"
     return 1
   fi
+  # makepkg finds a short id in its full clone, and git fetch takes a full one only
+  if [[ "${fragment%%=*}" == commit && ! "$ref" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]]; then
+    log_err "Cannot check the checksum of $entry: git fetches a commit by its full id only"
+    return 1
+  fi
   if [[ -z "$name" || "$name" == */* || "$name" == . || "$name" == .. ]]; then
     log_err "Cannot check the checksum of $entry"
     return 1
@@ -119,13 +124,24 @@ _git_source_sum() {
   # gives the checksum of a full clone
   dir="${4}/$(printf '%s#%s' "$url" "$fragment" | sha256sum | cut -d' ' -f1).git"
   if [[ ! -d "$dir" ]]; then
-    _download_left "$4" >/dev/null || return 1
+    left=$(_download_left "$4") || return 1
     refspec="$ref"
     [[ "${fragment%%=*}" != tag ]] || refspec="refs/tags/${ref}:refs/tags/${ref}"
-    if ! git init -q --bare "$dir" ||
-      ! GIT_ALLOW_PROTOCOL=https git -C "$dir" fetch -q --depth 1 --no-tags "$url" "$refspec"; then
+    if ! git init -q --bare "$dir"; then
       rm -rf "$dir"
       log_err "Could not fetch ${fragment} of $url"
+      return 1
+    fi
+    # The pack goes into one file under a size limit of the budget left, and a stall ends the
+    # fetch as it ends a download; an ignored SIGXFSZ makes a write past the limit fail, no dump
+    if ! (trap '' XFSZ && ulimit -f "$((left / 1024))" && GIT_ALLOW_PROTOCOL=https git -c fetch.unpackLimit=1 \
+      -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 -C "$dir" fetch -q --depth 1 --no-tags "$url" "$refspec"); then
+      if (($(du -sb -- "$dir" | cut -f1) >= left / 1024 * 1024)); then
+        log_err "The fetch of ${fragment} of $url passes the budget of 1 GiB of the package"
+      else
+        log_err "Could not fetch ${fragment} of $url"
+      fi
+      rm -rf "$dir"
       return 1
     fi
     if ! _download_left "$4" >/dev/null 2>&1; then

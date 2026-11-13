@@ -145,6 +145,11 @@ if [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgver)" == "$NEW_VERSION" ]] &&
   if [[ -n "$PREPARE_DIR" ]]; then
     hand_over
   elif [[ -z "$DRY_RUN" ]]; then
+    # The AUR got this version without a commit of this YAML, so the cooldown of the
+    # next version starts today
+    if [[ "$(pkg_get "$PKG_FILE" '.current // ""')" != "$NEW_VERSION" ]]; then
+      pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
+    fi
     pkg_set_current "$PKG_FILE" "$NEW_VERSION" "$ASSET"
   fi
   exit 2

@@ -255,7 +255,7 @@ current: '$current'"
   type: git
   url: $value"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: a value holds a control character"* ]] || {
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: a key or a value holds a control character"* ]] || {
       echo "taken: $value"
       return 1
     }
@@ -267,7 +267,24 @@ current: '$current'"
   branch: \"m\\e]0;PWNED\\an\""
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"a value holds a control character"* && "$output" != *$'\e'* ]]
+  [[ "$output" == *"a key or a value holds a control character"* && "$output" != *$'\e'* ]]
+}
+
+# yq -r prints the text of a key and of a scalar with any tag
+@test "validate: no key and no tagged value holds a control character" {
+  local yaml
+  for yaml in 'name: !x "mypkg\e[31m"|strategy: github-tag|upstream:|  project: owner/repo' \
+    'name: mypkg|strategy: github-tag|"key\e[31m": 1|upstream:|  project: owner/repo' \
+    'name: mypkg|strategy: github-tag|upstream:|  project: owner/repo|  tag_version_regex: !x "^v(.*)\e]0;T\a$"' \
+    'name: mypkg|strategy: github-tag|cooldown_days: !!int "1\e[31m"|upstream:|  project: owner/repo'; do
+    tr '|' '\n' <<<"$yaml" >"$TEST_TMPDIR/packages/mypkg.yml"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: a key or a value holds a control character"* ]] || {
+      echo "taken: $yaml"
+      return 1
+    }
+    [[ "$output" != *$'\e'* && "$output" != *$'\a'* ]]
+  done
 }
 
 @test "validate: upstream.url holds no user name" {
@@ -972,7 +989,7 @@ alerts:
   user_agent: \"Example/2.0\\r\\nX-Extra: 1\""
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"packages/mypkg.yml: a value holds a control character"* ]]
+  [[ "$output" == *"packages/mypkg.yml: a key or a value holds a control character"* ]]
 }
 
 @test "validate: webpage-scrape fails on a user_agent outside ASCII" {
@@ -1517,7 +1534,7 @@ alerts:
       Second line"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"packages/mypkg.yml: a value holds a control character"* ]]
+  [[ "$output" == *"packages/mypkg.yml: a key or a value holds a control character"* ]]
   for note in "" "note: ''" "note: [a, b]" "note: {text: x}"; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo

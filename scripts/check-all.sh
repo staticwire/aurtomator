@@ -142,12 +142,34 @@ if [[ "$MODE" == "prepare" || "$MODE" == "verify" || "$MODE" == "publish" ]] && 
   done
 fi
 
+# Print the name of package file $1, or fail for a name other than the file name, which
+# validate-pkg.sh refuses too: the name reaches the paths of statuses and prepared files
+package_name() {
+  local name stem="${1##*/}"
+  stem="${stem%.yml}"
+  name=$(pkg_get "$1" .name)
+  if [[ "$name" != "$stem" ]]; then
+    log_err "packages/${stem}.yml: name ${name@Q} must equal the file name"
+    return 1
+  fi
+  printf '%s\n' "$name"
+}
+
 # A failed verify, exit code 3 of a moved AUR repo included, takes the update
 # out with update_failed. Only package names from packages/ reach a path.
 if [[ "$MODE" == "verify" ]]; then
+  # Slow sources early in the list would take the budget of the same packages in
+  # every run, so the loop starts at another package each hour
+  verify_files=()
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-    [[ -f "$pkg_file" ]] || continue
-    pkg_name=$(pkg_get "$pkg_file" .name)
+    if [[ -f "$pkg_file" ]]; then
+      verify_files+=("$pkg_file")
+    fi
+  done
+  verify_start=0
+  ((${#verify_files[@]} == 0)) || verify_start=$(($(date -u +%s) / 3600 % ${#verify_files[@]}))
+  for pkg_file in "${verify_files[@]:verify_start}" "${verify_files[@]:0:verify_start}"; do
+    pkg_name=$(package_name "$pkg_file") || continue
     prepared="${WORK_DIR}/prepared/${pkg_name}"
     if [[ -L "${WORK_DIR}/prepared" || ! -d "$prepared" ]]; then
       continue
@@ -398,7 +420,7 @@ run_package() {
   local pkg_file="$1" pass="$2"
   local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false in_flight
   local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
-  pkg_name=$(pkg_get "$pkg_file" .name)
+  pkg_name=$(package_name "$pkg_file") || return 0
   # --prepare and --publish keep a wait for the cooldown from the check run
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ "${CHECKED[$pkg_name]:-}" == "cooldown: "* ]]; then
     if valid_date "${CHECKED[$pkg_name]#cooldown: }"; then

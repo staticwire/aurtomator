@@ -200,6 +200,21 @@ teardown() {
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
+@test "runner: refuses a mikefarah/yq without kind" {
+  local real
+  real=$(command -v yq)
+  mkdir "$TEST_TMPDIR/bin"
+  printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then' \
+    '  echo "yq (https://github.com/mikefarah/yq/) version 4.35.2"' '  exit 0' 'fi' \
+    'case "$*" in *kind*) echo "Error: unknown operator kind" >&2 && exit 1 ;; esac' \
+    "exec $real \"\$@\"" >"$TEST_TMPDIR/bin/yq"
+  chmod +x "$TEST_TMPDIR/bin/yq"
+  run env PATH="$TEST_TMPDIR/bin:$PATH" "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$REPO/aurtomator.sh needs a newer mikefarah/yq, and this yq prints: yq (https://github.com/mikefarah/yq/) version 4.35.2" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
 @test "runner: refuses a yq that is not mikefarah/yq" {
   mkdir "$TEST_TMPDIR/bin"
   printf '#!/bin/sh\necho "yq 3.4.3"\necho "second line"\n' >"$TEST_TMPDIR/bin/yq"
