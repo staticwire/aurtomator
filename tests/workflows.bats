@@ -292,10 +292,10 @@ run_blocks() {
   [ "$output" = "null" ]
 }
 
-@test "merge-image: runs only after lint, test, validate and pipeline" {
+@test "merge-image: runs only after lint, test, validate, pipeline and ci-ok" {
   run yq '.jobs["merge-image"].needs | sort | join(" ")' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = "lint pipeline test validate" ]
+  [ "$output" = "ci-ok lint pipeline test validate" ]
 }
 
 @test "merge-image: off unless the variable is true and Dependabot opened the pull request" {

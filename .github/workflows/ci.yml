@@ -129,11 +129,11 @@ jobs:
       issues: write
 
   # Merges a Dependabot pull request that changes only the CI image, after
-  # lint, test, validate and pipeline passed, so the two reusable
+  # lint, test, validate, pipeline and ci-ok passed, so the two reusable
   # workflows ran in the new image first. Off unless the repository
   # variable CI_IMAGE_AUTO_MERGE is true.
   merge-image:
-    needs: [lint, test, validate, pipeline]
+    needs: [lint, test, validate, pipeline, ci-ok]
     if: >-
       vars.CI_IMAGE_AUTO_MERGE == 'true' &&
       github.event_name == 'pull_request' &&
