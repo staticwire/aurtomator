@@ -8,3 +8,10 @@ updates:
     directory: "/.github/ci-image"
     schedule:
       interval: "monthly"
+  - package-ecosystem: "npm"
+    directory: "/site"
+    schedule:
+      interval: "monthly"
+    groups:
+      site:
+        patterns: ["*"]
