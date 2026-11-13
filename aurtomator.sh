@@ -27,6 +27,11 @@ if [[ "$yq_version" != *mikefarah/yq* ]]; then
   echo "$0 needs mikefarah/yq, go-yq on Arch, and this yq prints: ${yq_version%%$'\n'*}" >&2
   exit 1
 fi
+# Older releases of mikefarah/yq have no -r and no document_index
+if [[ $(Y=x yq -N -r '(.a | test(strenv(Y))) and document_index == 0' <<<'a: x' 2>/dev/null) != true ]]; then
+  echo "$0 needs a newer mikefarah/yq, and this yq prints: ${yq_version%%$'\n'*}" >&2
+  exit 1
+fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 workflow=.github/workflows/check-updates.yml
 if [[ ! -f "$root/$workflow" ]]; then
@@ -61,20 +66,22 @@ check_shape "$workflow"
 # The repository and the commit come from one uses: line, never a comment
 uses='^[[:space:]]*uses:[[:space:]]+([[:alnum:]_.-]+/[[:alnum:]_.-]+)/\.github/workflows/check-updates\.yml@([0-9a-f]{40})([[:space:]]|$)'
 mapfile -t pins < <(grep -E "$uses" "$root/$workflow" || true)
-if [[ ${#pins[@]} -eq 0 ]]; then
-  echo "No commit SHA pinned in $workflow" >&2
-  exit 1
-fi
 if [[ ${#pins[@]} -gt 1 ]]; then
   echo "More than one uses: line pins check-updates.yml in $workflow" >&2
   exit 1
 fi
-[[ "${pins[0]}" =~ $uses ]]
-repo="${BASH_REMATCH[1]}"
-sha="${BASH_REMATCH[2]}"
 # GitHub reads YAML, where a pin in quotes counts and a line in a text does
 # not, so yq has to read the same one pin
 read_out=$(yq -r 'explode(.) | .jobs[].uses | select(. != null) | select(test("/[.]github/workflows/check-updates[.]yml@"))' "$root/$workflow")
+if [[ ${#pins[@]} -eq 0 ]] && ! grep -qE '@[0-9a-f]{40}$' <<<"$read_out"; then
+  echo "No commit SHA pinned in $workflow" >&2
+  exit 1
+fi
+repo="" sha=""
+if [[ ${#pins[@]} -eq 1 && "${pins[0]}" =~ $uses ]]; then
+  repo="${BASH_REMATCH[1]}"
+  sha="${BASH_REMATCH[2]}"
+fi
 mapfile -t read_pins <<<"$read_out"
 if [[ ${#read_pins[@]} -ne 1 || "${read_pins[0]}" != "$repo/.github/workflows/check-updates.yml@$sha" ]]; then
   echo "Write the pin of check-updates.yml in $workflow on one uses: line without quotes. GitHub reads:" >&2

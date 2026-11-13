@@ -169,6 +169,12 @@ validate_pkg() {
     log_err "$shown must be a map of fields"
     return 1
   fi
+  # The messages print values, and a terminal takes a control character as a command
+  if [[ $(CONTROL_RE='[\x00-\x08\x0a-\x1f\x7f\x{80}-\x{9f}]' yq \
+    '[.. | select(tag == "!!str") | select(test(strenv(CONTROL_RE)))] | length' "$file") != 0 ]]; then
+    log_err "$shown: a value holds a control character"
+    return 1
+  fi
 
   local name strategy
   name=$(pkg_get "$file" '.name // ""')
@@ -589,6 +595,9 @@ validate_pkg() {
       if [[ -z "$host" || "$host" == "null" ]]; then
         log_err "$shown: strategy '$strategy' requires 'upstream.host'"
         ((errors++))
+      elif [[ ! "$host" =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
+        log_err "$shown: upstream.host must be a host name, with a port or none: ${host@Q}"
+        ((errors++))
       fi
       if [[ -z "$project" || "$project" == "null" ]]; then
         log_err "$shown: strategy '$strategy' requires 'upstream.project'"
@@ -603,6 +612,9 @@ validate_pkg() {
         ((errors++))
       elif [[ "$url" != https://* ]]; then
         log_err "$shown: upstream.url must use HTTPS: $url"
+        ((errors++))
+      elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
+        log_err "$shown: upstream.url must hold no user name: ${url@Q}"
         ((errors++))
       fi
       ;;
@@ -629,6 +641,9 @@ validate_pkg() {
             if [[ -z "$host" || "$host" == "null" ]]; then
               log_err "$shown: git-latest type 'gitlab' requires 'upstream.host'"
               ((errors++))
+            elif [[ ! "$host" =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
+              log_err "$shown: upstream.host must be a host name, with a port or none: ${host@Q}"
+              ((errors++))
             fi
             if [[ -z "$project" || "$project" == "null" ]]; then
               log_err "$shown: git-latest type 'gitlab' requires 'upstream.project'"
@@ -643,6 +658,9 @@ validate_pkg() {
               ((errors++))
             elif [[ "$url" != https://* ]]; then
               log_err "$shown: upstream.url must use HTTPS: $url"
+              ((errors++))
+            elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
+              log_err "$shown: upstream.url must hold no user name: ${url@Q}"
               ((errors++))
             fi
             ;;
@@ -698,6 +716,9 @@ validate_pkg() {
         ((errors++))
       elif [[ "$url" != https://* ]]; then
         log_err "$shown: upstream.url must use HTTPS: $url"
+        ((errors++))
+      elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
+        log_err "$shown: upstream.url must hold no user name: ${url@Q}"
         ((errors++))
       fi
       if [[ -z "$pattern" || "$pattern" == "null" ]]; then

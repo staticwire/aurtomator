@@ -44,6 +44,11 @@ require_cmd() {
     log_err "yq must be mikefarah/yq, go-yq on Arch, and this one prints: $version"
     exit 1
   fi
+  # Older releases of mikefarah/yq have no -r and no document_index
+  if [[ "$cmd" == yq && $(Y=x yq -N -r '(.a | test(strenv(Y))) and document_index == 0' <<<'a: x' 2>/dev/null) != true ]]; then
+    log_err "yq is older than the scripts need, and this one prints: $version"
+    exit 1
+  fi
 }
 
 # =============================================================================
@@ -174,9 +179,16 @@ host_memory() {
   [[ -n "${AURTOMATOR_HOSTS_DIR:-}" && -d "$AURTOMATOR_HOSTS_DIR" ]]
 }
 
-# Print the host of https URL $1 in lower case and without the port
+# Succeeds when text $1 holds a control character other than a tab, C1 ones in UTF-8 included
+has_control() {
+  local re=$'[\x01-\x08\x0a-\x1f\x7f]|\xc2[\x80-\x9f]'
+  (LC_ALL=C && [[ "$1" =~ $re ]])
+}
+
+# Print the host of https URL $1 in lower case. A URL with a user name or a
+# port gives none, since curl contacts another host or port than the name
 url_host() {
-  [[ "$1" =~ ^https://([A-Za-z0-9.-]+) ]] || return 1
+  [[ "$1" =~ ^https://([A-Za-z0-9.-]+)([/?#]|$) ]] || return 1
   printf '%s\n' "${BASH_REMATCH[1],,}"
 }
 

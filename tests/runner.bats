@@ -154,6 +154,24 @@ teardown() {
   [ -z "$(ls -A "$XDG_CACHE_HOME/aurtomator")" ]
 }
 
+@test "runner: names the pin GitHub reads when no uses: line shows it" {
+  local form
+  for form in "\"staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED\"" \
+    "'staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED'"; do
+    printf '%s\n' 'on: push' 'jobs:' '  check-updates:' "    uses: $form # vX.Y.Z" >"$REPO/.github/workflows/check-updates.yml"
+    run "$REPO/aurtomator.sh" sample
+    [ "$status" -eq 1 ]
+    [ "${lines[0]}" = "Write the pin of check-updates.yml in .github/workflows/check-updates.yml on one uses: line without quotes. GitHub reads:" ]
+    [ "${lines[1]}" = "  staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" ]
+  done
+  printf '%s\n' 'on: push' "x-pin: &pin staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" \
+    'jobs:' '  check-updates:' '    uses: *pin' >"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "${lines[1]}" = "  staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
 @test "runner: stops when check-updates.yml pins no commit" {
   local pin
   for pin in v0.8.0 "${PINNED}0"; do
@@ -171,6 +189,18 @@ teardown() {
   run env PATH="$TEST_TMPDIR/bin" "$REPO/aurtomator.sh" sample
   [ "$status" -eq 1 ]
   [ "$output" = "$REPO/aurtomator.sh needs yq: https://github.com/mikefarah/yq" ]
+}
+
+@test "runner: refuses a mikefarah/yq older than the scripts need" {
+  mkdir "$TEST_TMPDIR/bin"
+  printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then' \
+    '  echo "yq (https://github.com/mikefarah/yq/) version 4.12.0"' '  exit 0' 'fi' \
+    'echo "Error: unknown shorthand flag: '"'"'r'"'"' in -r" >&2' 'exit 1' >"$TEST_TMPDIR/bin/yq"
+  chmod +x "$TEST_TMPDIR/bin/yq"
+  run env PATH="$TEST_TMPDIR/bin:$PATH" "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$REPO/aurtomator.sh needs a newer mikefarah/yq, and this yq prints: yq (https://github.com/mikefarah/yq/) version 4.12.0" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
 @test "runner: refuses a yq that is not mikefarah/yq" {

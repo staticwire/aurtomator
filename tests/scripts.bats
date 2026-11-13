@@ -1286,9 +1286,9 @@ MOCKCURL
   [ "$output" = "https://silent.example/a: Operation timed out after 30000 milliseconds with 0 bytes received" ]
   [ "$(cat "$AURTOMATOR_HOSTS_DIR/silent")" = "silent.example" ]
   [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
-  run http_get https://SILENT.example:8443/b
+  run http_get https://SILENT.example/b
   [ "$status" -eq 28 ]
-  [ "$output" = "https://SILENT.example:8443/b: silent.example did not answer earlier in this run" ]
+  [ "$output" = "https://SILENT.example/b: silent.example did not answer earlier in this run" ]
   [ "$(cat "$TEST_TMPDIR/curl.log")" = "https://silent.example/a|https://silent.example/a https://silent.example/a" ]
 }
 
@@ -1302,6 +1302,33 @@ MOCKCURL
   [ "$status" -eq 7 ]
   CURL_RC=22 CURL_STDERR='https://gone.example/a\tThe requested URL returned error: 404\t404\t' run http_get https://gone.example/a
   [ "$status" -eq 22 ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/silent" ]
+}
+
+@test "lib.sh: url_host gives no host for a URL with a user name or a port" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local url
+  for url in 'https://api.github.com@127.0.0.1:9/repos/a/b' 'https://user:pw@codeberg.org/api' \
+    'https://api.github.com:9/x' 'https://api.github.com:443' 'http://api.github.com/x'; do
+    run url_host "$url"
+    [ "$status" -eq 1 ] && [ -z "$output" ] || {
+      echo "keyed: $url as $output"
+      return 1
+    }
+  done
+  run url_host 'https://API.GitHub.com/repos?q=1'
+  [ "$output" = api.github.com ]
+  run url_host 'https://codeberg.org'
+  [ "$output" = codeberg.org ]
+}
+
+@test "lib.sh: a request with a user name in its URL remembers no host" {
+  keep_host_memory
+  timeout_curl
+  echo 'api.github.com@silent.example' >"$TEST_TMPDIR/silent-hosts"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get 'https://api.github.com@silent.example/a'
+  [ "$status" -eq 28 ]
   [ ! -s "$AURTOMATOR_HOSTS_DIR/silent" ]
 }
 
@@ -2291,6 +2318,17 @@ current: '1.0.0'"
   run require_cmd yq
   [ "$status" -eq 1 ]
   [[ "$output" == *"yq must be mikefarah/yq, go-yq on Arch, and this one prints: yq 3.4.3"* ]]
+}
+
+@test "lib.sh: require_cmd yq refuses a mikefarah/yq older than the scripts need" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then' \
+    '  echo "yq (https://github.com/mikefarah/yq/) version 4.12.0"' '  exit 0' 'fi' \
+    'echo "Error: unknown shorthand flag: r" >&2' 'exit 1' >"$MOCK_DIR/yq"
+  chmod +x "$MOCK_DIR/yq"
+  run require_cmd yq
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"yq is older than the scripts need, and this one prints: yq (https://github.com/mikefarah/yq/) version 4.12.0"* ]]
 }
 
 # Prints the four values that load_config of lib.sh reads from the
@@ -4358,6 +4396,17 @@ arch_wait:
   check_arch 28+23
   [ "$ARCH_RC" -eq 0 ]
   [ "$ARCH_OUT" = "aarch64|"$'\n'"$since|" ]
+}
+
+@test "check-arch: a start of arch_wait after now starts a new wait" {
+  temurin_package "current: 28+22
+arch_wait:
+  version: 28+23
+  since: '2099-01-01T00:00:00Z'"
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  about_now "$(<"$TEST_TMPDIR/arch.out")"
 }
 
 @test "check-arch: arch_wait of another version starts a new wait" {

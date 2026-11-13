@@ -220,6 +220,73 @@ current: '$current'"
   [[ "$output" == *"upstream.branch applies to the git-latest strategy only"* ]]
 }
 
+@test "validate: upstream.host is a host name with a port or none" {
+  local host
+  for host in 'api.github.com@127.0.0.1:9' 'codeberg.org/x' 'a b' 'host:' 'host:123456'; do
+    create_test_package "mypkg" "gitea-tag" "upstream:
+  host: '$host'
+  project: owner/repo"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"upstream.host must be a host name, with a port or none: '$host'"* ]] || {
+      echo "taken: $host"
+      return 1
+    }
+  done
+  create_test_package "mypkg" "gitlab-tag" "upstream:
+  host: git.example.com:8443
+  project: owner/repo"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: git-latest gitlab type checks upstream.host as a host name" {
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: gitlab
+  host: gitlab.com@127.0.0.1
+  project: owner/repo"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.host must be a host name, with a port or none: 'gitlab.com@127.0.0.1'"* ]]
+}
+
+@test "validate: no value holds a control character" {
+  local value
+  for value in '"https://example.invalid/x\e]0;PWNED\ay"' '"main\rx"' '"https://example.invalid/\u009b2J"'; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: git
+  url: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: a value holds a control character"* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+    [[ "$output" != *$'\e'* && "$output" != *$'\r'* && "$output" != *$'\u009b'* ]]
+  done
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: git
+  url: https://example.invalid/x
+  branch: \"m\\e]0;PWNED\\an\""
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"a value holds a control character"* && "$output" != *$'\e'* ]]
+}
+
+@test "validate: upstream.url holds no user name" {
+  local strategy extra
+  for strategy in git-tag git-latest webpage-scrape; do
+    extra=""
+    [[ "$strategy" != git-latest ]] || extra=$'\n  type: git'
+    [[ "$strategy" != webpage-scrape ]] || extra=$'\n  pattern: v([0-9.]+)'
+    create_test_package "mypkg" "$strategy" "upstream:$extra
+  url: https://api.github.com@127.0.0.1/repo"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"upstream.url must hold no user name: 'https://api.github.com@127.0.0.1/repo'"* ]] || {
+      echo "taken by $strategy: $output"
+      return 1
+    }
+  done
+}
+
 @test "validate: git-latest git type fails on a URL without HTTPS" {
   create_test_package "mypkg" "git-latest" "upstream:
   type: git
@@ -906,7 +973,7 @@ alerts:
   user_agent: \"Example/2.0\\r\\nX-Extra: 1\""
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"upstream.user_agent must hold printable ASCII only: \$'Example/2.0\\r\\nX-Extra: 1'"* ]]
+  [[ "$output" == *"packages/mypkg.yml: a value holds a control character"* ]]
 }
 
 @test "validate: webpage-scrape fails on a user_agent outside ASCII" {
@@ -1442,9 +1509,17 @@ alerts:
 
 @test "validate: an alert note that is not one line of text rejected" {
   local note
-  for note in "" "note: ''" "note: |
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    note: |
       First line
-      Second line" "note: [a, b]" "note: {text: x}"; do
+      Second line"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"packages/mypkg.yml: a value holds a control character"* ]]
+  for note in "" "note: ''" "note: [a, b]" "note: {text: x}"; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 alerts:

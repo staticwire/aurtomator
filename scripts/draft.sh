@@ -49,6 +49,13 @@ fi
 PKGVER="" EPOCH="" URL="" SOURCES=()
 line_re='^[[:space:]]*([a-z0-9_]+) = (.*)$'
 mapfile -t lines <"$info_file"
+# The YAML and the messages of its checks would carry such a character
+for line in "${lines[@]}"; do
+  if has_control "$line"; then
+    log_err "The .SRCINFO of $NAME holds a control character, so no YAML is written"
+    exit 1
+  fi
+done
 for line in "${lines[@]}"; do
   [[ "$line" =~ $line_re ]] || continue
   case "${BASH_REMATCH[1]}" in

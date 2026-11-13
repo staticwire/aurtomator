@@ -729,6 +729,14 @@ run_decide_step() {
   grep -qxF '::warning::2 outdated packages wait for the next run, which prepares at most 256' "$BATS_TEST_TMPDIR/decide.out"
 }
 
+@test "check-updates: Decide removes the _without and the _deferred of builder" {
+  run run_decide_step pkg="new_version: 2.0.0" _without="" _deferred=other
+  [ "$status" -eq 0 ]
+  [ "${lines[3]}" = 'to-prepare=["pkg"]' ]
+  [ ! -e "$BATS_TEST_TMPDIR/ws/statuses/_without" ]
+  [ ! -e "$BATS_TEST_TMPDIR/ws/statuses/_deferred" ]
+}
+
 # Puts package a, its journal and the card of day $1 into the workspace of
 # run_decide_step
 decide_stats() {
@@ -2366,7 +2374,7 @@ no_commit() {
 }
 
 @test "check-updates: the commit step commits on the head it checked out" {
-  make_commit_repo README.md="new table"
+  make_commit_repo README.md="new table" packages/foo.yml="current: 2.0"
   run_commit_step
   [ "$status" -eq 0 ]
   # The commit holds the new tree, with the checked out head as its parent
@@ -2493,7 +2501,7 @@ no_commit() {
   run_commit_step
   [ "$status" -eq 0 ]
   jq -e '[.tree[].path] == ["README.md", "stats/events.csv", "stats/card.svg", "stats/card-dark.svg"]' "$GH_LOG.tree"
-  grep -qF -- "-f message=chore: update package versions [skip ci] " "$GH_LOG"
+  grep -qF -- "-f message=chore: update package statuses [skip ci] " "$GH_LOG"
 }
 
 @test "check-updates: a commit of stats/ alone is a commit of the statistics" {
@@ -2574,12 +2582,27 @@ make_runner_repo() {
   no_commit
 }
 
-@test "check-updates: the commit step names the runner beside the package versions" {
+@test "check-updates: the commit step names the runner beside the package statuses" {
   make_runner_repo "old runner" "new runner" README.md="new table"
   run_commit_step
   [ "$status" -eq 0 ]
   jq -e '[.tree[] | [.path, .mode]] == [["README.md", "100644"], ["aurtomator.sh", "100755"]]' "$GH_LOG.tree"
-  grep -qF -- "-f message=chore: update package versions and aurtomator.sh [skip ci] " "$GH_LOG"
+  grep -qF -- "-f message=chore: update package statuses and aurtomator.sh [skip ci] " "$GH_LOG"
+}
+
+@test "check-updates: a commit of README.md alone is a commit of the statuses" {
+  make_commit_repo README.md="new table"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["README.md"]' "$GH_LOG.tree"
+  grep -qF -- "-f message=chore: update package statuses [skip ci] " "$GH_LOG"
+}
+
+@test "check-updates: a commit with a package YAML is a commit of the versions" {
+  make_commit_repo README.md="new table" packages/foo.yml="current: 2.0" stats/events.csv=journal
+  run_commit_step
+  [ "$status" -eq 0 ]
+  grep -qF -- "-f message=chore: update package versions [skip ci] " "$GH_LOG"
 }
 
 @test "check-updates: a commit of stats/ and the runner names both" {
