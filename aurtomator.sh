@@ -11,6 +11,7 @@
 #   ./aurtomator.sh check-all             scripts/check-all.sh
 #   ./aurtomator.sh sample                prints packages/example.yml.sample
 #   ./aurtomator.sh pin vX.Y.Z            pins the calling workflows to a release
+#   ./aurtomator.sh check-pins            checks each pin against its release tag
 #
 # The first run of a pin fetches aurtomator at that commit into
 # ~/.cache/aurtomator/<sha>, or $XDG_CACHE_HOME/aurtomator/<sha>.
@@ -96,6 +97,30 @@ tag_commit() {
     awk -v ref="refs/tags/$1" '$2 == ref || $2 == ref "^{}" { sha = $1 } END { print sha }'
 }
 
+# Stop unless the pin $3 on the uses: line $2 of file $1 is the commit of the release written
+# after it, since GitHub serves the commits of every fork under the name of its parent
+check_release() {
+  local release_re="@${3}[[:space:]]+#[[:space:]]*(v[0-9]+[.][0-9]+[.][0-9]+)([[:space:]]|\$)" tag tagged
+  if [[ ! "$2" =~ $release_re ]]; then
+    echo "Write the release after the pin in $1, as ./aurtomator.sh pin vX.Y.Z does: @$3 # vX.Y.Z" >&2
+    exit 1
+  fi
+  tag="${BASH_REMATCH[1]}"
+  if ! tagged=$(tag_commit "$tag"); then
+    echo "Could not list the tags of $repo" >&2
+    exit 1
+  fi
+  if [[ "$tagged" != "$3" ]]; then
+    echo "The pin $3 in $1 is not the commit of $tag of $repo; ./aurtomator.sh pin vX.Y.Z pins the commit of a release" >&2
+    exit 1
+  fi
+}
+
+# GitHub finds a repository by its name in any case
+names_repo() {
+  [[ "${1,,}" == "${repo,,}"[/@]* ]]
+}
+
 if [[ "${1:-}" == pin ]]; then
   if [[ $# -ne 2 || ! "$2" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Usage: $0 pin vX.Y.Z" >&2
@@ -136,24 +161,50 @@ if [[ "${1:-}" == pin ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == check-pins ]]; then
+  if [[ $# -ne 1 ]]; then
+    echo "Usage: $0 check-pins" >&2
+    exit 1
+  fi
+  cd "$root"
+  use_re='^[0-9]+:[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+([^[:space:]]+)'
+  checked=()
+  for file in "$workflow" .github/workflows/validate.yml; do
+    [[ -f "$file" ]] || continue
+    check_shape "$file"
+    # The release comes from the uses: line, so every pin GitHub reads has to be on one
+    read_out=$(yq -r 'explode(.) | .jobs[] | (.uses, .steps[]?.uses) | select(tag == "!!str")' "$file")
+    read_pins=() values=() lines=()
+    while IFS= read -r value; do
+      if names_repo "$value"; then read_pins+=("$value"); fi
+    done < <(sort <<<"$read_out")
+    while IFS= read -r line; do
+      if [[ "$line" =~ $use_re ]] && names_repo "${BASH_REMATCH[2]}"; then
+        values+=("${BASH_REMATCH[2]}")
+        lines+=("$line")
+      fi
+    done < <(grep -nE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]' "$file" || true)
+    if [[ "$(printf '%s\n' "${values[@]}" | sort)" != "$(printf '%s\n' "${read_pins[@]}")" ]]; then
+      echo "Write each pin of $repo in $file on one uses: line without quotes. GitHub reads:" >&2
+      printf '  %s\n' "${read_pins[@]:-none}" >&2
+      exit 1
+    fi
+    for i in "${!lines[@]}"; do
+      if [[ ! "${values[i]}" =~ @([0-9a-f]{40})$ ]]; then
+        echo "$file runs ${values[i]}, which names no commit SHA" >&2
+        exit 1
+      fi
+      check_release "$file" "${lines[i]}" "${BASH_REMATCH[1]}"
+      checked+=("$file:${lines[i]}")
+    done
+  done
+  printf '%s\n' "${checked[@]}"
+  exit 0
+fi
+
 copy="${XDG_CACHE_HOME:-$HOME/.cache}/aurtomator/$sha"
 if [[ ! -d "$copy" ]]; then
-  # GitHub serves the commits of every fork under the name of its parent, so a
-  # pin runs only as the commit of the release written after it
-  release_re="@${sha}[[:space:]]+#[[:space:]]*(v[0-9]+[.][0-9]+[.][0-9]+)([[:space:]]|\$)"
-  if [[ ! "${pins[0]}" =~ $release_re ]]; then
-    echo "Write the release after the pin in $workflow, as ./aurtomator.sh pin vX.Y.Z does: @$sha # vX.Y.Z" >&2
-    exit 1
-  fi
-  tag="${BASH_REMATCH[1]}"
-  if ! tagged=$(tag_commit "$tag"); then
-    echo "Could not list the tags of $repo" >&2
-    exit 1
-  fi
-  if [[ "$tagged" != "$sha" ]]; then
-    echo "The pin $sha in $workflow is not the commit of $tag of $repo; ./aurtomator.sh pin vX.Y.Z pins the commit of a release" >&2
-    exit 1
-  fi
+  check_release "$workflow" "${pins[0]}" "$sha"
   mkdir -p "${copy%/*}"
   tmp="$(mktemp -d "$copy.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
@@ -169,7 +220,7 @@ fi
 
 # The documented commands. Another script of scripts/ is a step of the CI
 # jobs and runs after a warning.
-commands=(setup draft sample validate-pkg check-update update-pkg check-all pin)
+commands=(setup draft sample validate-pkg check-update update-pkg check-all pin check-pins)
 cmd="${1:-}"
 if [[ "$cmd" == sample ]]; then
   exec cat "$copy/packages/example.yml.sample"

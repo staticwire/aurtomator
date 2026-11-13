@@ -28,7 +28,7 @@ A repository created from the template [staticwire/aurtomator-seed](https://gith
 ### Required
 
 1. Enable Issues: Settings > General > Features > Issues. Failures, update alerts and new aurtomator releases arrive as issues. With Issues off, a run prints a notice and opens none.
-2. Check Actions: the Actions tab lists `Check AUR Package Updates` and `Validate packages`. A workflow shown as disabled runs again after "Enable workflow". GitHub disables the workflows of a fork until they are enabled there, and the scheduled workflow of a public repository after 60 days without activity. A private repository uses the Actions minutes of your account: GitHub rounds each job up to whole minutes, three jobs for a run that changes nothing and six for a run with an update.
+2. Check Actions: the Actions tab lists `Check AUR Package Updates` and `Validate packages`. A workflow shown as disabled runs again after "Enable workflow". GitHub disables the workflows of a fork until they are enabled there, and the scheduled workflow of a public repository after 60 days without activity. A private repository uses the Actions minutes of your account: GitHub rounds each job up to whole minutes, four jobs for a run that changes nothing and seven for a run with an update.
 3. Set the secrets: `./aurtomator.sh setup`, run in a clone of your repository, sets `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`, see [Quick setup](#quick-setup-with-gh-cli). The calling workflow passes them to aurtomator by name, since `secrets: inherit` works only between repositories of one organization or enterprise.
 
 The schedule runs from the start, before the secrets exist. A run without a package to push needs no key. A run with one stops in `publish` with `The secret AUR_SSH_KEY is empty` and opens the issue `❌ Check AUR Package Updates failed`, which the first run without a failed job closes.
@@ -48,7 +48,7 @@ The first run with a package adds `stats/` to your repository: the journal `even
 
 ## The calling workflows
 
-`.github/workflows/check-updates.yml` runs the updates on a schedule, and its job `notify` opens an issue when a run fails:
+`.github/workflows/check-updates.yml` runs the updates on a schedule. Its job `pins` checks the pins first, and its job `notify` opens an issue when a run fails:
 
 ```yaml
 name: Check AUR Package Updates
@@ -63,7 +63,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ./aurtomator.sh check-pins
+
   check-updates:
+    needs: pins
     uses: staticwire/aurtomator/.github/workflows/check-updates.yml@<sha> # vX.Y.Z
     permissions:
       contents: write
@@ -83,7 +95,7 @@ jobs:
       issues: write
 ```
 
-`.github/workflows/validate.yml` runs `validate-pkg.sh --all` on every push to `main` and on pull requests:
+`.github/workflows/validate.yml` runs `validate-pkg.sh --all` on every push to `main` and on pull requests, after the same job `pins`:
 
 ```yaml
 name: Validate packages
@@ -97,15 +109,27 @@ permissions:
   contents: read
 
 jobs:
+  pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ./aurtomator.sh check-pins
+
   validate:
+    needs: pins
     uses: staticwire/aurtomator/.github/workflows/validate.yml@<sha> # vX.Y.Z
 ```
 
-The pin after `@` is the SHA of a release tag of aurtomator, and the comment names the release. All three `uses:` lines carry the same pin. A tag can move and a SHA cannot, so a run always gets the code of that release.
+The pin after `@` is the SHA of a release tag of aurtomator, and the comment names the release. The three `uses:` lines of aurtomator carry the same pin. A tag can move and a SHA cannot, so a run always gets the code of that release.
 
 `./aurtomator.sh pin vX.Y.Z` moves the three pins to a release, see [The aurtomator.sh script](#the-aurtomatorsh-script). By hand, `git ls-remote https://github.com/staticwire/aurtomator refs/tags/vX.Y.Z` prints the SHA of a tag for the three lines. Dependabot opens one pull request for the three lines at its next weekly check: the template groups them as `aurtomator` and excludes them from the cooldown. Insights > Dependency graph > Dependabot > "Recent update jobs" > "Check for updates" runs the check at once. `Validate packages` checks your packages with the validator of the new release on that pull request. After the merge, `./aurtomator.sh` runs the scripts of the new release, and the first run on the new pin updates `aurtomator.sh` itself.
 
-GitHub serves a commit of any fork of aurtomator under the name `staticwire/aurtomator` too, so a pin can name code that no release holds, and the jobs on GitHub run that code with the secrets of your repository. Before you merge a pull request that moves the pins and does not come from Dependabot, check that the `git ls-remote` command above prints the pin for the release its comment names. `./aurtomator.sh` makes the same check before it fetches a pin.
+GitHub serves a commit of any fork of aurtomator under the name `staticwire/aurtomator` too, so a pin can name code that no release holds, and the jobs on GitHub run that code with the secrets of your repository. The job `pins` runs `./aurtomator.sh check-pins`, see [The aurtomator.sh script](#the-aurtomatorsh-script), and fails when a pin of aurtomator in the two files is not the commit of the release its comment names. `check-updates` and `validate` start only after `pins` passes. A pull request with such a pin therefore fails its checks, and a scheduled run with one stops before any job gets the secrets. `notify` runs without the secrets and opens the issue of the failed run. `./aurtomator.sh` makes the same check before it fetches a pin.
 
 A calling job sets the permissions of the token for the whole called workflow, and a called job can lower them but cannot raise them. `check-updates` grants `contents: write` for its commit and `issues: write` for its issues. `notify` grants `actions: read` to list the failed jobs and `issues: write` for its issue. A calling job that grants less makes GitHub reject the file before any job starts, see [Invalid workflow file](/help/troubleshooting/#invalid-workflow-file-a-nested-job-requests-more-permissions).
 
@@ -122,9 +146,10 @@ A calling job sets the permissions of the token for the whole called workflow, a
 ./aurtomator.sh check-all              # scripts/check-all.sh
 ./aurtomator.sh sample                 # prints packages/example.yml.sample
 ./aurtomator.sh pin vX.Y.Z             # pins the calling workflows to a release
+./aurtomator.sh check-pins             # checks each pin against its release tag
 ```
 
-A command is `sample`, `pin` or the name of a script of `scripts/` without `.sh`, and the arguments after it go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, from any directory. A script of the CI jobs, such as `publish-pkg`, runs after a warning.
+A command is `sample`, `pin`, `check-pins` or the name of a script of `scripts/` without `.sh`, and the arguments after it go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, from any directory. A script of the CI jobs, such as `publish-pkg`, runs after a warning.
 
 The pin comes from the one `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA, and a pin in a comment changes nothing. The script also reads the file with `yq`, as GitHub does, and stops unless the jobs call `check-updates.yml` once, at the pin of that line: a pin in quotes, on the next line or through an alias stops it, and so does a `uses:` line inside a block of text. It stops as well on a file with two YAML documents, a merge key `<<` or a key twice in one mapping.
 
@@ -134,9 +159,11 @@ The script needs mikefarah/yq 4.40.1 or newer, and names the version of any othe
 
 `./aurtomator.sh pin vX.Y.Z` reads the commit of the tag with `git ls-remote`, writes it and `# vX.Y.Z` into every `uses:` line of aurtomator in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. It stops before it changes a file when the tag names no commit or `yq` reads a pin outside such a line. The next run of the script fetches the release, and CI takes it once the two files are pushed.
 
+`./aurtomator.sh check-pins` reads every `uses:` line of aurtomator in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, in a job or a step and with the name of the repository in any case. It prints these lines when each pin is the commit of the release written after it. It stops at the first pin that is not the commit of its release, at a `uses:` line of aurtomator without a commit SHA and, as `pin` does, when `yq` reads a pin outside such a line. It fetches nothing.
+
 In CI, the jobs check out your repository, then aurtomator into `aurtomator/` of that checkout, and create `upload`, `handoff`, `handoff-out`, `handoffs` and `statuses` there. Nothing in the root of your repository may take one of these names.
 
-Each run of `check-updates.yml` compares your `aurtomator.sh` with that of the release it uses, and its commit replaces your copy when they differ. A local edit therefore lasts until the next run. A repository without `aurtomator.sh` gets none. A repository created without the template takes the file of the release it pins, here `vX.Y.Z`:
+Each run of `check-updates.yml` compares your `aurtomator.sh` with that of the release it uses, and its commit replaces your copy when they differ. A local edit therefore lasts until the next run. A repository without `aurtomator.sh` gets none, and its job `pins` fails. A repository created without the template takes the file of the release it pins, here `vX.Y.Z`:
 
 ```bash
 curl -fsSL -o aurtomator.sh https://raw.githubusercontent.com/staticwire/aurtomator/vX.Y.Z/aurtomator.sh
@@ -272,4 +299,4 @@ A new run of the setup does not ask again for the values the file holds. An opti
 
 ## Pull requests to your repository
 
-`Validate packages` checks the YAMLs of `packages/` and no other file of a pull request. A change to `aurtomator.sh` runs on your machine at your next `./aurtomator.sh` command after the checkout or the merge. A change to a calling workflow changes what CI runs with your secrets: the `uses:` line of `check-updates.yml` names the workflow that gets `AUR_SSH_KEY` and `GPG_SIGNING_KEY`. Read these files in the diff before you merge, and check a new pin as [The aurtomator.sh script](#the-aurtomatorsh-script) says.
+`Validate packages` checks the YAMLs of `packages/` and no other file of a pull request. A change to `aurtomator.sh` runs on your machine at your next `./aurtomator.sh` command after the checkout or the merge. A change to a calling workflow changes what CI runs with your secrets: the `uses:` line of `check-updates.yml` names the workflow that gets `AUR_SSH_KEY` and `GPG_SIGNING_KEY`. Read these files in the diff before you merge. The job `pins` checks a new pin, but a pull request runs it with its own `aurtomator.sh` and workflows, so a change to them can skip the check.
