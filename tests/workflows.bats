@@ -2742,6 +2742,25 @@ run_bare_issues_step() {
   [ "$output" = $'alert_issue_body .status/bar https://example.invalid/run\nfailure_issue_body .status/foo https://example.invalid/run\nupstream_issue_body .status/_upstream https://example.invalid/run' ]
 }
 
+# A package without a YAML gets no check, so no status of a later run closes its issues
+@test "check-updates: the close step closes the issues of a package whose YAML is gone" {
+  GH_OPEN=$'1 ❌ gone: update failed\n2 ✋ gone: update held\n3 ⚠️ gone: 1.2 without aarch64\n4 ❌ kept: check failed' \
+    run_close_step kept="check_failed: boom" _packages=kept
+  [ "$status" -eq 0 ]
+  grep -qxF 'issue close 1 --comment `packages/gone.yml` is gone as of https://example.invalid/run.' "$GH_LOG"
+  grep -q '^issue close 2 ' "$GH_LOG"
+  grep -q '^issue close 3 ' "$GH_LOG"
+  run grep -c '^issue close 4 ' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the close step keeps the issues of every package without _packages" {
+  GH_OPEN='1 ❌ gone: update failed' run_close_step kept=up_to_date
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "check-updates: the close step finds an open issue behind 30 others" {
   local i
   GH_OPEN="$(for i in {1..30}; do echo "$i ❌ pkg$i: check failed"; done)"$'\n31 ❌ foo: check failed' \

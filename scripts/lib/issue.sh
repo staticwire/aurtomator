@@ -139,6 +139,14 @@ arch_issue_body() {
   printf 'Package: `%s`\nVersion: `%s`\nMissing arches: `%s`\nRun: %s\n\nThe release of this version has no archive for these arches, so the AUR package builds without them. Each run asks for the archives again and puts an arch back once its archive is out.\n\nAuto-created by update workflow. A run closes it when every arch is back.\n' "$1" "$2" "$3" "$4"
 }
 
+# Print the comment for package $1 and run URL $2 on an issue that a run closes since the YAML
+# of the package is gone
+retired_close_comment() {
+  # The backticks are Markdown code around the path
+  # shellcheck disable=SC2016
+  printf '`packages/%s.yml` is gone as of %s.\n' "$1" "$2"
+}
+
 # Print the comment for package $1 and run URL $2 on an arch issue a run closes
 arch_close_comment() {
   # The backticks are Markdown code around the package

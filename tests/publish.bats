@@ -3032,6 +3032,13 @@ EOF
 
 # Without network every check runs out of its budget, and a second pass
 # would double the time of the job
+@test "check-all: lists the packages for the issues of a package whose YAML is gone" {
+  flaky_check flaky
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_packages")" = $'flaky\nsteady' ]
+}
+
 # A host that answers slowly takes the time of the packages after it
 @test "check-all: starts no check after the time budget of the loop" {
   flaky_check flaky

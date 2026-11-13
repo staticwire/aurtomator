@@ -721,6 +721,12 @@ if ((${#RECHECK[@]} > 0)) && check_time_left; then
   done
 fi
 
+# The issues step closes the issues of a name this list lacks, since a package
+# without a YAML gets no check that would close them
+for pkg_file in "${check_files[@]}"; do
+  package_name "$pkg_file" 2>/dev/null || true
+done >"${STATUS_DIR}/_packages"
+
 # The arches each package lacks after the run, for the issues of arches out
 if [[ "$MODE" == "publish" ]]; then
   : >"${STATUS_DIR}/_without"
