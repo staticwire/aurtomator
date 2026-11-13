@@ -15,6 +15,11 @@ PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
 
 strategy=$(pkg_get "$PKG_FILE" .strategy)
+# The strategy names a script under strategies/, and a / or a . would leave it
+if ! (LC_ALL=C && [[ "$strategy" =~ ^[A-Za-z0-9_][A-Za-z0-9_-]*$ ]]); then
+  log_err "$PKG_NAME: strategy must be a plain name: ${strategy@Q}"
+  exit 1
+fi
 current=$(pkg_get "$PKG_FILE" '.current // ""')
 dash=$(pkgver_dash "$PKG_FILE")
 format=$(pkg_get "$PKG_FILE" '.pkgver_format // ""')

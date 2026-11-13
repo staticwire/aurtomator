@@ -1321,6 +1321,25 @@ MOCKCURL
   [ "$output" = codeberg.org ]
 }
 
+# check-all.sh runs no validate-pkg.sh, and the name reaches the paths of statuses
+@test "check-all: skips a package whose name is not its file name" {
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo"
+  sed -i 's|^name: mypkg$|name: ../escape|' "$TEST_TMPDIR/packages/mypkg.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [[ "$output" == *"packages/mypkg.yml: name '../escape' must equal the file name"* ]]
+  [ ! -e "$TEST_TMPDIR/escape" ]
+  [ ! -e "$TEST_TMPDIR/.status/mypkg" ]
+}
+
+@test "check-update: refuses a strategy that is no plain name" {
+  create_test_package "mypkg" "../../escape" "upstream:
+  project: owner/repo"
+  run "$TEST_TMPDIR/scripts/check-update.sh" mypkg
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mypkg: strategy must be a plain name: '../../escape'"* ]]
+}
+
 @test "check-arch: refuses an arch_out that names no full commit id" {
   create_test_package "mypkg" "github-tag" "upstream:
   project: owner/repo
