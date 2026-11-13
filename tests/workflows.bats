@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 
 GITHUB_DIR="$BATS_TEST_DIRNAME/../.github"
+CI_IMAGE="$BATS_TEST_DIRNAME/../ci-image/Dockerfile"
 
 # Prints the run blocks of every step in workflow $1
 run_blocks() {
@@ -35,9 +36,9 @@ run_blocks() {
 }
 
 @test "ci-image: the Dockerfile pins archlinux:base-devel by digest" {
-  run grep -c '^FROM ' "$GITHUB_DIR/ci-image/Dockerfile"
+  run grep -c '^FROM ' "$CI_IMAGE"
   [ "$output" = "1" ]
-  run grep -Ex 'FROM archlinux:base-devel@sha256:[0-9a-f]{64}' "$GITHUB_DIR/ci-image/Dockerfile"
+  run grep -Ex 'FROM archlinux:base-devel@sha256:[0-9a-f]{64}' "$CI_IMAGE"
   [ "$status" -eq 0 ]
 }
 
@@ -47,18 +48,18 @@ run_blocks() {
   local step="$BATS_TEST_TMPDIR/read-image.sh" work="$BATS_TEST_TMPDIR/work" digest from
   digest=$(printf 'a%.0s' {1..64})
   yq '.jobs.image.steps[] | select(.name == "Read image") | .run' "$GITHUB_DIR/workflows/ci.yml" >"$step"
-  mkdir -p "$work/.github/ci-image"
+  mkdir -p "$work/ci-image"
   for from in archlinux:base-devel "archlinux:base-devel@sha256:${digest:1}" "archlinux:base-devel@sha256:${digest}a" \
     "archlinux:base-devel@sha256:${digest^^}" "archlinux:base@sha256:$digest" "evil/archlinux:base-devel@sha256:$digest"; do
-    echo "FROM $from" >"$work/.github/ci-image/Dockerfile"
+    echo "FROM $from" >"$work/ci-image/Dockerfile"
     : >"$work/out"
     run env -C "$work" GITHUB_OUTPUT="$work/out" bash --noprofile --norc -eo pipefail "$step"
     echo "$from: $output"
     [ "$status" -eq 1 ]
-    [ "$output" = "::error::.github/ci-image/Dockerfile must pin archlinux:base-devel by digest" ]
+    [ "$output" = "::error::ci-image/Dockerfile must pin archlinux:base-devel by digest" ]
     [ ! -s "$work/out" ]
   done
-  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:base-devel@sha256:$digest" >"$work/.github/ci-image/Dockerfile"
+  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:base-devel@sha256:$digest" >"$work/ci-image/Dockerfile"
   run env -C "$work" GITHUB_OUTPUT="$work/out" bash --noprofile --norc -eo pipefail "$step"
   [ "$status" -eq 0 ]
   [ "$(cat "$work/out")" = "ref=archlinux:base-devel@sha256:$digest" ]
@@ -67,7 +68,7 @@ run_blocks() {
 @test "ci-image: Dependabot updates the Dockerfile" {
   run yq '.updates[] | select(.["package-ecosystem"] == "docker") | .directory' "$GITHUB_DIR/dependabot.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = "/.github/ci-image" ]
+  [ "$output" = "/ci-image" ]
 }
 
 @test "workflows: every container comes from the image job" {
@@ -330,14 +331,14 @@ EOF
 }
 
 @test "merge-image: merges the tested head when only the Dockerfile changed" {
-  GH_FILES=".github/ci-image/Dockerfile" run_merge_step
+  GH_FILES="ci-image/Dockerfile" run_merge_step
   [ "$status" -eq 0 ]
   grep -qx 'api repos/owner/repo/pulls/12/files --paginate --jq .\[\].filename' "$GH_LOG"
   grep -qx 'pr merge 12 -R owner/repo --squash --match-head-commit abc123' "$GH_LOG"
 }
 
 @test "merge-image: leaves a pull request that changes other files" {
-  GH_FILES=$'.github/ci-image/Dockerfile\n.github/workflows/ci.yml' run_merge_step
+  GH_FILES=$'ci-image/Dockerfile\n.github/workflows/ci.yml' run_merge_step
   [ "$status" -eq 0 ]
   [[ "$output" == *"::notice::"* ]]
   run grep -c '^pr merge' "$GH_LOG"
@@ -345,7 +346,7 @@ EOF
 }
 
 @test "merge-image: fails when the file list cannot be read" {
-  GH_FAIL=1 GH_FILES=".github/ci-image/Dockerfile" run_merge_step
+  GH_FAIL=1 GH_FILES="ci-image/Dockerfile" run_merge_step
   [ "$status" -ne 0 ]
   run grep -c '^pr merge' "$GH_LOG"
   [ "$output" = "0" ]

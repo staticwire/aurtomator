@@ -36,7 +36,7 @@ The two tests of the `namcap` check in `update-pkg.sh` run the real `namcap`, an
 
 ## CI image updates
 
-Once a month, when Docker Hub has a new `archlinux:base-devel`, Dependabot opens a pull request in aurtomator that changes the digest in `.github/ci-image/Dockerfile`. The `image` jobs read the digest from the pull request, so `test` and the two calls of [Validate and pipeline jobs](#validate-and-pipeline-jobs) run in the new image before the merge. The probe of [Runner probe](#runner-probe) checks the new image for what `builder` rests on.
+Once a month, when Docker Hub has a new `archlinux:base-devel`, Dependabot opens a pull request in aurtomator that changes the digest in `ci-image/Dockerfile`. The `image` jobs read the digest from the pull request, so `test` and the two calls of [Validate and pipeline jobs](#validate-and-pipeline-jobs) run in the new image before the merge. The probe of [Runner probe](#runner-probe) checks the new image for what `builder` rests on.
 
 The `merge-image` job merges such a pull request without a review. It is off until `CI_IMAGE_AUTO_MERGE`, a variable of the aurtomator repository, is `true`. It runs after `lint`, `test`, `validate` and `pipeline` passed, only for a pull request that `dependabot[bot]` opened, on an event Dependabot caused, and gets `contents: write` and `pull-requests: write`. A pull request that changes any other file, a Dependabot update of an action for example, stays open with a notice. Otherwise the job squash-merges it with `--match-head-commit`, so a commit pushed after the tests stops the merge.
 
@@ -52,7 +52,7 @@ The two jobs call the reusable workflows of the same commit, with the `./.github
 
 ## Runner probe
 
-`runner-probe.yml` runs only by hand, with `contents: read`: `Run workflow` in the Actions tab, or `gh workflow run runner-probe.yml`. It runs on the branch chosen there, so it can check the pull request of a new image before the merge. Run it after GitHub changes the `ubuntu-latest` image and after the digest in `.github/ci-image/Dockerfile` moves. `builder` in the jobs of [Steps](/internals/workflow/#steps) rests on facts of the runner that no BATS test sees: the account the runner runs as, the owners and modes of what it mounts into a job container, and what `builder` reaches there.
+`runner-probe.yml` runs only by hand, with `contents: read`: `Run workflow` in the Actions tab, or `gh workflow run runner-probe.yml`. It runs on the branch chosen there, so it can check the pull request of a new image before the merge. Run it after GitHub changes the `ubuntu-latest` image and after the digest in `ci-image/Dockerfile` moves. `builder` in the jobs of [Steps](/internals/workflow/#steps) rests on facts of the runner that no BATS test sees: the account the runner runs as, the owners and modes of what it mounts into a job container, and what `builder` reaches there.
 
 The job `runner` prints `id` of the account the runner runs as on the VM. The job `container` runs in the image that `image` reads, as the jobs of [Steps](/internals/workflow/#steps) do. It installs `sudo` and runs **Add builder**, the step of `check-updates.yml`, which a test in `tests/workflows.bats` keeps equal to it. The step **The mounts** prints `id builder`, the mounts under `/__` from `/proc/self/mountinfo`, and the owner and mode of `/__w`, `/__w/_actions`, `$RUNNER_TEMP`, its `_runner_file_commands`, the workspace, `/__e`, `/__t` and `/var/run/docker.sock`.
 

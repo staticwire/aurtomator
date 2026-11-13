@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  # Reads the pinned Arch image from .github/ci-image/Dockerfile, where
+  # Reads the pinned Arch image from ci-image/Dockerfile, where
   # Dependabot updates its digest
   image:
     runs-on: ubuntu-latest
@@ -37,14 +37,14 @@ jobs:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           persist-credentials: false
-          sparse-checkout: .github/ci-image
+          sparse-checkout: ci-image
 
       - name: Read image
         id: read
         run: |
-          ref=$(sed -n 's/^FROM //p' .github/ci-image/Dockerfile)
+          ref=$(sed -n 's/^FROM //p' ci-image/Dockerfile)
           if [[ ! "$ref" =~ ^archlinux:base-devel@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::.github/ci-image/Dockerfile must pin archlinux:base-devel by digest"
+            echo "::error::ci-image/Dockerfile must pin archlinux:base-devel by digest"
             exit 1
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
