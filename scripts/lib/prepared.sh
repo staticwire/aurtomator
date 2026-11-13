@@ -446,6 +446,17 @@ _name_differs_in_digits() {
   [[ "$(sed -E 's/[0-9]+/0/g' <<<"${1%%::*}")" == "$(sed -E 's/[0-9]+/0/g' <<<"${2%%::*}")" ]]
 }
 
+# Print line $1 of a .SRCINFO for a message without its indent, in the quoting of ${line@Q}
+# when it holds a control character, which a terminal or a log would act on
+_shown_line() {
+  local line="${1#"${1%%[![:space:]]*}"}"
+  if has_control "$line"; then
+    printf '%s' "${line@Q}"
+  else
+    printf '%s' "$line"
+  fi
+}
+
 # Drop the empty lines at the end of array $1: makepkg --printsrcinfo writes none, and some
 # AUR copies end in one, as those of mksrcinfo v8 do
 _drop_trailing_blank() {
@@ -523,19 +534,19 @@ check_prepared_srcinfo() {
       kind=other
     fi
     if [[ "$kind" != "other" && "${old%% = *}" != "${new%% = *}" ]]; then
-      log_err "Prepared .SRCINFO line $((i + 1)) has another key than the AUR copy: $new"
+      log_err "Prepared .SRCINFO line $((i + 1)) has another key than the AUR copy: $(_shown_line "$new")"
       return 1
     fi
     case "$kind" in
       pkgver)
         [[ "$new_val" == "$version" ]] || {
-          log_err "Prepared .SRCINFO has pkgver = ${new_val}, expected ${version}"
+          log_err "Prepared .SRCINFO has pkgver = $(_shown_line "$new_val"), expected ${version}"
           return 1
         }
         ;;
       pkgrel)
         [[ "$new_val" == "$rel" ]] || {
-          log_err "Prepared .SRCINFO has pkgrel = ${new_val}, expected ${rel}"
+          log_err "Prepared .SRCINFO has pkgrel = $(_shown_line "$new_val"), expected ${rel}"
           return 1
         }
         ;;
@@ -543,7 +554,7 @@ check_prepared_srcinfo() {
         if [[ ! "$new_val" =~ ^([0-9a-fA-F]+|SKIP)$ ]] ||
           [[ "$new_val" == "SKIP" && "$old_val" != "SKIP" ]] ||
           [[ "$new_val" != "SKIP" && "$old_val" == "SKIP" ]]; then
-          log_err "Prepared .SRCINFO line $((i + 1)) is not a checksum matching the AUR copy: $new"
+          log_err "Prepared .SRCINFO line $((i + 1)) is not a checksum matching the AUR copy: $(_shown_line "$new")"
           return 1
         fi
         group="${key#*sums}"
@@ -564,7 +575,7 @@ check_prepared_srcinfo() {
         if ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel" &&
           ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
             _name_differs_in_digits "$expected" "$new"; }; then
-          log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: ${new#"${new%%[![:space:]]*}"}, expected ${expected#"${expected%%[![:space:]]*}"}"
+          log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $(_shown_line "$new"), expected $(_shown_line "$expected")"
           return 1
         fi
         group="${key#source}"
@@ -587,12 +598,12 @@ check_prepared_srcinfo() {
         [[ "$key" != arch || "$in_pkgbase" == false ]] || arches["$new_val"]=1
         if [[ "$text" == *"$old_val"* ]]; then
           if [[ "$new" != "$old" ]]; then
-            log_err "Prepared .SRCINFO line $((i + 1)) changes a value the PKGBUILD holds as text: ${new#"${new%%[![:space:]]*}"}, expected ${old#"${old%%[![:space:]]*}"}"
+            log_err "Prepared .SRCINFO line $((i + 1)) changes a value the PKGBUILD holds as text: $(_shown_line "$new"), expected $(_shown_line "$old")"
             return 1
           fi
         elif ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel"; then
           expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
-          log_err "Prepared .SRCINFO line $((i + 1)) does not follow the version as the PKGBUILD does: ${new#"${new%%[![:space:]]*}"}, expected ${expected#"${expected%%[![:space:]]*}"}"
+          log_err "Prepared .SRCINFO line $((i + 1)) does not follow the version as the PKGBUILD does: $(_shown_line "$new"), expected $(_shown_line "$expected")"
           return 1
         fi
         ;;

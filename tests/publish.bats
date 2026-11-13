@@ -4380,6 +4380,15 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "check_prepared_srcinfo: shows the control character of a refused line" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  sed -i $'s/^\tlicense = MIT$/\tlicense = MIT\r/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"does not follow the version as the PKGBUILD does: \$'license = MIT\\r', expected license = MIT" ]]
+}
+
 # A package with arch=(any) builds on each arch of pkgbase, from the sources of that arch
 @test "check_prepared_srcinfo: takes the arches of pkgbase alone" {
   split_srcinfo() {
@@ -5138,7 +5147,7 @@ write_srcinfo_arch() {
   sed -i $'s/^\tsha256sums = '"$H4"'$/\tb2sums = '"$H4"'/' "$TEST_TMPDIR/new.SRCINFO"
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO line 11 has another key than the AUR copy: "$'\t'"b2sums = $H4"* ]]
+  [[ "$output" == *"Prepared .SRCINFO line 11 has another key than the AUR copy: b2sums = $H4"* ]]
 }
 
 # A .SRCINFO without pkgver gives no old version, and the empty string
