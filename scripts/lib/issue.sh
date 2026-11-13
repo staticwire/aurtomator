@@ -9,11 +9,16 @@
 # Args: $1=_upstream in .status/, holding newer: and the release; $2=URL
 #       of the run
 upstream_issue_body() {
-  local release
+  local release setup
   release=$(<"$1")
   release="${release#newer: }"
+  # aurtomator.dev serves staticwire/aurtomator; a fork gets the page in its repository
+  setup="https://aurtomator.dev/setup/#the-calling-workflows"
+  if [ "$AURTOMATOR_UPSTREAM" != staticwire/aurtomator ]; then
+    setup="https://github.com/${AURTOMATOR_UPSTREAM}/blob/main/site/src/content/docs/setup.md#the-calling-workflows"
+  fi
   # shellcheck disable=SC2016
-  printf 'aurtomator %s is out, and this repository runs %s.\n\nTo update: Insights > Dependency graph > Dependabot > Recent update jobs > Check for updates. Dependabot opens the pull request that moves the pin. The first run on the new pin also updates `aurtomator.sh` to this release.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nManual update: https://github.com/%s/blob/main/docs/SETUP.md#the-calling-workflows\nRun: %s\n\nAuto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$AURTOMATOR_UPSTREAM" "$2"
+  printf 'aurtomator %s is out, and this repository runs %s.\n\nTo update: Insights > Dependency graph > Dependabot > Recent update jobs > Check for updates. Dependabot opens the pull request that moves the pin. The first run on the new pin also updates `aurtomator.sh` to this release.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nManual update: %s\nRun: %s\n\nAuto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$setup" "$2"
 }
 
 # Body of the issue opened for an update an alert fired on: a held update,
