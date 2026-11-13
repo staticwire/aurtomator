@@ -1,7 +1,7 @@
 name: Runner probe
 
 # Run by hand after GitHub changes the runner image and after the digest in
-# .github/ci-image/Dockerfile moves. It prints what builder in the jobs of
+# ci-image/Dockerfile moves. It prints what builder in the jobs of
 # check-updates.yml rests on, and fails when builder can write a file of the
 # runner, use the Docker socket or read a variable of the runner.
 on:
@@ -30,14 +30,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/ci-image
+          sparse-checkout: ci-image
 
       - name: Read image
         id: read
         run: |
-          ref=$(sed -n 's/^FROM //p' .github/ci-image/Dockerfile)
+          ref=$(sed -n 's/^FROM //p' ci-image/Dockerfile)
           if [[ ! "$ref" =~ ^archlinux:base-devel@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::.github/ci-image/Dockerfile must pin archlinux:base-devel by digest"
+            echo "::error::ci-image/Dockerfile must pin archlinux:base-devel by digest"
             exit 1
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"

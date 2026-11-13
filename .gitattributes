@@ -1,1 +1,2 @@
 .simplecov -linguist-detectable
+ci-image/Dockerfile -linguist-detectable
