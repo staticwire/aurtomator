@@ -122,7 +122,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          keep-env: GITHUB_TOKEN
+          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER
           readme: "true"
 
       - &stop-builder
@@ -853,6 +853,26 @@ jobs:
             done
           done <<<"$open
           $held"
+
+          # The issues of a package whose YAML is gone close, since no check of it closes them; a
+          # run without the list of packages closes none
+          if [[ -f "$STATUS_DIR/_packages" ]]; then
+            arched=$(gh issue list --label "arch-missing" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
+            failed_re="^❌ (${name_re}): (check|update) failed\$"
+            held_re="^✋ (${name_re}): update held\$"
+            arch_re="^⚠️ (${name_re}): .+ without .+\$"
+            while read -r number title; do
+              [[ -n "$number" ]] || continue
+              [[ "$title" =~ $failed_re || "$title" =~ $held_re || "$title" =~ $arch_re ]] || continue
+              pkg_name=${BASH_REMATCH[1]}
+              grep -qxF -e "$pkg_name" "$STATUS_DIR/_packages" && continue
+              comment=$(lib retired_close_comment "$pkg_name" "$RUN_URL")
+              gh issue close "$number" --comment "$comment"
+            done <<<"$open
+          $held
+          $arched"
+          fi
 
           # A host issue closes when fewer than HOST_ISSUE_MIN packages of the host failed to check
           hosts=$(lib failed_hosts "$STATUS_DIR")

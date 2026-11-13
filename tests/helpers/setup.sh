@@ -12,6 +12,8 @@ unset GITHUB_REPOSITORY
 setup_test_env() {
   TEST_TMPDIR=$(mktemp -d)
   export TEST_TMPDIR
+  # GitHub Actions sets the run number, which moves the start of the check loop
+  unset GITHUB_RUN_NUMBER
 
   # Create mock package dir structure
   mkdir -p "$TEST_TMPDIR/packages"

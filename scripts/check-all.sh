@@ -37,6 +37,10 @@ UPDATE_TIMEOUT="${AURTOMATOR_UPDATE_TIMEOUT:-300}"
 # so the verify job ends within its 30 minutes
 VERIFY_BUDGET="${AURTOMATOR_VERIFY_BUDGET:-1200}"
 
+# Time budget of the loop of a check run, in seconds: no check starts after it,
+# so the check job ends within its 30 minutes
+CHECK_BUDGET="${AURTOMATOR_CHECK_BUDGET:-1200}"
+
 # Pause, in seconds, before a package whose check failed is checked again
 RECHECK_DELAY="${AURTOMATOR_RECHECK_DELAY:-60}"
 
@@ -679,21 +683,49 @@ run_package() {
   esac
 }
 
-RECHECK=()
+# Succeeds while a check run has time left for a check
+check_time_left() {
+  [[ "$MODE" != check ]] || (($(date -u +%s) < CHECK_END))
+}
+
+check_files=()
 for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-  [[ -f "$pkg_file" ]] || continue
-  run_package "$pkg_file" 1
+  [[ ! -f "$pkg_file" ]] || check_files+=("$pkg_file")
+done
+# Slow hosts early in the list would take the budget of the same packages in
+# every run, so each run of the workflow starts the loop one package later
+check_start=0
+if [[ "$MODE" == check && ${#check_files[@]} -gt 0 ]] && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
+  check_start=$((GITHUB_RUN_NUMBER % ${#check_files[@]}))
+fi
+CHECK_END=$(($(date -u +%s) + CHECK_BUDGET))
+
+RECHECK=()
+for pkg_file in "${check_files[@]:check_start}" "${check_files[@]:0:check_start}"; do
+  if check_time_left; then
+    run_package "$pkg_file" 1
+  elif pkg_name=$(package_name "$pkg_file"); then
+    log_err "$pkg_name: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run"
+    echo "check_failed: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run" >"${STATUS_DIR}/${pkg_name}"
+  fi
 done
 
 # A check that failed fast runs again after a pause. After a timeout or on a
 # silent host it does not, so a run without network stays within its time limit
-if ((${#RECHECK[@]} > 0)); then
+if ((${#RECHECK[@]} > 0)) && check_time_left; then
   log_info "Checking ${#RECHECK[@]} failed package(s) again in ${RECHECK_DELAY} s"
   sleep "$RECHECK_DELAY"
   for pkg_file in "${RECHECK[@]}"; do
+    check_time_left || break
     run_package "$pkg_file" 2
   done
 fi
+
+# The issues step closes the issues of a name this list lacks, since a package
+# without a YAML gets no check that would close them
+for pkg_file in "${check_files[@]}"; do
+  package_name "$pkg_file" 2>/dev/null || true
+done >"${STATUS_DIR}/_packages"
 
 # The arches each package lacks after the run, for the issues of arches out
 if [[ "$MODE" == "publish" ]]; then

@@ -19,10 +19,12 @@ Before it touches an issue, the job writes the summary of the run, which the pag
 
 A package gets no second issue of a kind while one is open, and an issue closed while its package still fails comes back in the next run. Each body links the run. An error holds text from upstream, so it stands in a code block, where links, images and mentions do not render, and keeps its last 4000 characters. A closing comment names the run and shows the new status.
 
+A package whose YAML you delete gets no further check, so the next run closes its `update failed`, `check failed`, `update held` and arch issues with a comment that names the deleted file.
+
 The host of a failed check is that of the first `http://` or `https://` URL in its error, in lower case and without the port, and `api.github.com` and `github.com` are two hosts. An error without a URL, and every failed update, gets the issue of its package. When a host issue closes, each of its packages that still fails gets its own issue in the same run.
 
 Issues close before new ones open, so a package whose check passes and whose update fails gets its check issue closed and an update issue opened in one run. A failed step or a failed `publish` closes nothing. In a repository with Issues turned off, the job prints a notice and opens nothing.
 
 ## Failed runs
 
-A run that fails in `image` or `check` never reaches the job `issues`. For that case your calling workflow has the job `notify`, which calls `notify-failure.yml` at the same pin after every result but `success`, with `actions: read` and `issues: write`. It opens one issue `❌ Check AUR Package Updates failed` with a link to the run, its branch and the names of the jobs that failed or timed out, and no second one while that issue is open. A canceled run has no failed job and gets no issue.
+A run that fails in `image` or `check` never reaches the job `issues`. For that case your calling workflow has the job `notify`, which calls `notify-failure.yml` at the same pin after every result but `success`, with `actions: read` and `issues: write`. It opens one issue `❌ Check AUR Package Updates failed` with a link to the run, its branch and the names of the jobs that failed or timed out, and no second one while that issue is open. GitHub marks a job that ran into its `timeout-minutes` as canceled, so a canceled job counts as timed out once it ran for the time limit of its job. A run canceled by hand before that has no failed job and gets no issue.

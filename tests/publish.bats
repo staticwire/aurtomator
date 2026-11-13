@@ -3032,6 +3032,53 @@ EOF
 
 # Without network every check runs out of its budget, and a second pass
 # would double the time of the job
+@test "check-all: lists the packages for the issues of a package whose YAML is gone" {
+  flaky_check flaky
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_packages")" = $'flaky\nsteady' ]
+}
+
+# A host that answers slowly takes the time of the packages after it
+@test "check-all: starts no check after the time budget of the loop" {
+  flaky_check flaky
+  AURTOMATOR_CHECK_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/checks" ]
+  [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "check_failed: the check ran out of its 0 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "check_failed: the check ran out of its 0 minutes in this run" ]
+}
+
+@test "check-all: checks no package again after the time budget of the loop" {
+  flaky_check flaky 1
+  # Each read of the clock moves it 100 s on
+  printf '%s\n' '#!/bin/sh' 'if [ "$*" = "-u +%s" ]; then' 'n=$(($(cat "$CLOCK" 2>/dev/null || echo 0) + 100))' \
+    'echo "$n" >"$CLOCK"' 'echo "$n"' 'else exec /usr/bin/date "$@"; fi' >"$MOCK_DIR/date"
+  chmod +x "$MOCK_DIR/date"
+  CLOCK="$TEST_TMPDIR/clock" AURTOMATOR_CHECK_BUDGET=150 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = flaky ]
+  [ ! -e "$TEST_TMPDIR/sleeps" ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "check_failed: the check ran out of its 2 minutes in this run" ]
+}
+
+@test "check-all: starts the check loop one package later in each run" {
+  flaky_check flaky
+  GITHUB_RUN_NUMBER=7 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'steady\nflaky' ]
+  rm "$TEST_TMPDIR/checks"
+  GITHUB_RUN_NUMBER="x[\$(touch $TEST_TMPDIR/pwned)]" run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady' ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
+@test "check-all: gives the check loop 20 minutes by default" {
+  run grep -cx 'CHECK_BUDGET="${AURTOMATOR_CHECK_BUDGET:-1200}"' "$PROJECT_DIR/scripts/check-all.sh"
+  [ "$output" = "1" ]
+}
+
 @test "check-all: checks a package that ran out of its budget once" {
   flaky_check flaky 124
   run "$TEST_TMPDIR/scripts/check-all.sh"

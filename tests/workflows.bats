@@ -1155,7 +1155,7 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN -u builder $code/check-all.sh cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
     "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/update-readme.sh cwd=$work"
@@ -2742,6 +2742,25 @@ run_bare_issues_step() {
   [ "$output" = $'alert_issue_body .status/bar https://example.invalid/run\nfailure_issue_body .status/foo https://example.invalid/run\nupstream_issue_body .status/_upstream https://example.invalid/run' ]
 }
 
+# A package without a YAML gets no check, so no status of a later run closes its issues
+@test "check-updates: the close step closes the issues of a package whose YAML is gone" {
+  GH_OPEN=$'1 ❌ gone: update failed\n2 ✋ gone: update held\n3 ⚠️ gone: 1.2 without aarch64\n4 ❌ kept: check failed' \
+    run_close_step kept="check_failed: boom" _packages=kept
+  [ "$status" -eq 0 ]
+  grep -qxF 'issue close 1 --comment `packages/gone.yml` is gone as of https://example.invalid/run.' "$GH_LOG"
+  grep -q '^issue close 2 ' "$GH_LOG"
+  grep -q '^issue close 3 ' "$GH_LOG"
+  run grep -c '^issue close 4 ' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the close step keeps the issues of every package without _packages" {
+  GH_OPEN='1 ❌ gone: update failed' run_close_step kept=up_to_date
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "check-updates: the close step finds an open issue behind 30 others" {
   local i
   GH_OPEN="$(for i in {1..30}; do echo "$i ❌ pkg$i: check failed"; done)"$'\n31 ❌ foo: check failed' \
@@ -3100,7 +3119,7 @@ done
 # gh answers with the JSON of the API and applies --jq to it
 case "$cmd" in
   "api repos/owner/fork") json="{\"has_issues\": ${GH_HAS_ISSUES:-true}}" ;;
-  "api repos/owner/fork/actions/runs/7/jobs")
+  "api repos/owner/fork/actions/runs/7/jobs?per_page=100")
     [[ -z "${GH_JOBS_FAIL:-}" ]] || exit 1
     if [[ -z "${GH_JOBS_JSON:-}" ]]; then
       echo "$GH_JOBS"
@@ -3131,23 +3150,55 @@ EOF
 @test "notify-failure: keeps a branch name with backticks inside its code span" {
   RUN_BRANCH='fix`@owner``' GH_JOBS=check run_notify_step
   [ "$status" -eq 0 ]
-  grep -qF 'on ``` fix`@owner`` ``` failed in check' "$GH_LOG"
+  grep -qF 'on ``` fix`@owner`` ``` failed in `check`' "$GH_LOG"
 }
 
 @test "notify-failure: opens an issue that names the run and its failed jobs" {
-  GH_JOBS="check, publish" run_notify_step
+  GH_JOBS=$'check\npublish' run_notify_step
   [ "$status" -eq 0 ]
   grep -q '^issue create --title ❌ Check AUR Package Updates failed --label auto-update --body ' "$GH_LOG"
   grep -q 'https://example.invalid/runs/7' "$GH_LOG"
-  grep -q 'failed in check, publish' "$GH_LOG"
+  grep -qF 'failed in `check`, `publish`' "$GH_LOG"
   grep -q 'until a run succeeds, and that run closes this issue\.$' "$GH_LOG"
 }
 
-# A job that runs into timeout-minutes concludes timed_out
 @test "notify-failure: names the jobs that failed or timed out" {
   GH_JOBS_JSON='{"jobs":[{"name":"check","conclusion":"failure"},{"name":"verify","conclusion":"timed_out"},{"name":"publish","conclusion":"skipped"},{"name":"status","conclusion":"success"}]}' run_notify_step
   [ "$status" -eq 0 ]
-  grep -q 'failed in check, verify' "$GH_LOG"
+  grep -qF 'failed in `check`, `verify`' "$GH_LOG"
+}
+
+# GitHub gives a job stopped by timeout-minutes the conclusion `cancelled`, as one canceled by hand
+@test "notify-failure: names a canceled job that ran for its timeout-minutes" {
+  GH_JOBS_JSON='{"jobs":[
+    {"name":"check-updates / check","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:30:40Z"},
+    {"name":"check-updates / prepare (demo)","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:02:00Z"},
+    {"name":"check-updates / status","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:09:10Z"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  grep -qF 'failed in `check-updates / check`, `check-updates / status`.' "$GH_LOG"
+  grep -q -- '--paginate' "$GH_LOG"
+}
+
+# The AUR takes a package name that starts with @, which outside a code span mentions a user
+@test "notify-failure: names a failed job of a package in a code span" {
+  GH_JOBS_JSON='{"jobs":[{"name":"check-updates / prepare (@owner)","conclusion":"failure"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  grep -qF 'failed in `check-updates / prepare (@owner)`.' "$GH_LOG"
+}
+
+@test "notify-failure: opens nothing for jobs canceled before their timeout-minutes" {
+  GH_JOBS_JSON='{"jobs":[{"name":"check-updates / check","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:12:00Z"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::No job of the run failed, so the canceled run gets no issue"* ]]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "notify-failure: knows the timeout-minutes of every job of check-updates.yml" {
+  local workflow="$GITHUB_DIR/workflows/check-updates.yml" table
+  table=$(yq '.jobs.notify.steps[0].run' "$NOTIFY" | command grep -oE '\{"image": [^}]*\}')
+  [ -n "$table" ]
+  [ "$(jq -cS . <<<"$table")" = "$(yq -o=json '.jobs' "$workflow" | jq -cS 'to_entries | map({(.value.name // .key): .value."timeout-minutes"}) | add')" ]
 }
 
 @test "notify-failure: opens the issue when the jobs cannot be listed" {
