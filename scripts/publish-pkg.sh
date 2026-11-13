@@ -1,21 +1,10 @@
 #!/usr/bin/env bash
 #
-# publish-pkg.sh - Push an update that update-pkg.sh --prepare made
-#
-# Clones the AUR repo over SSH, checks the prepared PKGBUILD and .SRCINFO
-# against it, then commits, signs when GPG_KEY_ID is set, and pushes them.
-# Never sources the PKGBUILD and never runs makepkg: the files are untrusted.
-#
-# With --asset <value>: the value from the name of a release asset that the
-# check run found, which the line of upstream.asset_var must hold
-#
-# With --arch-out <arches>: the arches out after the update, from the check
-# run, so arch=() may change as update-pkg.sh --arch-out changes it
+# publish-pkg.sh - Push an update that update-pkg.sh --prepare made, after checking the prepared
+# files against the AUR copy; it never sources the PKGBUILD or runs makepkg
 #
 # Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]
-#
-# Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version,
-#             3 the AUR moved since the update was prepared
+# Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version, 3 the AUR moved since the prepare
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -77,9 +66,7 @@ strategy=$(pkg_get "$PKG_FILE" .strategy)
 
 base=$(prepared_base "$PREPARED") || exit 1
 
-# =============================================================================
-# CLONE AUR REPO
-# =============================================================================
+# === CLONE AUR REPO ===
 
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -95,9 +82,7 @@ if [[ "$head" != "$base" ]]; then
   exit 3
 fi
 
-# =============================================================================
-# CHECK AND PUSH
-# =============================================================================
+# === CHECK AND PUSH ===
 
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
@@ -128,10 +113,8 @@ fi
 check_prepared_files "$aur_files" "$PREPARED" "$VERSION" "$(pkgver_dash "$PKG_FILE")" \
   "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" "$arch_words" "${tmp_dir}/ref" || exit 1
 
-# The clone has no checkout: the index takes the tree of HEAD, and the two
-# prepared files enter it byte for byte. git add would pass them through
-# the attributes of the AUR repo, and an encoding such as UTF-7 turns text
-# in a comment into code.
+# The index takes the tree of HEAD, and the prepared files enter it byte for byte: git add would
+# pass them through the attributes of the AUR repo, where UTF-7 turns a comment into code
 git -C "$aur_dir" read-tree HEAD || exit 1
 for file in PKGBUILD .SRCINFO; do
   blob=$(git -C "$aur_dir" hash-object -w --stdin --no-filters <"${PREPARED}/${file}") || exit 1

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-#
-# pypi - Detect latest version from PyPI
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string
-#
-# upstream.registry: PyPI package name (e.g. "requests")
+# pypi - Print the latest stable version of a package on PyPI, see
+# https://aurtomator.dev/strategies/#pypi
 
 set -euo pipefail
 

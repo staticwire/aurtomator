@@ -979,11 +979,8 @@ $2}"
 
 # === git-latest ===
 
-# Helper: a repo with 3 commits in $fake_repo, and a git that clones it in
-# place of any URL and logs the protocols the strategy allows and the options
-# of the clone. The clone goes over file://, where a filter applies, and any
-# other git command fails on an object the clone left out instead of fetching
-# it.
+# Helper: a repo of 3 commits in $fake_repo, and a git that clones it over file:// for any URL and
+# logs the protocols and clone options; other commands fail on an object the clone left out
 fake_git_upstream() {
   fake_repo="$TEST_TMPDIR/fake-upstream"
   mkdir -p "$fake_repo"
@@ -1017,7 +1014,6 @@ EOF
 
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
   [ "$status" -eq 0 ]
-  # Should match r3.<7-char-hash>
   [[ "$output" =~ ^r3\.[0-9a-f]{7}$ ]]
   [ "$(cat "$TEST_TMPDIR/git-clone")" = "https https://git.example.com/repo.git" ]
 }
@@ -1165,9 +1161,8 @@ EOF
   [ ! -e "$TEST_TMPDIR/ssh.args" ]
 }
 
-# The git recipes of the Arch package guidelines for VCS packages:
-# git describe --long [--tags] --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g',
-# with a prefix of the tag cut first as 's/^v//'
+# The recipe of the Arch VCS package guidelines, with a tag prefix cut first by 's/^v//':
+# git describe --long [--tags] --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
 @test "git-latest: describe tags prints what the recipe prints" {
   fake_git_upstream
   git -C "$fake_repo" tag v1.2.0 HEAD~2
@@ -1732,9 +1727,8 @@ nightly_pages() {
 
 # === GITHUB_TOKEN ===
 
-# Helper: one package for each GitHub strategy that calls the API, and a
-# curl that appends its arguments to curl.args and its stdin to curl.stdin
-# before it answers
+# Helper: one package for each GitHub strategy that calls the API, and a curl that appends its
+# arguments to curl.args and its stdin to curl.stdin before it answers
 setup_github_strategies() {
   create_test_package "gh-release" "github-release" "upstream:
   project: owner/repo"
@@ -1759,9 +1753,8 @@ EOF
   chmod +x "$MOCK_DIR/curl"
 }
 
-# Helper: run every GitHub strategy that calls the API. Stdin is /dev/null,
-# so the recording curl does not wait when a strategy gives it nothing to
-# read.
+# Helper: run every GitHub strategy that calls the API, with stdin from /dev/null so that the
+# recording curl does not wait for input a strategy never gives
 run_github_strategies() {
   local strategy
   for strategy in release asset nightly; do

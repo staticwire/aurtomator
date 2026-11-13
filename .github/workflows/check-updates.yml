@@ -1,9 +1,7 @@
 name: Check AUR Package Updates
 
-# The calling repository is checked out at the workspace root and holds
-# the data. aurtomator is checked out at job.workflow_sha into aurtomator/
-# and holds the code. The image job checks out only the Dockerfile of
-# aurtomator, and the issues job only aurtomator.
+# The jobs check out the calling repository at the workspace root and aurtomator at
+# job.workflow_sha into aurtomator/. image and issues check out aurtomator alone.
 on:
   workflow_call:
     secrets:
@@ -20,8 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  # Reads the pinned Arch image from ci-image/Dockerfile, where
-  # Dependabot updates its digest
+  # Reads the pinned Arch image from ci-image/Dockerfile, whose digest Dependabot updates
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -29,9 +26,8 @@ jobs:
       ref: ${{ steps.read.outputs.ref }}
 
     steps:
-      # With an empty ref, actions/checkout takes the default branch of a
-      # repository other than the one that triggered the run. The run would
-      # then use the code of main, and no step would fail.
+      # With an empty ref, actions/checkout takes the default branch of another repository,
+      # and the run goes on with that code without an error
       - name: Check the pin
         env:
           SHA: ${{ job.workflow_sha }}
@@ -59,9 +55,8 @@ jobs:
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
 
-  # Runs the strategies with the read-only token and decides what the run
-  # does. No PKGBUILD runs here, so the jobs after it trust the statuses
-  # this job hands over.
+  # Runs the strategies with the read-only token and decides what the run does. No PKGBUILD
+  # runs here, so the jobs after it trust the statuses this job hands over.
   check:
     needs: image
     runs-on: ubuntu-latest
@@ -74,7 +69,6 @@ jobs:
       checked-id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
-      # The commit of publish goes to the branch of the run, and a tag is none
       - name: Require a branch
         if: github.ref_type != 'branch'
         run: |
@@ -87,8 +81,7 @@ jobs:
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git go-yq
 
-      # builder may own no file that the runner mounts into the container,
-      # so it gets a fixed uid that no account of the runner has
+      # builder must own no file that the runner mounts into the container
       - &add-builder
         name: Add builder
         run: |
@@ -123,8 +116,7 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
-      # builder works in /work, and the workspace and
-      # aurtomator/ stay root's
+      # builder works in /work, and the workspace and aurtomator/ stay root's
       - name: Check updates
         uses: ./aurtomator/.github/actions/run-as-builder
         env:
@@ -138,21 +130,17 @@ jobs:
         id: stop
         if: always()
         run: |
-          # A job that failed before useradd has no builder and no checkout
+          # A job that failed before useradd has no builder to stop
           uid=$(id -u builder) || exit 0
-          # A process builder started can outlive its step. Stop all of
-          # them before root reads anything builder wrote. A zombie runs
-          # nothing, and pid 1 of a job container never reaps one, so only
-          # the other processes count, by effective or real user. live exits
-          # with 0 for a running process, 1 for none and 2 when the list
-          # fails, and only 1 lets the step go on.
+          # Returns 0 while a process of builder runs, 1 for none and 2 when ps fails. pid 1
+          # of a job container never reaps a zombie, so a zombie does not count.
           live() {
             procs=$(ps -e -o uid=,ruid=,stat=) || return 2
             printf '%s\n' "$procs" |
               awk -v u="$uid" '($1 == u || $2 == u) && $3 !~ /^Z/ { n++ } END { exit !n }'
           }
-          # kill -1 reaches every process builder may signal in one call,
-          # and a fork under way then fails
+          # A process of builder can outlive its step. kill -1 reaches every process builder
+          # may signal in one call, and a fork under way then fails.
           sudo -u builder kill -KILL -1 || true
           for _ in $(seq 30); do
             rc=0
@@ -169,8 +157,7 @@ jobs:
             exit 1
           fi
 
-      # Takes what builder wrote as data, now that no process of builder
-      # runs. builder reads each file, so a link reaches nothing it cannot.
+      # Takes what builder wrote as data, once no process of builder runs
       - &hand-over
         name: Hand over
         if: always() && steps.stop.outcome == 'success'
@@ -181,7 +168,8 @@ jobs:
           mkdir upload statuses
           install -d -m 0700 "$RESULTS" "$RESULTS/packages"
           [[ -d "$WORK" && ! -L "$WORK" ]] || exit 0
-          # Copies file $1 of builder to $2 when it is a regular file
+          # Copies $WORK/$1 to $2 when it is a regular file. builder reads it, so a link reaches
+          # only what builder can read.
           take() {
             [[ -f "$WORK/$1" && ! -L "$WORK/$1" ]] || return 0
             mkdir -p "$(dirname "$2")"
@@ -192,8 +180,7 @@ jobs:
           # A package name never starts with a dot, so . and .. do not match
           name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
           if [[ -d "$WORK/handoff" && ! -L "$WORK/handoff" ]]; then
-            # find follows no link; -print0, as a name may hold a newline. find
-            # fails on a missing prepared/ or status/, and the step goes on.
+            # find follows no link. It fails on a missing prepared/ or status/, and the step goes on.
             (cd "$WORK/handoff" && find prepared status -type f -print0 2>/dev/null || true) |
               while IFS= read -r -d '' f; do
                 if [[ "$f" =~ ^prepared/(${name_re})/(PKGBUILD|\.SRCINFO|base)$ ]] ||
@@ -225,11 +212,10 @@ jobs:
         env:
           RESULTS: /results
         run: |
-          # prepare runs a job for each outdated package, at most 256 as a
-          # matrix allows, and publish also runs for a change in the README
+          # A matrix runs at most 256 jobs, so prepare takes the first 256 outdated packages
           name_re='^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$'
-          # Only --publish writes _without and only this step writes _deferred,
-          # so a copy that builder of check wrote goes
+          # Only --publish writes _without and only this step writes _deferred, so the step
+          # deletes any copy of them that builder wrote
           rm -f statuses/_without statuses/_deferred
           to_prepare=()
           deferred=()
@@ -259,15 +245,14 @@ jobs:
           if [[ -f "$RESULTS/README.md" ]] && ! cmp -s "$RESULTS/README.md" README.md; then
             work=true
           fi
-          # publish commits aurtomator/aurtomator.sh over a regular aurtomator.sh
-          # of the checkout that differs from it
+          # publish commits aurtomator/aurtomator.sh over a regular aurtomator.sh that differs
           release_runner=aurtomator/aurtomator.sh repo_runner=aurtomator.sh
           if [[ -f "$release_runner" && -f "$repo_runner" && ! -L "$repo_runner" ]] &&
             ! cmp -s "$release_runner" "$repo_runner"; then
             work=true
           fi
-          # The windows of the card move with the day, so publish runs also
-          # when today's card differs from the committed one
+          # The windows of the card end today, so publish also runs when the card of today
+          # differs from the committed one
           packages=false
           if compgen -G 'packages/*.yml' >/dev/null; then
             packages=true
@@ -291,8 +276,7 @@ jobs:
             echo "to-prepare=$list"
           } >>"$GITHUB_OUTPUT"
 
-      # prepare, verify and publish read them, and issues when publish is
-      # skipped. A run without a package can have no status to upload.
+      # A run without a package has no status to upload
       - name: Upload statuses
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -302,16 +286,14 @@ jobs:
           if-no-files-found: ${{ steps.decide.outputs.packages == 'true' && 'error' || 'ignore' }}
           retention-days: 1
 
-      # A second layer: the post step of a checkout runs git as root, and
-      # does nothing once .git/config is gone
+      # The post step of a checkout runs git as root and does nothing once .git/config is gone
       - &drop-checkouts
         name: Drop the checkouts
         if: always()
         run: rm -rf -- .git aurtomator
 
-  # Every step that executes a PKGBUILD from the AUR runs here, without
-  # secrets and without a token. Each package gets a job of its own, so code
-  # from a PKGBUILD reaches the files of its package alone.
+  # Every step that executes a PKGBUILD from the AUR runs here, without secrets or a token.
+  # Each package gets a job of its own, so the code of a PKGBUILD reaches only its package.
   prepare:
     needs: [image, check]
     if: needs.check.outputs.prepare == 'true'
@@ -348,8 +330,8 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
-      # By the id of the upload, never by name. No artifact has the id 0, and
-      # an empty id would download every artifact of the run.
+      # By the id of the upload, never by name. An empty id would download every artifact of
+      # the run, and no artifact has the id 0.
       - name: Download statuses
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -366,8 +348,7 @@ jobs:
 
       - *hand-over
 
-      # The files of each attempt go to a directory of their own, so verify
-      # takes the newest attempt of each package
+      # Each attempt gets a directory of its own, so verify can take the newest one of a package
       - name: Name the attempt
         env:
           ATTEMPT: ${{ github.run_attempt }}
@@ -387,12 +368,11 @@ jobs:
 
       - *drop-checkouts
 
-  # Checks the checksums that prepare handed over against the sources, in a
-  # job that runs no PKGBUILD and holds no secrets: the downloads from URLs
-  # that the AUR sets stay out of the job with the keys.
+  # Checks the checksums from prepare against the sources. It runs no PKGBUILD and holds no
+  # secret, so the downloads from URLs that the AUR sets stay out of the job with the keys.
   verify:
     needs: [image, check, prepare]
-    # Also after a failed job of prepare, for the packages of the others
+    # Also after a failed job of prepare, for the packages of the other jobs
     if: "!cancelled() && needs.check.outputs.prepare == 'true'"
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
@@ -429,8 +409,8 @@ jobs:
           artifact-ids: ${{ needs.check.outputs.checked-id || '0' }}
           path: .status
 
-      # A matrix gives no artifact id per job, and only prepare uploads
-      # handoff-*. Merged, the files of each attempt stay in its directory.
+      # A matrix gives no artifact id per job, and only prepare uploads handoff-*. Merged,
+      # the files of each attempt stay in its directory.
       - name: Download handoff
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -467,8 +447,8 @@ jobs:
             done
           done
 
-      # git and curl read the AUR repo and the sources here, as builder,
-      # who cannot reach the Docker socket that root has in a job container
+      # git and curl read the AUR repo and the sources as builder, who cannot reach the
+      # Docker socket that root has in a job container
       - name: Verify checksums
         uses: ./aurtomator/.github/actions/run-as-builder
         with:
@@ -491,12 +471,8 @@ jobs:
 
       - *drop-checkouts
 
-  # Pushes what verify passed on and records the statuses of the check job.
-  # Runs also when prepare is skipped, for a change in the README or the
-  # statistics, and when verify failed: then it publishes nothing, and every
-  # package with a new version gets update_failed, as a failed job of prepare
-  # gives it to its own package. Nothing here executes a PKGBUILD:
-  # publish-pkg.sh checks the prepared files against the AUR copy.
+  # Pushes what verify passed and records the statuses of check, also after a failed verify.
+  # This job holds the keys, so nothing here executes a PKGBUILD.
   publish:
     needs: [image, check, prepare, verify]
     if: "!cancelled() && needs.check.outputs.work == 'true'"
@@ -543,8 +519,8 @@ jobs:
           artifact-ids: ${{ needs.verify.outputs.verified-id || '0' }}
           path: handoff
 
-      # Only a package to push needs the SSH and GPG keys, so a run before
-      # the secrets are set still commits the README
+      # Only a package to push needs the SSH and GPG keys, so a run before the secrets are set
+      # still commits the README
       - name: Find packages to push
         id: handoff
         run: |
@@ -575,7 +551,7 @@ jobs:
           mkdir -m 0700 "$SSH_DIR"
           echo "$AUR_SSH_KEY" > "$SSH_DIR/aur"
           chmod 600 "$SSH_DIR/aur"
-          # Host key published at https://aur.archlinux.org as
+          # https://aur.archlinux.org lists the fingerprint of this host key as
           # Ed25519 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
           echo "aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN" > "$SSH_DIR/known_hosts"
 
@@ -605,8 +581,8 @@ jobs:
           sudo -u builder git config --global user.signingkey "$GPG_KEY_ID"
           sudo -u builder git config --global commit.gpgsign true
 
-      # GPG_KEY_ID comes from Setup GPG, when a key is set. git refuses an
-      # empty author name or email in the environment.
+      # Setup GPG sets GPG_KEY_ID when the secret holds a key. git refuses an empty author name
+      # or email in the environment.
       - name: Publish updates
         uses: ./aurtomator/.github/actions/run-as-builder
         env:
@@ -621,8 +597,8 @@ jobs:
 
       - *hand-over
 
-      # Root writes stats/ from the journal of the checkout and the copies of
-      # Hand over. A failure or a timeout leaves stats/ out of the commit.
+      # Root writes stats/ from the journal of the checkout and the copies of Hand over. A
+      # failure or a timeout leaves stats/ out of the commit.
       - name: Record statistics
         env:
           RESULTS: /results
@@ -645,15 +621,15 @@ jobs:
           BRANCH: ${{ github.ref_name }}
           RESULTS: /results
         run: |
-          # README.md and the package YAMLs of the checkout are committed
-          # from the copies of Hand over, the files of stats/ from root's
+          # The commit takes README.md and the package YAMLs from the copies of Hand over, and
+          # stats/ from Record statistics
           changed=()
           for copy in "$RESULTS/README.md" "$RESULTS"/packages/*.yml \
             "$RESULTS/stats/events.csv" "$RESULTS/stats/card.svg" "$RESULTS/stats/card-dark.svg"; do
             [[ -f "$copy" ]] || continue
             file=${copy#"$RESULTS"/}
             if [[ "$file" == stats/* ]]; then
-              # A path under a file would replace it, one under a link go through it
+              # A path under a file would replace the file, and one under a link would follow it
               if [[ -L stats || (-e stats && ! -d stats) ]]; then
                 echo "::warning::$file is left out of the commit, stats is a link or no directory"
                 continue
@@ -667,8 +643,8 @@ jobs:
             [[ -f "$file" && ! -L "$file" ]] || continue
             cmp -s -- "$copy" "$file" || changed+=("$file")
           done
-          # aurtomator/aurtomator.sh replaces a regular aurtomator.sh that
-          # differs from it. The step leaves a link and adds no missing file.
+          # aurtomator/aurtomator.sh replaces a regular aurtomator.sh that differs from it. The
+          # step leaves a link and adds no missing file.
           release_runner=aurtomator/aurtomator.sh repo_runner=aurtomator.sh
           if [[ -f "$release_runner" && -f "$repo_runner" && ! -L "$repo_runner" ]] &&
             ! cmp -s "$release_runner" "$repo_runner"; then
@@ -679,7 +655,6 @@ jobs:
             exit 0
           fi
 
-          # The message names aurtomator.sh when the commit holds it
           files=$(printf '%s\n' "${changed[@]}")
           if [[ "$files" == "$repo_runner" ]]; then
             MESSAGE="chore: update aurtomator.sh [skip ci]"
@@ -699,12 +674,10 @@ jobs:
           HEAD_SHA=$(gh api "repos/$REPO/git/ref/heads/$BRANCH" --jq '.object.sha')
           BASE_TREE=$(gh api "repos/$REPO/git/commits/$HEAD_SHA" --jq '.tree.sha')
 
-          # The tree below replaces each changed file as a whole, so a
-          # commit pushed during the run that changed one of them would be
-          # lost. Then this run commits nothing, and the next run starts
-          # from the new head. builder never writes the checkout, so root's
-          # git may trust it.
+          # builder never writes the checkout, so root's git may trust it
           git_ws() { git -c safe.directory="$PWD" "$@"; }
+          # The new tree replaces each changed file whole. When a commit pushed during the run
+          # changed one of them, this run commits nothing and the next run starts from the new head.
           if [[ "$HEAD_SHA" != "$(git_ws rev-parse HEAD)" ]]; then
             remote=$(gh api "repos/$REPO/git/trees/$BASE_TREE?recursive=1" \
               --jq '.tree[] | select(.type == "blob") | .path + " " + .sha')
@@ -725,8 +698,7 @@ jobs:
             if [[ "$file" == "$repo_runner" ]]; then
               from=$release_runner mode=100755
             fi
-            # Linux refuses one argument over 128 KiB, so the file goes on
-            # stdin
+            # Linux refuses one argument over 128 KiB, so the file goes on stdin
             BLOB_SHA=$(base64 -w0 -- "$from" |
               jq -Rs '{content: ., encoding: "base64"}' |
               gh api "repos/$REPO/git/blobs" \
@@ -761,8 +733,7 @@ jobs:
 
           echo "Committed: $COMMIT_SHA (verified)"
 
-      # The issues job reads the statuses of this job, also after a failed
-      # step
+      # The issues job reads these statuses, also after a failed step
       - name: Upload statuses
         id: upload
         if: always()
@@ -775,10 +746,8 @@ jobs:
 
       - *drop-checkouts
 
-  # Opens and closes the issues in every run that checked, from the statuses
-  # of publish when it ran and from those of check otherwise. Holds no
-  # secret. No other user runs code in the workspace it checks out, so root
-  # writes the bodies with scripts/lib/issue.sh.
+  # Opens and closes issues from the statuses of publish, or of check when publish is skipped.
+  # No other user runs code in this job, so root runs scripts/lib/issue.sh.
   issues:
     name: status
     needs: [image, check, prepare, verify, publish]
@@ -789,8 +758,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    # The image has no git, so gh cannot read the repository from the
-    # checkout
+    # This job has no git, so gh cannot read the repository from a checkout
     env:
       GH_REPO: ${{ github.repository }}
 
@@ -823,8 +791,8 @@ jobs:
           artifact-ids: ${{ needs.publish.outputs.published-id || '0' }}
           path: .status
 
-      # With publish skipped, the statuses come as builder of check wrote
-      # them, so root checks them as publish does
+      # With publish skipped, the statuses are as builder wrote them in check, so root checks
+      # them as publish does
       - name: Check the statuses
         id: clean
         run: bash -c 'source ./aurtomator/scripts/lib.sh && clean_statuses .status'
@@ -832,11 +800,8 @@ jobs:
       - name: Write the run summary
         run: bash -c 'source ./aurtomator/scripts/lib.sh && run_summary .status' >>"$GITHUB_STEP_SUMMARY"
 
-      # Before the issue step: an open issue of a package holds back a new
-      # one, so the check issue of a package whose update now fails has to
-      # be closed first. The step runs neither after a failed step nor after
-      # a failed publish, so a status that publish did not write closes
-      # nothing.
+      # Runs before Create issues, since an open issue of a package holds back a new one. After
+      # a failed publish it does not run, so a status that publish did not write closes no issue.
       - name: Close resolved issues
         if: needs.publish.result == 'success' || needs.publish.result == 'skipped'
         env:
@@ -863,9 +828,8 @@ jobs:
               pkg_name=$(basename "$status_file")
               [[ "$pkg_name" == _* ]] && continue
               status=$(cat "$status_file")
-              # A check issue closes once the check passes, an update issue
-              # and a held issue once the version is in the AUR, so a failed
-              # check keeps a held issue open
+              # A check issue closes when the check passes, and an update or held issue when the
+              # version is in the AUR
               case "$title:$status" in
                 "❌ $pkg_name: check failed:check_failed:"*) continue ;;
                 "❌ $pkg_name: check failed:"*) ;;
@@ -883,8 +847,7 @@ jobs:
           done <<<"$open
           $held"
 
-          # A host issue closes once fewer than HOST_ISSUE_MIN packages of the
-          # host, in scripts/lib/issue.sh, failed to check
+          # A host issue closes when fewer than HOST_ISSUE_MIN packages of the host failed to check
           hosts=$(lib failed_hosts "$STATUS_DIR")
           failing=$(cut -d ' ' -f 1 <<<"$hosts")
           host_re='^([a-z0-9.-]+): [0-9]+ packages failed to check$'
@@ -896,8 +859,7 @@ jobs:
             gh issue close "$number" --comment "$comment"
           done <<<"$open"
 
-          # notify-failure opens this issue, and a run with no failed job
-          # closes it
+          # notify-failure opens this issue, and a run without a failed job closes it
           if [[ "$RUN_OK" == true ]]; then
             while read -r number title; do
               [[ "$title" == "❌ Check AUR Package Updates failed" ]] || continue
@@ -905,8 +867,8 @@ jobs:
             done <<<"$open"
           fi
 
-          # An arch issue closes once _without lists its package no more; a run
-          # without publish has no _without and closes none
+          # An arch issue closes when _without no longer lists its package. Only publish writes
+          # _without, so a run without publish closes none.
           if [[ -f "$STATUS_DIR/_without" ]]; then
             arched=$(gh issue list --label "arch-missing" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
             title_re='^⚠️ ([A-Za-z0-9@_+][A-Za-z0-9@._+-]*): '
@@ -919,9 +881,8 @@ jobs:
             done <<<"$arched"
           fi
 
-          # The issue of an aurtomator release closes once VERSION holds it
-          # or a newer release is out. A run that could not read the latest
-          # release has no _upstream and closes nothing.
+          # A release issue closes when VERSION holds the release or a newer one is out. A run that
+          # could not read the latest release has no _upstream and closes none.
           if [[ -f "$STATUS_DIR/_upstream" ]]; then
             upstream=$(cat "$STATUS_DIR/_upstream")
             releases=$(gh issue list --label "aurtomator-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
@@ -940,9 +901,8 @@ jobs:
           STATUS_DIR=".status"
           [[ -d "$STATUS_DIR" ]] || exit 0
 
-          # gh issue list fails in a repository with Issues turned off. A
-          # repository like that gets a notice, and any other failure of the
-          # list still fails the step.
+          # gh issue list fails when Issues are turned off, so the step reads has_issues first and
+          # ends with a notice. Any other failure of the list fails the step.
           if grep -qsE '^(check_failed|update_failed|held|newer):' "$STATUS_DIR"/* || [[ -s "$STATUS_DIR/_alerts" ]] ||
             grep -qs . "$STATUS_DIR/_without"; then
             has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
@@ -976,10 +936,8 @@ jobs:
             fi
           }
 
-          # Opens an issue with label $1, made with color $2 and description
-          # $3 when it is missing, and title $4, unless an open issue of the
-          # label has that title. Function $5 of scripts/lib/issue.sh writes
-          # the body from status file $6.
+          # Opens an issue with label $1 and title $4 unless one is open. use_label takes $2 and $3,
+          # and function $5 of scripts/lib/issue.sh writes the body from status file $6.
           open_issue() {
             use_label "$1" "$2" "$3"
             if grep -qxF -e "$4" <<<"${titles[$1]}"; then
@@ -990,8 +948,7 @@ jobs:
             create_issue "$1" "$4" "$body"
           }
 
-          # The packages of a host that failed HOST_ISSUE_MIN or more checks,
-          # in scripts/lib/issue.sh, share one issue
+          # The packages of a host with HOST_ISSUE_MIN or more failed checks share one issue
           hosts=$(lib failed_hosts "$STATUS_DIR")
           declare -A shared=()
           while read -r host packages; do
@@ -1020,8 +977,7 @@ jobs:
                 kind="${status%%:*}"
                 use_label auto-update d73a4a "Automated update failure"
 
-                # Exact titles: search splits foo-bar into words, so a
-                # search for foo also finds the issue of foo-bar
+                # Matches whole titles, since a search for foo also finds the issue of foo-bar
                 if grep -qxF -e "❌ $pkg_name: check failed" -e "❌ $pkg_name: update failed" <<<"${titles[auto-update]}"; then
                   echo "Issue already open for $pkg_name, skipping"
                   continue
@@ -1034,8 +990,7 @@ jobs:
                 open_issue update-held fbca04 "Update waits for a hand edit" "✋ $pkg_name: update held" alert_issue_body "$status_file"
                 ;;
               "updated: "* | "downgrade: "*)
-                # A published update gets an issue for the notices that
-                # fired; a hold would have kept it from being published
+                # The alerts of a published update are notices, since a hold stops the update
                 if awk -F'\t' -v p="$pkg_name" '$1 == p { found = 1 } END { exit !found }' "$STATUS_DIR/_alerts" 2>/dev/null; then
                   open_issue update-notice 1d76db "Published update needs a hand edit" "🔔 $pkg_name: ${status#*: } notice" alert_issue_body "$status_file"
                 fi
@@ -1043,8 +998,7 @@ jobs:
             esac
           done
 
-          # A package published without some arches has one issue while an arch
-          # is out, whatever version it names
+          # A package published without some arches has one issue, whatever version its title names
           if [[ -f "$STATUS_DIR/_without" ]]; then
             while IFS=$'\t' read -r pkg_name version arches; do
               [[ -n "$pkg_name" ]] || continue
@@ -1058,7 +1012,6 @@ jobs:
             done <"$STATUS_DIR/_without"
           fi
 
-          # A newer release of aurtomator gets an issue
           upstream=$(cat "$STATUS_DIR/_upstream" 2>/dev/null || true)
           if [[ "$upstream" == "newer: "* ]]; then
             open_issue aurtomator-update 0e8a16 "Newer aurtomator release" "🚀 aurtomator ${upstream#newer: } available" upstream_issue_body "$STATUS_DIR/_upstream"

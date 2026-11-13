@@ -1,8 +1,6 @@
 #!/usr/bin/env bats
 
-# GPG flow tests using REAL GPG keys (no mocks)
-# Tests: key detection, passphrase detection, passphrase stripping,
-#        setup.sh GPG step, commit signing
+# Tests of the GPG steps of setup.sh and of commit signing, with real gpg keys
 
 load helpers/setup.sh
 
@@ -113,9 +111,7 @@ teardown() {
   teardown_test_env
 }
 
-# =============================================================================
-# KEY TYPE DETECTION
-# =============================================================================
+# === Key type detection ===
 
 @test "gpg-real: detects subkey with [S] capability" {
   key_info=$(gpg --list-secret-keys --keyid-format long 2>/dev/null)
@@ -125,15 +121,11 @@ teardown() {
 
 @test "gpg-real: distinguishes master from subkey" {
   key_info=$(gpg --list-secret-keys --keyid-format long "$NOPASS_SUBKEY_ID" 2>/dev/null)
-  # Subkey ID should appear on ssb line, not sec line
   echo "$key_info" | grep "^ssb" | grep -q "$NOPASS_SUBKEY_ID"
-  # Master key should be on sec line
   echo "$key_info" | grep "^sec" | grep -q "$NOPASS_MASTER_ID"
 }
 
-# =============================================================================
-# PASSPHRASE DETECTION (the exact method setup.sh uses)
-# =============================================================================
+# === Passphrase detection as setup.sh does it ===
 
 @test "gpg-real: pinentry-mode error succeeds for no-passphrase key" {
   gpgconf --kill gpg-agent 2>/dev/null || true
@@ -156,9 +148,7 @@ teardown() {
   [[ "$output" == *"signing failed: No pinentry"* ]]
 }
 
-# =============================================================================
-# PASSPHRASE STRIPPING (the exact flow setup.sh uses)
-# =============================================================================
+# === Passphrase strip as setup.sh does it ===
 
 @test "gpg-real: full passphrase strip flow works" {
   # This replicates setup.sh lines 277-330 exactly
@@ -188,14 +178,14 @@ teardown() {
   printf '%s\n\n\n\n' "testpass123" | gpg --homedir "$tmp_gnupg" --batch --yes \
     --pinentry-mode loopback --command-fd 0 --passwd "${WITHPASS_SUBKEY_ID}" 2>/dev/null || true
 
-  # Step 5: Export clean key (should work with empty passphrase now)
+  # Step 5: export the copy without a passphrase
   local clean_key
   clean_key=$(gpg --homedir "$tmp_gnupg" --batch --pinentry-mode loopback \
     --passphrase "" --export-secret-subkeys --armor "${WITHPASS_SUBKEY_ID}!" 2>/dev/null) || true
   [[ -n "$clean_key" ]]
   [[ "$clean_key" == *"BEGIN PGP PRIVATE KEY BLOCK"* ]]
 
-  # Step 6: Verify clean key actually works without passphrase
+  # Step 6: the copy signs without a passphrase
   local verify_gnupg
   verify_gnupg=$(mktemp -d)
   chmod 700 "$verify_gnupg"
@@ -215,9 +205,7 @@ teardown() {
   # The happy path: setup.sh reports "no passphrase, ready for CI"
 }
 
-# =============================================================================
-# GIT COMMIT SIGNING
-# =============================================================================
+# === Commit signing ===
 
 @test "gpg-real: git commit signing works with subkey" {
   cd "$AUR_DIR"
@@ -274,9 +262,7 @@ teardown() {
   git log --show-signature -1 2>&1 | grep -qi "good signature\|gpg"
 }
 
-# =============================================================================
-# aur_commit_push WITH GPG_KEY_ID
-# =============================================================================
+# === aur_commit_push with GPG_KEY_ID ===
 
 # Helper: a bare remote for $AUR_DIR at $TEST_TMPDIR/aur-remote.git, and a
 # staged PKGBUILD at 2.0.0
@@ -309,9 +295,7 @@ stage_aur_update() {
   [[ $'\n'"$output" != *$'\ngpgsig '* ]]
 }
 
-# =============================================================================
-# SETUP.SH GPG STEP (with real keys, non-interactive)
-# =============================================================================
+# === setup.sh GPG step with real keys ===
 
 @test "gpg-real: setup.sh detects no-passphrase subkey" {
   run "$TEST_TMPDIR/scripts/setup.sh" gpg \
@@ -362,9 +346,7 @@ stage_aur_update() {
   [[ "$output" == *'skipped "NONEXISTENT999": No secret key'* ]]
 }
 
-# =============================================================================
-# SETUP.SH FULL FLOW (with real keys)
-# =============================================================================
+# === Full setup.sh run with real keys ===
 
 @test "gpg-real: full setup with no-passphrase key" {
   cat >"$TEST_TMPDIR/.aurtomator.conf" <<EOF

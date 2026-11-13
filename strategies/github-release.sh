@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
-#
-# github-release - Detect latest version from GitHub releases
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string
-#
-# Uses curl (no gh CLI required). Works with public repos without auth.
-# For private repos, set GITHUB_TOKEN env var.
-#
-# With upstream.tag_version_regex it reads the release list, up to 10 pages
-# of 100 releases, in place of /releases/latest.
+# github-release - Print the version of the latest GitHub release, see
+# https://aurtomator.dev/strategies/#github-release
 
 set -euo pipefail
 
@@ -28,9 +19,8 @@ tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 api="https://api.github.com/repos/${owner_repo}"
 
 if [[ -n "$tag_version_regex" ]]; then
-  # /releases/latest can be a release of another product of the same
-  # repository, so the regex picks among the releases, by version as the
-  # tag strategies do
+  # /releases/latest can be a release of another product of the repository, so the regex
+  # picks among the releases by version, as the tag strategies do
   release=$(github_release_matching "$api" "$tag_version_regex" 10 stable version "$tag_version_replace") || {
     echo "Failed to fetch releases for ${owner_repo}" >&2
     exit 1
@@ -66,7 +56,6 @@ if [[ -z "$version" || "$version" == "null" ]]; then
   exit 1
 fi
 
-# Extract version from tag
 if [[ -n "$tag_version_regex" ]]; then
   extracted=$(tag_versions "$tag_version_regex" "$tag_version_replace" <<<"$version")
   if [[ -z "$extracted" ]]; then
@@ -75,6 +64,5 @@ if [[ -n "$tag_version_regex" ]]; then
   fi
   echo "$extracted"
 else
-  # Default: strip v prefix
   echo "${version#v}"
 fi

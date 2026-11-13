@@ -1,36 +1,22 @@
 #!/usr/bin/env bash
 #
-# prepared.sh - Checks of a prepared update against the AUR copy
-#
-# The job that executes a PKGBUILD holds no secrets, so the files it hands
-# over are untrusted. The job that pushes accepts a PKGBUILD that differs
-# from the AUR copy only in pkgver, pkgrel, the asset_var value and the
-# checksums as updpkgsums writes them, and a .SRCINFO with the changes that
-# check_prepared_srcinfo lists. None of these checks sources the file.
+# prepared.sh - Checks of a prepared update against the AUR copy; none of them sources a file
 #
 # Sourced by lib.sh, after common.sh.
 
-# awk keeps a NUL byte, $(...) drops it and mapfile cuts the line at it, so
-# a file with one is compared as something it is not
-# Args: $1=file
-# Returns: 0 when the file holds a NUL byte
+# Succeeds when file $1 holds a NUL byte, which $(...) drops and mapfile cuts the line at,
+# so the checks would compare something else
 _has_nul() {
   [[ "$(tr -d '\000' <"$1" | wc -c)" -ne "$(wc -c <"$1")" ]]
 }
 
-# Split a PKGBUILD into lines of six kinds, without executing it:
-#   SKEL<TAB>line          every line, with pkgver=, pkgrel=, the asset_var
-#                          line, a top-level arch= line and each top-level
-#                          checksum array replaced by a placeholder
-#   PKGVER|PKGREL|ASSET|ARCH<TAB>val  the value of a pkgver=, pkgrel=,
-#                          asset_var or top-level arch= line
-#   SUM<TAB>array<TAB>index<TAB>HASH|SKIP  one line per checksum
-#   SUMVAL<TAB>array<TAB>value  the same checksum with its value
-#   NOTE<TAB>text          a comment in or after a checksum array, or an
-#                          empty line inside one, as empty text
-#   BAD<TAB>text           anything in a checksum array but a quoted
-#                          checksum, a comment or a line continuation
-# Args: $1=pkgbuild path, $2=asset_var of the package, if any
+# Split PKGBUILD $1, with asset_var $2 if any, into lines of six kinds without running it:
+#   SKEL<TAB>line      each line, with pkgver=, pkgrel=, $2=, a top-level arch= and each
+#                      top-level checksum array as a placeholder
+#   PKGVER|PKGREL|ASSET|ARCH<TAB>value   the value of such a line
+#   SUM<TAB>array<TAB>index<TAB>HASH|SKIP, SUMVAL<TAB>array<TAB>value   one of each per checksum
+#   NOTE<TAB>text      a comment in or after a checksum array, or an empty line in one
+#   BAD<TAB>text       anything else in a checksum array
 _pkgbuild_parts() {
   awk -v asset="${2:-}" '
     function tokens(text,   n, i, t, parts) {
@@ -46,9 +32,8 @@ _pkgbuild_parts() {
         print "SUMVAL\t" name "\t" substr(t, 2, length(t) - 2)
       }
     }
-    # As bash does: a # that starts a word comments out the rest of the
-    # line, and a backslash at the end of a line outside a comment joins
-    # the next line, which inside the parentheses is only a separator
+    # As in bash, a # that starts a word comments out the rest of the line, and a backslash
+    # outside a comment joins the next line, which inside the parentheses only separates
     function body(text,   raw, cont, end, rest, note) {
       raw = text
       if (match(text, /(^|[ \t])#.*/)) {
@@ -91,9 +76,8 @@ _pkgbuild_parts() {
   ' "$1"
 }
 
-# Print the SKEL lines among the parts in $2 with one SUMS line in place of
-# the checksum arrays: one for each run of consecutive arrays with $1=runs,
-# one for all of them at the place of the first with $1=all
+# Print the SKEL lines of parts $2 with a SUMS line for each run of checksum arrays with
+# $1=runs, or one SUMS line at the place of the first array with $1=all
 _merged_skel() {
   awk -v mode="$1" '
     !/^SKEL\t/ { next }
@@ -103,9 +87,8 @@ _merged_skel() {
   ' <<<"$2"
 }
 
-# Print the checksum arrays among the parts in $1 whatever their place: a
-# line with the name of each array and a line per checksum, sorted by name,
-# those of arrays of one name in file order
+# Print the checksum arrays of parts $1 wherever they stand: the name of each array and a
+# line per checksum, sorted by name, arrays of one name in file order
 _sum_arrays() {
   grep -E $'^(SKEL\tSUMS |SUM\t)' <<<"$1" | sort -s -t $'\t' -k2,2
 }
@@ -177,9 +160,8 @@ check_handed_aur_files() {
 # Args: $1=AUR PKGBUILD, $2=prepared PKGBUILD, $3=version, $4=pkgrel (default
 #       1), $5=asset_var, if any, $6=asset value, $7=arch= line the update
 #       writes, if any, $8 and $9=arches whose checksum arrays it drops, adds
-# Returns: 0 when the prepared file changes only pkgver, pkgrel, arch=, the
-#          checksums as updpkgsums writes them and the value of its one
-#          asset_var line, to the values above, 1 otherwise (reason on stderr)
+# Returns: 0 when the prepared file changes only pkgver, pkgrel, arch=, the checksums
+#          and the asset_var line, to the values above, 1 otherwise (reason on stderr)
 check_prepared_pkgbuild() {
   local version="$3" rel="${4:-1}" asset_var="${5:-}" asset="${6:-}" want_arch="${7:-}"
   local old_parts new_parts value old_arch new_arch
@@ -252,10 +234,8 @@ check_prepared_pkgbuild() {
   fi
 }
 
-# Print the value of the one asset_var line of a PKGBUILD
-# Args: $1=PKGBUILD, $2=asset_var, $3=name of the file in messages
-# Returns: 1 when the file has no such line or more than one, or when the
-#          value is rejected (reason on stderr)
+# Print the value of the one $2= line of PKGBUILD $1, whose messages name the file $3
+# Returns: 1 for no such line, several, or a refused value (reason on stderr)
 _asset_line_value() {
   local -a values
   mapfile -t values < <(sed -n "s/^$2=//p" "$1")
@@ -267,9 +247,8 @@ _asset_line_value() {
   printf '%s\n' "${values[0]}"
 }
 
-# Print the value of the first line of a PKGBUILD that sets the variable as
-# bash reads it, without the quotes around it and a comment after it
-# Args: $1=PKGBUILD, $2=variable name
+# Print the value of the first line of PKGBUILD $1 that sets variable $2, as bash reads
+# it: without its quotes and without a comment after it
 _plain_value() {
   local value end='([[:space:]]+#.*|[[:space:]]*)$'
   local dq="^\"([^\"]*)\"$end" sq="^'([^']*)'$end" bare="^([^[:space:]]*)$end"
@@ -290,13 +269,10 @@ _update_pkgrel() {
   fi
 }
 
-# Print the pkgrel of an update of a package with asset_var: 1 for a new
-# version, the AUR pkgrel plus one for a rebuild, which is a new asset
-# value of the same version, and the AUR pkgrel when the AUR already has
-# the value
+# Print the pkgrel of an update of a package with asset_var: 1 for a new version, the AUR
+# pkgrel plus one for a new asset value of its version, the AUR pkgrel for the same value
 # Args: $1=AUR PKGBUILD, $2=asset_var, $3=version, $4=asset value
-# Returns: 1 when the asset_var line of the AUR PKGBUILD is refused, or a
-#          rebuild meets a pkgrel that is not an integer (reason on stderr)
+# Returns: 1 for a refused asset_var line, or a rebuild of a pkgrel that is no integer
 _asset_pkgrel() {
   local old_asset old_rel
   old_asset=$(_asset_line_value "$1" "$2" "AUR PKGBUILD") || return 1
@@ -316,20 +292,9 @@ _asset_pkgrel() {
   echo "$((10#$old_rel + 1))"
 }
 
-# Replace the old version in a line with the new one, and also the forms a
-# PKGBUILD derives from pkgver: dots and plus signs turned into
-# underscores, the part before the first +, and the version without its
-# last component, such as ${pkgver%.*} in the frameworks/6.19/ directory
-# of KDE Frameworks. That last form counts only while it keeps a dot, as a
-# lone major version is too common in other text. One pass from left to
-# right, longest form first, so a replaced part is not matched again: with
-# 5.1.0 -> 5.10.0 the 5.1 at the start of 5.10.0 stays. A form counts only
-# where it does not continue another number, with no digit or dot before it
-# and no digit after it, so the 0.1 inside 10.1 stays. With pkgver_format,
-# the upstream version inside the version is the last form, as 4215 in
-# 4.4215.
-# Args: $1=line, $2=old version, $3=new version, $4=old upstream version,
-#       $5=new upstream version
+# Replace the old version in line $1 by the new one, also in the forms _ for . and +, before
+# the first +, and without the last component while a dot stays; longest first, never inside a number
+# Args: $1=line, $2=old version, $3=new version, $4=old upstream version, $5=new upstream version
 _bump_version() {
   local rest="$1" lead=" $1" old="$2" new="$3" out="" i matched
   if [[ -z "$old" ]]; then
@@ -377,9 +342,8 @@ _bump_version() {
   printf '%s\n' "$out"
 }
 
-# Print the upstream version inside a version of pkgver_format, the part
-# in place of %s, or nothing when the version does not fit the format
-# Args: $1=version, $2=pkgver_format
+# Print the upstream version in version $1 of pkgver_format $2, the part in place of %s, or
+# nothing when the version does not fit the format
 _unformat_version() {
   local prefix="${2%%"%s"*}" suffix="${2#*"%s"}" version="$1"
   if [[ "$2" == *%s* && "$version" == "$prefix"*"$suffix" ]]; then
@@ -388,12 +352,8 @@ _unformat_version() {
   fi
 }
 
-# Print the line with each form of the version that has a dash in place of
-# the pkgver_dash character turned back into the version, as
-# ${pkgver//_/-} writes 0.0.1-rc.20 for pkgver 0.0.1_rc.20. With drop, for
-# pkgver_dash: '', a form with a dash between two characters counts, as
-# ${pkgver/rc/-rc} writes 2.5.0-rc1 for pkgver 2.5.0rc1.
-# Args: $1=line, $2=version, $3=pkgver_dash character or drop
+# Print line $1 with each dash form of version $2 turned back into $2: the pkgver_dash character
+# $3 written as a dash, as ${pkgver//_/-} does, or with drop a dash between two characters
 _undash_version() {
   local rest="$1" version="$2" dash="$3" re="" out="" c i match
   for ((i = 0; i < ${#version}; i++)); do
@@ -415,24 +375,17 @@ _undash_version() {
   printf '%s\n' "$out$rest"
 }
 
-# Args: $1=AUR line, $2=prepared line, $3=old version, $4=new version,
-#       $5=pkgver_dash character or drop
-# Returns: 0 when the prepared line is the AUR line with the version
-#          replaced, once a dash in place of the pkgver_dash character in
-#          either version counts as that character, or as nothing for drop
+# Args: $1=AUR line, $2=prepared line, $3=old version, $4=new version, $5=pkgver_dash or drop
+# Returns: 0 when the prepared line is the AUR line with the version replaced, a dash in place
+#          of the pkgver_dash character counting as that character, or as nothing for drop
 _bumped_with_dash() {
   [[ "$(_undash_version "$2" "$4" "$5")" == "$(_bump_version "$(_undash_version "$1" "$3" "$5")" "$3" "$4")" ]]
 }
 
-# Args: $1=AUR line, $2=prepared line, $3=old version, $4=new version,
-#       $5=old upstream version, $6=new upstream version, $7=pkgver_dash
-#       character or drop, $8=old asset value, $9=new asset value
-# Returns: 0 when the prepared line is the AUR line with the version
-#          replaced, by _bump_version or by _bumped_with_dash. For a
-#          package with asset_var, each old asset value of the AUR line
-#          stands for the new one in the prepared line, and the parts
-#          between them are compared one by one, so a dash inside a value
-#          is never taken for one of the version.
+# Args: $1=AUR line, $2=prepared line, $3=old and $4=new version, $5=old and $6=new upstream
+#       version, $7=pkgver_dash or drop, $8=old and $9=new asset value
+# Returns: 0 when the prepared line is the AUR line with the version and each asset value
+#          replaced, the parts between the asset values compared one by one
 _bumped_line() {
   local old="$1" new="$2"
   if [[ -n "${8:-}" ]]; then
@@ -447,10 +400,8 @@ _bumped_line() {
   [[ "$new" == "$(_bump_version "$old" "$3" "$4" "$5" "$6")" ]] || _bumped_with_dash "$old" "$new" "$3" "$4" "$7"
 }
 
-# Print "SKIP <arch suffix>:<index>" for every source entry of a .SRCINFO
-# that is SKIP in each checksum array with the same arch suffix, and
-# "HASH <arch suffix>:<index>" for every other one
-# Args: $1=.SRCINFO
+# Print "SKIP <arch suffix>:<index>" for each source of .SRCINFO $1 that is SKIP in every
+# checksum array of its arch suffix, and "HASH <arch suffix>:<index>" for every other one
 _source_checksums() {
   awk -F' = ' '
     { key = $1; sub(/^[ \t]+/, "", key) }
@@ -463,17 +414,13 @@ _source_checksums() {
   ' "$1"
 }
 
-# Args: $1=source entry of a .SRCINFO
-# Returns: 0 when makepkg downloads it over http, https or ftp, as
-#          verify_prepared_sums does
+# Succeeds when makepkg downloads source entry $1 over http, https or ftp
 _is_download() {
   local url="${1#*::}"
   [[ "$1" == *://* && "${url%%://*}" =~ ^(http|https|ftp)$ ]]
 }
 
-# Args: $1=source entry of a .SRCINFO
-# Returns: 0 when makepkg checks it out with a VCS client at a fixed
-#          commit, tag or revision
+# Succeeds when makepkg checks out source entry $1 with a VCS client at a fixed commit, tag or revision
 _is_vcs_pin() {
   local url="${1#*::}"
   [[ "$1" == *://* && "${url%%://*}" =~ ^(bzr|fossil|git|hg|svn)(\+.+)?$ && "$url" == *#* ]] || return 1
@@ -481,18 +428,15 @@ _is_vcs_pin() {
   [[ "${fragment%%=*}" =~ ^(commit|tag|revision)$ ]]
 }
 
-# Args: $1=expected source line, $2=prepared source line
-# Returns: 0 when both save their file under a name before ::, have the same
-#          URL after it, and their names differ in nothing but digits
+# Succeeds when source lines $1 and $2 save their file under names before :: that differ in
+# digits alone, with the same URL after it
 _name_differs_in_digits() {
   [[ "$1" == *::* && "$2" == *::* && "${1#*::}" == "${2#*::}" ]] || return 1
   [[ "$(sed -E 's/[0-9]+/0/g' <<<"${1%%::*}")" == "$(sed -E 's/[0-9]+/0/g' <<<"${2%%::*}")" ]]
 }
 
-# Drop the empty lines at the end of an array. makepkg --printsrcinfo ends
-# a .SRCINFO at its last line, while some AUR copies end in an empty line,
-# as those mksrcinfo v8 wrote do.
-# Args: $1=name of the array
+# Drop the empty lines at the end of array $1: makepkg --printsrcinfo writes none, and some
+# AUR copies end in one, as those of mksrcinfo v8 do
 _drop_trailing_blank() {
   local -n lines_ref="$1"
   while ((${#lines_ref[@]} > 0)) && [[ -z "${lines_ref[-1]}" ]]; do
@@ -500,39 +444,13 @@ _drop_trailing_blank() {
   done
 }
 
-# A .SRCINFO is generated, so line N of the prepared file must be line N of
-# the AUR file, with these changes: pkgver is the new version, pkgrel is 1,
-# a checksum keeps its key and stays a SKIP or a hash, a source has the old
-# version replaced by the new one (see _bump_version), and any other line
-# stays when the text of the AUR PKGBUILD holds its value, as a license or
-# a dependency can hold the old version without deriving it from pkgver,
-# and has the version replaced in the same way otherwise. A source that is
-# SKIP in every checksum array may also change
-# the digits in the name of its file, as a nightly package names its
-# download by the date: verify_prepared_sums never fetches it, and makepkg
-# takes the sources from the PKGBUILD. When pkgver changes and a download
-# has a real checksum, or a VCS source is pinned to a commit, a tag or a
-# revision, some source URL or checksum has to change too, for each
-# architecture, the common sources and checksums counting for all of them:
-# a pkgver built from another variable, a source URL without the version,
-# a pin that stays, or a version only in the name a download is saved
-# under, the part before ::, would otherwise label the old files with the
-# new version. A download with a real checksum that gets a new name and
-# keeps its URL and its checksum is refused on its own, whatever another
-# source does. With
-# pkgver_dash, a version with a dash in place of that character, as
-# ${pkgver//_/-} writes it, counts as the version, and with pkgver_dash: ''
-# a version with a dash between two characters. With pkgver_format, so
-# does the upstream version inside it, as ${pkgver#4.} writes 4215. For a
-# package with asset_var, the old asset value is replaced by the new one
-# as well, and pkgrel is the one check_prepared_files works out. A new
-# asset value has to change some source URL or checksum.
-# Args: $1=text of the AUR PKGBUILD that the .SRCINFO comes from, as
-#       _pkgbuild_text prints it, $2=AUR .SRCINFO, $3=prepared .SRCINFO,
-#       $4=version, $5=pkgver_dash character or drop, $6=pkgver_format,
-#       $7=pkgrel (default 1), $8 and $9=old and new asset value, $10 and
-#       $11=arches whose lines leave the AUR and the prepared copy first
-# Returns: 0 when that holds, 1 otherwise (reason on stderr)
+# Check prepared .SRCINFO $3 against AUR .SRCINFO $2 line by line, as step 5 of publish in
+# https://aurtomator.dev/internals/update-process/#prepare-and-publish describes
+# Args: $1=text of the AUR PKGBUILD, as _pkgbuild_text prints it, $2=AUR .SRCINFO,
+#       $3=prepared .SRCINFO, $4=version, $5=pkgver_dash or drop, $6=pkgver_format,
+#       $7=pkgrel (default 1), $8 and $9=old and new asset value, $10 and $11=arches
+#       whose lines leave both copies first
+# Returns: 0 when every line follows, 1 otherwise (reason on stderr)
 check_prepared_srcinfo() {
   local text="$1"
   shift
@@ -698,10 +616,8 @@ check_prepared_srcinfo() {
   return 0
 }
 
-# Check the layout of a prepared directory and print its base, the AUR
-# commit the update was prepared from
-# Args: $1=prepared dir
-# Returns: 0 when the layout holds, 1 otherwise (reason on stderr)
+# Check the layout of prepared directory $1 and print its base, the AUR commit the update was
+# prepared from; a failure gives the reason on stderr
 prepared_base() {
   local f base
   if [[ -L "$1" || ! -d "$1" ]]; then
@@ -722,9 +638,8 @@ prepared_base() {
   echo "$base"
 }
 
-# Check a prepared PKGBUILD and .SRCINFO against the AUR repo at their base.
-# For a package with asset_var, the old asset value and the pkgrel come
-# from the AUR PKGBUILD, see _asset_pkgrel.
+# Check the prepared PKGBUILD and .SRCINFO against the AUR repo at their base; the old asset
+# value and pkgrel come from the AUR PKGBUILD, see _asset_pkgrel
 # Args: $1=AUR repo, $2=prepared dir, $3=version, $4=pkgver_dash character
 #       or drop, $5=pkgver_format, $6=asset_var, $7=asset value, each if any,
 #       $8=arch words of an update that changes arch=(), $9=directory of the

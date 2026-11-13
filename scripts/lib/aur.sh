@@ -9,8 +9,8 @@
 # Args: $1=url, $2=destination, $3...=options for git clone
 aur_clone() {
   local attempt delay="${AURTOMATOR_RETRY_DELAY:-5}"
-  # Brief delay to reduce AUR SSH rate-limit pressure from GitHub Actions IP
-  # pool. The anonymous HTTPS clones of prepare and verify do not use SSH.
+  # A pause before an SSH clone lowers the load of the shared GitHub Actions addresses on the
+  # SSH rate limit of the AUR; the HTTPS clones of prepare and verify skip it
   if [[ "$1" == ssh://* ]]; then
     sleep "${AURTOMATOR_CLONE_DELAY:-2}"
   fi
@@ -31,14 +31,8 @@ aur_clone() {
   done
 }
 
-# The AUR can serve a HEAD that does not match refs/heads/master after two
-# runs pushed at the same time. HEAD and master then point at different
-# commits with the same content, and a clone lands on a detached HEAD.
-#
-# The AUR refuses non-fast-forward pushes, so the commit has to sit on
-# origin/master and not on the detached HEAD. Anything unique to the
-# detached commit is dropped. The workflow's concurrency group prevents
-# the race; this stays as a safety net.
+# Put the clone back on origin/master when it lands on a detached HEAD, which the AUR can serve
+# after two pushes at once, since the AUR refuses a push that is no fast-forward of master
 # Args: $1=clone directory, $2=--no-checkout for a clone made without one
 aur_reanchor() {
   if ! git -C "$1" symbolic-ref -q HEAD >/dev/null; then
@@ -53,13 +47,8 @@ aur_reanchor() {
   fi
 }
 
-# Write the top-level entries of HEAD of a clone made with --no-checkout
-# into a directory, without a checkout, so git applies none of the links,
-# attributes or filters of the repo: a regular file with its content, a
-# symlink as a link to nowhere and anything else as an empty directory. The
-# checks of the prepared update refuse those two where a PKGBUILD, a
-# .SRCINFO or a source is expected, as they do in a checkout.
-# Args: $1=clone directory, $2=destination directory, created here
+# Write the top-level entries of HEAD of --no-checkout clone $1 to new directory $2 without git
+# filters: a file with its content, a symlink as a link to nowhere, anything else as an empty dir
 aur_export() {
   local entry name mode sha
   mkdir "$2" || return 1
@@ -75,10 +64,8 @@ aur_export() {
   done < <(git -C "$1" ls-tree -z HEAD)
 }
 
-# Commit what the index holds, sign when GPG_KEY_ID is set, push with 3
-# attempts, AURTOMATOR_RETRY_DELAY seconds apart. The caller stages
-# PKGBUILD and .SRCINFO. The message names the pkgrel of a rebuild, as in
-# "2.4.6-2 release from github-tag".
+# Commit the index, signed when GPG_KEY_ID is set, and push with 3 attempts AURTOMATOR_RETRY_DELAY
+# seconds apart; the caller stages PKGBUILD and .SRCINFO
 # Args: $1=clone directory, $2=version, $3=strategy (for the commit message),
 #       $4=pkgrel, 1 by default, $5=arches put back, for "Add <arches> to <version>"
 aur_commit_push() {

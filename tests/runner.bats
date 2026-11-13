@@ -5,11 +5,8 @@ load helpers/setup.sh
 SETUP_DOC="$BATS_TEST_DIRNAME/../site/src/content/docs/setup.md"
 RUNNER="$BATS_TEST_DIRNAME/../aurtomator.sh"
 
-# Commits the files of a fake aurtomator to the work tree $1: a sample that
-# holds $2, scripts/show-args.sh, which prints what it got and exits with
-# SHOW_STATUS, the same script as scripts/setup.sh and scripts/draft.sh,
-# documented commands, scripts/lib.sh, a library that is not executable, as
-# in aurtomator, and the directory scripts/show
+# Commits a fake aurtomator to the work tree $1: a sample holding $2, scripts/show-args.sh and its
+# copies setup.sh and draft.sh, a lib.sh that is not executable, and a directory scripts/show
 commit_aurtomator() {
   mkdir -p "$1/scripts/show" "$1/packages"
   : >"$1/scripts/show/.keep"
@@ -512,9 +509,8 @@ shape() {
   [ -d "$cache/$old" ]
 }
 
-# Writes the two calling workflows with every uses: line at the pin $1 and
-# its comment $2, a uses: line of another repository, a comment line and a
-# pin one digit too long
+# Writes the two calling workflows with every uses: line at pin $1 and comment $2, plus a uses:
+# line of another repository, a comment line and a pin one digit too long
 calling_workflows() {
   cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
 jobs:

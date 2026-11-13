@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
-#
-# git-tag - Detect latest version from the tags of any git repository
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string
-#
-# For hosts without a tags API, such as sourcehut, kernel.org and Savannah,
-# and for a GitLab or Gitea project with more tags than gitlab-tag and
-# gitea-tag read. Reads every tag with git ls-remote, without authentication.
-#
-# upstream.url: HTTPS URL of the repository
+# git-tag - Print the newest version among the tags of any git repository, see
+# https://aurtomator.dev/strategies/#git-tag
 
 set -euo pipefail
 

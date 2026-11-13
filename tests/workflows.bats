@@ -85,9 +85,8 @@ run_blocks() {
   [ "$count" -gt 0 ]
 }
 
-# ci.yml checks out its own commit. A called workflow checks out the pinned
-# commit, so its pin check and the repository and ref of its checkout are
-# left out of the comparison.
+# ci.yml checks out its own commit and a called workflow the pinned one, so the comparison
+# leaves out the pin check and the repository and ref of the checkout
 @test "workflows: the image job is the same in every workflow" {
   local workflow expected count=0
   run yq '.jobs.image' "$GITHUB_DIR/workflows/ci.yml"
@@ -224,9 +223,8 @@ run_blocks() {
   [ "$output" = "$expected" ]
 }
 
-# Without .shellcheckrc, shellcheck reads a source directive relative to
-# the current directory, and -S warning hides the SC1091 it gives for a
-# file it cannot follow
+# Without .shellcheckrc, shellcheck reads a source directive relative to the current directory,
+# and -S warning hides the SC1091 of a file it cannot follow
 @test "ci: every shellcheck source directive names a file next to its script" {
   local root="$GITHUB_DIR/.." file target count=0
   grep -qx 'source-path=SCRIPTDIR' "$root/.shellcheckrc"
@@ -566,11 +564,8 @@ id_of() {
   done
 }
 
-# A name takes whichever artifact of that name the run holds, and a job of
-# the run can upload one. An empty id would download every artifact of the
-# run, so 0, which no artifact has, stands in for it. The jobs of prepare
-# give no id each, so verify takes their handoffs by a pattern only they
-# upload.
+# A download by name takes any artifact of that name in the run and an empty id takes them all,
+# so 0 stands in for no id; verify takes the handoffs of prepare by a pattern only they upload
 @test "check-updates: each job downloads an artifact by the id the job of its upload gave" {
   run yq '.jobs | to_entries[] | .key as $job | .value.steps[] | select(.uses | test("^actions/download-artifact@")) |
     $job + " " + .with.path + " " + (.with["artifact-ids"] // ("pattern " + .with.pattern + " " + (.with["merge-multiple"] | tostring))) + " " + (.with | has("name") | tostring)' "$CHECK_UPDATES"
@@ -592,12 +587,8 @@ id_of() {
   [ "$(step_index verify "Download statuses")" -lt "$(step_index verify "Verify checksums")" ]
 }
 
-# Runs the Decide step in a workspace whose statuses/ holds the statuses that
-# Hand over wrote, given as name=status pairs, beside the README of the
-# checkout. The copy of the README in $RESULTS differs from it when
-# $README_CHANGED is set and is missing when $NO_README_COPY is set. sudo and
-# git fail. The day of the card is 2026-11-10. aurtomator/ links to
-# $AURTOMATOR_TREE, this tree by default. Prints the step outputs.
+# Runs the Decide step with the name=status pairs as statuses/ and prints the step outputs;
+# $README_CHANGED and $NO_README_COPY change or drop the README copy in $RESULTS
 run_decide_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" results="$BATS_TEST_TMPDIR/results" pair
   mkdir -p "$ws/statuses" "$bin" "$results"
@@ -992,8 +983,8 @@ step_index() {
     [ "$(step_run "$job" "Stop builder")" = "$(step_run check "Stop builder")" ]
     [ "$(step_run "$job" "Hand over")" = "$(step_run check "Hand over")" ]
     [ "$(step_run "$job" "Drop the checkouts")" = "$(step_run check "Drop the checkouts")" ]
-    # Nothing after the step of builder runs as builder, but the kill of
-    # Stop builder and the reads of Hand over
+    # Nothing after the step of builder runs as builder except the kill of Stop builder and the
+    # reads of Hand over
     run yq ".jobs.$job.steps[$((builder + 1)):] | .[] | select(has(\"run\")) | .run" "$CHECK_UPDATES"
     [ "$status" -eq 0 ]
     output=${output//"sudo -u builder kill -KILL -1 "/}
@@ -1102,19 +1093,8 @@ builder_steps() {
   [ "$output" = "" ]
 }
 
-# Runs the run-as-builder action with the inputs of step $2 of job $1, in
-# the shell the action names, from the workspace $BATS_TEST_TMPDIR/ws, with
-# $BATS_TEST_TMPDIR/work as the directory of builder. sudo answers its
-# check that builder can run check-all.sh with $TEST_X_RC, and for any other
-# command records its arguments and directory on one line and its
-# environment in $SUDO_LOG, prints $SUDO_OUT on stdout and stderr, leaves two
-# processes behind that print $LATE_OUT after it exits, one holding only
-# stdout and one only stderr, and exits with $SUDO_RC. chown and git log
-# their arguments to chown.log and git.log in the test directory. The action
-# sits in aurtomator/ of the workspace, and GITHUB_ACTION_PATH names its
-# directory, or $ACTION_PATH when it is set. The input package takes
-# $MATRIX_PACKAGE, foo by default, for the package of a job of the matrix,
-# and $PACKAGE_INPUT in place of the input of the step when it is set.
+# Runs the run-as-builder action with the inputs of step $2 of job $1 in $BATS_TEST_TMPDIR/ws,
+# with mocks of sudo, chown and git that log their calls
 run_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep readme package
   local action_dir="$BATS_TEST_TMPDIR/ws/aurtomator/.github/actions/run-as-builder"
@@ -1423,11 +1403,8 @@ make_builder_inputs() {
   done
 }
 
-# Runs the Add builder step with $RUNNER_TEMP set to /__w/_temp. useradd
-# logs its arguments to $CALLS/useradd and exits with $USERADD_RC, id prints
-# $BUILDER_UID for builder, and stat prints $TEMP_OWNER as the owner of
-# $RUNNER_TEMP. find logs its arguments to $CALLS/find, prints $FOUND and
-# exits with $FIND_RC.
+# Runs the Add builder step with $RUNNER_TEMP set to /__w/_temp; useradd and find log to $CALLS,
+# id prints $BUILDER_UID and stat prints $TEMP_OWNER as the owner of $RUNNER_TEMP
 run_add_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   CALLS="$BATS_TEST_TMPDIR/calls"
@@ -1482,15 +1459,8 @@ run_add_builder_step() {
   [ ! -e "$CALLS/find" ]
 }
 
-# Runs the Stop builder step in an empty workspace. builder has uid 2000,
-# and no uid when $NO_BUILDER is set. ps lists the processes in $PS_LINES
-# until pkill ran, or sudo when $KILL_ENDS is set, and those in
-# $PS_AFTER_KILL after it, as "<uid> <ruid> <state>" separated by commas,
-# with the uid of ps itself, and exits with $PS_RC. pgrep matches any
-# process of builder, zombies included, as the real one does. sudo, pkill
-# and sleep only log their calls, sudo and pkill also in their order to
-# $CALLS/seq, and sudo exits with $SUDO_RC. A step still running after 20 s
-# fails.
+# Runs the Stop builder step in an empty workspace; ps lists $PS_LINES until pkill runs and
+# $PS_AFTER_KILL after it, as "<uid> <ruid> <state>" separated by commas. It fails after 20 s.
 run_stop_builder_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$ws" "$bin"
@@ -1582,13 +1552,8 @@ EOF
   [[ "$output" == *"::error::"* ]]
 }
 
-# Runs the Hand over step of prepare in the workspace $BATS_TEST_TMPDIR/ws,
-# with $BATS_TEST_TMPDIR/work as the directory of builder and
-# $BATS_TEST_TMPDIR/results as the directory of root, and the commands of
-# $BATS_TEST_TMPDIR/bin first on PATH. sudo logs its arguments to $SUDO_LOG
-# and runs the command of -u builder as the test user. bash takes the
-# options in $HAND_OVER_SHELL, -e by default, as the default shell of a step.
-# PACKAGE is $HAND_OVER_PACKAGE, as a job of prepare sets it.
+# Runs the Hand over step of prepare in $BATS_TEST_TMPDIR/ws, with work/ of builder and results/
+# of root beside it; sudo runs the command of -u builder as the test user
 run_hand_over_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BATS_TEST_TMPDIR/ws" "$bin"
@@ -1867,15 +1832,8 @@ run_stats_step() {
   [ ! -e "$results/stats" ]
 }
 
-# Runs the issue step of the issues job in a workspace with the statuses
-# given as name=status pairs. gh lists the titles in $GH_TITLES, one per
-# line, that start with the emoji of the --label it asks for, the first 30
-# unless --limit says otherwise, answers has_issues with $GH_HAS_ISSUES (true
-# by default) or fails it when $GH_API_FAIL is set, and logs every call to
-# $GH_LOG. A creation fails with an error of two lines when $GH_CREATE_FAIL
-# is set. aurtomator/scripts/lib.sh of the workspace takes failed_hosts from
-# scripts/lib/issue.sh, writes the body "body" and logs the function and its
-# arguments to $BODY_LOG. sudo fails.
+# Runs the issue step of the issues job with the name=status pairs as statuses; gh answers from
+# $GH_TITLES and logs to $GH_LOG, and the issue functions log to $BODY_LOG
 run_issue_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
@@ -2192,14 +2150,8 @@ host_failures() {
   [[ "$output" == *"::warning::Could not create the issue ✋ bar: update held: GraphQL: was submitted too quickly (createIssue) second line"* ]]
 }
 
-# Runs the close step of the issues job in a workspace with the statuses given as
-# name=status pairs. gh lists the open issues in $GH_OPEN, one
-# "<number> <title>" per line, whose title starts with the emoji of the
-# --label it asks for, the first 30 unless --limit says otherwise, answers
-# has_issues with $GH_HAS_ISSUES (true by default), fails the list when
-# $GH_FAIL is set and logs every call to $GH_LOG. aurtomator/scripts/lib.sh
-# of the workspace takes scripts/lib/issue.sh, writes the comment "comment"
-# of a package and logs the function and its arguments to $BODY_LOG.
+# Runs the close step of the issues job with the name=status pairs as statuses; gh lists the
+# issues of $GH_OPEN and logs to $GH_LOG, and the issue functions log to $BODY_LOG
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
@@ -2257,10 +2209,8 @@ EOF
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
-# A git repository at $BATS_TEST_TMPDIR/ws whose HEAD holds README.md,
-# packages/foo.yml and packages/bar.yml, and the copies that Hand over took
-# from builder in $BATS_TEST_TMPDIR/results, with the edits given as
-# file=text pairs
+# A repository at $BATS_TEST_TMPDIR/ws with README.md and two package YAMLs, and the copies that
+# Hand over took from builder in $BATS_TEST_TMPDIR/results, with the given file=text edits
 make_commit_repo() {
   local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results" pair
   mkdir -p "$ws/packages" "$results/packages"
@@ -2286,13 +2236,8 @@ moved_tree() {
     { print $4 " " $3 }'
 }
 
-# Runs the commit step of publish in the repository of make_commit_repo. gh
-# answers the head of main with $GH_HEAD (HEAD of the repository by
-# default), lists the tree of that head from $GH_TREE as "path sha" lines
-# (the tree of HEAD by default) or fails the listing when $GH_TREE_FAIL is
-# set, and logs every call to $GH_LOG. It appends the body of each blob to
-# $GH_LOG.blobs, one line each. For a new tree it logs the number of
-# --input options and keeps the body of the last one in $GH_LOG.tree.
+# Runs the commit step of publish in the repository of make_commit_repo; gh takes the head of main
+# and its tree from $GH_HEAD and $GH_TREE, or from HEAD without them, and logs to $GH_LOG
 run_commit_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
@@ -3038,9 +2983,8 @@ run_find_packages_step() {
   [ "$write" -lt "$(step_index issues "Close resolved issues")" ]
 }
 
-# Runs Write the run summary in a workspace with the statuses given as
-# name=status pairs and aurtomator/ linked to this repository; prints the
-# summary
+# Runs Write the run summary with the name=status pairs as statuses and aurtomator/ linked to
+# this repository, and prints the summary
 run_summary_step() {
   local ws="$BATS_TEST_TMPDIR/ws" pair
   mkdir -p "$ws"
@@ -3113,13 +3057,8 @@ NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
   [ "$output" = "0" ]
 }
 
-# Runs the step of notify-failure for run 7 of owner/fork. gh lists the
-# titles in $GH_TITLES as the open issues, answers has_issues with
-# $GH_HAS_ISSUES (true by default), lists the jobs in $GH_JOBS as the failed
-# ones (an empty $GH_JOBS lists no failed job), applies the filter of the
-# step to the jobs in $GH_JOBS_JSON when it is set, or fails that when
-# $GH_JOBS_FAIL is set, fails the list of issues when $GH_FAIL is set and
-# logs every call to $GH_LOG.
+# Runs the step of notify-failure for run 7 of owner/fork; gh lists the open issues from
+# $GH_TITLES and the failed jobs from $GH_JOBS, and logs every call to $GH_LOG
 run_notify_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
@@ -3249,9 +3188,8 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   grep -qxF './aurtomator/scripts/validate-pkg.sh --all' <<<"$output"
 }
 
-# The loop test of the image job leaves out the pin check and the
-# repository and ref of the checkout, so this test compares the whole job
-# with the one of check-updates.yml
+# "the image job is the same in every workflow" leaves out the pin check and the repository and
+# ref of the checkout, so this test compares the whole job with the one of check-updates.yml
 @test "validate: the image job is the one of check-updates" {
   local expected
   run yq '.jobs.image' "$CHECK_UPDATES"
@@ -3376,9 +3314,8 @@ PROBE="$GITHUB_DIR/workflows/runner-probe.yml"
 # with the file commands under /fc
 PROBE_PATHS=(/fc/set_env /fc/add_path /fc/set_output /fc/step_summary /__w/_temp /__w/repo/repo /__w /__w/_actions /__e)
 
-# Runs the step What builder reaches. sudo logs each test it runs as builder
-# to $CALLS/sudo and passes those in $REACH, given as "<flag>:<path>"
-# separated by spaces. As builder, env prints the names in $BUILDER_ENV.
+# Runs the step What builder reaches; sudo logs each test it runs as builder to $CALLS/sudo and
+# passes those in $REACH, "<flag>:<path>" separated by spaces
 run_probe_reach_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   CALLS="$BATS_TEST_TMPDIR/calls"

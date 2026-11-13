@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
-#
-# git-latest - Get latest commit info from a git repo
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: pkgver in standard -git format: r<count>.<shorthash>, or with
-#         upstream.describe <tag>.r<count>.g<shorthash>
-#
-# upstream.branch:     the branch of a source pinned to #branch= (default:
-#                      the default branch of the repository)
-# upstream.describe:   tags or annotated: the form of git describe that the
-#                      Arch package guidelines give, from the newest tag of
-#                      any kind or from the newest annotated tag
-# upstream.tag_prefix: text cut from the start of the tag, as 's/^v//'
+# git-latest - Print r<count>.<hash> of the latest commit of a git repository, see
+# https://aurtomator.dev/strategies/#git-latest
 
 set -euo pipefail
 
@@ -31,7 +20,6 @@ branch=$(pkg_get "$pkg_file" '.upstream.branch // ""')
 describe=$(pkg_get "$pkg_file" '.upstream.describe // ""')
 tag_prefix=$(pkg_get "$pkg_file" '.upstream.tag_prefix // ""')
 
-# Build repo URL based on type
 case "$upstream_type" in
   gitlab)
     repo_url="https://${host}/${project}.git"
@@ -53,11 +41,8 @@ esac
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
-# Commits and tags only: the strategy reads no files, and the trees and blobs
-# of a large repository do not fit in the time of a check. A server without
-# partial clone ignores the filter with a warning and sends everything. With
-# --branch, HEAD of the bare clone is that branch, as makepkg checks it out
-# for #branch=.
+# Commits and tags only, since the strategy reads no files and the trees of a large repository
+# do not fit the time of a check; with --branch, HEAD of the bare clone is that branch
 clone_args=(--bare --quiet --filter=tree:0)
 if [[ -n "$branch" ]]; then
   clone_args+=("--branch=$branch")
@@ -100,9 +85,8 @@ hash=$(git -C "$tmp_dir/repo" rev-parse HEAD 2>/dev/null) || {
   exit 1
 }
 
-# The hash takes as many characters as the hash in current. rev-parse
-# --short in a PKGBUILD grows with the repository, and vercmp reads a shorter
-# hash of the same commit as another version.
+# The hash takes as many characters as the hash in current: rev-parse --short in a PKGBUILD grows
+# with the repository, and vercmp reads a shorter hash of the same commit as another version
 hash_len=7
 if [[ "$current" =~ ^r[0-9]+\.([0-9a-f]+)$ ]]; then
   hash_len=${#BASH_REMATCH[1]}

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-#
-# gitlab-tag - Detect latest version from GitLab tags
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string
-#
-# Works with any GitLab instance (invent.kde.org, gitlab.com, etc.)
+# gitlab-tag - Print the newest version among the tags of a GitLab project, see
+# https://aurtomator.dev/strategies/#gitlab-tag
 
 set -euo pipefail
 
@@ -22,7 +17,7 @@ project=$(pkg_get "$pkg_file" .upstream.project)
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 
-# URL-encode the project path (e.g., group/project → group%2Fproject)
+# The API takes the project path URL-encoded, as group%2Fproject
 project_encoded="${project//\//%2F}"
 
 tags=$(http_get_json "https://${host}/api/v4/projects/${project_encoded}/repository/tags?per_page=100" |

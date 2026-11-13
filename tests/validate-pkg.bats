@@ -10,7 +10,7 @@ teardown() {
   teardown_test_env
 }
 
-# === Valid configs (should all pass) ===
+# === Valid configs ===
 
 @test "validate: github-release minimal config passes" {
   create_test_package "mypkg" "github-release" "upstream:
@@ -80,9 +80,8 @@ current: '$current'"
   done
 }
 
-# vercmp reads 1.4.0.r47.g0bbf5ad, 1.2.3 and 0 as newer than every
-# r<count>.<hash>, and r1234.g42cd4ac as older than r1234.42cd4ac of the
-# same commit
+# vercmp reads 1.4.0.r47.g0bbf5ad, 1.2.3 and 0 as newer than every r<count>.<hash>, and
+# r1234.g42cd4ac as older than r1234.42cd4ac of the same commit
 @test "validate: git-latest fails on a current of another form" {
   local current
   for current in 1.4.0.r47.g0bbf5ad 1.2.3 r1234.g42cd4ac 0; do
@@ -1205,7 +1204,7 @@ cooldown_days: $value"
   done
 }
 
-# git-tag and git-latest read their upstream with git, not with curl
+# git-tag and git-latest read their upstream with git and send no HTTP request
 @test "validate: upstream.max_answer_mb applies to the strategies that send HTTP requests" {
   create_test_package "mypkg" "git-tag" "upstream:
   url: https://example.com/repo.git

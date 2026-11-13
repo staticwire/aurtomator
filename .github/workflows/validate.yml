@@ -1,8 +1,7 @@
 name: Validate packages
 
-# Validates the packages of the calling repository with validate-pkg.sh
-# from aurtomator at job.workflow_sha. It runs on any trigger the calling
-# workflow picks.
+# Checks the packages of the calling repository with validate-pkg.sh of aurtomator at
+# job.workflow_sha, on any trigger the calling workflow picks
 on:
   workflow_call:
 
@@ -10,8 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  # Reads the pinned Arch image from ci-image/Dockerfile, where
-  # Dependabot updates its digest
+  # Reads the pinned Arch image from ci-image/Dockerfile, whose digest Dependabot updates
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -19,9 +17,8 @@ jobs:
       ref: ${{ steps.read.outputs.ref }}
 
     steps:
-      # With an empty ref, actions/checkout takes the default branch of a
-      # repository other than the one that triggered the run. The run would
-      # then use the code of main, and no step would fail.
+      # With an empty ref, actions/checkout takes the default branch of another repository,
+      # and the run goes on with that code without an error
       - name: Check the pin
         env:
           SHA: ${{ job.workflow_sha }}

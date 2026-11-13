@@ -58,9 +58,7 @@ write_srcinfo() {
     "pkgname = demo" >"$1"
 }
 
-# Helper: add a file to the AUR repo of demo and hand the new commit to the
-# prepared update as its base
-# Usage: aur_add_file <name> <content>
+# Helper: commit <name> with <content> to the AUR repo of demo; $PREPARED/base gets the new HEAD
 aur_add_file() {
   local work="$TEST_TMPDIR/aur-work-demo"
   printf '%s\n' "$2" >"$work/$1"
@@ -71,9 +69,8 @@ aur_add_file() {
   git -C "$AUR_REMOTE" rev-parse HEAD >"$PREPARED/base"
 }
 
-# Helper: makepkg that prints a fixed .SRCINFO, the given file or a single
-# pkgbase line, and namcap that finds nothing
-# Usage: mock_pkg_tools [.SRCINFO]
+# Helper: a makepkg that prints the given .SRCINFO, or "pkgbase = demo" without one, and a namcap
+# that exits 0
 mock_pkg_tools() {
   if [[ -n "${1:-}" ]]; then
     printf '#!/usr/bin/env bash\ncat %q\n' "$1" >"$MOCK_DIR/makepkg"
@@ -202,9 +199,8 @@ EOF
   chmod +x "$MOCK_DIR/makepkg" "$MOCK_DIR/updpkgsums" "$MOCK_DIR/namcap"
 }
 
-# Helper: jdk-temurin-ea-bin at 28+22 on the AUR, then at 28+23 with only the
-# arches given and the others in arch_out; the tools of mock_arch_tools
-# Usage: setup_arch_prepare [arch]...
+# Helper: jdk-temurin-ea-bin at 28+22 on the AUR and, with arches given, at 28+23 with only those
+# arches and the others in arch_out; then mock_arch_tools and mock_heads
 setup_arch_prepare() {
   local first arch yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   create_test_package jdk-temurin-ea-bin webpage-scrape "upstream:
@@ -645,10 +641,8 @@ current: '1.0.0'"
   [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
 }
 
-# Helper: the AUR at an old pkgver of a package with the given pkgver_dash,
-# whose source restores the dash, and the .SRCINFO makepkg prints for the
-# new pkgver in new.SRCINFO. Sets OLD_SUM and NEW_SUM, the checksums of the
-# two downloads.
+# Helper: the AUR at <old pkgver> of a package with <pkgver_dash> and a <source> that restores the
+# dash, new.SRCINFO for makepkg at <new pkgver>, and OLD_SUM and NEW_SUM of the two downloads
 # Usage: setup_dash_package <pkgver_dash> <source> <old pkgver> <old upstream version> <new pkgver> <new upstream version>
 setup_dash_package() {
   local dash="$1" source="$2" old="$3" old_up="$4" new="$5" new_up="$6"
@@ -724,10 +718,8 @@ EOF
   [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
 }
 
-# Helper: the AUR at 4.4215 of a package with pkgver_format: '4.%s', whose
-# source takes the build from ${pkgver#4.}, and the .SRCINFO makepkg prints
-# for 4.4216 in new.SRCINFO. Sets OLD_SUM and NEW_SUM, the checksums of the
-# two downloads.
+# Helper: the AUR at 4.4215 of a package with pkgver_format '4.%s' and a source from ${pkgver#4.},
+# new.SRCINFO for makepkg at 4.4216, and OLD_SUM and NEW_SUM of the two downloads
 setup_format_package() {
   create_test_package "demo" "webpage-scrape" "upstream:
   url: https://example.com/updates.json
@@ -889,8 +881,8 @@ current: '1.0.0'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" 'has("current_asset")')" = "false" ]
 }
 
-# Without the rule, a run that found the version the AUR has pushed it with
-# pkgrel 1 over the pkgrel of the AUR
+# Without the check, a run that finds the version the AUR has would push it with pkgrel 1 over
+# the pkgrel of the AUR
 @test "publish-pkg: refuses to lower the pkgrel of the version the AUR has" {
   setup_publish
   write_pkgbuild "$PREPARED/PKGBUILD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
@@ -1095,8 +1087,8 @@ current: '0.9.0'"
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
-# Helper: give the AUR copy and the prepared files of demo a provides line,
-# derived from pkgver, and hand the new AUR commit to the prepared update
+# Helper: add provides=("demo=${pkgver}") to the AUR copy and the prepared files of demo, and
+# commit the AUR copy as the base of the update
 # Usage: provides_from_pkgver <provides of the prepared .SRCINFO>
 provides_from_pkgver() {
   local work="$TEST_TMPDIR/aur-work-demo"
@@ -1146,9 +1138,8 @@ provides_from_pkgver() {
 
 # === verify-pkg.sh ===
 
-# Helper: a curl that logs its arguments to curl.args and writes
-# "source of <url>" to its -o file. While $TEST_TMPDIR/curl.fail exists it
-# fails as curl -f does on an HTTP error.
+# Helper: a curl that logs its arguments to curl.args and writes "source of <url>" to its -o file;
+# while $TEST_TMPDIR/curl.fail exists, it exits 22 as curl -f does on an HTTP error
 mock_downloads() {
   cat >"$MOCK_DIR/curl" <<EOF
 #!/usr/bin/env bash
@@ -1164,9 +1155,8 @@ EOF
   chmod +x "$MOCK_DIR/curl"
 }
 
-# Helper: the AUR at 1.0.0 with local.patch, and a prepared 1.1.0 in
-# $TEST_TMPDIR/out/demo whose checksums, SUM_REMOTE and SUM_LOCAL, match
-# the sources
+# Helper: the AUR at 1.0.0 with local.patch, and a prepared 1.1.0 in $TEST_TMPDIR/out/demo whose
+# checksums SUM_REMOTE and SUM_LOCAL match the sources
 # Usage: setup_verify [site that replaces https://example.com]
 setup_verify() {
   local site="${1:-https://example.com}"
@@ -1511,11 +1501,8 @@ tag_upstream() {
   git -C "$1" -c tag.gpgSign=false tag "$2"
 }
 
-# Helper: a repo standing in for the upstream git repo of demo, with tags
-# v1.0.0 and v1.1.0 at fixed dates, so that their archives are fixed too.
-# Its .gitattributes keeps ignored.txt out of git archive, unless the
-# attributes are turned off as makepkg does. GIT_SUM is what makepkg -g
-# prints for sha256sums of v1.1.0.
+# Helper: the upstream repo of demo; fixed tag dates keep GIT_SUM, makepkg -g of v1.1.0, fixed.
+# git archive leaves out ignored.txt by .gitattributes, and makepkg turns attributes off.
 make_upstream() {
   local work="$TEST_TMPDIR/upstream-work"
   git init -q -b main "$work"
@@ -1530,9 +1517,8 @@ make_upstream() {
   GIT_COMMIT=25463c6b9d6d29b0aafce9086418e06b77292dff
 }
 
-# Helper: put a source in place of the remote archive of setup_verify, in
-# the AUR repo and in the prepared files. VER stands for the version.
-# Usage: use_source <source>
+# Helper: put <source> in place of the remote archive of setup_verify in the AUR repo and the
+# prepared files, and commit the AUR repo; VER in <source> stands for the version
 use_source() {
   local work="$TEST_TMPDIR/aur-work-demo" pkgver='${pkgver}'
   sed -i "s|https://example.com/demo-[^\"]*\.tar\.gz|${1//VER/$pkgver}|" "$work/PKGBUILD" "$PREPARED/PKGBUILD"
@@ -2707,9 +2693,8 @@ current: '2.0.0'"
 
 # === check-all.sh time budgets ===
 
-# Helper: replace a script with a stub that starts a background sleep,
-# records its pid in $TEST_TMPDIR/<script>.child, and then hangs
-# Usage: hanging_script <script name>
+# Helper: replace <script name> with a stub that starts a background sleep, records its pid in
+# $TEST_TMPDIR/<script name>.child and hangs
 hanging_script() {
   rm -f "$TEST_TMPDIR/scripts/$1"
   cat >"$TEST_TMPDIR/scripts/$1" <<EOF
@@ -2807,10 +2792,8 @@ current: '1.0.0'"
 
 # === check-all.sh second pass ===
 
-# Helper: a check-update.sh that logs every package it checks to
-# $TEST_TMPDIR/checks, exits for <package> with the given codes, one per
-# call, and finds every package up to date otherwise; a sleep that logs its
-# argument to $TEST_TMPDIR/sleeps; the packages flaky and steady
+# Helper: packages flaky and steady, a sleep that logs to $TEST_TMPDIR/sleeps, and a check-update.sh
+# that logs to $TEST_TMPDIR/checks and exits for <package> with the next code, 0 otherwise
 # Usage: flaky_check <package> [exit code]...
 flaky_check() {
   local pkg="$1"
@@ -2898,10 +2881,8 @@ EOF
 
 # === check-all.sh: hosts that did not answer ===
 
-# Helper: packages that check-update.sh checks with one request each, from
-# lines "<package> <hang|sleep|git|http> <url>"; hang starts the request and
-# waits, sleep waits outside a request. curl answers a host of silent-hosts
-# with nothing and one of refused-hosts with a refusal, and git logs its URL.
+# Helper: packages from lines "<package> <hang|sleep|git|http> <url>", one request each: hang waits
+# in the request, sleep outside it; curl is silent to silent-hosts and refuses refused-hosts
 host_checks() {
   local name
   printf '%s\n' "$@" >"$TEST_TMPDIR/plan"
@@ -3985,7 +3966,7 @@ make_unpushable_repo() {
   [[ "$output" == *"Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array"* ]]
 }
 
-# bash reads an escaped space there, so the # starts a word, not a comment
+# bash reads an escaped space there, so the # is part of a word
 @test "check_prepared_pkgbuild: rejects a backslash before a hash sign in a checksum array" {
   write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('SKIP' 'SKIP')"
   write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('SKIP' \\ # c
@@ -4543,9 +4524,8 @@ write_srcinfo_sources() {
   [ "$status" -eq 0 ]
 }
 
-# A dependency of a fixed version stays on every bump
-# The 0.1 of pkgver after a digit in libbar-10.1, before a digit in
-# libbaz-0.12 and after a dot in libqux-1.0.1
+# The 0.1 of pkgver sits after a digit in libbar-10.1, before a digit in libbaz-0.12 and after a
+# dot in libqux-1.0.1
 @test "check_prepared_srcinfo: keeps a version that is part of another number" {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 0.1 "https://example.com/demo-0.1.tar.gz" "$H1" \
     "https://example.com/deps/libbar-10.1.tar.gz" "$H2" "https://example.com/deps/libbaz-0.12.tar.gz" "$H2" \
@@ -4577,9 +4557,8 @@ write_srcinfo_sources() {
   [ "$status" -eq 0 ]
 }
 
-# Helper: .SRCINFO with the given pkgver, a common source, and for each
-# architecture its arch line and a source with its sha256sum. An empty
-# source gives the arch line alone.
+# Helper: .SRCINFO with <pkgver>, a common source, and for each arch its arch line and a source with
+# its sha256sum; an empty source gives the arch line alone
 # Usage: write_srcinfo_archs <path> <pkgver> <common source> <common sum> [<arch> <source> <sha256sum>]...
 write_srcinfo_archs() {
   local path=$1 pkgver=$2 common=$3 common_sum=$4 i
@@ -4789,9 +4768,8 @@ write_srcinfo_archs() {
   [ "$status" -eq 0 ]
 }
 
-# Helper: .SRCINFO of a nightly package with two sources, the first saved
-# under <name>. <sums> gives the checksum arrays as array=checksum pairs,
-# with the checksum of the first source; the second source has $H2.
+# Helper: .SRCINFO of a nightly package with the first of two sources saved under <name>; <sums>
+# holds array=checksum pairs for the first source, and the second source has $H2
 # Usage: write_srcinfo_nightly <path> <pkgver> <name> <sums> [url]
 write_srcinfo_nightly() {
   local url="${5:-https://example.com/releases/download/nightly/demo-linux.tar.gz}"
@@ -5243,11 +5221,8 @@ write_asset_dirs() {
   [[ "$output" == *"A rebuild needs an integer pkgrel in the AUR PKGBUILD, it has 1.1"* ]]
 }
 
-# Helper: the AUR at <old pkgver> with <old _deb> and <old pkgrel> for the
-# package of write_asset_pkgbuild, its YAML with asset_var and
-# pkgver_dash: '', and the .SRCINFO makepkg prints for <pkgver>, <_deb>
-# and <pkgrel>. Sets OLD_SUM and NEW_SUM, the checksums of the two
-# downloads.
+# Helper: the AUR at <old pkgver>, <old _deb> and <old pkgrel> of the package of write_asset_pkgbuild,
+# its YAML with asset_var and pkgver_dash: '', new.SRCINFO for makepkg, OLD_SUM and NEW_SUM
 # Usage: setup_asset_package <old pkgver> <old _deb> <old pkgrel> <pkgver> <_deb> <pkgrel>
 setup_asset_package() {
   create_test_package "demo" "github-tag" "upstream:

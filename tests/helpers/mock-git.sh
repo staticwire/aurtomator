@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Mock git for BATS tests
-# Answers ls-remote with predefined tags based on the repository URL and
-# runs the real git for every other command. Each ls-remote appends its
-# arguments to $TEST_TMPDIR/ls-remote.args and its GIT_* variables to
-# $TEST_TMPDIR/ls-remote.env.
+# Mock git for the bats tests: ls-remote answers fixed tags by URL, every other command runs real git
 
 if [[ "${1:-}" != ls-remote ]]; then
   exec /usr/bin/git "$@"

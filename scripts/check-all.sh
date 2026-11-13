@@ -7,17 +7,16 @@
 # Without a mode: only checks and reports
 # With --update: runs update-pkg.sh for each outdated package
 # With --prepare <dir>: runs update-pkg.sh --prepare <dir>/prepared for each
-#   package the check run before it found outdated, without running the
-#   strategies, and copies the statuses to <dir>/status
+#   package the check run found outdated, and copies the statuses to <dir>/status
 # With --verify <dir>: runs verify-pkg.sh for each package in <dir>/prepared
-#   and takes out the ones that fail, without running the strategies
-# With --publish <dir>: keeps the statuses of the check run before it, and
-#   runs publish-pkg.sh for each package that run found outdated, with the
-#   version that run found and without running the strategies
-# With --dry-run: runs update-pkg.sh or publish-pkg.sh in dry-run mode
+#   and removes the ones that fail
+# With --publish <dir>: runs publish-pkg.sh for each package the check run
+#   found outdated, with the version it found, and keeps its other statuses
+# --prepare, --verify and --publish run no strategy.
+# With --dry-run: runs update-pkg.sh or publish-pkg.sh with --dry-run
 #
-# Writes per-package status to .status/ of the data root (AURTOMATOR_DATA_DIR)
-# for README generation and auto-issue creation.
+# Writes the status of each package to .status/ under AURTOMATOR_DATA_DIR,
+# where update-readme.sh and the issue steps read it.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -44,10 +43,8 @@ RECHECK_DELAY="${AURTOMATOR_RECHECK_DELAY:-60}"
 # The UTC day of the run, for the cooldown
 TODAY=$(date -u +%F)
 
-# Runs a per-package script within a budget. timeout runs it in a process
-# group of its own and ends the whole group, makepkg, git and curl below it
-# included. Such a group cannot read the terminal, where git and ssh may ask
-# for a passphrase, so --update, which runs on a terminal, has no budget.
+# Runs a command under timeout, which ends its children as well. --update runs
+# it bare: under timeout git and ssh cannot read a passphrase from the terminal.
 # Args: $1=budget in seconds, the command after it
 bounded() {
   local budget="$1"
@@ -60,7 +57,7 @@ bounded() {
 }
 
 # Prints the error of a per-package script: its stderr, or the budget it ran out
-# of and the URL $4 of a request in flight. $1=exit code, $2=stderr, $3=budget
+# of and the URL $4 of a request in flight. $1=exit code, $2=stderr file, $3=budget
 script_error() {
   case "$1" in
     124 | 137) echo "${4:+$4: }timed out after $3 s" ;;
@@ -68,8 +65,8 @@ script_error() {
   esac
 }
 
-# Ends the request of a check that exited with $1. After a timeout it prints the
-# URL and remembers the host when one HEAD request of 10 s gets no status either
+# Clears the request in flight of a check that exited with $1. After a timeout it
+# prints the URL, and remembers the host when a HEAD request of 10 s gets no status
 request_done() {
   local url check rc=0 code
   host_memory || return 0
@@ -112,7 +109,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '3,20p' "$0"
+      sed -n '3,19p' "$0"
       exit 0
       ;;
     *)
@@ -133,11 +130,10 @@ if [[ "$MODE" == check || "$MODE" == update ]]; then
   : >"$AURTOMATOR_HOSTS_DIR/request"
 fi
 
-# Status directory for per-package results
 STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
 
-# --prepare, --verify and --publish run no strategy and take the statuses of
-# the check run, read here before anything else runs
+# --prepare, --verify and --publish run no strategy: they take the statuses of
+# the check run, read here before the run clears .status/
 declare -A CHECKED=()
 if [[ "$MODE" == "prepare" || "$MODE" == "verify" || "$MODE" == "publish" ]] && [[ ! -L "$STATUS_DIR" ]]; then
   for status_file in "$STATUS_DIR"/*; do
@@ -209,10 +205,8 @@ fi
 rm -rf "$STATUS_DIR"
 mkdir -p "$STATUS_DIR"
 
-# The version of aurtomator, and in a mode that runs the strategies its
-# latest release, for the README line and its issue. A failed request
-# records nothing, so it closes no issue. --prepare and --publish carry the
-# record of the check run.
+# A failed request for the latest release records nothing, so it closes no
+# issue; --prepare and --publish carry the record of the check run
 AURTOMATOR_VERSION=$(aurtomator_version)
 [[ -z "$AURTOMATOR_VERSION" ]] || log_info "aurtomator $AURTOMATOR_VERSION"
 if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
@@ -228,8 +222,8 @@ elif [[ -n "$AURTOMATOR_VERSION" ]]; then
   fi
 fi
 
-# The update failure that prepare or verify recorded for an outdated package,
-# or one of its own when they handed over nothing. Nothing else is taken.
+# Prints the update_failed status that prepare or verify wrote for package $1,
+# or one of its own when there is none; it ignores any other status there
 handed_failure() {
   local status_dir="${WORK_DIR}/status"
   local file="${status_dir}/$1"
@@ -248,11 +242,9 @@ handed_failure() {
 updated=0
 checked=0
 
-# The version the check run found for a package, printed the way
-# check-update.sh prints it: nothing when up to date, an error on failure.
-# A rebuild prints the version it rebuilds. A skipped downgrade or version
-# jump, a held update and a pending asset print their version, and the
-# checks below skip, hold or keep it pending again.
+# Prints the version the check run found, as check-update.sh prints it; it prints
+# a skipped, held or pending version too, and the checks below apply to it again
+# Args: $1=package name
 checked_version() {
   local status="${CHECKED[$1]:-}"
   case "$status" in
@@ -288,14 +280,10 @@ record_alerts() {
   [[ -z "$2" ]] || awk -v p="$1" '{ print p "\t" $0 }' <<<"$2" >>"${STATUS_DIR}/_alerts"
 }
 
-# Sets ASSET_VALUE to the value that a release asset name holds for a
-# version of a package with upstream.asset_regex, and records it in
-# _assets: check-asset.sh finds it in a mode that runs the strategies,
-# and --prepare and --publish take the one the check run recorded. A
-# pending value and a failure get their status here, and return 1. A
-# failure that comes fast goes on the list for the second pass, as a
-# failed check does.
+# Sets ASSET_VALUE from check-asset.sh, or from the check run in --prepare and
+# --publish, and records it in _assets. A fast failure goes on the second pass.
 # Args: $1=package file, $2=package name, $3=version, $4=pass, 1 or 2
+# Returns: 1 after writing the status of a pending value or a failure
 find_asset() {
   local rc=0 err_file err in_flight
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
@@ -388,7 +376,7 @@ find_arches() {
   if ((rc == 0)) && arch_record_ok "$first" "$second"; then
     [[ -z "$err" ]] || printf '%s\n' "$err" >&2
     ARCH_OUT=$first
-    # A line with neither tells prepare to put back every arch of arch_out
+    # A line with no arch and no wait tells prepare to put back every arch of arch_out
     if [[ -n "$first$second" || -n "$(pkg_get "$1" '.arch_out // {} | keys | .[]')" ]]; then
       printf '%s\t%s\t%s\t%s\n' "$2" "$3" "$first" "$second" >>"${STATUS_DIR}/_arches"
     fi
@@ -403,9 +391,8 @@ find_arches() {
   return 1
 }
 
-# Checks one package, then updates, prepares or publishes it as the mode
-# says, and writes its status. A check that fails fast in a mode that runs
-# the strategies goes on the list for the second pass.
+# Checks one package, then updates, prepares or publishes it by the mode and
+# writes its status. A strategy check that fails fast goes on the second pass.
 # Args: $1=package file, $2=pass, 1 or 2
 run_package() {
   local pkg_file="$1" pass="$2"
@@ -421,9 +408,8 @@ run_package() {
     fi
     return
   fi
-  # --publish keeps the status of the check run and publishes only a package
-  # that run found outdated. Only package names from packages/ reach a path,
-  # never a name from WORK_DIR.
+  # --publish keeps the status of the check run and publishes only what it found
+  # outdated; only names from packages/ reach a path, never a name from WORK_DIR
   if [[ "$MODE" == "publish" ]]; then
     found="${CHECKED[$pkg_name]:-}"
     case "$found" in
@@ -475,7 +461,6 @@ run_package() {
     check_cmd=(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-update.sh" "$pkg_name")
   fi
 
-  # Capture stderr separately for error reporting
   err_file=$(mktemp)
   check_rc=0
   latest=$("${check_cmd[@]}" 2>"$err_file") || check_rc=$?
@@ -492,9 +477,8 @@ run_package() {
   fi
   rm -f "$err_file"
 
-  # A package with asset_regex that is up to date checks the asset value of
-  # its version as well: a value other than current_asset is a rebuild of
-  # that version. --prepare and --publish get a rebuild as its version.
+  # An up-to-date package with asset_regex gets a rebuild when the asset value of
+  # its version is not current_asset; --prepare and --publish read it as a version
   current=$(pkg_get "$pkg_file" '.current // ""')
   asset_regex=$(pkg_get "$pkg_file" '.upstream.asset_regex // ""')
   ASSET_VALUE=""
@@ -524,8 +508,7 @@ run_package() {
     return
   fi
 
-  # Detect downgrade: current from YAML is newer than latest from upstream.
-  # vercmp prints -1/0/1 to stdout, always exits 0.
+  # vercmp prints -1, 0 or 1 and exits 0
   is_downgrade=false
   if [[ -n "$current" ]]; then
     cmp=$(vercmp "$current" "$latest")
@@ -534,9 +517,8 @@ run_package() {
     fi
   fi
 
-  # A lower version reaches the AUR only for a package that allows it. The
-  # latest release of a GitHub project can be a maintenance release of an
-  # older line.
+  # The latest release of a GitHub project can be a maintenance release of an
+  # older line, so a lower version needs allow_downgrade
   if [[ "$is_downgrade" == "true" ]] &&
     [[ "$(pkg_get "$pkg_file" '.allow_downgrade // false')" != "true" ]]; then
     log_warn "$pkg_name: DOWNGRADE detected $current → $latest, skipped: allow_downgrade is not set"
@@ -544,10 +526,8 @@ run_package() {
     return
   fi
 
-  # A first number that grows by two digits or more is more often another
-  # version scheme than a release: build tags next to release tags, or a
-  # build number in place of 4.<build>. It reaches the AUR only for a
-  # package that allows it.
+  # A first number that grows by two digits or more can be another version scheme,
+  # such as build tags beside release tags, so it needs allow_version_jump
   if version_jump "$current" "$latest" &&
     [[ "$(pkg_get "$pkg_file" '.allow_version_jump // false')" != "true" ]]; then
     log_warn "$pkg_name: version jump $current → $latest, skipped: allow_version_jump is not set"
@@ -585,7 +565,7 @@ run_package() {
     return
   fi
 
-  # The cooldown holds every push until some days after the last one
+  # cooldown_days holds every push back until that many days after the last one
   err_file=$(mktemp)
   check_rc=0
   push_day=$(cooldown_until "$pkg_file" 2>"$err_file") || check_rc=$?
@@ -704,7 +684,6 @@ if [[ "$MODE" == "publish" ]]; then
   done
 fi
 
-# Count the failures among the statuses written
 errors=0
 for status_file in "$STATUS_DIR"/*; do
   [[ -f "$status_file" ]] || continue

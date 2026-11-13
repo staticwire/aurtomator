@@ -10,8 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  # Reads the pinned Arch image from ci-image/Dockerfile, where
-  # Dependabot updates its digest
+  # Reads the pinned Arch image from ci-image/Dockerfile, whose digest Dependabot updates
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -60,9 +59,8 @@ jobs:
       # Checks the workflows, and the run blocks with shellcheck
       - name: actionlint
         run: actionlint
-      # actionlint does not check the run blocks of a composite action. The
-      # default severity fails an unquoted variable, as actionlint does in a
-      # workflow. yq comes with the runner image.
+      # actionlint skips the run blocks of a composite action, and the default severity of
+      # shellcheck fails an unquoted variable, as actionlint does in a workflow
       - name: shellcheck the actions
         run: |
           for action in .github/actions/*/action.yml; do
@@ -115,12 +113,8 @@ jobs:
     permissions:
       contents: read
 
-  # Runs the update pipeline with aurtomator itself as the packages
-  # repository, where no package exists: prepare, verify and publish are
-  # skipped, and the jobs that run check that the two checkouts, the
-  # action path, the artifacts and the issues job work. A pull request
-  # from a fork gets a read-only token, so the job runs only for pushes
-  # and pull requests from this repository.
+  # Runs the pipeline with aurtomator as a packages repository without packages, which checks the
+  # checkouts, the action path, the artifacts and the issues job; a fork PR gets a read-only token
   pipeline:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     uses: ./.github/workflows/check-updates.yml
@@ -128,10 +122,8 @@ jobs:
       contents: write
       issues: write
 
-  # Merges a Dependabot pull request that changes only the CI image, after
-  # lint, test, validate, pipeline and ci-ok passed, so the two reusable
-  # workflows ran in the new image first. Off unless the repository
-  # variable CI_IMAGE_AUTO_MERGE is true.
+  # Merges a Dependabot pull request that changes only the CI image, once lint, test, validate,
+  # pipeline and ci-ok passed; off unless the repository variable CI_IMAGE_AUTO_MERGE is true
   merge-image:
     needs: [lint, test, validate, pipeline, ci-ok]
     if: >-

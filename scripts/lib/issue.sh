@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 #
-# issue.sh - Text of the issues the update workflow opens, and the hosts
-# whose failed checks share one
+# issue.sh - The texts of the issues of the workflow, and the hosts whose failed checks share one
 #
 # Sourced by lib.sh.
 
-# Body of the issue opened for a newer release of aurtomator
-# Args: $1=_upstream in .status/, holding newer: and the release; $2=URL
-#       of the run
+# Body of the issue of a newer release of aurtomator, from _upstream file $1, for run URL $2
 upstream_issue_body() {
   local release setup
   release=$(<"$1")
@@ -21,13 +18,9 @@ upstream_issue_body() {
   printf 'aurtomator %s is out, and this repository runs %s.\n\nTo update: Insights > Dependency graph > Dependabot > Recent update jobs > Check for updates. Dependabot opens the pull request that moves the pin. The first run on the new pin also updates `aurtomator.sh` to this release.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nManual update: %s\nRun: %s\n\nAuto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$setup" "$2"
 }
 
-# Body of the issue opened for an update an alert fired on: a held update,
-# or a published one with a notice. The notes come from _alerts, which
-# builder writes beside the status file, one line per fired alert: the
-# package, hold or notice, and the note, split by tabs, so they go into a
-# code block. clean_statuses checked the version, so a code span holds it.
-# Args: $1=status file in .status/, named after the package, holding
-#       held:, updated: or downgrade: and the version; $2=URL of the run
+# Body of the issue of a held update, or of a published one with a notice. The notes come from
+# _alerts, which builder writes, so they go into a code block; clean_statuses checked the version
+# Args: $1=status file in .status/, named after the package, $2=URL of the run
 # The backticks are Markdown code
 # shellcheck disable=SC2016
 alert_issue_body() {
@@ -59,10 +52,8 @@ _code_block() {
   printf '%s\n%s\n%s\n' "$fence" "$text" "$fence"
 }
 
-# Body of the issue opened for a failed package. The error holds text from
-# upstream, such as a rejected tag name, so it goes into a code block.
-# Args: $1=status file in .status/, named after the package, holding
-#       check_failed: ... or update_failed: ...; $2=URL of the run
+# Body of the issue of a failed package; the error holds text from upstream, so it goes into a
+# code block. Args: $1=status file in .status/, named after the package, $2=URL of the run
 failure_issue_body() {
   local status kind
   status=$(<"$1")
@@ -73,10 +64,8 @@ failure_issue_body() {
     "${1##*/}" "${kind//_/ }" "$2" "$(_code_block "${status#*: }")"
 }
 
-# Comment of an issue that a run closes. The status can hold the error of a
-# failure, so it goes into a code block as that error does.
-# Args: $1=status file in .status/, named after the package; $2=URL of the
-#       run
+# Comment on an issue that a run closes; the status can hold an error, so it goes into a code
+# block. Args: $1=status file in .status/, named after the package, $2=URL of the run
 close_comment() {
   local status
   status=$(<"$1")
