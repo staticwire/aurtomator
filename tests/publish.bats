@@ -4960,6 +4960,28 @@ write_srcinfo_arch() {
   [[ "$output" == *"PKGBUILD in the AUR repo is missing, a symlink or not a regular file"* ]]
 }
 
+# The CI image sets LANG=C.UTF-8, where grep leaves out a line with a byte that is no UTF-8
+@test "check_prepared_files: refuses an added line with a byte that is no UTF-8" {
+  local p="$TEST_TMPDIR/prepared/PKGBUILD"
+  mkdir "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared"
+  write_pkgbuild "$TEST_TMPDIR/aur/PKGBUILD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
+  write_srcinfo "$TEST_TMPDIR/aur/.SRCINFO" 1.0.0 1 "$H1" "$H2"
+  write_pkgbuild "$p" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  head -n -1 "$p" >"$p.new"
+  printf '  echo added # \xff\n}\n' >>"$p.new"
+  mv "$p.new" "$p"
+  write_srcinfo "$TEST_TMPDIR/prepared/.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  LC_ALL=C.UTF-8 run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+}
+
+@test "pkgbuild_arch_words: refuses a second arch line with a byte that is no UTF-8" {
+  printf '%s\n' "pkgname=demo" "arch=('x86_64')" $'arch+=(\'aarch64\') # \xff' >"$TEST_TMPDIR/PKGBUILD"
+  LC_ALL=C.UTF-8 run pkgbuild_arch_words "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 1 ]
+}
+
 # === values from release asset names ===
 
 # Values of _deb, the part of a liquidsoap asset name past the package
