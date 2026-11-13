@@ -22,10 +22,8 @@ require_bashcov() {
   skip "bashcov not installed"
 }
 
-# Helper: a project with demo.sh and demo.bats. demo.sh runs its line 4
-# 2000 times and traces 10 KB each time. The one test of demo.bats links
-# demo.sh into its test directory, as the suite links the scripts, and runs
-# the body given in $1.
+# Helper: a project whose demo.sh runs its line 4 2000 times with 10 KB of trace each, and whose
+# one test links demo.sh into its test directory, as the suite links the scripts, and runs $1
 make_fixture() {
   cat >"$FIXTURE/demo.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -50,9 +48,8 @@ teardown() {
 EOF
 }
 
-# Helper: bashcov through bashcov-bats.sh on the fixture. SimpleCov reads
-# .simplecov from the current directory. The suite may itself run under
-# bashcov-bats.sh, so the variable it sets for the tests is cleared here.
+# Helper: bashcov through bashcov-bats.sh, run in the fixture for its .simplecov and without the
+# AURTOMATOR_KEEP_TEST_DIRS that bashcov-bats.sh sets when the suite itself runs under it
 run_bashcov() {
   run env -u AURTOMATOR_KEEP_TEST_DIRS TMPDIR="$TEST_TMPDIR/tmp" bash -c '
     cd "$1" && timeout 120 bashcov --skip-uncovered --root "$1" -- "$2" demo.bats' \
@@ -72,9 +69,8 @@ demo_hits() {
   [ ! -e "$TEST_TMPDIR" ]
 }
 
-# Run as a child, demo.sh traces each line once, while bats traces a line
-# of the test twice. 20 MB of trace in a burst is more than bashcov reads in
-# time from a pipe that Ruby opens in non-blocking mode.
+# 20 MB of trace in a burst is more than bashcov reads in time from a pipe that Ruby opens in
+# non-blocking mode. As a child, demo.sh traces each line once; bats traces a test line twice.
 @test "bashcov-bats.sh: bashcov counts every run of a line" {
   require_bashcov
   make_fixture '"$TEST_TMPDIR/demo.sh"'

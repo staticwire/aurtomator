@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
 #
-# lib.sh - Shared functions for aurtomator scripts
+# lib.sh - Sources the files of lib/ for the scripts; a strategy sources lib/common.sh alone
 #
 # Usage: source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# Requires: yq (https://github.com/mikefarah/yq)
-#
-# The functions live in lib/, one file per concern. A strategy sources
-# lib/common.sh alone.
 
 set -euo pipefail
 

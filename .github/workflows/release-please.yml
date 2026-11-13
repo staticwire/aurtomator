@@ -8,19 +8,16 @@ permissions:
   contents: read
 
 jobs:
-  # Opens the release PR, which writes VERSION, and on its merge tags the
-  # release. A fork or a template copy carries this file too, so the job
-  # runs only in the upstream repository.
+  # Opens the release PR, which writes VERSION, and tags the release at its merge; it runs only in
+  # the upstream repository, since forks and template copies carry this file too
   release-please:
     if: github.repository == 'staticwire/aurtomator'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
-      # GitHub runs the CI of a pull request opened with the workflow token
-      # only after someone with write access approves it, and main requires
-      # that CI. A pull request opened with the token of the release GitHub
-      # App runs it at once.
+      # GitHub runs the CI of a pull request opened with the workflow token only after an approval,
+      # and main requires that CI; a pull request of the release App runs it at once
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app-token
         with:

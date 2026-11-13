@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-#
-# gitea-tag - Detect latest version from Gitea/Forgejo/Codeberg tags
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string
-#
-# Works with any Gitea/Forgejo instance (codeberg.org, etc.)
+# gitea-tag - Print the newest version among the tags of a Gitea or Forgejo project, see
+# https://aurtomator.dev/strategies/#gitea-tag
 
 set -euo pipefail
 

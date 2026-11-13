@@ -54,7 +54,7 @@ runs:
           exit 1
         fi
         install -d -m 0700 "$WORK"
-        # The regular files of the expected names, never a link
+        # Copies $1 into $WORK when it is a regular file, never a link
         take() {
           [[ -f "$1" && ! -L "$1" ]] || return 0
           install -D -m 0644 "$1" "$WORK/$1"
@@ -98,11 +98,8 @@ runs:
 
         read -ra check_args <<<"$ARGS"
         keep="GITHUB_REPOSITORY${KEEP_ENV:+,$KEEP_ENV}"
-        # The runner reads ::cmd:: at the start of a line and ##[cmd]
-        # anywhere in it as a workflow command. It ignores both between
-        # stop-commands and the token, and the token stays in this shell.
-        # cat ends only when no process of builder holds the pipe, so
-        # nothing builder prints comes after the token.
+        # The runner ignores workflow commands until it reads the token, which builder never sees.
+        # cat ends when no process of builder holds the pipe, so the token comes last.
         token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
         echo "::stop-commands::$token"
         rc=0

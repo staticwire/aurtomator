@@ -3,7 +3,6 @@
 # check-update.sh - Check a single package for upstream updates
 #
 # Usage: ./scripts/check-update.sh <package-name>
-#        ./scripts/check-update.sh my-package
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -15,7 +14,6 @@ readonly PKG_NAME="${1:?Usage: check-update.sh <package-name>}"
 PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
 
-# Read package config
 strategy=$(pkg_get "$PKG_FILE" .strategy)
 current=$(pkg_get "$PKG_FILE" '.current // ""')
 dash=$(pkgver_dash "$PKG_FILE")
@@ -24,7 +22,6 @@ format=$(pkg_get "$PKG_FILE" '.pkgver_format // ""')
 MAX_ANSWER_MB=$(max_answer_mb "$PKG_FILE") || exit 1
 export MAX_ANSWER_MB
 
-# Run strategy
 strategy_script="${AURTOMATOR_DIR}/strategies/${strategy}.sh"
 if [[ ! -x "$strategy_script" ]]; then
   log_err "Strategy not found or not executable: $strategy_script"
@@ -60,7 +57,7 @@ fi
 if [[ -z "$current" ]]; then
   log_warn "$PKG_NAME: no current version set, latest is $latest"
 else
-  # vercmp prints -1/0/1 to stdout, always exits 0. Use stdout value.
+  # vercmp prints -1, 0 or 1 and exits 0
   cmp=$(vercmp "$current" "$latest")
   if [[ "$cmp" -gt 0 ]]; then
     log_warn "$PKG_NAME: DOWNGRADE $current → $latest"
@@ -69,5 +66,5 @@ else
   fi
 fi
 
-# Output for scripting: print latest version on stdout
+# stdout holds the version alone
 echo "$latest"

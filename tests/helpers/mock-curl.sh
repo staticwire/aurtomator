@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Mock curl for BATS tests
-# Reads URL from args, returns predefined responses based on URL patterns
-#
-# IMPORTANT: Specific patterns MUST come before wildcard patterns
-# to avoid shellcheck SC2221/SC2222 (pattern ordering).
+# Mock curl for the bats tests: answers by the pattern the URL matches.
+# A specific pattern comes before the wildcard that covers it, or shellcheck reports SC2221/SC2222.
 
 # The URL is the last argument. curl takes the last -w.
 write_out=""
@@ -70,9 +67,8 @@ case "$url" in
   *crates.io/api/v1/crates/null-crate)
     echo '{"crate": {"max_stable_version": null}}'
     ;;
-  # Repology: the AUR alone is newest, as for bluemail, and a second AUR
-  # package lags behind it. vercmp puts 1.140.10 above 1.140.9, a string
-  # sort does not.
+  # Repology: the AUR alone is newest, and a second AUR package lags behind it.
+  # vercmp puts 1.140.10 above 1.140.9, a string sort does not.
   *repology.org/api/v1/project/aur-ahead)
     echo '[{"repo": "aur", "status": "newest", "version": "1.143.44"}, {"repo": "aur", "status": "outdated", "version": "1.142.0"}, {"repo": "nix_stable_24_05", "status": "outdated", "version": "1.140.9"}, {"repo": "nix_unstable", "status": "outdated", "version": "1.140.10"}]'
     ;;
@@ -236,9 +232,8 @@ case "$url" in
   *api.github.com/repos/*/releases/tags/nightly)
     printf '{"tag_name": "nightly", "body": "NVIM v0.12.0-dev+2713+g925e9e8722\\nSome other text", "published_at": "2026-03-27T05:43:19Z"}'
     ;;
-  # Pattern B with a regex, as servo/servo-nightly-builds: the rc releases
-  # come first, the API order is not the publish order, and a draft holds
-  # no published_at
+  # Pattern B with a regex, as in servo/servo-nightly-builds: rc releases first, an API order that
+  # differs from the publish order, and a draft without published_at
   *"api.github.com/repos/dated-nightly/repo/releases?per_page=100&page=1")
     echo '[{"tag_name": "v0.7.0-rc1", "published_at": "2026-10-01T20:28:19Z"}, {"tag_name": "2026-10-20", "published_at": "2026-10-21T00:00:29Z"}, {"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z"}, {"tag_name": "2026-10-22", "published_at": null}, {"tag_name": "2026-10-19", "published_at": "2026-10-19T23:28:58Z"}]'
     ;;
@@ -419,11 +414,8 @@ case "$url" in
     printf '[{"tag_name": "v1.%s.0", "prerelease": false, "draft": false}]\n' "${url##*page=}"
     ;;
 
-  # Releases of savonet/liquidsoap. v2.4.6 has builds for two OCaml
-  # versions, v2.5.0-rc1 for one. MOCK_RELEASE_AGE gives the hours since
-  # v2.5.0-rc1 was published, 48 by default, MOCK_RELEASE_DATE the date
-  # itself, and MOCK_ASSETS its asset names. MOCK_RELEASE_STATUS=500 fails
-  # the request.
+  # Releases of savonet/liquidsoap: v2.4.6 with builds for two OCaml versions, v2.5.0-rc1 for one.
+  # MOCK_RELEASE_AGE (hours), MOCK_RELEASE_DATE, MOCK_ASSETS and MOCK_RELEASE_STATUS set v2.5.0-rc1.
   *api.github.com/repos/asset-owner/asset-repo/releases/tags/v2.4.6)
     printf '{"tag_name": "v2.4.6", "published_at": "2026-10-09T13:47:40Z", "assets": [%s]}\n' \
       '{"name": "liquidsoap_2.4.6-debian-forky-ocaml4.14.2-3_amd64.deb"}, {"name": "liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb"}'

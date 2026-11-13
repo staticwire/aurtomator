@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
-#
-# kde-tarball - Detect latest version from a directory on download.kde.org
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string (e.g., "1.0.1")
-#
-# The KDE download server lists tarballs as {project}-{version}.tar.xz.
-# Plasma, Frameworks, Gear and krita keep a directory per version or per
-# series instead, Gear with the tarballs under src/ in it: the strategy
-# also reads the newest such directory and takes the highest version.
-#
-# upstream.project: tarball name (default: the package name)
-# upstream.path:    directory on download.kde.org (default: stable/{project})
+# kde-tarball - Print the newest version of a tarball on download.kde.org, see
+# https://aurtomator.dev/strategies/#kde-tarball
 
 set -euo pipefail
 
@@ -27,8 +16,7 @@ project=$(pkg_get "$pkg_file" '.upstream.project // .name')
 path=$(pkg_get "$pkg_file" '.upstream.path // ""')
 url="https://download.kde.org/${path:-stable/${project}}/"
 
-# Prints the listing of a directory, or exits with the URL
-# Args: $1=directory URL
+# Print the listing of directory URL $1, or exit with the URL
 listing() {
   http_get "$1" || {
     echo "Failed to fetch $1" >&2
@@ -36,9 +24,8 @@ listing() {
   }
 }
 
-# Prints the version of every {project}-{version}.tar.xz in a listing.
-# \Q...\E makes a dot or a plus in the name match itself.
-# Args: $1=listing
+# Print the version of every {project}-{version}.tar.xz in listing $1; \Q...\E makes a dot or
+# a plus in the name match itself
 tarball_versions() {
   grep -oP "\Q${project}\E-\K[0-9]+\.[0-9]+(\.[0-9]+)*(?=\.tar\.xz\")" <<<"$1" || true
 }

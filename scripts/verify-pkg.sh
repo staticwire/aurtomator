@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
 #
-# verify-pkg.sh - Check the checksums of an update that update-pkg.sh --prepare made
-#
-# Clones the AUR repo anonymously and checks the prepared PKGBUILD and
-# .SRCINFO against it as publish-pkg.sh does. Then downloads the remote
-# sources and compares every checksum with its source. Never sources the
-# PKGBUILD and never runs makepkg: the prepared files are untrusted.
-#
-# With --arch-out <arches>: the arches out after the update, from the check
-# run, so arch=() may change as update-pkg.sh --arch-out changes it
+# verify-pkg.sh - Check the checksums of an update that update-pkg.sh --prepare made against its
+# sources, after the checks of publish-pkg.sh; it never sources the PKGBUILD or runs makepkg
 #
 # Usage: ./scripts/verify-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>]
-#
-# Exit codes: 0 verified, 1 failed,
-#             3 the AUR moved since the update was prepared
+# Exit codes: 0 verified, 1 failed, 3 the AUR moved since the prepare
 
 set -euo pipefail
 # shellcheck source=lib.sh

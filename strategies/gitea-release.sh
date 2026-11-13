@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-#
-# gitea-release - Detect latest version from Gitea/Forgejo/Codeberg releases
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string
-#
-# Works with any Gitea/Forgejo instance (codeberg.org, etc.). With
-# upstream.tag_version_regex it reads the release list, up to 10 pages of
-# 50 releases, in place of /releases/latest.
+# gitea-release - Print the version of the latest release of a Gitea or Forgejo project, see
+# https://aurtomator.dev/strategies/#gitea-release
 
 set -euo pipefail
 

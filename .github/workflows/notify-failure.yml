@@ -1,9 +1,7 @@
 name: Notify Failed Runs
 
-# The issues of the packages come from the issues job of check-updates.yml,
-# which runs once check passed. A run with a failed job gets this one issue.
-# A job of the calling workflow runs this workflow after the update call
-# ended with a result other than success.
+# Opens one issue for a run whose jobs failed before the issues job of check-updates.yml; the
+# calling workflow runs it after any result but success
 on:
   workflow_call:
 
@@ -41,9 +39,8 @@ jobs:
             exit 0
           fi
 
-          # A run with no failed job was canceled and gets no issue. The names
-          # of the failed jobs only fill the text, so a list that cannot be
-          # read opens the issue without them.
+          # A run without a failed job was canceled and gets no issue; a job list that cannot be
+          # read opens the issue without the names
           if ! failed=$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID/jobs" \
             --jq '[.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name] | join(", ")'); then
             failed=""
@@ -52,9 +49,8 @@ jobs:
             exit 0
           fi
 
-          # A code span ends at a run of as many backticks as it opens with, so
-          # its fence is longer than any run in the branch name, and the
-          # spaces, which Markdown drops, let the name end in a backtick
+          # A code span ends at a run of as many backticks as it opens with, so its fence outruns every
+          # run in the branch name, and the spaces, which Markdown drops, let the name end in a backtick
           fence='`'
           while [[ "$RUN_BRANCH" == *"$fence"* ]]; do
             fence+='`'

@@ -1,22 +1,7 @@
 #!/usr/bin/env bash
 #
-# update-readme.sh - Generate the badges and the package table of README.md
-#
-# Looks for two marker pairs in README.md:
-#   <!-- BADGES:START --> / <!-- BADGES:END -->     - header badges
-#   <!-- PACKAGES:START --> / <!-- PACKAGES:END --> - package table
-#
-# The badge block holds the badges of validate.yml and check-updates.yml,
-# the two workflows a repository calls, and the badge of aurtomator. The
-# workflow badges take the repo from the git origin. Without a GitHub origin
-# the block holds the badge of aurtomator alone.
-#
-# The package block holds the statistics card, the table and the version
-# line of aurtomator.
-#
-# Reads per-package status from .status/ directory (written by check-all.sh).
-#
-# With no package in packages/, the script writes nothing.
+# update-readme.sh - Write the badges and the package table of README.md between the markers
+# <!-- BADGES:START -->, <!-- BADGES:END -->, <!-- PACKAGES:START --> and <!-- PACKAGES:END -->
 #
 # Usage: ./scripts/update-readme.sh
 
@@ -38,12 +23,8 @@ readonly BADGES_END="<!-- BADGES:END -->"
 readonly PKG_START="<!-- PACKAGES:START -->"
 readonly PKG_END="<!-- PACKAGES:END -->"
 
-# Each section is written up to its start marker and from its end marker,
-# each a line of its own. A missing end marker would drop the rest of the
-# README, and a second marker or an end marker above the start would copy
-# the README into itself on every run. The badges are optional.
-# Args: $1=start marker, $2=end marker
-# Returns: 1 when the README does not hold each marker once, start first
+# Succeeds when the README holds markers $1 and $2 once each, on lines of their own, start first:
+# a missing end marker would drop the rest of the README, a second one copy it into itself
 check_markers() {
   local marker count
   for marker in "$1" "$2"; do
@@ -93,9 +74,7 @@ else
   fi
 fi
 
-# =============================================================================
-# BADGES SECTION
-# =============================================================================
+# === BADGES ===
 
 if [[ "$has_badges" == true ]]; then
   badges=""
@@ -109,7 +88,6 @@ if [[ "$has_badges" == true ]]; then
   # 1793d1 is the blue of the Arch Linux logo
   badges+="[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-1793d1?logo=archlinux&logoColor=white)](https://github.com/staticwire/aurtomator)"
 
-  # Replace between badge markers
   {
     sed -n "0,/^${BADGES_START}\$/p" "$README"
     echo "$badges"
@@ -119,9 +97,7 @@ if [[ "$has_badges" == true ]]; then
   log_ok "Badges updated (repo: ${repo_url:-unknown})"
 fi
 
-# =============================================================================
-# PACKAGES SECTION
-# =============================================================================
+# === PACKAGES ===
 
 # The table is HTML, since a Markdown table cell takes no attributes. nowrap
 # keeps Strategy, Updated and Status on one line, and the package name wraps.
@@ -149,7 +125,6 @@ for pkg_file in "${pkg_files[@]}"; do
   last_updated=$(pkg_get "$pkg_file" '.last_updated // "-"')
   arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")')
 
-  # Determine status from .status/ dir or YAML
   status_file="${STATUS_DIR}/${name}"
   if [[ -f "$status_file" ]]; then
     status=$(status_label "$(cat "$status_file")" "$arches_out" "$current")
@@ -178,7 +153,6 @@ if [[ -n "$version" ]]; then
   fi
 fi
 
-# Replace between markers
 {
   sed -n "0,/^${PKG_START}\$/p" "$README"
   echo "$table"

@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 #
-# sums.sh - Checksums of the sources of a prepared update, computed the
-# way makepkg computes them
+# sums.sh - Checksums of the sources of a prepared update, computed as makepkg computes them
 #
 # Sourced by lib.sh, after common.sh and prepared.sh.
 
-# The most bytes of one download, and of all the downloads of one package
+# The byte limits of one download and of all the downloads of one package
 SOURCE_FILE_MAX=$((600 * 1024 * 1024))
 SOURCES_MAX=$((1024 * 1024 * 1024))
 
@@ -23,9 +22,8 @@ _download_left() {
   printf '%s\n' "$left"
 }
 
-# Print the path of the file makepkg hashes for a source, following
-# get_protocol, get_filename and download_file of makepkg. A source that
-# makepkg would handle another way is refused, never guessed at.
+# Print the path of the file makepkg hashes for a source, as get_protocol, get_filename and
+# download_file of makepkg find it, and refuse a source makepkg would handle another way
 # Args: $1=source entry of a .SRCINFO, $2=AUR repo, $3=download directory
 _source_file() {
   local entry="$1" url="${1#*::}" name file left rc
@@ -78,12 +76,9 @@ _source_file() {
   printf '%s\n' "$file"
 }
 
-# Print the checksum makepkg computes for a git source, following
-# download_git and calc_checksum_git of makepkg: the tar archive of the tag
-# or commit, fetched alone, with export-subst and export-ignore turned off.
-# makepkg gives any other git source SKIP, so a checksum never matches.
-# Args: $1=source entry of a .SRCINFO, $2=algorithm, $3=AUR repo,
-#       $4=download directory
+# Print the checksum makepkg computes for a git source at #tag= or #commit=: that of the tar
+# archive of the ref, fetched alone, with export-subst and export-ignore off
+# Args: $1=source entry of a .SRCINFO, $2=algorithm, $3=AUR repo, $4=download directory
 _git_source_sum() {
   local entry="$1" url="${1#*::}" name fragment="" ref dir sum refspec
   local -x GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/etc/makepkg.d/gitconfig
@@ -148,8 +143,7 @@ _git_source_sum() {
 }
 
 # Print the checksum makepkg computes for a source
-# Args: $1=source entry of a .SRCINFO, $2=algorithm, $3=AUR repo,
-#       $4=download directory
+# Args: $1=source entry of a .SRCINFO, $2=algorithm, $3=AUR repo, $4=download directory
 _source_sum() {
   local proto="${1#*::}" file sum
   proto="${proto%%://*}"
@@ -162,11 +156,8 @@ _source_sum() {
   printf '%s\n' "${sum%% *}"
 }
 
-# check_prepared_pkgbuild lets checksum values change, and prepare computes
-# them in a job where code from the PKGBUILD runs. So each value must match
-# its source, hashed the way makepkg does. The sources come from the
-# prepared .SRCINFO, which check_prepared_srcinfo ties to the AUR copy. Run
-# check_prepared_files first.
+# Check each checksum of the prepared update against its source, since prepare computed them
+# where PKGBUILD code runs; check_prepared_files ties the sources to the AUR copy first
 # Args: $1=AUR repo, $2=prepared dir, $3=empty directory for the downloads
 # Returns: 0 when every checksum matches, 1 otherwise (reason on stderr)
 verify_prepared_sums() {

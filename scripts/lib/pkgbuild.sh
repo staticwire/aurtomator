@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
 #
-# pkgbuild.sh - Checks update-pkg.sh runs on a PKGBUILD. All but
-# warn_maintainer_line and warn_epoch source the file in a child bash.
-#
-# Sourced by lib.sh, after common.sh.
+# pkgbuild.sh - Checks of a PKGBUILD for update-pkg.sh; all but warn_maintainer_line and
+# warn_epoch source it in a child bash. Sourced by lib.sh, after common.sh.
 
-# =============================================================================
-# CHECKSUMS
-# =============================================================================
+# === CHECKSUMS ===
 
-# Print every checksum of a PKGBUILD as "<hash><TAB><source>": each array
-# makepkg knows, with and without an arch suffix, paired with the entry at
-# the same index of source or source_<arch>.
-# Args: $1=pkgbuild path
+# Print every checksum of PKGBUILD $1 as "<hash><TAB><source>", from each array makepkg
+# knows, with and without an arch suffix, paired by index with source or source_<arch>
 pkgbuild_checksums() {
   bash -c '
     source "$1" 2>/dev/null
@@ -26,10 +20,8 @@ pkgbuild_checksums() {
   ' -- "$1" 2>/dev/null || true
 }
 
-# Args: $1=pkgbuild path
-# Returns: 0 when a checksum is SKIP for a source other than a signature,
-#          1 otherwise. makepkg itself gives SKIP to a source whose file
-#          name ends in .sig, .sign or .asc, so updpkgsums keeps it.
+# Succeeds when a checksum of PKGBUILD $1 is SKIP for a source other than a signature, a
+# file name ending in .sig, .sign or .asc, which makepkg gives SKIP itself
 has_skip_checksums() {
   pkgbuild_checksums "$1" | awk -F'\t' '
     { name = $2; sub(/::.*/, "", name) }
@@ -37,12 +29,8 @@ has_skip_checksums() {
     END { exit !found }'
 }
 
-# Print, one a line, each source whose checksum is SKIP where makepkg would
-# give a real hash. makepkg 7.1 gives SKIP itself to a signature, to every
-# svn source, and to a git, hg or bzr source without the pin it hashes: git
-# #commit= or #tag=, hg #tag= or #revision=, bzr #revision=. A fossil clone
-# is one file, which it hashes as a download.
-# Args: $1=pkgbuild path
+# Print each source of PKGBUILD $1 whose SKIP makepkg 7.1 would hash: all but a signature, an svn
+# source, and a git, hg or bzr source without its pin (#commit= or #tag=, #tag= or #revision=, #revision=)
 fixed_skip_sources() {
   pkgbuild_checksums "$1" | awk -F'\t' '
     BEGIN { pin["git"] = "^(commit|tag)$"; pin["hg"] = "^(tag|revision)$"; pin["bzr"] = "^revision$" }
@@ -63,24 +51,17 @@ fixed_skip_sources() {
     }'
 }
 
-# Args: $1=pkgbuild path
-# Returns: 0 when a remote source, one with ://, has a real checksum
+# Succeeds when a remote source of PKGBUILD $1, one with ://, has a real checksum
 has_remote_hash() {
   pkgbuild_checksums "$1" | awk -F'\t' '
     $1 != "SKIP" && $2 ~ /:\/\// { found = 1 }
     END { exit !found }'
 }
 
-# =============================================================================
-# PKGBUILD AUDIT
-# =============================================================================
+# === PKGBUILD AUDIT ===
 
-# bash prints a function in one layout: a header line, "{", one command a
-# line with a ; at its end, and "}"
-# Args: $1=pkgbuild path
-# Returns: 0 when pkgver() holds only cd lines and one printf or echo of
-#          $pkgver, ${pkgver} or ${pkgver//-/.}, as streamrip has it. pkgver
-#          holds no dash, so each prints the pkgver that sed sets.
+# Succeeds when pkgver() of PKGBUILD $1, as declare -f prints it, holds only cd lines and one
+# printf or echo of $pkgver, ${pkgver} or pkgver with its dash replaced, as streamrip has it
 pkgver_prints_pkgver() {
   local body
   body=$(bash -c 'source "$1" 2>/dev/null; declare -f pkgver' -- "$1" 2>/dev/null) || return 1
@@ -100,19 +81,16 @@ warn_epoch() {
   log_warn "  pacman does not install a downgrade over the newer version unless epoch is raised by hand."
 }
 
-# Audit PKGBUILD for unsupported features before updating.
-# Args: $1=pkgbuild path, $2=strategy name
-# Returns: 0=ok, 1=fatal (block update), 2=warnings only
+# Audit PKGBUILD $1 for strategy $2 before an update
+# Returns: 0 when it passes, 1 for a blocking finding, 2 for warnings alone
 audit_pkgbuild() {
   local pkgbuild="$1"
   local strategy="${2:-}"
   local warnings=0
   local fatals=0
 
-  # FATAL: pkgver() with incompatible strategy (version mismatch)
-  # git-latest and github-nightly are designed for packages with pkgver(),
-  # and a pkgver() that only prints pkgver keeps what sed sets. bash finds
-  # the function under every header it takes.
+  # A pkgver() blocks every strategy but git-latest and github-nightly, unless it only prints
+  # pkgver; bash finds the function under any header form it accepts
   if bash -c 'source "$1" 2>/dev/null; declare -F pkgver >/dev/null' -- "$pkgbuild"; then
     if [[ "$strategy" != "git-latest" && "$strategy" != "github-nightly" ]] && ! pkgver_prints_pkgver "$pkgbuild"; then
       log_err "BLOCKED: pkgver() function detected with strategy '$strategy'."
@@ -122,12 +100,8 @@ audit_pkgbuild() {
     fi
   fi
 
-  # FATAL: SKIP mixed with real hashes for REMOTE sources.
-  # update-pkg.sh runs updpkgsums when a remote source has a real hash, and
-  # updpkgsums turns a SKIP that makepkg does not write itself into a hash,
-  # which check_prepared_pkgbuild refuses. Real hashes for local files (no
-  # ://) are fine: they live in the AUR repo and do not change between
-  # versions.
+  # A real hash of a remote source makes update-pkg.sh run updpkgsums, which would hash a SKIP
+  # that makepkg does not write itself; a local file of the AUR repo keeps its hash
   local -a fixed
   mapfile -t fixed < <(fixed_skip_sources "$pkgbuild")
   if ((${#fixed[@]} > 0)) && has_remote_hash "$pkgbuild"; then
@@ -138,7 +112,7 @@ audit_pkgbuild() {
     fatals=$((fatals + 1))
   fi
 
-  # WARNING: Patches in source=()
+  # Patches in source=() warn
   local source_entries
   source_entries=$(bash -c 'source "$1" 2>/dev/null; printf "%s\n" "${source[@]}"' -- "$pkgbuild" 2>/dev/null || true)
   if grep -qE '\.(patch|diff)$' <<<"$source_entries"; then
@@ -146,7 +120,7 @@ audit_pkgbuild() {
     warnings=$((warnings + 1))
   fi
 
-  # WARNING: an epoch, which pacman compares before pkgver
+  # An epoch warns, since pacman compares it before pkgver
   local epoch
   epoch=$(bash -c 'source "$1" 2>/dev/null; printf "%s" "${epoch:-}"' -- "$pkgbuild" 2>/dev/null || true)
   if [[ -n "$epoch" && "$epoch" != 0 ]]; then
@@ -163,10 +137,8 @@ audit_pkgbuild() {
   return 0
 }
 
-# Check that source URLs return files and not HTML error pages.
-# Covers source and every source_<arch> array the PKGBUILD defines.
-# Args: $1=pkgbuild path, $2=arches whose source arrays it skips, if any
-# Returns: 0=ok, non-zero=errors found
+# Succeeds when every http URL of source and source_<arch> of PKGBUILD $1 answers with a file
+# and no HTML page; $2 names the arches whose arrays it skips
 validate_source_urls() {
   local pkgbuild="$1"
   local errors=0
@@ -191,9 +163,8 @@ validate_source_urls() {
   while IFS= read -r url; do
     [[ -z "$url" ]] && continue
 
-    # curl reports the status and type of the last response. The headers
-    # are text the server chose, and bash evaluates an operand of -ge as
-    # arithmetic, where an array subscript runs a command.
+    # The server chooses the headers, and bash evaluates an operand of -ge as arithmetic,
+    # where an array subscript runs a command
     local response http_code content_type
     response=$(curl -sIL -o /dev/null -w '%{http_code} %{content_type}' \
       --max-time 10 --max-redirs 5 "$url" 2>/dev/null) || {
@@ -247,8 +218,7 @@ arch_answers() {
   done <<<"$urls"
 }
 
-# Check if PKGBUILD has a # Maintainer: line, warn if missing
-# Usage: warn_maintainer_line /path/to/PKGBUILD
+# Warn when PKGBUILD $1 has no # Maintainer: line
 warn_maintainer_line() {
   local pkgbuild="$1"
   if ! grep -q '^# Maintainer:' "$pkgbuild" 2>/dev/null; then

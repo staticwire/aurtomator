@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
-#
-# github-asset - Detect re-uploaded assets on a fixed GitHub release tag
-#
-# For releases whose tag never moves while the assets behind it get
-# replaced (model zoos, rolling download tags). The version is the newest
-# assets[].updated_at among the listed assets, rendered as YYYYMMDD.
-#
-# YAML fields:
-#   upstream.project - owner/repo (required)
-#   upstream.tag     - release tag that carries the assets (required)
-#   upstream.assets  - list of exact asset file names (required, non-empty)
-#
-# The release object lists only assets in state "uploaded", so one request
-# covers every downloadable asset and no pagination is needed.
+# github-asset - Print the date of the newest listed asset of a fixed GitHub release tag, see
+# https://aurtomator.dev/strategies/#github-asset
 
 set -euo pipefail
 

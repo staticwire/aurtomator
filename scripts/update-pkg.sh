@@ -2,18 +2,6 @@
 #
 # update-pkg.sh - Update an existing AUR package to a new version
 #
-# Clones the AUR repo, updates pkgver in the existing PKGBUILD,
-# regenerates checksums and .SRCINFO, commits and pushes.
-#
-# With --prepare <dir>: clones anonymously over HTTPS, stops before the
-# commit and copies PKGBUILD, .SRCINFO and the AUR commit it started from
-# to <dir>/<package-name>/ for publish-pkg.sh. Exit code 2 still means the
-# AUR already has the version.
-#
-# With --asset <value>: writes the value from the name of a release asset
-# to the line of upstream.asset_var. A new value of the version the AUR
-# has is a rebuild, with the AUR pkgrel plus one.
-#
 # Usage: ./scripts/update-pkg.sh <package-name> <new-version> [--asset <value>] [--arch-out <arches>] [--dry-run] [--prepare <dir>]
 
 set -euo pipefail
@@ -72,7 +60,7 @@ if ! arch_list_ok "$ARCH_OUT"; then
   log_err "--arch-out must name arches other than x86_64, separated by single spaces: ${ARCH_OUT@Q}"
   exit 1
 fi
-# Only publish writes arch_out, which says what an update left out
+# Only publish-pkg.sh records in arch_out the arches an update left out
 if [[ -n "$ARCH_EDIT" && -z "$PREPARE_DIR" ]]; then
   log_err "--arch-out needs --prepare"
   exit 1
@@ -87,19 +75,11 @@ load_config
 
 strategy=$(pkg_get "$PKG_FILE" .strategy)
 
-# =============================================================================
-# TEMP DIR WITH CLEANUP
-# =============================================================================
-
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
-# =============================================================================
-# CLONE AUR REPO
-# =============================================================================
-
 aur_dir="${tmp_dir}/aur-${PKG_NAME}"
-# The job that prepares an update holds no SSH key
+# The job that prepares an update has no SSH key
 if [[ -n "$PREPARE_DIR" ]]; then
   aur_url="https://aur.archlinux.org/${PKG_NAME}.git"
 else
@@ -116,7 +96,7 @@ fi
 aur_reanchor "$aur_dir"
 aur_base=$(git -C "$aur_dir" rev-parse HEAD)
 
-# Copy the result for publish-pkg.sh, with the AUR commit it starts from
+# Copy PKGBUILD, .SRCINFO and the AUR base commit for publish-pkg.sh
 hand_over() {
   local dest="${PREPARE_DIR}/${PKG_NAME}"
   mkdir -p "$dest"
@@ -127,10 +107,6 @@ hand_over() {
 
 warn_maintainer_line "${aur_dir}/PKGBUILD"
 
-# =============================================================================
-# AUDIT PKGBUILD
-# =============================================================================
-
 audit_rc=0
 audit_pkgbuild "${aur_dir}/PKGBUILD" "$strategy" || audit_rc=$?
 if [[ "$audit_rc" -eq 1 ]]; then
@@ -138,18 +114,14 @@ if [[ "$audit_rc" -eq 1 ]]; then
   exit 1
 fi
 
-# =============================================================================
-# UPDATE PKGVER
-# =============================================================================
-
 log_info "Updating pkgver to $NEW_VERSION"
 pkgrel=$(_update_pkgrel "${aur_dir}/PKGBUILD" "$NEW_VERSION")
 if [[ -n "$ASSET_VAR" ]]; then
   pkgrel=$(_asset_pkgrel "${aur_dir}/PKGBUILD" "$ASSET_VAR" "$NEW_VERSION" "$ASSET") || exit 1
 fi
 
-# --arch-out takes the arches of its list out of arch=() and puts back each
-# arch of arch_out it does not name, at the place the commit of the arch gives
+# --arch-out takes its arches out of arch=() and puts back each arch of arch_out
+# it does not list, at the place it had in the commit that arch_out records
 arch_words=()
 new_words=()
 back=""
@@ -164,8 +136,8 @@ if [[ -n "$ARCH_EDIT" ]]; then
   read -ra new_words <<<"$(arch_update_words "${arch_words[*]}" "$ARCH_OUT" "" "$back" "${tmp_dir}/ref")"
 fi
 
-# The AUR has this version when pkgver and pkgrel hold the values of the
-# update, as bash reads them; a new asset value raises pkgrel
+# The AUR already has the update when pkgver and pkgrel, as bash reads them,
+# and arch=() hold its values; a new asset value raises pkgrel
 if [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgver)" == "$NEW_VERSION" ]] &&
   [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgrel)" == "$pkgrel" ]] &&
   [[ "${new_words[*]}" == "${arch_words[*]}" ]]; then
@@ -184,8 +156,8 @@ fi
 sed -i "s/^pkgver=.*/pkgver=${NEW_VERSION}/" "${aur_dir}/PKGBUILD"
 sed -i "s/^pkgrel=.*/pkgrel=${pkgrel}/" "${aur_dir}/PKGBUILD"
 
-# An arch of the list whose archives answer, as the PKGBUILD builds their
-# URLs, stays: the check asked other URLs
+# check-arch.sh built its URLs from the AUR .SRCINFO, so an arch of --arch-out
+# stays in arch=() when its archives answer at the URLs of the new PKGBUILD
 skip_arches=""
 if [[ -n "$ARCH_EDIT" ]]; then
   read -ra listed <<<"$ARCH_OUT"
@@ -214,23 +186,15 @@ if [[ -n "$ARCH_EDIT" ]]; then
   fi
 fi
 
-# =============================================================================
-# UPDATE CHECKSUMS
-# =============================================================================
-
-# Validate source URLs before downloading. A download with a SKIP checksum
-# is checked too: no later step fetches it, so a URL that answers 404 or an
-# HTML page would reach the AUR.
+# A download with a SKIP checksum is checked too: no later step fetches it,
+# so a URL that answers 404 or with an HTML page would reach the AUR
 if ! validate_source_urls "${aur_dir}/PKGBUILD" "$skip_arches"; then
   log_err "Source URL validation failed, aborting"
   exit 1
 fi
 
-# updpkgsums would put a real hash in place of the SKIP of a download, of a
-# fossil clone, or of a git, hg or bzr source at a pin makepkg hashes, and
-# the audit blocks such a SKIP next to a remote hash. Next to any other SKIP
-# of a VCS source, updpkgsums runs only for a remote hash, since makepkg -g
-# clones the repository.
+# makepkg -g clones a VCS source, so updpkgsums runs only for a remote hash;
+# audit_pkgbuild blocks a SKIP beside one that updpkgsums would turn into a hash
 if has_skip_checksums "${aur_dir}/PKGBUILD" && ! has_remote_hash "${aur_dir}/PKGBUILD"; then
   log_info "VCS package, skipping checksums"
 else
@@ -240,7 +204,6 @@ else
     log_err "updpkgsums failed, refusing to push stale checksums"
     exit 1
   }
-  # Verify checksums are correct before pushing
   log_info "Verifying checksums"
   (cd "$aur_dir" && makepkg --verifysource --skippgpcheck) || {
     log_err "Checksum verification failed, aborting"
@@ -248,7 +211,6 @@ else
   }
 fi
 
-# Lint PKGBUILD with namcap (non-fatal on warnings, fatal on errors)
 if command -v namcap &>/dev/null; then
   log_info "Running namcap lint"
   namcap_out=$(namcap "${aur_dir}/PKGBUILD" 2>&1) || true
@@ -263,10 +225,6 @@ if command -v namcap &>/dev/null; then
   fi
 fi
 
-# =============================================================================
-# GENERATE .SRCINFO
-# =============================================================================
-
 log_info "Generating .SRCINFO"
 (cd "$aur_dir" && makepkg --printsrcinfo >.SRCINFO) || {
   log_err "makepkg --printsrcinfo failed"
@@ -279,19 +237,11 @@ if [[ -n "$PREPARE_DIR" ]]; then
   exit 0
 fi
 
-# =============================================================================
-# CHECK THE UPDATE
-# =============================================================================
-
-# The checks that publish-pkg.sh runs, against the files of the clone's HEAD
+# Run the checks of publish-pkg.sh on the update, against the files at the clone's HEAD
 aur_files="${tmp_dir}/aur-files"
 aur_export "$aur_dir" "$aur_files" || exit 1
 check_prepared_files "$aur_files" "$aur_dir" "$NEW_VERSION" "$(pkgver_dash "$PKG_FILE")" \
   "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" || exit 1
-
-# =============================================================================
-# DRY RUN CHECK
-# =============================================================================
 
 if [[ "$DRY_RUN" == "--dry-run" ]]; then
   log_warn "[DRY RUN] Would push $PKG_NAME $NEW_VERSION to AUR"
@@ -300,17 +250,9 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   exit 0
 fi
 
-# =============================================================================
-# COMMIT & PUSH TO AUR
-# =============================================================================
-
 git -C "$aur_dir" add PKGBUILD .SRCINFO || exit 1
 aur_commit_push "$aur_dir" "$NEW_VERSION" "$strategy" "$pkgrel" || exit 1
 log_ok "Pushed $PKG_NAME $NEW_VERSION to AUR"
-
-# =============================================================================
-# UPDATE PACKAGE YAML
-# =============================================================================
 
 log_info "Updating package YAML"
 pkg_set_current "$PKG_FILE" "$NEW_VERSION" "$ASSET"

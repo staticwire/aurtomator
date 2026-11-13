@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-#
-# github-tag - Detect latest version from GitHub tags
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string
-#
-# For projects that use tags but not GitHub Releases.
-# Reads every tag with git ls-remote, outside the API rate limit. Works
-# with public repos without auth. For private repos, set GITHUB_TOKEN env var.
+# github-tag - Print the newest version among the tags of a GitHub repository, see
+# https://aurtomator.dev/strategies/#github-tag
 
 set -euo pipefail
 

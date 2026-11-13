@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-#
-# npm - Detect latest version from npm registry
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string
-#
-# upstream.registry: npm package name (e.g. "express")
+# npm - Print the latest version of a package on npm, see
+# https://aurtomator.dev/strategies/#npm
 
 set -euo pipefail
 

@@ -1,24 +1,17 @@
 #!/usr/bin/env bash
 #
-# common.sh - Config, YAML, HTTP, version and logging helpers. A strategy
-# sources this file alone, a script sources it through lib.sh.
+# common.sh - YAML, HTTP, version and logging helpers for strategies and scripts
 #
 # Usage: source "${SCRIPT_DIR}/../scripts/lib/common.sh"
-# Requires: yq (https://github.com/mikefarah/yq)
-#
-# AURTOMATOR_DIR is the root of the checkout that holds this file.
-# AURTOMATOR_DATA_DIR is the directory with the packages, .status/,
-# .aurtomator.conf, README.md and the origin remote the badges read. It comes
-# from the environment and defaults to the working directory.
 
 set -euo pipefail
 
-# Resolve project root. The scripts and lib/version.sh read it.
+# The root of this checkout. The scripts and lib/version.sh read it.
 # shellcheck disable=SC2034
 AURTOMATOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# Resolve the data root. The variable is set last, so the message names the
-# value as the caller gave it.
+# AURTOMATOR_DATA_DIR is the folder of packages/ and .status/. The function sets
+# it last, so the error names the value the caller gave.
 resolve_data_dir() {
   local dir
   if ! dir="$(cd -- "${AURTOMATOR_DATA_DIR:-.}" 2>/dev/null && pwd)"; then
@@ -29,9 +22,7 @@ resolve_data_dir() {
 }
 resolve_data_dir
 
-# =============================================================================
-# DEPENDENCY CHECK
-# =============================================================================
+# === DEPENDENCY CHECK ===
 
 require_cmd() {
   local cmd="$1" version
@@ -39,7 +30,7 @@ require_cmd() {
     log_err "Required command not found: $cmd"
     exit 1
   fi
-  # The yq of Arch extra is a jq wrapper that reads other expressions
+  # The yq of Arch extra is a jq wrapper with another expression syntax
   if [[ "$cmd" == yq ]] && version=$(yq --version 2>&1 | head -n 1) && [[ "$version" != *mikefarah/yq* ]]; then
     log_err "yq must be mikefarah/yq, go-yq on Arch, and this one prints: $version"
     exit 1
@@ -51,13 +42,10 @@ require_cmd() {
   fi
 }
 
-# =============================================================================
-# YAML (via yq)
-# =============================================================================
+# === YAML (via yq) ===
 
-# Read any field from a YAML file
-# Usage: pkg_get packages/my-package.yml .name
-#        pkg_get packages/my-package.yml .upstream.type
+# Read a field of a YAML file
+# Usage: pkg_get packages/my-package.yml .upstream.type
 pkg_get() {
   local file="$1" query="$2"
   yq -r "$query" "$file"
@@ -77,8 +65,7 @@ pkg_set_current() {
   [[ -z "${3:-}" ]] || pkg_set "$1" .current_asset "\"$3\""
 }
 
-# The pkgver_dash of a package: _ or ., drop for '', which drops the dash,
-# and nothing when the package does not set it
+# Print the pkgver_dash of a package: _, ., drop for '', or nothing when unset
 # Usage: pkgver_dash packages/my-package.yml
 pkgver_dash() {
   local file="$1" dash
@@ -87,16 +74,8 @@ pkgver_dash() {
   printf '%s\n' "${dash:-drop}"
 }
 
-# The pkgver of an upstream version, as check-update.sh makes it from the
-# version of a strategy. pkgver holds no dash. The PKGBUILD turns
-# pkgver_dash back into a dash where a URL needs one, as in ${pkgver//_/-}.
-# pkgver_dash: '' drops the dash, so 2.5.0-rc1 gives 2.5.0rc1, which vercmp
-# puts below 2.5.0, and the PKGBUILD puts it back as in ${pkgver/rc/-rc}.
-# pkgver is the upstream version with the text of pkgver_format around it,
-# as 4.4215 for build 4215. The PKGBUILD cuts that text off where a URL
-# needs the upstream version, as in ${pkgver#4.}.
-# Args: $1=upstream version, $2=pkgver_dash character or drop, if any,
-#       $3=pkgver_format, if any
+# The pkgver of upstream version $1: pkgver_dash $2 in place of each dash, none
+# for drop, and the result in the %s of pkgver_format $3. Both may be empty.
 to_pkgver() {
   local version="$1"
   if [[ "$2" == drop ]]; then
@@ -110,12 +89,8 @@ to_pkgver() {
   printf '%s\n' "$version"
 }
 
-# The asset_var of a package, the PKGBUILD variable that holds a value from
-# the name of a release asset, and nothing when the package does not set it.
-# The name reaches a sed command and an awk program, so it has to be a
-# variable name that starts with _.
-# Usage: pkg_asset_var packages/my-package.yml
-# Returns: 1 when the name is of another form (reason on stderr)
+# Print upstream.asset_var of package file $1, or fail for a name that does not
+# match ^_[A-Za-z0-9_]+$. The name reaches a sed command and an awk program.
 pkg_asset_var() {
   local var
   var=$(pkg_get "$1" '.upstream.asset_var // ""')
@@ -126,11 +101,9 @@ pkg_asset_var() {
   printf '%s\n' "$var"
 }
 
-# =============================================================================
-# PACKAGE HELPERS
-# =============================================================================
+# === PACKAGE HELPERS ===
 
-# Resolve package YAML file path from name
+# Print the YAML path of a package, or fail when the file does not exist
 # Usage: pkg_file my-package
 pkg_file() {
   local name="$1"
@@ -142,20 +115,18 @@ pkg_file() {
   echo "$file"
 }
 
-# =============================================================================
-# HTTP
-# =============================================================================
+# === HTTP ===
 
-# The User-Agent of every strategy request. SourceForge answers a bare
-# Mozilla/5.0 with HTTP 403. webpage-scrape.sh sets upstream.user_agent here.
+# The User-Agent of every strategy request, which webpage-scrape.sh replaces with
+# upstream.user_agent. SourceForge answers a bare Mozilla/5.0 with HTTP 403.
 USER_AGENT="aurtomator/1.0"
 
 # What curl writes to stderr on a failure: the URL of the last answer, the
 # error, the status (000 without an answer) and the cf-mitigated header
 HTTP_FAILURE='%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated}'
 
-# The most megabytes of one answer: upstream.max_answer_mb of the package,
-# which check-update.sh exports, or 50
+# The size limit of one answer in megabytes: upstream.max_answer_mb, which
+# check-update.sh exports, or 50
 MAX_ANSWER_MB="${MAX_ANSWER_MB:-}"
 
 # Prints upstream.max_answer_mb of package file $1, nothing without it, and
@@ -171,10 +142,10 @@ max_answer_mb() {
   printf '%s\n' "$mb"
 }
 
-# The memory of a run of check-all.sh, in AURTOMATOR_HOSTS_DIR: the file silent
-# lists the hosts that did not answer, and request holds the request in flight
+# check-all.sh keeps two files in AURTOMATOR_HOSTS_DIR: silent lists the hosts
+# that did not answer in the run, and request holds the request in flight
 
-# Succeeds in a run that keeps the memory
+# Succeeds in a run of check-all.sh that keeps these files
 host_memory() {
   [[ -n "${AURTOMATOR_HOSTS_DIR:-}" && -d "$AURTOMATOR_HOSTS_DIR" ]]
 }
@@ -226,22 +197,19 @@ remember_host() {
   fi
 }
 
-# Args: $1=URL, the rest: curl options, which come after these and win.
-# curl follows a redirect to plain http by default, so --proto-redir stays.
+# Args: $1=URL, the rest: curl options, which come after these and win
 _curl_get() {
   curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
     --proto '=https' --proto-redir '=https' --max-filesize "${MAX_ANSWER_MB:-50}M" \
     -A "$USER_AGENT" -w "$HTTP_FAILURE" "${@:2}" "$1"
 }
 
-# GET a URL for a strategy. curl tries a timeout, a refused connection and
-# an HTTP 408, 429, 500, 502, 503, 504, 522 or 524 answer twice more. A
-# failure prints the URL of the last answer after redirects and the error.
+# GET a URL for a strategy. A failure prints the URL of the last answer and the error.
 # Usage: http_get <url> [curl option]...
 http_get() {
   local failure rc=0 url error code mitigated
   request_begin "$1" || return 28
-  # The answer goes out through fd 3, and stderr into failure
+  # stdout goes out through fd 3, and stderr into failure
   { failure=$(_curl_get "$@" 2>&1 >&3 3>&-); } 3>&1 || rc=$?
   request_end
   if ((rc == 0)); then
@@ -253,7 +221,7 @@ http_get() {
     if [[ "$mitigated" == challenge ]]; then
       failure+=", a Cloudflare challenge, which only a browser passes"
     fi
-    # Three attempts without any answer: the run asks this host no more
+    # Three attempts without any answer: the run asks this host nothing more
     if ((rc == 28)) && [[ "$code" == 000 ]]; then
       remember_host "$1"
     fi
@@ -264,11 +232,8 @@ http_get() {
   return "$rc"
 }
 
-# GET a URL that answers JSON and print the answer. The bot check of a
-# site answers an HTML page with HTTP 200, often after a redirect, so an
-# answer that is not a JSON object or array fails and names the URL it
-# came from.
-# Usage: http_get_json <url> [curl option]...
+# GET a URL that answers JSON. A bot check answers HTML with HTTP 200, so an answer
+# other than a JSON object or array fails and names the URL it came from.
 http_get_json() {
   local answer url
   answer=$(http_get "$@" -w "\n%{url_effective}${HTTP_FAILURE}") || return
@@ -281,10 +246,8 @@ http_get_json() {
   printf '%s\n' "$answer"
 }
 
-# GET a GitHub API URL, with GITHUB_TOKEN when it is set. curl reads the
-# header from stdin: as an argument, the token is visible in ps to every
-# local user.
-# Usage: github_api https://api.github.com/repos/owner/repo/tags
+# GET a GitHub API URL with GITHUB_TOKEN when it is set. curl reads the header
+# from stdin, since ps shows every argument to every local user.
 github_api() {
   local auth=()
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
@@ -293,9 +256,8 @@ github_api() {
   http_get "$1" "${auth[@]}" <<<"Authorization: Bearer ${GITHUB_TOKEN:-}"
 }
 
-# Print published_at<TAB>tag of each release in the JSON that passes the yq
-# filter and whose tag matches the ERE
-# Args: $1=releases JSON, $2=ERE, $3=yq filter of the releases
+# Print published_at<TAB>tag of each release in JSON $1 that passes yq filter $3
+# and whose tag matches ERE $2
 _release_matches() {
   local rows row
   local -a lines
@@ -307,8 +269,7 @@ _release_matches() {
 }
 
 # Print the tag of the newest release among lines of published_at<TAB>tag on
-# stdin: the one published last, or with $1=version the one with the newest
-# version
+# stdin: the one published last, or the one with the newest version
 # Args: $1="version" to pick by version, $2=ERE, $3=tag_version_replace
 _newest_release_tag() {
   if [[ "${1:-}" == version ]]; then
@@ -318,8 +279,7 @@ _newest_release_tag() {
   fi
 }
 
-# The tag on stdin, one per line, that gives the newest version by
-# newest_version
+# Print the tag on stdin, one per line, that gives the newest version
 # Args: $1=tag_version_regex, $2=tag_version_replace
 _newest_tag() {
   local tag version newest
@@ -336,16 +296,10 @@ _newest_tag() {
   fi
 }
 
-# Print the release whose tag matches the ERE, as JSON, or nothing. Reads
-# pages of 100 releases until a page holds fewer than 100, at most the given
-# number of pages. Of the matches on all of them, the one published last
-# wins, or with "version" the one with the newest version. The API lists
-# releases by created_at, the date of the tagged commit, so neither the
-# order of the list nor its pages decide anything. A draft holds no
-# published_at.
-# Args: $1=API URL of the repository, $2=ERE, $3=most pages to read,
-#       $4="stable" to leave out pre-releases, $5="version" to pick by
-#       version, $6=tag_version_replace
+# Print as JSON the matching release published last, or the one with the newest
+# version. The API sorts by commit date, so the choice spans every page read.
+# Args: $1=API URL of the repository, $2=ERE, $3=most pages of 100 to read,
+#       $4="stable" to skip pre-releases, $5="version", $6=tag_version_replace
 # Returns: 1 when a request fails
 github_release_matching() {
   local filter='select(.published_at != null)' page json matches="" tag release
@@ -362,8 +316,8 @@ github_release_matching() {
     fi
   done
   tag=$(_newest_release_tag "${5:-}" "$2" "${6:-}" <<<"$matches") || return 1
-  # A release created while the pages are read moves the last one of a page
-  # to the next page as well
+  # A release created between two reads repeats the last release of a page on
+  # the next one, so the loop looks the tag up in every page
   for json in "${pages[@]}"; do
     release=$(TAG="$tag" yq -r '[.[] | select(.tag_name == strenv(TAG))][0]' <<<"$json")
     if [[ "$release" != null ]]; then
@@ -373,21 +327,13 @@ github_release_matching() {
   done
 }
 
-# =============================================================================
-# VERSION VALIDATION
-# =============================================================================
+# === VERSIONS AND TAGS ===
 
-# The most characters of a version, which a README cell and the journal hold
+# The character limit of a version, for a README cell and the journal
 PKGVER_MAX=64
 
-# Reject a version string before it is written into a PKGBUILD.
-# update-pkg.sh writes the value with sed and makepkg then sources the
-# file, so a shell metacharacter in an upstream tag would execute in CI.
-# The allowlist is narrower than makepkg's own pkgver check on purpose:
-# makepkg only forbids whitespace, '/', ':', '-' and non-ASCII. A word
-# without a digit, such as latest, is no version.
-# Args: $1=version string
-# Returns: 0=ok, 1=rejected (reason on stderr)
+# Reject version $1 before sed writes it into a PKGBUILD that makepkg sources,
+# where a shell metacharacter of an upstream tag would run in CI
 validate_pkgver() {
   local ver="$1"
   local LC_ALL=C
@@ -409,11 +355,8 @@ validate_pkgver() {
   fi
 }
 
-# Reject a value from the name of a release asset before it is written into
-# a PKGBUILD, as validate_pkgver does for a version. bash expands a tilde at
-# the start of an assignment, so the value starts with a letter or a digit.
-# Args: $1=value
-# Returns: 0=ok, 1=rejected (reason on stderr)
+# Reject value $1 from a release asset name before it goes into a PKGBUILD. bash
+# expands a leading ~ in an assignment, so the value starts with a letter or digit.
 validate_asset_value() {
   local LC_ALL=C
   if [[ ! "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]*$ ]]; then
@@ -422,10 +365,8 @@ validate_asset_value() {
   fi
 }
 
-# The --asset option of update-pkg.sh and publish-pkg.sh: a package with
-# asset_var needs it, any other package must not get it
-# Args: $1=asset_var of the package, $2=value of --asset
-# Returns: 1 when one is set without the other or the value is rejected
+# Check --asset value $2 against asset_var $1: a package with asset_var needs it,
+# and any other package must not get it
 check_asset_option() {
   if [[ -n "$1" && -z "$2" ]]; then
     log_err "upstream.asset_var is set, so --asset is needed"
@@ -438,10 +379,8 @@ check_asset_option() {
   [[ -z "$2" ]] || validate_asset_value "$2"
 }
 
-# Args: $1=current version, $2=new version
-# Returns: 0 when the first number in the new version has at least two
-#          digits more than the first number in the current one, as in
-#          13 → 2026102100 or 4.4215 → 4215, 1 otherwise
+# Succeeds when the first number of new version $2 has at least two digits more
+# than the first number of current version $1, as from 13 to 2026102100
 version_jump() {
   local old new
   [[ "$1" =~ [0-9]+ ]] || return 1
@@ -486,9 +425,7 @@ cooldown_until() {
   date -u -d "$last + $days days" +%F
 }
 
-# Print every tag name of a git repository, one per line, from git
-# ls-remote over https only and without a terminal prompt
-# Args: $1=HTTPS URL of the repository
+# Print the tag names of the git repository at HTTPS URL $1, one per line
 remote_tags() {
   local rc=0
   git_request_begin "$1" || return 1
@@ -498,11 +435,8 @@ remote_tags() {
   return "$rc"
 }
 
-# Print every tag name of a GitHub repository, with GITHUB_TOKEN when it is
-# set. The tags API answers 100 tags at most per page. git takes the token
-# from the environment: as an argument, it is visible in ps to every local
-# user.
-# Args: $1=owner/repo
+# Print the tag names of GitHub repository $1, owner/repo, with GITHUB_TOKEN when
+# it is set. git reads the token from the environment, since ps shows arguments.
 github_tags() {
   (
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
@@ -514,11 +448,8 @@ github_tags() {
   )
 }
 
-# The newest of the versions on stdin, one per line, in the order of
-# pacman: vercmp puts 2.1.0rc1 below 2.1.0, where sort -V puts it above.
-# vercmp reads a dash as the pkgrel separator, so the comparison drops a
-# dash before a letter, as pkgver_dash: '' does, and takes any other dash
-# for a dot: 2.1.0-rc1 is below 2.1.0, and 2025-04-03 is 2025.04.03.
+# Print the newest version on stdin by vercmp, which splits off pkgrel at a dash.
+# The comparison drops a dash before a letter and turns any other dash into a dot.
 newest_version() {
   local version key newest="" newest_key=""
   while IFS= read -r version; do
@@ -538,18 +469,14 @@ newest_version() {
   fi
 }
 
-# The tags of the form v1.2.3 or 1.2.3, for a tag strategy without
-# tag_version_regex. latest, 2.1.0-rc1 and 2.1.0rc1 are left out, so a
-# pre-release is never the version.
-# Args: $1=tags, one per line
+# The tags of the form v1.2.3 or 1.2.3 among tags $1, one per line. A tag strategy
+# without tag_version_regex reads only these, so a pre-release is never the version.
 release_tags() {
   grep -E '^v?[0-9]+(\.[0-9]+)*$' <<<"$1" || true
 }
 
-# The version a match of tag_version_regex gives: the template with \1 to
-# \9 replaced by the groups in BASH_REMATCH and every other character kept.
-# Args: $1=tag_version_replace
-# Returns: 1 when the template names a group the regex does not have
+# Print tag_version_replace $1 with \1 to \9 filled from the groups in BASH_REMATCH.
+# Fails when it names a group the regex does not have.
 tag_version_fill() {
   local template="$1" version="" i n
   for ((i = 0; i < ${#template}; i++)); do
@@ -568,10 +495,8 @@ tag_version_fill() {
   printf '%s\n' "$version"
 }
 
-# The version in each tag of stdin, one per line: tag_version_replace
-# filled from the groups of tag_version_regex where it matches, or the tag
-# without a leading v when the regex is empty. bash takes the groups, so
-# the regex may hold |, which ends the pattern of a sed s command.
+# The version in each tag on stdin, one per line: tag_version_replace filled from
+# the groups of tag_version_regex, or with no regex the tag minus a leading v
 # Args: $1=tag_version_regex or empty, $2=tag_version_replace (default \1)
 tag_versions() {
   local regex="$1" replace="${2:-\\1}" tag
@@ -584,9 +509,8 @@ tag_versions() {
   done
 }
 
-# The highest version among the tags of a tag strategy. tag_version_regex
-# keeps the tags it matches, and without it only the tags of the form
-# v1.2.3 or 1.2.3 count.
+# The highest version among the tags of a tag strategy. Without tag_version_regex
+# only the tags of the form v1.2.3 or 1.2.3 count.
 # Args: $1=tags, one per line, $2=tag_version_regex, $3=tag_version_replace
 # Returns: 1 with the reason on stderr when no tag gives a version
 latest_tag_version() {
@@ -606,10 +530,8 @@ latest_tag_version() {
   echo "$version"
 }
 
-# The first capture group of every match of an ERE in stdin, one per line.
-# grep finds the matches and bash takes the group, so no delimiter of a sed
-# command limits the pattern.
-# Args: $1=ERE with a capture group
+# Print the first capture group of every match of ERE $1 in stdin. bash takes the
+# group, so no sed delimiter limits the pattern.
 capture_matches() {
   local pattern="$1" match
   while IFS= read -r match; do
@@ -619,9 +541,8 @@ capture_matches() {
   done < <(grep -oE -e "$pattern")
 }
 
-# Succeeds when bash accepts an ERE, as capture_matches needs. bash refuses
-# some patterns that grep -E takes, (?:x) and *x among them.
-# Args: $1=ERE
+# Succeeds when bash accepts ERE $1, as capture_matches needs. bash refuses some
+# patterns that grep -E takes, (?:x) and *x among them.
 ere_valid() {
   local rc=0
   # [[ =~ ]] returns 2 for a pattern bash cannot compile
@@ -630,9 +551,8 @@ ere_valid() {
   ((rc != 2))
 }
 
-# Succeeds when grep -P compiles a Perl regex, as github-nightly reads the
-# version out of a release body with it
-# Args: $1=Perl regex
+# Succeeds when grep -P compiles Perl regex $1. github-nightly reads the version
+# out of a release body with such a regex.
 pcre_valid() {
   local rc=0
   # grep exits 2 for a pattern it cannot compile
@@ -640,9 +560,7 @@ pcre_valid() {
   ((rc != 2))
 }
 
-# =============================================================================
-# LOGGING
-# =============================================================================
+# === LOGGING ===
 
 # The log functions write to stderr, so stderr decides the colors
 if [[ -t 2 ]]; then

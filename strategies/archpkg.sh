@@ -1,16 +1,6 @@
 #!/usr/bin/env bash
-#
-# archpkg - Detect latest version from Arch official repositories
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: pkgver of the official package, without epoch and pkgrel
-#
-# For AUR packages that follow the pkgver of an official package. A
-# rebuild in the official repos raises only pkgrel, so it gives no new
-# version here.
-# upstream.archpkg: package name in official repos (e.g. "qt6-base")
-# upstream.testing: true also reads core-testing, extra-testing and
-#   multilib-testing
+# archpkg - Print the pkgver of an official Arch package, see
+# https://aurtomator.dev/strategies/#archpkg
 
 set -euo pipefail
 

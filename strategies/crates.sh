@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-#
-# crates - Detect latest version from crates.io
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest stable version string, or max_version with
-#         upstream.prerelease, which counts pre-releases
-#
-# upstream.registry: crate name (e.g. "serde")
-# upstream.prerelease: true to read max_version (default: false)
+# crates - Print the latest version of a crate on crates.io, see
+# https://aurtomator.dev/strategies/#crates
 
 set -euo pipefail
 

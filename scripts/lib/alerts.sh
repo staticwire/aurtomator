@@ -4,12 +4,11 @@
 #
 # Sourced by lib.sh.
 
-# Succeeds when one alert condition fires on the step from current to the
-# new version: the new version meets it and current does not. Without
-# current nothing fires. A broken condition fails with or without current.
+# Succeeds when one alert condition fires on the step from current to the new version: the new
+# version meets it and current does not, and without current nothing fires
 # Args: $1=when, from or match, $2=its value, $3=current, $4=new version
-# Returns: 0=fires, 1=does not, 2=no condition it knows, or a match that
-#          is no ERE bash accepts
+# Returns: 0=fires, 1=does not, 2=an unknown condition or a match bash cannot compile, with or
+#          without current
 alert_fires() {
   local kind="$1" value="$2" current="$3" latest="$4" old new
   [[ "$kind" =~ ^(when|from|match)$ ]] || return 2
@@ -30,9 +29,8 @@ alert_fires() {
   esac
 }
 
-# Prints the note of an alert. Fails when the note is not one line of
-# text: the note goes into one log line and one line of _alerts.
-# Args: $1=package file, $2=index of the alert
+# Print the note of alert $2 of package file $1; fails when it is not one line of text, since
+# it goes into one log line and one line of _alerts
 alert_note() {
   local note
   note=$(pkg_get "$1" ".alerts[$2].note | select(tag == \"!!str\")")
@@ -40,20 +38,16 @@ alert_note() {
   printf '%s\n' "$note"
 }
 
-# Prints the error for a note that alert_note refuses. YAML reads a bare
-# number, boolean or date as another type than text.
-# Args: $1=package file, $2=index of the alert
+# Print the error for a note of alert $2 of package file $1 that alert_note refuses; YAML reads
+# a bare number, boolean or date as another type than text
 alert_note_error() {
   local value
   value=$(pkg_get "$1" ".alerts[$2].note | select(tag == \"!!int\" or tag == \"!!float\" or tag == \"!!bool\" or tag == \"!!timestamp\")")
   printf 'note must be one line of text%s\n' "${value:+: put $value in quotes}"
 }
 
-# The alerts of a package that fire on the step from current to the new
-# version, one per line in file order: hold or notice, a tab and the note.
-# Fails on a rule it cannot evaluate and on a note that is not one line
-# of text, which validate-pkg.sh refuses too.
-# Args: $1=package file, $2=current, $3=new version
+# Print the alerts of package file $1 that fire from current $2 to version $3, in file order,
+# as hold or notice, a tab and the note; fails on a broken rule or a note of several lines
 fired_alerts() {
   local file="$1" current="$2" latest="$3" count i kind value rc action note
   count=$(pkg_get "$file" '.alerts | length')

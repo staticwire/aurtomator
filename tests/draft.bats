@@ -15,9 +15,8 @@ teardown() {
   teardown_test_env
 }
 
-# Publishes the AUR package $1, whose .SRCINFO holds pkgver $2 and the
-# "key = value" lines after it in the pkgbase section. Its PKGBUILD leaves
-# a mark when it runs.
+# Publishes the AUR package $1 with pkgver $2 and the remaining "key = value" arguments in the
+# pkgbase section of its .SRCINFO; its PKGBUILD leaves a mark when it runs
 aur_package() {
   local name="$1" version="$2" work="$TEST_TMPDIR/aur-work/$1" line
   shift 2

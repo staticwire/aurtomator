@@ -4,8 +4,7 @@
 #
 # Sourced by lib.sh and by setup.sh.
 
-# The repository whose releases VERSION counts. VERSION is the version of
-# aurtomator in a fork, a fork of a fork and a template copy alike.
+# The repository whose releases VERSION counts, in a fork and a template copy alike
 AURTOMATOR_UPSTREAM=staticwire/aurtomator
 
 # Print the version in VERSION, or nothing when the file is missing
@@ -15,9 +14,8 @@ aurtomator_version() {
   printf '%s\n' "$(<"$file")"
 }
 
-# Print the version of the latest release of aurtomator, its tag without the
-# v. Fails on a failed request and on a tag other than vX.Y.Z, which goes
-# into the README and an issue.
+# Print the latest release of aurtomator, its tag without the v; fails on a failed request and
+# on a tag other than vX.Y.Z, since the version goes into the README and an issue
 latest_aurtomator_release() {
   local tag
   tag=$(github_api "https://api.github.com/repos/${AURTOMATOR_UPSTREAM}/releases/latest" | yq -r '.tag_name // ""') || return 1
@@ -28,9 +26,8 @@ latest_aurtomator_release() {
   printf '%s\n' "${tag#v}"
 }
 
-# Print newer: <release> when the latest release of aurtomator is newer
-# than VERSION, and current: <release> otherwise. Fails without VERSION or
-# a release.
+# Print newer: <release> when the latest release is newer than VERSION, and current: <release>
+# otherwise; fails without VERSION or a release
 upstream_status() {
   local version release
   version=$(aurtomator_version)

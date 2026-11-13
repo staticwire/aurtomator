@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 #
-# validate-pkg.sh - Validate package YAML configuration
+# validate-pkg.sh - Check the syntax, the keys and the strategy fields of a package YAML
 #
 # Usage: ./scripts/validate-pkg.sh <package-name>
 #        ./scripts/validate-pkg.sh --all
-#
-# Validates YAML syntax, required fields, strategy name,
-# and strategy-specific field requirements.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -46,9 +43,8 @@ readonly UPSTREAM_KEYS=(
   "kde-tarball: project path max_answer_mb"
 )
 
-# Succeeds when $1 is one of the words of $2. A substring match would pass
-# a key such as "name strategy".
-# Args: $1=word, $2=words separated by spaces
+# Succeeds when $1 is one of the words of $2, split by spaces; a substring match would pass a
+# key such as "name strategy"
 in_words() {
   local words word
   read -ra words <<<"$2"
@@ -58,9 +54,7 @@ in_words() {
   return 1
 }
 
-# Prints the upstream keys of a strategy, or fails when UPSTREAM_KEYS has
-# no line for it
-# Args: $1=strategy
+# Print the upstream keys of strategy $1, or fail when UPSTREAM_KEYS has no line for it
 upstream_keys() {
   local line
   for line in "${UPSTREAM_KEYS[@]}"; do
@@ -72,10 +66,8 @@ upstream_keys() {
   return 1
 }
 
-# Prints the strategies that read an upstream key, as "the git-latest
-# strategy" or "the github-release and github-tag strategies", or fails
-# when no strategy reads it
-# Args: $1=key
+# Print the strategies that read upstream key $1, as "the git-latest strategy" or "the
+# github-release and github-tag strategies", or fail when no strategy reads it
 key_strategies() {
   local line names=() list i
   for line in "${UPSTREAM_KEYS[@]}"; do
@@ -94,9 +86,8 @@ key_strategies() {
   esac
 }
 
-# Validate one entry of alerts
-# Args: $1=package file, $2=index of the entry, $3=pkgver_format, if any
-# Returns 0 if valid, 1 if invalid (errors printed to stderr)
+# Check entry $2 of the alerts of package file $1, with pkgver_format $3 if any; the errors
+# go to stderr
 validate_alert() {
   local file="$1" i="$2" format="$3" rule="packages/${1##*/}: alerts[$2]" errors=0 unknown tag value
   if [[ $(pkg_get "$file" ".alerts[$i] | tag") != "!!map" ]]; then
@@ -152,8 +143,7 @@ validate_alert() {
   return "$errors"
 }
 
-# Validate a single package YAML file
-# Returns 0 if valid, 1 if invalid (errors printed to stderr)
+# Check one package YAML file; the errors go to stderr
 validate_pkg() {
   local file="$1"
   local errors=0
@@ -446,11 +436,11 @@ validate_pkg() {
     if [[ "$strategy" == "github-nightly" && $(pkg_get "$file" '.upstream.version_source // "tag"') != "tag" ]]; then
       log_err "$shown: upstream.tag_version_regex applies to version_source tag only"
       ((errors++))
-    # Then check the capture group (must have parentheses)
+    # The regex needs a capture group
     elif ! echo "$tag_version_regex" | grep -qE '\([^)]*\)'; then
       log_err "$shown: upstream.tag_version_regex must contain a capture group (): $tag_version_regex"
       ((errors++))
-    # Then check that bash compiles it, as tag_versions needs
+    # tag_versions needs a regex that bash compiles
     elif ! ere_valid "$tag_version_regex"; then
       log_err "$shown: upstream.tag_version_regex is not valid ERE regex: $tag_version_regex"
       ((errors++))
@@ -469,9 +459,8 @@ validate_pkg() {
     elif [[ ! "$tag_version_replace" =~ ^([A-Za-z0-9._+]|\\[1-9])+$ ]]; then
       log_err "$shown: upstream.tag_version_replace may hold only A-Za-z0-9 . _ + and \\1 to \\9: $tag_version_replace"
       ((errors++))
-    # $regex|^ matches the empty string and fills BASH_REMATCH with every
-    # group of the regex, so tag_version_fill finds a missing group as it
-    # does at run time
+    # $regex|^ matches the empty string and fills BASH_REMATCH with every group, so
+    # tag_version_fill finds a missing group as it does at run time
     elif ere_valid "$tag_version_regex" &&
       ! { [[ "" =~ $tag_version_regex|^ ]] && tag_version_fill "$tag_version_replace" >/dev/null 2>&1; }; then
       log_err "$shown: upstream.tag_version_replace names a group tag_version_regex does not have: $tag_version_replace"
@@ -479,9 +468,8 @@ validate_pkg() {
     fi
   fi
 
-  # A value from the name of a release asset, see https://aurtomator.dev/features/asset-values/
-  # $regex|^ matches the empty string and fills
-  # BASH_REMATCH with every group of the regex.
+  # A value from the name of a release asset, see https://aurtomator.dev/features/asset-values/;
+  # $regex|^ matches the empty string and fills BASH_REMATCH with every group of the regex
   local asset_regex_tag asset_var_tag asset_regex current_asset groups=0
   asset_regex_tag=$(pkg_get "$file" '.upstream.asset_regex | tag')
   asset_var_tag=$(pkg_get "$file" '.upstream.asset_var | tag')
@@ -683,10 +671,8 @@ validate_pkg() {
           ((errors++))
         fi
       fi
-      # The strategy prints r<count>.<hash>, or with upstream.describe
-      # <tag>.r<count>.g<hash>. vercmp reads 1.4.0.r47.g0bbf5ad as newer
-      # than every r<count>.<hash>, so a current of the other form would
-      # make each check a downgrade, or each check an update.
+      # The strategy prints r<count>.<hash>, or <tag>.r<count>.g<hash> with upstream.describe,
+      # which vercmp reads as newer, so a current of the other form breaks every check
       local current
       current=$(pkg_get "$file" '.current // ""')
       if [[ -n "$describe" ]]; then
@@ -725,9 +711,8 @@ validate_pkg() {
         log_err "$shown: strategy 'webpage-scrape' requires 'upstream.pattern'"
         ((errors++))
       else
-        # The strategy runs the pattern through grep and bash, and prints the
-        # first group of each match. |^ makes the empty text match, so
-        # BASH_REMATCH holds one entry per group.
+        # The strategy prints the first group of each match, and |^ makes the empty text
+        # match, so BASH_REMATCH holds one entry per group
         if ! ere_valid "$pattern"; then
           log_err "$shown: upstream.pattern is not valid ERE regex: $pattern"
           ((errors++))
@@ -770,9 +755,7 @@ validate_pkg() {
   return 0
 }
 
-# =============================================================================
-# MAIN
-# =============================================================================
+# === MAIN ===
 
 if [[ "${1:-}" == "--all" ]]; then
   total=0

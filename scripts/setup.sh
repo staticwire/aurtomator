@@ -26,17 +26,15 @@ source "$SCRIPT_DIR/lib/version.sh"
 # shellcheck source=lib/config.sh
 source "$SCRIPT_DIR/lib/config.sh"
 
-# The command that the printed commands start with. The script
-# aurtomator.sh of the template sets AURTOMATOR_RUNNER to the path it was
-# run by.
+# The printed commands start with this; aurtomator.sh of the template sets
+# AURTOMATOR_RUNNER to the path it was run by
 SETUP_CMD="$0"
 if [[ -n "${AURTOMATOR_RUNNER:-}" ]]; then
   SETUP_CMD="$AURTOMATOR_RUNNER setup"
 fi
 
-# The data root, resolved as in lib/common.sh, which this script does not
-# source. The variable is set last, so the message names the value as the
-# caller gave it.
+# Resolves AURTOMATOR_DATA_DIR as lib/common.sh does, which this script does not
+# source; it sets the variable last, so the error names the value as given
 resolve_data_dir() {
   local dir
   if ! dir="$(cd -- "${AURTOMATOR_DATA_DIR:-.}" 2>/dev/null && pwd)"; then
@@ -48,7 +46,6 @@ resolve_data_dir() {
 resolve_data_dir
 CONFIG_FILE="${AURTOMATOR_DATA_DIR}/.aurtomator.conf"
 
-# Defaults
 GIT_AUTHOR_NAME=""
 GIT_AUTHOR_EMAIL=""
 GPG_KEY_ID=""
@@ -57,7 +54,6 @@ AUR_SSH_KEY=""
 NON_INTERACTIVE=false
 STEPS=()
 
-# Colors (if terminal)
 if [[ -t 1 ]]; then
   GREEN=$'\033[0;32m'
   YELLOW=$'\033[0;33m'
@@ -119,10 +115,6 @@ origin_repo() {
   fi
 }
 
-# =============================================================================
-# SAVE CONFIG
-# =============================================================================
-
 # load_config of lib/config.sh reads each value in this form
 save_config() {
   {
@@ -133,20 +125,15 @@ save_config() {
   } >"$CONFIG_FILE"
 }
 
-# =============================================================================
-# STEPS
-# =============================================================================
-
 setup_identity() {
   header "identity" "Who you are on AUR"
   printf "  Data directory: %s\n" "$AURTOMATOR_DATA_DIR"
 
-  # Detect defaults from git config
   local default_name default_email
   default_name=$(git config --global user.name 2>/dev/null || true)
   default_email=$(git config --global user.email 2>/dev/null || true)
 
-  # Use saved values if available, otherwise detected defaults
+  # A saved value or a flag skips the question, which offers git config as the default
   if [[ -z "$GIT_AUTHOR_NAME" ]]; then
     printf "  AUR git commits need an author name and email.\n"
     printf "  This appears in %sgit log%s on your AUR package repos.\n\n" "$BOLD" "$RESET"
@@ -157,7 +144,6 @@ setup_identity() {
     GIT_AUTHOR_EMAIL=$(ask "Git author email" "${default_email:-}")
   fi
 
-  # Validate
   if [[ -z "$GIT_AUTHOR_NAME" ]]; then
     fail "Git author name is required"
     return 1
@@ -180,7 +166,7 @@ check_ssh_key() {
     return 1
   fi
 
-  # Check that it is a private key
+  # ssh-keygen -y prints the public key only for a private key it opens without a passphrase
   local key_check
   key_check=$(ssh-keygen -y -f "$AUR_SSH_KEY" -P "" 2>&1) || true
   if [[ "$key_check" == ssh-* ]]; then
@@ -234,9 +220,8 @@ gpg_is_primary_key() {
   [[ -n "$fpr" && "${fpr^^}" == *"${id^^}" ]]
 }
 
-# The temporary keyring of setup_gpg holds the signing subkey without a
-# passphrase once gpg-agent has removed it. setup_gpg sets this function as
-# the EXIT trap, so Ctrl-C or a closed terminal does not leave it on disk.
+# The temporary keyring holds the signing subkey without a passphrase; setup_gpg
+# sets this as the EXIT trap, so Ctrl-C or a closed terminal does not leave it
 TMP_GNUPG=""
 remove_tmp_gnupg() {
   [[ -n "$TMP_GNUPG" ]] || return 0
@@ -248,7 +233,7 @@ remove_tmp_gnupg() {
 setup_gpg() {
   header "gpg" "Sign AUR commits with GPG (optional)"
 
-  # Yes/no gate: skip unless the user wants GPG or passed --gpg-key
+  # Without a key from --gpg-key or the saved config, GPG signing is opt-in
   if [[ -z "$GPG_KEY_ID" ]]; then
     if [[ "$NON_INTERACTIVE" == "true" ]]; then
       ok "GPG signing skipped (no --gpg-key provided)"
@@ -272,7 +257,6 @@ setup_gpg() {
     return 0
   fi
 
-  # Validate key exists
   local key_info
   if ! key_info=$(gpg --list-secret-keys --keyid-format long "$GPG_KEY_ID" 2>/dev/null); then
     fail "Key not found in keyring: $GPG_KEY_ID"
@@ -280,7 +264,7 @@ setup_gpg() {
   fi
 
   if ! echo "$key_info" | grep -q '\[S'; then
-    warn "Key may not have signing capability, verify manually"
+    warn "gpg lists no signing flag [S] for $GPG_KEY_ID"
   fi
 
   # CI gets the signing subkey alone. The primary key certifies the others
@@ -314,14 +298,13 @@ setup_gpg() {
       return 0
     fi
 
-    # Strip passphrase via temp keyring (only the signing subkey, not all subkeys)
+    # A temporary keyring with the signing subkey alone gets the passphrase removed
     TMP_GNUPG=$(mktemp -d)
     trap remove_tmp_gnupg EXIT
     chmod 700 "$TMP_GNUPG"
     echo "pinentry-program /usr/bin/pinentry" >"$TMP_GNUPG/gpg-agent.conf"
 
-    # Export ONLY the signing subkey (! suffix = exact key) from real keyring
-    # Pinentry will ask for passphrase once
+    # The ! suffix exports this subkey alone; pinentry asks for its passphrase
     local exported_key
     exported_key=$(gpg --export-secret-subkeys --armor "${GPG_KEY_ID}!" 2>/dev/null) || true
     if [[ -z "$exported_key" ]]; then
@@ -331,7 +314,6 @@ setup_gpg() {
       return 0
     fi
 
-    # Import into temp keyring
     if ! echo "$exported_key" | gpg --homedir "$TMP_GNUPG" --batch --import 2>/dev/null; then
       fail "Failed to import key into temporary keyring"
       remove_tmp_gnupg
@@ -339,7 +321,7 @@ setup_gpg() {
       return 0
     fi
 
-    # Remove passphrase via gpg-agent in isolated temp keyring
+    # PASSWD of gpg-agent takes the keygrip of the signing subkey
     local keygrip
     keygrip=$(gpg --homedir "$TMP_GNUPG" --list-secret-keys --with-keygrip 2>/dev/null |
       grep -A1 "\[S\]" | grep Keygrip | awk '{print $3}' || true)
@@ -378,7 +360,7 @@ setup_gpg() {
 setup_secrets() {
   header "secrets" "GitHub Secrets"
 
-  # The ssh step is not run when secrets runs alone or with a saved config
+  # secrets can run without the ssh step, so the saved key is checked here too
   check_ssh_key || return 1
 
   local has_gh=false
@@ -431,7 +413,6 @@ setup_secrets() {
     printf "\n  Setting secrets on %s:\n" "$gh_repo"
 
     # gh prints a line for each secret on stdout and its errors on stderr
-    # Identity secrets (for CI to use as AUR commit author)
     if [[ -n "$GIT_AUTHOR_NAME" ]]; then
       if echo "$GIT_AUTHOR_NAME" | gh secret set AUR_GIT_NAME -R "$gh_repo" >/dev/null; then
         ok "AUR_GIT_NAME"
@@ -493,7 +474,7 @@ setup_secrets() {
   fi
 }
 
-# Issues of repository $1, where the runs report failures and alerts
+# Checks that repository $1 has Issues on, where the runs report failures and alerts
 verify_issues() {
   local has_issues
   if ! has_issues=$(gh api "repos/$1" --jq .has_issues 2>/dev/null); then
@@ -507,7 +488,7 @@ verify_issues() {
   ok "Issues: on"
 }
 
-# Workflow $1 among the paths and states $2 that GitHub lists
+# Checks that workflow $1 is active among the paths and states $2 that GitHub lists
 verify_workflow() {
   local state
   state=$(awk -v path=".github/workflows/$1" '$1 == path { print $2 }' <<<"$2")
@@ -524,7 +505,7 @@ verify_workflow() {
   esac
 }
 
-# The open issue of a failed run in repository $1, which the next run
+# Warns of an open issue of a failed run in repository $1, which the next run
 # without a failed job closes
 warn_run_issue() {
   local number
@@ -532,7 +513,7 @@ warn_run_issue() {
   [[ -z "$number" ]] || warn "Run issue #${number%%$'\n'*} is open: a run without a failed job closes it"
 }
 
-# The version of this aurtomator against its latest release
+# Compares the version of this aurtomator with its latest release
 verify_release() {
   local version latest
   version=$(aurtomator_version)
@@ -551,7 +532,6 @@ verify_all() {
 
   local errors=0
 
-  # Identity
   if [[ -n "$GIT_AUTHOR_NAME" && -n "$GIT_AUTHOR_EMAIL" ]]; then
     ok "Identity: $GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>"
   else
@@ -572,7 +552,6 @@ verify_all() {
     errors=$((errors + 1))
   fi
 
-  # GPG (only if configured)
   if [[ -n "$GPG_KEY_ID" ]]; then
     if echo "test" | gpg --sign --armor --local-user "$GPG_KEY_ID" >/dev/null 2>&1; then
       ok "GPG: signing works with $GPG_KEY_ID"
@@ -640,10 +619,6 @@ verify_all() {
   fi
 }
 
-# =============================================================================
-# ARGUMENT PARSING
-# =============================================================================
-
 # Saved values first, so that flags override them
 load_config
 
@@ -681,20 +656,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Default: all steps
 if [[ ${#STEPS[@]} -eq 0 ]]; then
   STEPS=(identity ssh gpg secrets verify)
 fi
 
-# =============================================================================
-# MAIN
-# =============================================================================
-
 printf "%saurtomator setup%s\n" "$BOLD" "$RESET"
 
-# Each step is saved as soon as it ends, so a step that fails keeps the
-# answers given before it. A failed verify still saves the config, so the
-# re-run it suggests has the values of this run.
+# Saving after each step keeps the answers given before a failed step; a failed
+# verify saves too, so the re-run it suggests has the values of this run
 EXIT_STATUS=0
 for step in "${STEPS[@]}"; do
   case "$step" in

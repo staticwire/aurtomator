@@ -1,9 +1,7 @@
 name: Runner probe
 
-# Run by hand after GitHub changes the runner image and after the digest in
-# ci-image/Dockerfile moves. It prints what builder in the jobs of
-# check-updates.yml rests on, and fails when builder can write a file of the
-# runner, use the Docker socket or read a variable of the runner.
+# Run by hand after a new runner image or digest of ci-image/Dockerfile. It prints what builder rests
+# on, and fails when builder can write a runner file, use the Docker socket or read a runner variable
 on:
   workflow_dispatch:
 

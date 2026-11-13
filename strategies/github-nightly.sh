@@ -1,30 +1,6 @@
 #!/usr/bin/env bash
-#
-# github-nightly - Detect latest version from GitHub nightly/prerelease builds
-#
-# Supports 4 patterns:
-#   A) Fixed tag (default): nightly tag force-pushed daily (neovim, ghostty, yazi)
-#   B) Dated tags: nightly-YYYY-MM-DD (ruffle), or a tag that matches
-#      nightly_tag_regex (servo)
-#   C) Separate nightly repo: standard /releases/latest on a different repo
-#      (yt-dlp); /releases/latest skips pre-releases
-#   D) Channel filter: filter releases by name containing channel string (brave)
-#
-# YAML fields:
-#   upstream.project        - owner/repo (required)
-#   upstream.nightly_tag    - tag name or pattern (default: "nightly")
-#                             use "latest" for pattern C
-#                             use prefix like "nightly-" for pattern B
-#   upstream.nightly_tag_regex - ERE for the tag in pattern B, in place of
-#                             nightly_tag; reads up to 3 pages of 100 releases
-#   upstream.version_source - where to extract version from:
-#                             "tag" (default), "release_body", "tag_date", "published_date"
-#   upstream.version_pattern - regex for extracting version from release body (pattern A)
-#   upstream.channel        - filter releases by name (pattern D)
-#   upstream.tag_version_regex - ERE with a capture group, for version_source tag
-#   upstream.tag_version_replace - the version from its groups (default: \1)
-#   upstream.date_format    - format of date(1) for tag_date and published_date
-#                             (default: "%Y.%m.%d")
+# github-nightly - Print the version of the latest nightly build on GitHub, see
+# https://aurtomator.dev/strategies/#github-nightly
 
 set -euo pipefail
 
@@ -48,17 +24,15 @@ nightly_tag_regex=$(pkg_get "$pkg_file" '.upstream.nightly_tag_regex // ""')
 
 api="https://api.github.com/repos/${owner_repo}"
 
-# A date in date_format. -u keeps the day of a UTC timestamp whatever the
-# time zone of the machine. Prints nothing when there is no date.
-# Args: $1=date or timestamp
+# Prints date or timestamp $1 in date_format, and nothing for an empty or null $1. -u keeps
+# the day of a UTC timestamp whatever the time zone of the machine.
 format_date() {
   if [[ -n "$1" && "$1" != "null" ]]; then
     date -u -d "$1" +"$date_format"
   fi
 }
 
-# Fetch release based on pattern. channel and nightly_tag reach yq through
-# the environment so that quotes in them cannot break the expression.
+# channel and nightly_tag reach yq through strenv, so a quote in them cannot break the expression
 if [[ -n "$nightly_tag_regex" ]]; then
   # Pattern B with a regex
   release=$(github_release_matching "$api" "$nightly_tag_regex" 3) || {
@@ -107,7 +81,6 @@ if [[ -z "$release" || "$release" == "null" ]]; then
   exit 1
 fi
 
-# Extract version based on version_source
 case "$version_source" in
   tag)
     version=$(echo "$release" | yq -r '.tag_name')
@@ -138,7 +111,7 @@ case "$version_source" in
     fi
     body=$(echo "$release" | yq -r '.body')
     version=$(echo "$body" | grep -oP -e "$version_pattern" | head -1 || true)
-    # Clean up: replace - with + for pacman compatibility
+    # A pkgver cannot hold a dash
     version="${version//-/+}"
     ;;
   published_date)

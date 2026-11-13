@@ -36,11 +36,11 @@ graph LR
     C --> D
 ```
 
-Each package has a YAML config pointing to an upstream source. Your repository holds these configs and calls the pipeline of aurtomator. A first job runs the strategies and decides what the run does. When a new version is detected, aurtomator clones the existing AUR repo, bumps `pkgver`, regenerates checksums and `.SRCINFO`, and pushes. A PKGBUILD is code, so the steps before the push run in a job without secrets, and the jobs after it take the statuses from the first job. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. It does not generate PKGBUILDs, and [Limitations](#limitations) lists the lines of a PKGBUILD that it changes. A package that starts failing gets a GitHub Issue, and so does a failed run of the workflow. When the checks of 5 or more packages fail on one host in a run, those packages share one issue.
+Your repository holds one YAML per package, which names its upstream source, and calls the pipeline of aurtomator. The first job runs the strategies and decides the run. For a new version, a job without secrets clones the AUR repository, bumps `pkgver` and regenerates the checksums and `.SRCINFO`, since a PKGBUILD is code. A second job without secrets downloads the sources and checks the checksums, and the job that pushes checks the result once more. [Limitations](#limitations) lists the lines of a PKGBUILD that aurtomator changes. A package that starts failing gets an issue, and so does a failed run.
 
 ## Quick start
 
-1. Create your repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) with [Use this template](https://github.com/staticwire/aurtomator-seed/generate). Check that Issues are enabled in its settings, and that `Check AUR Package Updates` and `Validate packages` are enabled in its Actions tab ([why?](https://aurtomator.dev/setup/#after-creating-the-repository)).
+1. Create your repository from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed) with [Use this template](https://github.com/staticwire/aurtomator-seed/generate). Check that Issues are enabled in its settings, and that `Check AUR Package Updates` and `Validate packages` are enabled in its Actions tab ([details](https://aurtomator.dev/setup/#after-creating-the-repository)).
 2. Clone your repository:
 
    ```bash
@@ -62,14 +62,14 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 
    ![./aurtomator.sh draft hello-bin writes packages/hello-bin.yml with the github-release strategy, validates it and finds the update from 1.4.2 to 2.0.0](assets/demo/draft.gif)
 
-   It reads the `.SRCINFO` of the package in the AUR, writes `packages/<name>.yml` with a strategy and its `upstream` fields, and runs `validate-pkg` and `check-update` on that file, see [Draft a package](https://aurtomator.dev/add-a-package/#draft-a-package). When no rule matches the url or a source of the package, it writes nothing. Then write the file from the sample, with `name: <name>`, a `strategy` and its `upstream` fields, see [Strategies](#strategies), and check it:
+   It reads the `.SRCINFO` of the package in the AUR, writes `packages/<name>.yml` with a strategy and its `upstream` fields, and checks the file, see [Draft a package](https://aurtomator.dev/add-a-package/#draft-a-package). When no rule matches the package, write the file from the sample, see [Strategies](#strategies), and check it:
 
    ```bash
    ./aurtomator.sh sample > packages/<name>.yml
    ./aurtomator.sh validate-pkg <name>
    ```
 
-5. Commit and push. The workflows do the rest. The schedule starts a run a few times a day, and Actions > Check AUR Package Updates > Run workflow starts one at once.
+5. Commit and push. The schedule starts a run a few times a day, and Actions > Check AUR Package Updates > Run workflow starts one at once.
 
 `./aurtomator.sh` runs the scripts of aurtomator at the version your workflows pin, see [The aurtomator.sh script](https://aurtomator.dev/setup/#the-aurtomatorsh-script). Without [gh CLI](https://cli.github.com/), `setup` prints how to set the secrets by hand. GPG signing of the AUR commits is optional.
 
@@ -91,7 +91,7 @@ Each package has a YAML config pointing to an upstream source. Your repository h
 | `pypi`             | PyPI JSON API       | Python packages                        |
 | `npm`              | npm registry        | Node.js packages                       |
 | `crates`           | crates.io API       | Rust crates                            |
-| `repology`         | Repology API        | Universal fallback (120+ repos)        |
+| `repology`         | Repology API        | Fallback across distribution repos     |
 | `archpkg`          | Arch repos API      | The pkgver of an official package      |
 | `webpage-scrape`   | URL + regex         | Anything not covered above             |
 | `kde-tarball`      | download.kde.org    | KDE projects, Plasma and Gear too      |
@@ -117,9 +117,7 @@ It writes `.SRCINFO` from the result with `makepkg --printsrcinfo`. It does not 
 - [Source URLs returning HTML or an error status](https://aurtomator.dev/supported-packages/#source-url-returns-html-blocked)
 - [Checksums verify cannot compute](https://aurtomator.dev/supported-packages/#checksums-verify-cannot-compute-blocked)
 
-Patches in `source=()` trigger a warning and are not blocked.
-
-[Supported packages](https://aurtomator.dev/supported-packages/) has the full breakdown, including safe and unsafe failure modes.
+Patches in `source=()` get a warning. [Supported packages](https://aurtomator.dev/supported-packages/) lists every case.
 
 ## Features
 

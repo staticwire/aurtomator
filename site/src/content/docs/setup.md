@@ -7,19 +7,15 @@ title: Setup
 Required:
 
 - Arch Linux, or an Arch-based system with `makepkg` and `updpkgsums`
-- `git`
-- `yq`: the [Go version by mikefarah](https://github.com/mikefarah/yq), not the Python wrapper around `jq`
-- `ssh-keygen` from `openssh`
-- `curl`
-- An AUR account at <https://aur.archlinux.org> with at least one package you maintain
+- `git`, `curl`, and `ssh-keygen` from `openssh`
+- `yq`, the [Go version by mikefarah](https://github.com/mikefarah/yq). The Python `yq` around `jq` does not work
+- an AUR account at <https://aur.archlinux.org> with at least one package you maintain
 
 Optional:
 
-- `gh` (GitHub CLI) sets the GitHub Secrets for you. Without it, you set them in the web UI. Both paths are described below.
-- A GPG key, to sign AUR commits. See [GPG signing](/gpg-signing/).
-- `namcap`, to lint PKGBUILDs before pushing.
-
-Install everything at once:
+- `gh` (GitHub CLI), which sets the GitHub Secrets for you. Without it, you set them in the web UI
+- a GPG key, to sign AUR commits, see [GPG signing](/gpg-signing/)
+- `namcap`, to lint a PKGBUILD before a push
 
 ```bash
 sudo pacman -S --needed git openssh go-yq curl pacman-contrib namcap github-cli gnupg
@@ -31,30 +27,28 @@ A repository created from the template [staticwire/aurtomator-seed](https://gith
 
 ### Required
 
-1. **Enable Issues**: Settings > General > Features > Issues. Failures, update alerts and newer aurtomator releases are reported as issues. With Issues off, a run prints a notice instead and opens none.
-2. **Check Actions**: the Actions tab lists `Check AUR Package Updates` and `Validate packages`. A workflow shown as disabled there runs again once you open it and click "Enable workflow". In a fork, GitHub disables the workflows until they are enabled in its Actions tab. GitHub also disables a scheduled workflow of a public repository after 60 days without activity in it, and the workflow then needs "Enable workflow" again. Once `packages/` holds a package, the first run of each day commits the statistics card, see [Statistics](#statistics). Before the first package, a run commits nothing. A private repository keeps its schedule, and its runs use the Actions minutes of your account instead: GitHub counts each job in whole minutes, rounded up, from three jobs for a run that changes nothing, `image`, `check` and `status`, to six for a run with an update.
-3. **Set the secrets**: `./aurtomator.sh setup`, run in a clone of your repository, sets `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`, as [Quick setup](#quick-setup-with-gh-cli) describes. The calling workflow passes them to aurtomator by name. `secrets: inherit` would pass none, since it works only between repositories of one organization or enterprise.
+1. Enable Issues: Settings > General > Features > Issues. Failures, update alerts and new aurtomator releases arrive as issues. With Issues off, a run prints a notice and opens none.
+2. Check Actions: the Actions tab lists `Check AUR Package Updates` and `Validate packages`. A workflow shown as disabled runs again after "Enable workflow". GitHub disables the workflows of a fork until they are enabled there, and the scheduled workflow of a public repository after 60 days without activity. A private repository uses the Actions minutes of your account: GitHub rounds each job up to whole minutes, three jobs for a run that changes nothing and six for a run with an update.
+3. Set the secrets: `./aurtomator.sh setup`, run in a clone of your repository, sets `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`, see [Quick setup](#quick-setup-with-gh-cli). The calling workflow passes them to aurtomator by name, since `secrets: inherit` works only between repositories of one organization or enterprise.
 
-The schedule runs from the start, so runs can come before the secrets are set. Such a run needs no key while it pushes nothing to the AUR, and it can still commit the README. A run with a package to push stops in `publish` with `The secret AUR_SSH_KEY is empty`, and the `notify` job opens the issue `❌ Check AUR Package Updates failed`. The first run after `./aurtomator.sh setup secrets` in which no job fails closes that issue.
+The schedule runs from the start, before the secrets exist. A run without a package to push needs no key. A run with one stops in `publish` with `The secret AUR_SSH_KEY is empty` and opens the issue `❌ Check AUR Package Updates failed`, which the first run without a failed job closes.
 
 ### Recommended
 
-- **Dependabot version updates**: the `.github/dependabot.yml` of the template turns them on in a repository created from it. Dependabot then opens the pull request that moves the pin of the calling workflows to a new release of aurtomator, see [The calling workflows](#the-calling-workflows). A fork of the template needs the switch: Settings > Advanced Security, then Enable next to "Dependabot version updates".
-- Set repository topics if your repository is public.
+- Dependabot version updates: the `.github/dependabot.yml` of the template turns them on. Dependabot then opens the pull request that moves the pin of the calling workflows to a new release of aurtomator, see [The calling workflows](#the-calling-workflows). A fork of the template turns them on under Settings > Advanced Security, "Dependabot version updates".
+- Topics, for a public repository.
 
 ### Badges
 
-`update-readme.sh` writes three badges between the `<!-- BADGES:START -->` and `<!-- BADGES:END -->` markers of the README: `Validate packages`, `Check AUR Package Updates` and `maintained with aurtomator`. A run of `Check AUR Package Updates` runs the script and commits the README when it changed. While `packages/` holds no package, the script writes nothing, so the setup steps of the template stay in the README until the first package.
-
-The badge URLs name `validate.yml` and `check-updates.yml` in your repository, so the calling workflows keep those file names.
+`update-readme.sh` writes three badges between `<!-- BADGES:START -->` and `<!-- BADGES:END -->` in the README: `Validate packages`, `Check AUR Package Updates` and `maintained with aurtomator`. Until `packages/` holds a package it writes nothing, so the setup steps of the template stay in the README. The badge URLs name `validate.yml` and `check-updates.yml`, so the calling workflows keep those file names.
 
 ### Statistics
 
-The first run with a package adds `stats/` to your repository: `events.csv`, the journal of every change of state of your packages, and `card.svg` and `card-dark.svg`, the card at the top of the package block of the README. The card shows the packages updated, the pushes to the AUR, the new packages and the failed checks of the last 7, 30 and 365 days, and the pushes of each day of the last year. The journal starts with that run, with one `tracked` row for each package, and holds nothing from before it. The first run of each day commits the card of the new day. See [Statistics](/features/statistics/) for the events of the journal and for reading it in Google Sheets or Grafana.
+The first run with a package adds `stats/` to your repository: the journal `events.csv` and the card at the top of the package table, which the first run of each day draws again. The journal starts with that run. See [Statistics](/features/statistics/).
 
 ## The calling workflows
 
-`.github/workflows/check-updates.yml` runs the update pipeline on a schedule, and its `notify` job opens an issue when the run fails:
+`.github/workflows/check-updates.yml` runs the updates on a schedule, and its job `notify` opens an issue when a run fails:
 
 ```yaml
 name: Check AUR Package Updates
@@ -107,13 +101,15 @@ jobs:
     uses: staticwire/aurtomator/.github/workflows/validate.yml@<sha> # vX.Y.Z
 ```
 
-The pin after `@` is the SHA of a release tag of aurtomator, and the comment after it names that release. All three `uses:` lines carry the same pin. A tag can be moved and a SHA cannot, so a run always gets the code of that release. `./aurtomator.sh pin vX.Y.Z` moves the pin of the three lines to a release, see [The aurtomator.sh script](#the-aurtomatorsh-script). To move it by hand, `git ls-remote https://github.com/staticwire/aurtomator refs/tags/vX.Y.Z` prints the SHA of a tag, and that SHA and the new `# vX.Y.Z` go into the three lines. Dependabot opens the pull request that moves the pin to a new release at its next check. To run that check at once, open Insights > Dependency graph > Dependabot, click "Recent update jobs" and then "Check for updates". The group `aurtomator` in `.github/dependabot.yml` puts the three `uses:` lines into that one pull request. The `cooldown` entry of the same file exempts them from the 3 days that Dependabot otherwise waits after a release. The `Validate packages` run of that pull request checks your packages with the validator of the new release before the merge. After the merge, [`./aurtomator.sh`](#the-aurtomatorsh-script) runs the scripts of the new release, and the first run of `check-updates.yml` on the new pin updates `aurtomator.sh` itself to that release.
+The pin after `@` is the SHA of a release tag of aurtomator, and the comment names the release. All three `uses:` lines carry the same pin. A tag can move and a SHA cannot, so a run always gets the code of that release.
 
-A calling job sets the permissions of the token for the whole called workflow, and a job of the called workflow can lower them but cannot raise them. `check-updates` grants `contents: write` for the commit of the package versions, the README, `stats/` and `aurtomator.sh`, and `issues: write` for the issues it opens and closes. `notify` grants `actions: read` to list the failed jobs of the run, and `issues: write` to open its issue. `check-updates.yml` has no workflow-level `permissions`, so each job gets its own block and nothing more. `validate.yml` has one job, and its workflow-level `contents: read` covers that job. A calling job that grants less than this makes GitHub reject the file before any job starts, see [Invalid workflow file](/help/troubleshooting/#invalid-workflow-file-a-nested-job-requests-more-permissions).
+`./aurtomator.sh pin vX.Y.Z` moves the three pins to a release, see [The aurtomator.sh script](#the-aurtomatorsh-script). By hand, `git ls-remote https://github.com/staticwire/aurtomator refs/tags/vX.Y.Z` prints the SHA of a tag for the three lines. Dependabot opens one pull request for the three lines at its next weekly check: the template groups them as `aurtomator` and excludes them from the cooldown. Insights > Dependency graph > Dependabot > "Recent update jobs" > "Check for updates" runs the check at once. `Validate packages` checks your packages with the validator of the new release on that pull request. After the merge, `./aurtomator.sh` runs the scripts of the new release, and the first run on the new pin updates `aurtomator.sh` itself.
+
+A calling job sets the permissions of the token for the whole called workflow, and a called job can lower them but cannot raise them. `check-updates` grants `contents: write` for its commit and `issues: write` for its issues. `notify` grants `actions: read` to list the failed jobs and `issues: write` for its issue. A calling job that grants less makes GitHub reject the file before any job starts, see [Invalid workflow file](/help/troubleshooting/#invalid-workflow-file-a-nested-job-requests-more-permissions).
 
 ## The aurtomator.sh script
 
-The script `aurtomator.sh` in the root of your repository runs the scripts of aurtomator for that repository, at the commit the calling workflows pin. A local run then uses the strategies and the checks that a run in CI uses, and no clone of aurtomator is needed:
+`aurtomator.sh` in the root of your repository runs the scripts of aurtomator at the commit the calling workflows pin, so a local run uses the strategies and checks of CI without a clone of aurtomator:
 
 ```bash
 ./aurtomator.sh setup                  # scripts/setup.sh
@@ -126,21 +122,19 @@ The script `aurtomator.sh` in the root of your repository runs the scripts of au
 ./aurtomator.sh pin vX.Y.Z             # pins the calling workflows to a release
 ```
 
-A command is `sample`, `pin` or the name of an executable script in `scripts/` of aurtomator without `.sh`, and the arguments after it go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, whatever directory you run it from. The commands above are the documented ones, and the list that the script prints for an unknown command holds these alone. Any other script of `scripts/`, such as `publish-pkg`, is a step of the CI jobs and runs after a warning.
+A command is `sample`, `pin` or the name of a script of `scripts/` without `.sh`, and the arguments after it go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, from any directory. A script of the CI jobs, such as `publish-pkg`, runs after a warning.
 
-The `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA gives the repository and the commit. The script stops when the file holds no such line or more than one, and it reads no comment, so an old pin kept in a comment changes nothing. GitHub reads the file as YAML, and the script reads it with `yq` too: it stops unless the jobs of the file call `check-updates.yml` once, at the pin of that line. A pin in quotes, on the line after `uses:` or through an alias stops it, and so does a `uses:` line inside a block of text, which GitHub reads as text. The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or into `$XDG_CACHE_HOME/aurtomator/<sha>` when `XDG_CACHE_HOME` is set. Later runs use that copy, and the first run after a merge that moves the pin fetches the new release. That first run also removes the copies fetched more than 30 days ago, so a pin still in use is fetched again on its next run.
+The pin comes from the one `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA, and a pin in a comment changes nothing. The script also reads the file with `yq`, as GitHub does, and stops unless the jobs call `check-updates.yml` once, at the pin of that line: a pin in quotes, on the next line or through an alias stops it, and so does a `uses:` line inside a block of text. It stops as well on a file with two YAML documents, a merge key `<<` or a key twice in one mapping.
 
-Before that fetch, the script warns when no tag of the repository points to the pinned commit. GitHub serves a commit of any fork of a repository under the name of that repository too, so a `uses:` line that names `staticwire/aurtomator` can pin a commit that is not in aurtomator. The warning shows only when the script runs. Before you merge a pull request that moves the pin, `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
+The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or `$XDG_CACHE_HOME/aurtomator/<sha>`, and removes the copies fetched more than 30 days ago. Before the fetch it warns when no tag of `staticwire/aurtomator` points to the commit: GitHub serves a commit of any fork under the name of the repository too. `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
 
-The script needs mikefarah/yq and stops with any other `yq`, such as the Python wrapper around `jq`. It also stops with a release of mikefarah/yq that has no `-r` or no `document_index`, and names the version. Before it reads a pin, it stops when `.github/workflows/check-updates.yml` holds more than one YAML document, a merge key `<<` or a key twice in one mapping, or when `yq` cannot read the file. `pin` checks `.github/workflows/validate.yml` the same way. The checks allow anchors and aliases.
+The script needs mikefarah/yq with `-r` and `document_index`, and names the version of any other `yq` it finds.
 
-`./aurtomator.sh pin vX.Y.Z` moves the pin to a release. It reads the commit of that tag with `git ls-remote`, puts it and `# vX.Y.Z` into every `uses:` line of the pinned repository in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. Before it changes a file, it stops when the tag names no commit SHA, or when `yq` reads a pin of the repository in one of the two files that is on no such line, as a pin in quotes is. It fetches nothing. The next run of the script fetches the release, and CI takes it once the two files are committed and pushed.
+`./aurtomator.sh pin vX.Y.Z` reads the commit of the tag with `git ls-remote`, writes it and `# vX.Y.Z` into every `uses:` line of aurtomator in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. It stops before it changes a file when the tag names no commit or `yq` reads a pin outside such a line. The next run of the script fetches the release, and CI takes it once the two files are pushed.
 
-In CI, the jobs check out your repository and then aurtomator into `aurtomator/` of that checkout, which deletes whatever that path holds. So the script is `aurtomator.sh`, and nothing in the root of your repository may be named `aurtomator`. The jobs also make the directories `upload`, `handoff`, `handoff-out`, `handoffs` and `statuses` in that root, so these names are taken as well. A tracked `upload`, `handoff-out` or `statuses` stops the step that makes the directory, and so does a tracked `handoff` in `verify`. The files of a tracked `handoff` reach the steps of `builder` in `check` and `publish` beside those of the run, and `verify` reads the files of a tracked `handoffs` as attempts of the run.
+In CI, the jobs check out your repository, then aurtomator into `aurtomator/` of that checkout, and create `upload`, `handoff`, `handoff-out`, `handoffs` and `statuses` there. Nothing in the root of your repository may take one of these names.
 
-Your `aurtomator.sh` is a copy of the file `aurtomator.sh` in the root of aurtomator. Each run of `check-updates.yml` compares your copy with that file of the release the run uses. When they differ, the commit of the run replaces your copy with that file and makes it executable. So after a run, your copy is the script of the pinned release, and a local edit lasts until the next run. A repository without `aurtomator.sh` gets none, and a link of that name stays as it is.
-
-The template holds the file `aurtomator.sh`. A repository created without the template takes that file of the release it pins and makes it executable, here for `vX.Y.Z`:
+Each run of `check-updates.yml` compares your `aurtomator.sh` with that of the release it uses, and its commit replaces your copy when they differ. A local edit therefore lasts until the next run. A repository without `aurtomator.sh` gets none. A repository created without the template takes the file of the release it pins, here `vX.Y.Z`:
 
 ```bash
 curl -fsSL -o aurtomator.sh https://raw.githubusercontent.com/staticwire/aurtomator/vX.Y.Z/aurtomator.sh
@@ -159,21 +153,15 @@ cd <repository>
 
 It runs five steps in order:
 
-1. **identity**: your name and email for AUR git commits
-2. **ssh**: an existing SSH key for the AUR. CI uses the key without a prompt, so the step refuses a key with a passphrase and prints the commands that make a copy without one.
-3. **gpg**: optional GPG commit signing
-4. **secrets**: pushes `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY` to your GitHub repo. It checks the SSH key as the ssh step does, so a key that is missing or has a passphrase stops it before any secret is set.
-5. **verify**: checks identity, SSH access to the AUR with the saved key alone, as CI has it, GPG signing, and the secrets, Issues and the two calling workflows of your GitHub repo
+1. `identity`: the git name and email of your AUR commits, which CI commits under too
+2. `ssh`: an existing SSH key for the AUR. CI uses the key without a prompt, so the step refuses a key with a passphrase and prints the commands that make a copy without one
+3. `gpg`: optional commit signing, see [GPG signing](/gpg-signing/)
+4. `secrets`: sets `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY` in your GitHub repository. A missing key, or one with a passphrase, stops it before it sets any secret
+5. `verify`: checks the identity, SSH access to the AUR with the saved key alone, as CI has it, GPG signing, the secrets, Issues and the two calling workflows
 
-The setup works on the repository that holds `aurtomator.sh`, whatever directory you run it from, and the `identity` step prints it as `Data directory:`. The `secrets` step sets the secrets of the GitHub repo of its `origin` remote and prints that repo as `Target repo:`. It asks for `owner/repo` when `origin` is missing or is not a repository on github.com. The secrets hold the key that pushes all of your AUR packages, so an interactive run asks before it sets them. The setup saves your answers to `.aurtomator.conf` after each step. A step that fails stops the setup and keeps the answers of the steps before it. A `verify` that finds a problem keeps every answer of the run.
+The setup works on the repository that holds `aurtomator.sh` and prints it as `Data directory:`. `secrets` sets the secrets of the repository of the `origin` remote and prints it as `Target repo:`, or asks for `owner/repo` when `origin` is no repository on github.com. The SSH key pushes all of your AUR packages, so an interactive run asks before it sets the secrets. The setup saves your answers to `.aurtomator.conf` after each step, and a failed step keeps the answers of the steps before it.
 
-## Identity
-
-The `identity` step sets the git author name and email of your AUR commits, as `git log` shows them in your AUR package repos. They are pushed to the GitHub Secrets of your repository as `AUR_GIT_NAME` and `AUR_GIT_EMAIL`, so CI commits under the same identity.
-
-The `# Maintainer:` line in your PKGBUILD is yours to manage. aurtomator does not change it and warns during an update when it is missing.
-
-With GPG signing enabled, your key signs the AUR commits, and AUR users can check them with `git log --show-signature`.
+The `# Maintainer:` line of your PKGBUILD stays yours. aurtomator does not change it and warns when it is missing.
 
 ## Manual setup (without gh CLI)
 
@@ -199,25 +187,20 @@ On <https://aur.archlinux.org>, open My Account > SSH Public Key, paste the key 
 ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i ~/.ssh/aur_ed25519 aur@aur.archlinux.org
 ```
 
-The options make ssh offer this key alone, as CI does: without them, another key in your SSH agent or in `~/.ssh/config` can answer for it. A "Welcome" message means it works. The connection then closes, which is expected.
+The options make ssh offer this key alone, as CI does, so no other key of your agent or of `~/.ssh/config` answers for it. A "Welcome" message means it works, and the connection then closes.
 
 ### 4. Set GitHub Secrets in the web UI
 
 In your repository, open Settings > Secrets and variables > Actions > New repository secret, and create:
 
-| Secret name      | Value                                                 |
-|------------------|-------------------------------------------------------|
-| `AUR_GIT_NAME`   | Your name (e.g., `Jane Doe`)                          |
-| `AUR_GIT_EMAIL`  | Your email (e.g., `jane@example.com`)                 |
-| `AUR_SSH_KEY`    | Full contents of `~/.ssh/aur_ed25519` (the **private** key) |
+| Secret | Value |
+|---|---|
+| `AUR_GIT_NAME` | your name, as `Jane Doe` |
+| `AUR_GIT_EMAIL` | your email, as `jane@example.com` |
+| `AUR_SSH_KEY` | the whole private key, `~/.ssh/aur_ed25519` |
+| `GPG_SIGNING_KEY` | with GPG signing: the output of `gpg --export-secret-subkeys --armor '<subkey-id>!'` |
 
-With GPG signing, also create:
-
-| Secret name       | Value                                                      |
-|-------------------|------------------------------------------------------------|
-| `GPG_SIGNING_KEY` | Output of `gpg --export-secret-subkeys --armor '<subkey-id>!'` |
-
-That output works in CI only for a key without a passphrase. For a key with one, `./aurtomator.sh setup gpg secrets` prints a passphrase-free copy, see [Passphrase stripping](/gpg-signing/#passphrase-stripping-3-pinentry-dialogs).
+That GPG output works in CI only for a key without a passphrase. For a key with one, `./aurtomator.sh setup gpg secrets` prints a copy without it, see [Passphrase stripping](/gpg-signing/#passphrase-stripping-3-pinentry-dialogs).
 
 ### 5. Run verify
 
@@ -225,7 +208,7 @@ That output works in CI only for a key without a passphrase. For a key with one,
 ./aurtomator.sh setup verify --git-name "Jane Doe" --git-email "jane@example.com" --ssh-key ~/.ssh/aur_ed25519
 ```
 
-The steps above write no `.aurtomator.conf`, so `verify` takes your name, your email and the key from these options and saves them for the next run. With GPG signing, add `--gpg-key <subkey-id>`. It checks identity, SSH access, and GPG signing when configured. With `gh` available, it also checks the GitHub repo of `origin`: its secrets, that Issues are on, and that `check-updates.yml` and `validate.yml` are active workflows, as [Required](#required) asks. An `origin` that is not a repository on github.com counts as a failed check. Two findings are warnings and count as no failure: an open `❌ Check AUR Package Updates failed` issue, which the next run without a failed job closes, and a pin to a version of aurtomator other than its latest release. When a check fails, the others still run, and `verify` then prints how many failed and exits with status 1.
+The steps above write no `.aurtomator.conf`, so `verify` takes the values from the options and saves them. With GPG signing, add `--gpg-key <subkey-id>`. With `gh`, it also checks the repository of `origin`: the secrets, Issues, and the two calling workflows, as [Required](#required) asks. An open `❌ Check AUR Package Updates failed` and a pin older than the latest release of aurtomator are warnings. Every check runs, and when one fails, `verify` prints how many failed and exits with status 1.
 
 ## Setup script reference
 
@@ -233,60 +216,39 @@ The steps above write no `.aurtomator.conf`, so `verify` takes your name, your e
 ./aurtomator.sh setup [step...] [options]
 ```
 
-It runs `scripts/setup.sh` of aurtomator for the repository that holds `aurtomator.sh`, see [The aurtomator.sh script](#the-aurtomatorsh-script).
+Without a step, all steps run in order. Steps can be combined, as in `./aurtomator.sh setup identity ssh`.
 
-### Steps
+| Step | Does |
+|---|---|
+| `identity` | git name and email of AUR commits |
+| `ssh` | SSH key for the AUR |
+| `gpg` | GPG signing key, after a yes or no prompt |
+| `secrets` | sets the GitHub Secrets, or prints how to set them by hand |
+| `verify` | checks identity, SSH, GPG, secrets, Issues and workflows |
 
-Without a step, all of them run in order.
-
-| Step       | Description                                      |
-|------------|--------------------------------------------------|
-| `identity` | Git author name and email for AUR commits        |
-| `ssh`      | SSH key for AUR access                           |
-| `gpg`      | GPG signing key (yes/no prompt)                  |
-| `secrets`  | Push secrets to GitHub, or print manual instructions |
-| `verify`   | Check identity, SSH, GPG, secrets, Issues and workflows |
-
-Steps can be combined:
-
-```bash
-./aurtomator.sh setup identity ssh    # identity + SSH only
-./aurtomator.sh setup verify          # just verify
-```
-
-### Options
-
-| Option                 | Description                                           |
-|------------------------|-------------------------------------------------------|
-| `--git-name <name>`    | Git author name for AUR commits                       |
-| `--git-email <email>`  | Git author email for AUR commits                      |
-| `--gpg-key <id>`       | Use this GPG key ID, skip the GPG prompt              |
-| `--ssh-key <path>`     | Use this SSH private key, skip the SSH prompt         |
-| `--non-interactive`    | No prompts. The name and the email default to `user.name` and `user.email` of your global git config, and the SSH key to `~/.ssh/aur_ed25519`. A value without a default is an error, and GPG is skipped without `--gpg-key`. |
-| `-h`, `--help`         | Print a usage summary                                 |
-
-### Examples
+| Option | Does |
+|---|---|
+| `--git-name <name>` | git name of AUR commits |
+| `--git-email <email>` | git email of AUR commits |
+| `--gpg-key <id>` | this GPG key, with no GPG prompt |
+| `--ssh-key <path>` | this SSH private key, with no SSH prompt |
+| `--non-interactive` | no prompts. The name and email default to `user.name` and `user.email` of your global git config, the SSH key to `~/.ssh/aur_ed25519`. A value without a default is an error, and GPG is skipped without `--gpg-key` |
+| `-h`, `--help` | prints a usage summary |
 
 ```bash
-# Full interactive setup
-./aurtomator.sh setup
-
-# Non-interactive with explicit values
+# Without prompts
 ./aurtomator.sh setup \
   --git-name "Jane Doe" --git-email "jane@example.com" \
   --ssh-key ~/.ssh/aur_ed25519 --gpg-key ABCDEF1234567890 \
   --non-interactive
 
-# Re-run just secrets after rotating a key
+# The secrets again, after a new key
 ./aurtomator.sh setup secrets
-
-# Verify after manual changes
-./aurtomator.sh setup verify
 ```
 
 ## Configuration file
 
-Setup saves its state to `.aurtomator.conf` in the root of your repository, next to `packages/`. The scripts read it as data and never run it. Each line holds one of the four names below and a value in single quotes, as the setup writes it, so a `"`, `$` or backtick in a name stays part of the name. A file from an older version, with double quotes, still loads while its values hold no `$`, backtick or backslash. Empty lines and lines that start with `#` are skipped, and any other line stops the script with the number of that line.
+The setup saves its state to `.aurtomator.conf` in the root of your repository, which the `.gitignore` of the template lists, since it holds local paths. The scripts read it as data and never run it. Each line holds one of the four names below and a value in single quotes. Empty lines and lines that start with `#` are skipped, and any other line stops the script with its line number.
 
 ```bash
 GIT_AUTHOR_NAME='Jane Doe'
@@ -295,17 +257,17 @@ GPG_KEY_ID='ABCDEF1234567890'
 AUR_SSH_KEY='/home/<user>/.ssh/aur_ed25519'
 ```
 
-| Variable           | Description                                                |
-|--------------------|------------------------------------------------------------|
-| `GIT_AUTHOR_NAME`  | Name used as git commit author for AUR pushes.             |
-| `GIT_AUTHOR_EMAIL` | Email used as git commit author for AUR pushes.            |
-| `GPG_KEY_ID`       | GPG key ID for commit signing. Empty string if not used.   |
-| `AUR_SSH_KEY`      | Absolute path to the SSH private key for AUR. A relative path given to the setup is saved as an absolute one. |
+| Variable | Value |
+|---|---|
+| `GIT_AUTHOR_NAME` | git name of AUR commits |
+| `GIT_AUTHOR_EMAIL` | git email of AUR commits |
+| `GPG_KEY_ID` | GPG key ID, empty without signing |
+| `AUR_SSH_KEY` | absolute path to the SSH private key; the setup saves a relative path as an absolute one |
 
-A re-run of `./aurtomator.sh setup` loads this file first and does not ask again for the values it holds. A command line option overrides the saved value, and the new value is saved. The `.gitignore` of the template lists the file, because it holds local paths.
+A new run of the setup does not ask again for the values the file holds. An option overrides a saved value and saves the new one.
 
-The scripts that read the file, `setup.sh`, `update-pkg.sh` and `publish-pkg.sh`, stop when git tracks `.aurtomator.conf`. A tracked file takes the place of the ignored one at a checkout or a merge, so a pull request that adds it would choose the key the `secrets` step uploads and the name and email of your AUR commits. Check the values of such a file, then `git rm --cached .aurtomator.conf` takes it out of the repository and keeps it on disk. Before the `secrets` step sets the secrets, it prints each value and the file of the SSH key.
+`setup.sh`, `update-pkg.sh` and `publish-pkg.sh` stop when git tracks `.aurtomator.conf`. A tracked file replaces the ignored one at a checkout or a merge, so a pull request that adds one would choose the key that `secrets` uploads and the author of your AUR commits. Check its values, then `git rm --cached .aurtomator.conf` takes it out of the repository and keeps it on disk.
 
 ## Pull requests to your repository
 
-`Validate packages` runs `validate-pkg.sh --all` on a pull request, so it checks the YAMLs of `packages/` and no other file. A pull request that changes `aurtomator.sh` runs its code on your machine at the next `./aurtomator.sh` command after you check it out or merge it. One that changes a calling workflow changes what CI runs with your secrets after the merge: the `uses:` line of `check-updates.yml` names the workflow that gets `AUR_SSH_KEY` and `GPG_SIGNING_KEY`. Read these files in the diff before you merge, and check a new pin as [The aurtomator.sh script](#the-aurtomatorsh-script) describes. `setup.sh`, `update-pkg.sh` and `publish-pkg.sh` stop on a `.aurtomator.conf` that git tracks, see [Configuration file](#configuration-file).
+`Validate packages` checks the YAMLs of `packages/` and no other file of a pull request. A change to `aurtomator.sh` runs on your machine at your next `./aurtomator.sh` command after the checkout or the merge. A change to a calling workflow changes what CI runs with your secrets: the `uses:` line of `check-updates.yml` names the workflow that gets `AUR_SSH_KEY` and `GPG_SIGNING_KEY`. Read these files in the diff before you merge, and check a new pin as [The aurtomator.sh script](#the-aurtomatorsh-script) says.

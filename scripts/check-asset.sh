@@ -1,20 +1,9 @@
 #!/usr/bin/env bash
 #
-# check-asset.sh - Find the value that a release asset name holds for a version
-#
-# For a package with upstream.asset_regex: finds the tag of the version
-# among the tags of upstream.project, reads the GitHub release of that tag
-# and matches the regex against the names of its assets. Exactly one name
-# has to match, and its first capture group is the value.
-#
-# A tag shows before its release: upstream can keep the release a draft
-# while it uploads the assets, and the API lists a draft only to users who
-# can push. A missing asset is pending for a day after the release was
-# published, and a missing release for a day after the date of the tagged
-# commit.
+# check-asset.sh - Print the value that a release asset name holds for a version, see
+# https://aurtomator.dev/features/asset-values/
 #
 # Usage: ./scripts/check-asset.sh <package-name> <pkgver>
-#
 # Exit codes: 0 the value is on stdout, 1 failed, 3 pending
 
 set -euo pipefail
@@ -43,8 +32,7 @@ if [[ -z "$asset_regex" ]]; then
   exit 1
 fi
 
-# Percent-encode a tag for the path of an API URL, byte by byte, keeping /
-# Args: $1=tag
+# Percent-encode tag $1 for the path of an API URL, byte by byte, keeping /
 url_path() {
   local LC_ALL=C tag="$1" out="" c i
   for ((i = 0; i < ${#tag}; i++)); do
@@ -57,9 +45,8 @@ url_path() {
   printf '%s\n' "$out"
 }
 
-# Exit with 3 while a date of the GitHub API lies less than ASSET_WAIT back,
-# with 1 after that or more than ASSET_WAIT ahead, the reason on stderr
-# Args: $1=date, as 2026-10-09T16:57:18Z, $2=what is missing
+# Exit with 3 while date $1 of the GitHub API lies less than ASSET_WAIT back, and with 1 after
+# that or more than ASSET_WAIT ahead, with the reason on stderr; $2 names what is missing
 wait_or_fail() {
   local now at
   if [[ ! "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then

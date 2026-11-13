@@ -118,11 +118,8 @@ exit 1
 MOCKEOF
   chmod +x "$MOCK_DIR/ssh"
 
-  # Mock gh, logged in. A repository has Issues on unless $GH_HAS_ISSUES
-  # says otherwise, the workflows in $GH_WORKFLOWS (both active by default)
-  # and the secrets in $GH_SECRETS (all four by default); $GH_API_FAIL fails
-  # its reads. The open run issue is $GH_RUN_ISSUE, and the latest release
-  # of aurtomator $GH_LATEST, which fails when empty.
+  # A gh that is logged in and answers from $GH_HAS_ISSUES, $GH_WORKFLOWS, $GH_SECRETS, $GH_RUN_ISSUE
+  # and $GH_LATEST; $GH_API_FAIL fails its reads
   cat >"$MOCK_DIR/gh" <<'MOCKEOF'
 #!/usr/bin/env bash
 case "$1" in
@@ -210,9 +207,8 @@ EOF
   chmod +x "$TEST_TMPDIR/mock-bin/ssh"
 }
 
-# Helper: gpg for the passphrase strip flow on PASSKEY003. The main keyring
-# exports the key with its passphrase, the temporary keyring (--homedir)
-# exports the copy
+# Helper: gpg for the passphrase strip of PASSKEY003; the main keyring exports the key with its
+# passphrase, and the temporary keyring (--homedir) exports the copy
 mock_gpg_strip_flow() {
   cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'
 #!/usr/bin/env bash
@@ -442,7 +438,7 @@ EOF
   # First run: save GPG key
   "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key VALIDKEY123 --non-interactive 2>/dev/null
 
-  # Second run: should pick up saved key without --gpg-key
+  # A second run takes the saved key without --gpg-key
   run "$TEST_TMPDIR/scripts/setup.sh" gpg --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"GPG key: VALIDKEY123"* ]]
@@ -825,9 +821,8 @@ EOF
   mock_gpg_strip_flow
   write_full_config "PASSKEY003"
   mkdir -p "$TEST_TMPDIR/tmp"
-  # gpg-connect-agent that removes the passphrase, then the terminal of
-  # setup.sh closes. The signal goes to the topmost setup.sh process, not
-  # to the subshell of the command substitution.
+  # A gpg-connect-agent that removes the passphrase and then sends SIGHUP to the topmost setup.sh
+  # process, as a closing terminal does
   cat >"$TEST_TMPDIR/mock-bin/gpg-connect-agent" <<'EOF'
 #!/usr/bin/env bash
 echo "OK"
@@ -915,7 +910,6 @@ EOF
 @test "setup: no ANSI codes when piped (not a terminal)" {
   # run captures output, which means stdout is not a terminal
   run "$TEST_TMPDIR/scripts/setup.sh" --help
-  # Should NOT contain raw escape sequences
   if [[ "$output" == *$'\033'* ]]; then
     echo "Found ANSI escape codes in non-terminal output" >&2
     false
@@ -923,7 +917,7 @@ EOF
 }
 
 @test "setup: color variables use dollar-single-quote syntax" {
-  # Verify the fix: $'\033[...' not '\033[...'
+  # A color is $'\033[...', the escape character itself, in place of the text '\033[...'
   grep -q "\\\$'\\\\033" "$TEST_TMPDIR/scripts/setup.sh"
 }
 
@@ -1221,7 +1215,7 @@ EOF
 
   run "$TEST_TMPDIR/scripts/setup.sh" gpg --non-interactive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"! Key may not have signing capability, verify manually"* ]]
+  [[ "$output" == *"! gpg lists no signing flag [S] for NOSIGN01"* ]]
   [[ "$output" == *"✓ GPG key: NOSIGN01 (no passphrase, ready for CI)"* ]]
 }
 
@@ -1238,9 +1232,8 @@ EOF
   [ -z "$(ls -A "$TEST_TMPDIR/tmp")" ]
 }
 
-# Helper: the gpg and gpg-connect-agent of mock_gpg_strip_flow, with the step
-# of the passphrase strip named in $STRIP_FAIL failing: export, import,
-# keygrip, passwd or clean
+# Helper: the gpg and gpg-connect-agent of mock_gpg_strip_flow, with the strip step named in
+# $STRIP_FAIL failing: export, import, keygrip, passwd or clean
 mock_gpg_strip_failing() {
   mock_gpg_strip_flow
   cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'

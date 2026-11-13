@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# draft.sh - Write packages/<pkgbase>.yml from the .SRCINFO of the AUR
-# package, then validate and check it. https://aurtomator.dev/add-a-package/#draft-a-package has the rules.
+# draft.sh - Write packages/<pkgbase>.yml from the .SRCINFO of the AUR package, then validate and
+# check it, see https://aurtomator.dev/add-a-package/#draft-a-package
 
 set -euo pipefail
 # shellcheck source=lib.sh

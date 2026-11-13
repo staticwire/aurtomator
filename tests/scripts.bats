@@ -370,8 +370,8 @@ EOF
 
 @test "audit_pkgbuild: allows SKIP + real checksums for local files (nightly pattern)" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  # Typical nightly-bin pattern: SKIP for the remote nightly binary,
-  # real hashes for local files (e.g. .vim, .install) shipped in the AUR repo
+  # A nightly-bin package: SKIP for the remote binary, and real hashes for local files of the
+  # AUR repo, such as .vim and .install
   cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-nightly
 pkgver=0.13.0
@@ -756,7 +756,7 @@ EOF
   project: owner/repo
 current: '1.0.0'"
 
-  # check-update outputs version to stdout, logs to stderr
+  # check-update prints the version on stdout and the log on stderr
   result=$("$TEST_TMPDIR/scripts/check-update.sh" "mypkg" 2>/dev/null)
   [ "$result" = "2.0.0" ]
 }
@@ -964,9 +964,8 @@ MOCKCURL
   [[ "$output" == *"HTML instead of"* ]]
 }
 
-# Helper: a PKGBUILD with one source, and a curl that prints $CURL_W and
-# exits $CURL_RC. Real curl -s prints the -w text and nothing on stderr
-# when it fails.
+# Helper: a PKGBUILD with one source, and a curl that prints $CURL_W and exits $CURL_RC, as real
+# curl -s prints the -w text and nothing on stderr when it fails
 mock_source_head() {
   cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
 pkgname=test-status
@@ -2090,14 +2089,12 @@ EOF
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
 
-  # Check table was generated
   grep -q "pkg-a" "$TEST_TMPDIR/README.md"
   grep -q "github-release" "$TEST_TMPDIR/README.md"
 }
 
-# The name in a package YAML is the pkgbase. The AUR shows a split package
-# under /pkgbase/<name>, and sends /pkgbase/<name> of any other package to
-# /packages/<name>.
+# The name in a package YAML is the pkgbase. The AUR shows a split package under /pkgbase/<name>
+# and redirects /pkgbase/<name> of any other package to /packages/<name>.
 @test "update-readme: links each package to its pkgbase on the AUR" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
@@ -2546,7 +2543,6 @@ current: '3.2.1'"
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [[ "$output" == *"Checked: 3"* ]]
   [[ "$output" == *"Errors: 1"* ]]
-  # Both good packages should have status files
   [ -f "$TEST_TMPDIR/.status/aaa-good" ]
   [ -f "$TEST_TMPDIR/.status/ccc-good" ]
 }
@@ -2574,9 +2570,7 @@ EOF
 current: '2.0.0'"
 
   "$TEST_TMPDIR/scripts/check-all.sh" 2>/dev/null || true
-  # Stale file should be gone
   [ ! -f "$TEST_TMPDIR/.status/stale-pkg" ]
-  # Current package should exist
   [ -f "$TEST_TMPDIR/.status/pkg-a" ]
 }
 
@@ -2790,7 +2784,6 @@ EOF
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
   grep -q "# Header Before" "$TEST_TMPDIR/README.md"
   grep -q "# Footer After" "$TEST_TMPDIR/README.md"
-  # Old content should be replaced
   run ! grep -q "old table" "$TEST_TMPDIR/README.md"
 }
 
@@ -3330,7 +3323,7 @@ EOF
   # Remove namcap mock so real namcap runs
   rm -f "$MOCK_DIR/namcap"
 
-  # Should continue past namcap (warnings non-fatal), reach .SRCINFO
+  # namcap warnings do not stop the update
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-namcap-warn" "2.0.0"
   [[ "$output" == *"namcap warnings"* ]]
   [[ "$output" == *"Generating .SRCINFO"* ]]
@@ -3423,9 +3416,8 @@ EOF
   project: owner/repo
 current: '1.0.0'"
 
-  # Detached HEAD and no origin remote: checkout -B master origin/master
-  # fails and set -e ends the script. The safety net fails loudly and
-  # leaves the state untouched.
+  # Without an origin remote, checkout -B master origin/master fails and set -e ends the script
+  # before the pkgver bump
   aur_dir="$TEST_TMPDIR/aur-test-no-origin"
   mkdir -p "$aur_dir"
   git -C "$aur_dir" init -q -b master
@@ -3459,10 +3451,8 @@ MOCKGIT
 
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-no-origin" "2.0.0"
   [ "$status" -ne 0 ]
-  # Detection + attempt logged before the failure
   [[ "$output" == *"Detached HEAD after clone"* ]]
   [[ "$output" == *"Re-basing on origin/master"* ]]
-  # Must NOT have proceeded past the self-heal (no pkgver bump, no .SRCINFO)
   [[ "$output" != *"Updating pkgver"* ]]
   [[ "$output" != *"Generating .SRCINFO"* ]]
 }
@@ -3589,7 +3579,6 @@ echo "pkgname = test-vcs"
 EOF
   chmod +x "$MOCK_DIR/makepkg"
 
-  # Should skip updpkgsums and not fail
   run "$TEST_TMPDIR/scripts/update-pkg.sh" "test-vcs" "r200.def5678"
   [ "$status" -eq 0 ]
   [[ "$output" == *"VCS package, skipping checksums"* ]]
@@ -3654,9 +3643,8 @@ MOCKCURL
   grep -q "nightly-aarch64.tar.gz" "$TEST_TMPDIR/curl-urls.log"
 }
 
-# A source with a SKIP checksum is not downloaded by any later step, so
-# without the HEAD request a URL that answers 404 would reach the AUR, as a
-# tag built from $pkgver does for a release whose tag never moves.
+# No later step downloads a source with a SKIP checksum, so without the HEAD request a URL that
+# answers 404 would reach the AUR
 @test "update-pkg: checks source URLs when every checksum is SKIP" {
   create_test_package "test-skip-url" "github-asset" "upstream:
   project: owner/repo
@@ -4126,8 +4114,7 @@ current: '1.0.0'"
 }
 
 @test "check-all: writes 'updated:' status after --update on normal upgrade (regression)" {
-  # Current 1.0.0 < latest 2.0.0: the normal upgrade path.
-  # Verifies the is_downgrade=false branch of the new status-writing logic.
+  # current 1.0.0 below latest 2.0.0: the normal update, the is_downgrade=false branch
   create_test_package "pkg-up" "github-release" "upstream:
   type: github
   project: owner/repo
@@ -4154,8 +4141,7 @@ mock_tags() {
   chmod +x "$MOCK_DIR/git"
 }
 
-# Helper: liquidsoap-bin on the mock of savonet/liquidsoap, with the given
-# asset_regex
+# Helper: liquidsoap-bin on the mock of savonet/liquidsoap, with the given asset_regex
 # Usage: liquidsoap_package [asset_regex]
 liquidsoap_package() {
   mock_tags
@@ -4589,8 +4575,7 @@ stand_in_asset() {
   chmod +x "$TEST_TMPDIR/scripts/check-asset.sh"
 }
 
-# Helper: pkg on the stand-in strategy step, with asset_regex, at
-# <current>, and with <current_asset> when it is given
+# Helper: pkg on the stand-in strategy step with asset_regex, at <current> and <current_asset>
 # Usage: asset_package <current> [current_asset]
 asset_package() {
   create_test_package "pkg" "step" "upstream:
@@ -4782,9 +4767,8 @@ current: '1.0.0'"
 
 # === check-all.sh: arches out ===
 
-# Helper: a check-arch.sh that logs its arguments to check-arch.args, prints
-# the given text and exits with the given code, 1 with a reason on stderr
-# Usage: stand_in_arch <stdout> [exit code]
+# Helper: a check-arch.sh that logs its arguments to check-arch.args, prints <stdout> and exits
+# with [exit code], 0 by default; exit 1 comes with a reason on stderr
 stand_in_arch() {
   rm -f "$TEST_TMPDIR/scripts/check-arch.sh"
   printf '#!/usr/bin/env bash\necho "$*" >>%q\nprintf %%s %q\n[[ %s != 1 ]] || echo "AUR unreadable" >&2\nexit %s\n' \

@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
-#
-# webpage-scrape - Detect latest version by scraping a webpage with a regex
-#
-# Input: package name (reads upstream config from package YAML)
-# Output: latest version string
-#
-# YAML fields:
-#   upstream.url      - page URL to scrape
-#   upstream.pattern  - ERE whose first capture group is the version: 'package-([0-9.]+)\.tar\.gz'
-#   upstream.user_agent - User-Agent in place of aurtomator/1.0 (optional)
-#   upstream.max_answer_mb - the most megabytes of the page, 5 by default (optional)
+# webpage-scrape - Print the newest version that a regex finds on a web page, see
+# https://aurtomator.dev/strategies/#webpage-scrape
 
 set -euo pipefail
 
