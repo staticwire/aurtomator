@@ -105,7 +105,15 @@ if ((handed_rc == 0)); then
     pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
   fi
   pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
-  arch_state_after "$PKG_FILE" "$final_words" "" "$base"
+  # The arch_wait of this version stays when the YAML commit of the push that took arches
+  # out was lost: the arches its parent has and this version lacks go to arch_out
+  lost_out="" parent=""
+  if [[ -n "$final_words" && "$(pkg_get "$PKG_FILE" '.arch_wait.version // ""')" == "$VERSION" ]] &&
+    parent=$(git -C "$aur_dir" rev-parse -q --verify "${base}^") &&
+    git -C "$aur_dir" show "${parent}:PKGBUILD" >"${tmp_dir}/parent-PKGBUILD" 2>/dev/null; then
+    lost_out=$(arch_minus "$(pkgbuild_arch_words "${tmp_dir}/parent-PKGBUILD" | tr '\n' ' ')" "$final_words x86_64")
+  fi
+  arch_state_after "$PKG_FILE" "$final_words" "$lost_out" "$parent"
   exit 2
 fi
 ((handed_rc == 2)) || exit 1
