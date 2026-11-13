@@ -20,12 +20,14 @@ lib() {
 
 @test "stats_rows: prints the valid rows and names each invalid line" {
   printf '%s\n' 'time,package,event,version,previous,run' \
+    '2026-11-08T05:17:41Z,a,tracked,1.0' \
     '2026-11-08T05:17:41Z,a,tracked,1.0,,42' \
     '2026-11-08T05:17:41Z,a,exploded,1.0,,42' \
     '2026-11-09T10:17:03Z,a,updated,1.1,1.0,43' >"$J"
   run lib stats_rows "$J"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"line 3 of $J is not a journal row"* ]]
+  [[ "$output" == *"line 2 of $J is not a journal row"* ]]
+  [[ "$output" == *"line 4 of $J is not a journal row"* ]]
   run --separate-stderr lib stats_rows "$J"
   [ "$output" = $'2026-11-08T05:17:41Z,a,tracked,1.0,,42\n2026-11-09T10:17:03Z,a,updated,1.1,1.0,43' ]
 }
@@ -84,10 +86,12 @@ lib() {
     '2026-11-09T10:17:03Z,a,check_failed,1.0,,43' \
     '2026-11-09T10:17:03Z,b,pending,2.1,,43' \
     '2026-11-10T05:17:22Z,b,held,2.2,,44' \
-    '2026-11-10T05:17:22Z,c,added,,,44' >"$J"
+    '2026-11-10T05:17:22Z,c,added,,,44' \
+    '2026-11-08T05:17:41Z,d,tracked,4.0,,42' '2026-11-09T10:17:03Z,d,jump_skipped,5.0,,43' \
+    '2026-11-08T05:17:41Z,e,tracked,6.0,,42' '2026-11-09T10:17:03Z,e,downgrade_skipped,5.0,,43' >"$J"
   run --separate-stderr lib stats_last_states "$J"
   [ "$status" -eq 0 ]
-  [ "$output" = $'a,check_failed,1.0,1.0\nb,held,2.2,2.0\nc,added,,' ]
+  [ "$output" = $'a,check_failed,1.0,1.0\nb,held,2.2,2.0\nc,added,,\nd,jump_skipped,5.0,4.0\ne,downgrade_skipped,5.0,6.0' ]
 }
 
 @test "stats_last_states: lines come sorted by package name" {
@@ -122,6 +126,12 @@ lib() {
   [ "$output" = 'up_to_date,1.0' ]
   run lib stats_event "cooldown: 2026-11-12" 1.0
   [ "$output" = 'up_to_date,1.0' ]
+  run lib stats_event up_to_date 1.0+1
+  [ "$output" = 'up_to_date,1.0+1' ]
+  run lib stats_event "updated: 1.0+1" 1.0
+  [ "$output" = 'updated,1.0+1' ]
+  run lib stats_event "check_failed: HTTP 404: not found" 1.0
+  [ "$output" = 'check_failed,1.0' ]
   for kind in held jump_skipped downgrade_skipped pending; do
     run lib stats_event "$kind: 2.5.0rc1" 2.4.6
     [ "$output" = "$kind,2.5.0rc1" ]
@@ -178,6 +188,9 @@ lib() {
   run --separate-stderr lib stats_event 'exploded: 1.0' 1.0
   [ "$status" -eq 1 ]
   run --separate-stderr lib stats_event 'up_to_date: 1.0' 1.0
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  run --separate-stderr lib stats_event 'updated: 1.0: 2.0' 1.0
   [ "$status" -eq 1 ]
   [ -z "$output" ]
 }
@@ -304,18 +317,25 @@ added_rows() {
   run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]:0:8}" --out
   [ "$status" -eq 1 ]
   [[ "$stderr" == *"--out needs a value"* ]]
+  run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]:0:8}" --out ""
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--out needs a value"* ]]
   run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]:0:8}"
   [ "$status" -eq 1 ]
   [[ "$stderr" == *"Usage: record-events.sh"* ]]
-  AURTOMATOR_STATS_TIME=2026-11-10 run --separate-stderr "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == *"AURTOMATOR_STATS_TIME"* ]]
+  for time in 2026-11-10 x2026-11-10T05:17:41Z 2026-11-10T05:17:41Zx; do
+    AURTOMATOR_STATS_TIME=$time run --separate-stderr "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"AURTOMATOR_STATS_TIME"* ]]
+  done
   GITHUB_RUN_ID=4x run --separate-stderr "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
   [ "$status" -eq 1 ]
   [[ "$stderr" == *"GITHUB_RUN_ID"* ]]
-  run --separate-stderr "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]/#"$TEST_TMPDIR/packages"/"$TEST_TMPDIR/none"}"
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == *"--before is not a directory"* ]]
+  for before in "$TEST_TMPDIR/none" "$TEST_TMPDIR/packages/a.yml"; do
+    run --separate-stderr "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]/#"$TEST_TMPDIR/packages"/"$before"}"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"--before is not a directory"* ]]
+  done
   [ ! -e "$TEST_TMPDIR/out.csv" ]
 }
 
@@ -364,6 +384,52 @@ added_rows() {
   st a up_to_date
   record
   [ "$(added_rows)" = '2026-11-10T05:17:22Z,a,up_to_date,2.4.6,,44' ]
+}
+
+@test "record-events: a skipped jump or downgrade as the last row is no version change" {
+  local kind
+  for kind in jump_skipped downgrade_skipped; do
+    journal '2026-11-08T05:17:41Z,a,up_to_date,1.0,,42' "2026-11-09T05:17:41Z,a,$kind,3.0,,43"
+    pkg a 1.0
+    st a up_to_date
+    record
+    [ "$status" -eq 0 ]
+    [ "$(added_rows)" = "2026-11-10T05:17:22Z,a,up_to_date,1.0,,44" ] || {
+      echo "$kind: $(added_rows)"
+      return 1
+    }
+  done
+}
+
+@test "record-events: a YAML whose file name is no package name is no package" {
+  local bad
+  journal '2026-11-08T05:17:41Z,a,tracked,1.0,,42'
+  pkg a 1.0
+  st a up_to_date
+  for bad in 'a,b' .x -x; do
+    printf 'name: x\ncurrent: 9.0\n' >"$TEST_TMPDIR/packages/$bad.yml"
+  done
+  record
+  [ "$status" -eq 0 ]
+  [ -z "$(added_rows)" ]
+}
+
+@test "record-events: a version that vercmp rates equal is an update" {
+  journal '2026-11-08T05:17:41Z,a,tracked,1.0,,42'
+  pkg a 1.0
+  after a 1.00
+  st a up_to_date
+  record
+  [ "$(added_rows)" = "2026-11-10T05:17:22Z,a,updated,1.00,1.0,44" ]
+}
+
+@test "record-events: a YAML that gains its current version is written up to date" {
+  journal '2026-11-08T05:17:41Z,a,tracked,,,42'
+  pkg a 1.0
+  sed -i '/^current:/d' "$TEST_TMPDIR/packages/a.yml"
+  st a up_to_date
+  record
+  [ "$(added_rows)" = "2026-11-10T05:17:22Z,a,up_to_date,1.0,,44" ]
 }
 
 @test "record-events: a wait for the cooldown counts as up to date" {
@@ -576,6 +642,15 @@ day 364 1
 day 365 1" ]
 }
 
+@test "stats_numbers: a push 370 days back counts, one 371 days back does not" {
+  journal "$(date -u -d '2026-11-07 -371 days' +%F)T10:00:00Z,a,updated,1.1,1.0,1" \
+    "$(date -u -d '2026-11-07 -370 days' +%F)T10:00:00Z,b,updated,1.1,1.0,1"
+  run --separate-stderr lib stats_numbers "$J" 2026-11-07
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\nday 370 1'* ]]
+  [[ "$output" != *"day 371"* ]]
+}
+
 @test "stats_numbers: new packages, moves into a failure and packages failing now" {
   journal '2026-10-01T10:00:00Z,c,added,1.0,,1' '2026-11-01T10:00:00Z,a,tracked,1.0,,1' \
     '2026-11-02T10:00:00Z,b,added,1.0,,1' '2026-11-03T10:00:00Z,a,check_failed,1.0,,1' \
@@ -685,7 +760,8 @@ pushes() {
 }
 
 @test "stats-card: the header counts the packages and those failing now" {
-  touch "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/b.yml" "$TEST_TMPDIR/packages/notes.txt"
+  touch "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/b.yml" "$TEST_TMPDIR/packages/notes.txt" \
+    "$TEST_TMPDIR/packages/.x.yml" "$TEST_TMPDIR/packages/-x.yml"
   journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1' '2026-11-01T10:00:00Z,b,tracked,1.0,,1'
   card 2026-11-08
   [ "$status" -eq 0 ]
@@ -804,20 +880,39 @@ pushes() {
   run --separate-stderr timeout 10 "$script" "${args[@]:0:6}" --out
   [ "$status" -eq 1 ]
   [[ "$stderr" == *"--out needs a value"* ]]
+  run --separate-stderr timeout 10 "$script" "${args[@]:0:6}" --out ""
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--out needs a value"* ]]
   run --separate-stderr "$script" "${args[@]:0:6}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"Usage: stats-card.sh"* ]]
+  run --separate-stderr "$script" "${args[@]:0:4}" "${args[@]:6:2}"
   [ "$status" -eq 1 ]
   [[ "$stderr" == *"Usage: stats-card.sh"* ]]
   run --separate-stderr "$script" "${args[@]/aur-packages/a/b}"
   [ "$status" -eq 1 ]
   [[ "$stderr" == *"--name"* ]]
-  for day in 2026-11-8 2026-13-01 2026-02-30 tomorrow; do
+  run --separate-stderr "$script" "${args[@]/aur-packages/$(printf 'a%.0s' {1..101})}"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--name is not the name of a GitHub repository"* ]]
+  for day in 2026-11-8 2026-13-01 2026-02-30 tomorrow 12345-01-01; do
     AURTOMATOR_STATS_DATE="$day" run --separate-stderr "$script" "${args[@]}"
     [ "$status" -eq 1 ]
     [[ "$stderr" == *"AURTOMATOR_STATS_DATE"* ]]
   done
   run --separate-stderr "$script" "${args[@]/#"$J"/"$TEST_TMPDIR/none.csv"}"
   [ "$status" -eq 1 ]
-  run --separate-stderr "$script" "${args[@]/#"$TEST_TMPDIR/card"/"$TEST_TMPDIR/none"}"
-  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--journal is not a file"* ]]
+  local key value
+  for key in packages card; do
+    for value in "$TEST_TMPDIR/none" "$J"; do
+      run --separate-stderr "$script" "${args[@]/#"$TEST_TMPDIR/$key"/"$value"}"
+      [ "$status" -eq 1 ]
+      [[ "$stderr" == *"is not a directory: $value"* ]] || {
+        echo "taken for $key: $value"
+        return 1
+      }
+    done
+  done
   [ -z "$(ls -A "$TEST_TMPDIR/card")" ]
 }
