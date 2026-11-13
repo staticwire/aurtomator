@@ -145,6 +145,8 @@ validate_alert() {
 
 # Check one package YAML file; the errors go to stderr
 validate_pkg() {
+  # A bracket range of bash takes more than ASCII under a UTF-8 locale other than C.UTF-8
+  local -x LC_ALL=C
   local file="$1"
   local errors=0
   # The messages name the file in the data directory, as the user sees it
