@@ -228,6 +228,9 @@ jobs:
           # prepare runs a job for each outdated package, at most 256 as a
           # matrix allows, and publish also runs for a change in the README
           name_re='^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$'
+          # Only --publish writes _without and only this step writes _deferred,
+          # so a copy that builder of check wrote goes
+          rm -f statuses/_without statuses/_deferred
           to_prepare=()
           deferred=()
           for f in statuses/*; do

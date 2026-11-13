@@ -729,6 +729,14 @@ run_decide_step() {
   grep -qxF '::warning::2 outdated packages wait for the next run, which prepares at most 256' "$BATS_TEST_TMPDIR/decide.out"
 }
 
+@test "check-updates: Decide removes the _without and the _deferred of builder" {
+  run run_decide_step pkg="new_version: 2.0.0" _without="" _deferred=other
+  [ "$status" -eq 0 ]
+  [ "${lines[3]}" = 'to-prepare=["pkg"]' ]
+  [ ! -e "$BATS_TEST_TMPDIR/ws/statuses/_without" ]
+  [ ! -e "$BATS_TEST_TMPDIR/ws/statuses/_deferred" ]
+}
+
 # Puts package a, its journal and the card of day $1 into the workspace of
 # run_decide_step
 decide_stats() {
