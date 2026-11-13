@@ -105,15 +105,13 @@ if ((handed_rc == 0)); then
     pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
   fi
   pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
-  # The arch_wait of this version stays when the YAML commit of the push that took arches
-  # out was lost: the arches its parent has and this version lacks go to arch_out
-  lost_out="" parent=""
-  if [[ -n "$final_words" && "$(pkg_get "$PKG_FILE" '.arch_wait.version // ""')" == "$VERSION" ]] &&
-    parent=$(git -C "$aur_dir" rev-parse -q --verify "${base}^") &&
-    git -C "$aur_dir" show "${parent}:PKGBUILD" >"${tmp_dir}/parent-PKGBUILD" 2>/dev/null; then
-    lost_out=$(arch_minus "$(pkgbuild_arch_words "${tmp_dir}/parent-PKGBUILD" | tr '\n' ' ')" "$final_words x86_64")
+  # The arch_wait of this version stays when the YAML commit of a push of aurtomator that
+  # took arches out was lost: the arches its parent builds and the head lacks go to arch_out
+  lost_out=()
+  if [[ -n "$final_words" && "$(pkg_get "$PKG_FILE" '.arch_wait.version // ""')" == "$VERSION" ]]; then
+    mapfile -t lost_out < <(lost_push_out "$aur_dir" "$VERSION" "$final_words")
   fi
-  arch_state_after "$PKG_FILE" "$final_words" "$lost_out" "$parent"
+  arch_state_after "$PKG_FILE" "$final_words" "${lost_out[0]:-}" "${lost_out[1]:-}"
   exit 2
 fi
 ((handed_rc == 2)) || exit 1
@@ -145,7 +143,7 @@ taken_out=""
 put_back=""
 if [[ -n "$arch_words" ]]; then
   aur_arches=$(pkgbuild_arch_words "$aur_files/PKGBUILD" | tr '\n' ' ')
-  taken_out=$(arch_minus "$aur_arches" "$arch_words")
+  taken_out=$(srcinfo_built "$aur_files/.SRCINFO" "$(arch_minus "$aur_arches" "$arch_words")")
   # Arches put back at the pkgver and pkgrel of the AUR make no new release
   aur_release="$(_plain_value "$aur_files/PKGBUILD" pkgver)-$(_plain_value "$aur_files/PKGBUILD" pkgrel)"
   if [[ "$aur_release" == "$VERSION-$(_plain_value "${PREPARED}/PKGBUILD" pkgrel)" ]]; then

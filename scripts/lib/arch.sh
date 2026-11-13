@@ -97,6 +97,42 @@ srcinfo_arches() {
   awk '/^pkgname = /{exit} /^\tarch = /{print substr($0, 9)}' "$1"
 }
 
+# Print the arches of the list $2 that .SRCINFO $1 builds, as check-arch.sh
+# needs of the commit of an arch in arch_out
+srcinfo_built() {
+  local arch built="" listed
+  local -a arches
+  listed=" $(srcinfo_arches "$1" | tr '\n' ' ') "
+  read -ra arches <<<"$2"
+  for arch in "${arches[@]}"; do
+    [[ "$listed" != *" $arch "* ]] || built+="${built:+ }$arch"
+  done
+  printf '%s\n' "$built"
+}
+
+# Print the arches that the push of aurtomator of version $2 under HEAD of AUR clone $1
+# took out and HEAD lacks, then the parent of that push; $3 holds the arches of HEAD
+lost_push_out() {
+  local -x LC_ALL=C
+  local push parent out
+  # aur_commit_push writes "<version> release from <strategy>", with -<pkgrel> past 1
+  push=$(git -C "$1" log --format='%H %s' HEAD | awk -v v="$2" '!found {
+    s = $0
+    sub(/^[^ ]+ /, "", s)
+    if (index(s, v " release from ") == 1 ||
+      (index(s, v "-") == 1 && substr(s, length(v) + 2) ~ /^[0-9]+ release from /)) {
+      found = 1
+      print $1
+    }
+  }') || return 1
+  [[ -n "$push" ]] || return 0
+  parent=$(git -C "$1" rev-parse -q --verify "${push}^") || return 0
+  out=$(arch_minus "$(pkgbuild_arch_words <(git -C "$1" show "${parent}:PKGBUILD") | tr '\n' ' ')" \
+    "$(pkgbuild_arch_words <(git -C "$1" show "${push}:PKGBUILD") | tr '\n' ' ') $3 x86_64")
+  out=$(srcinfo_built <(git -C "$1" show "${parent}:.SRCINFO") "$out")
+  [[ -z "$out" ]] || printf '%s\n%s\n' "$out" "$parent"
+}
+
 # Print each line of .SRCINFO $1 that belongs to arch $2, after the header of its
 # section and a tab: its arch line and every key that ends in _$2
 srcinfo_arch_lines() {

@@ -1908,6 +1908,71 @@ EOF
   [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
 }
 
+# A co-maintainer can push the version during the wait and leave arches out on purpose
+@test "publish-pkg: writes no arch_out on a sync of a version that a person pushed" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  setup_arch_prepare
+  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  aur_arch_commit 28+23 x86_64 aarch64 >/dev/null
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+  [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
+}
+
+@test "publish-pkg: writes arch_out from a lost push under a later push of the version" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  setup_arch_prepare
+  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  cp "$yml" "$TEST_TMPDIR/yml.before"
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  cp "$TEST_TMPDIR/yml.before" "$yml"
+  mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
+  # A person pushes the version again with another pkgdesc before the next run
+  git -C "$work" pull -q --ff-only "$AUR_REMOTE" master
+  sed -i 's/early access JDK/early access JDK build/' "$work/PKGBUILD" "$work/.SRCINFO"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam 28+23
+  git -C "$work" push -q "$AUR_REMOTE" master
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
+  [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
+}
+
+# The AUR takes a .SRCINFO that lags its PKGBUILD, and check-arch.sh refuses a commit of
+# arch_out whose .SRCINFO does not build the arch
+@test "publish-pkg: writes to arch_out only the arches the .SRCINFO of the commit builds" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  setup_arch_prepare
+  arch_srcinfo "$work/.SRCINFO" 28+22 x86_64 aarch64 riscv64
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam 28+22
+  git -C "$work" push -q "$AUR_REMOTE" master
+  AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
+  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  cp "$yml" "$TEST_TMPDIR/yml.before"
+  archive_missing aarch64 28+23
+  archive_missing powerpc64le 28+23
+  prepare_arch 28+23 "aarch64 powerpc64le"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out "aarch64 powerpc64le"
+  [ "$status" -eq 0 ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
+  # The same on a sync after a lost YAML commit
+  cp "$TEST_TMPDIR/yml.before" "$yml"
+  mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
+}
+
 @test "publish-pkg: drops an arch that comes back at a new version from arch_out" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   setup_arch_prepare x86_64 powerpc64le riscv64
