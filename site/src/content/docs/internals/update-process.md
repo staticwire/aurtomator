@@ -10,6 +10,8 @@ Outside `--update`, `check-all.sh` gives each package 120 seconds for `check-upd
 
 A check that fails before its limit runs once more after all the other packages and a pause of 60 seconds, `AURTOMATOR_RECHECK_DELAY`, and the second result counts. A check that ran out of time, or failed on a silent host, runs once, so a run without network does not take twice as long.
 
+A check run starts no check after 20 minutes, `AURTOMATOR_CHECK_BUDGET`, so its job ends within 30, and a package it did not reach gets `check_failed: the check ran out of its 20 minutes in this run`. Each run of the workflow starts the loop one package later, so slow hosts cannot hold back the same packages in every run.
+
 A host that times out without any answer is silent for the rest of the run: every later request to it fails at once with `<url>: <host> did not answer earlier in this run`, so a silent host costs one check, whatever the number of its packages. A check that runs out of time during a request to a host makes it silent when one more `HEAD` request of 10 seconds gets no answer either. A refused connection, a failed DNS lookup, an HTTP error, an answer that stops halfway and a redirect to a silent host do not. A URL with a user name or a port, such as `https://git.example.com:8443/`, never makes its host silent, since curl contacts another host or port than the bare name.
 
 ## Arguments

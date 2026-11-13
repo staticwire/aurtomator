@@ -122,7 +122,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          keep-env: GITHUB_TOKEN
+          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER
           readme: "true"
 
       - &stop-builder
