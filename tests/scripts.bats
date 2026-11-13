@@ -2320,6 +2320,17 @@ current: '1.0.0'"
   [[ "$output" == *"yq must be mikefarah/yq, go-yq on Arch, and this one prints: yq 3.4.3"* ]]
 }
 
+@test "lib.sh: require_cmd yq refuses a mikefarah/yq older than the scripts need" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then' \
+    '  echo "yq (https://github.com/mikefarah/yq/) version 4.12.0"' '  exit 0' 'fi' \
+    'echo "Error: unknown shorthand flag: r" >&2' 'exit 1' >"$MOCK_DIR/yq"
+  chmod +x "$MOCK_DIR/yq"
+  run require_cmd yq
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"yq is older than the scripts need, and this one prints: yq (https://github.com/mikefarah/yq/) version 4.12.0"* ]]
+}
+
 # Prints the four values that load_config of lib.sh reads from the
 # .aurtomator.conf of $TEST_TMPDIR, one per line
 load_config_values() {
