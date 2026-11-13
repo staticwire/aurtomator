@@ -3100,7 +3100,7 @@ done
 # gh answers with the JSON of the API and applies --jq to it
 case "$cmd" in
   "api repos/owner/fork") json="{\"has_issues\": ${GH_HAS_ISSUES:-true}}" ;;
-  "api repos/owner/fork/actions/runs/7/jobs")
+  "api repos/owner/fork/actions/runs/7/jobs?per_page=100")
     [[ -z "${GH_JOBS_FAIL:-}" ]] || exit 1
     if [[ -z "${GH_JOBS_JSON:-}" ]]; then
       echo "$GH_JOBS"
@@ -3143,11 +3143,36 @@ EOF
   grep -q 'until a run succeeds, and that run closes this issue\.$' "$GH_LOG"
 }
 
-# A job that runs into timeout-minutes concludes timed_out
 @test "notify-failure: names the jobs that failed or timed out" {
   GH_JOBS_JSON='{"jobs":[{"name":"check","conclusion":"failure"},{"name":"verify","conclusion":"timed_out"},{"name":"publish","conclusion":"skipped"},{"name":"status","conclusion":"success"}]}' run_notify_step
   [ "$status" -eq 0 ]
   grep -q 'failed in check, verify' "$GH_LOG"
+}
+
+# GitHub gives a job stopped by timeout-minutes the conclusion `cancelled`, as one canceled by hand
+@test "notify-failure: names a canceled job that ran for its timeout-minutes" {
+  GH_JOBS_JSON='{"jobs":[
+    {"name":"check-updates / check","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:30:40Z"},
+    {"name":"check-updates / prepare (demo)","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:02:00Z"},
+    {"name":"check-updates / status","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:09:10Z"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  grep -q 'failed in check-updates / check, check-updates / status\.$' "$GH_LOG"
+  grep -q -- '--paginate' "$GH_LOG"
+}
+
+@test "notify-failure: opens nothing for jobs canceled before their timeout-minutes" {
+  GH_JOBS_JSON='{"jobs":[{"name":"check-updates / check","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:12:00Z"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::No job of the run failed, so the canceled run gets no issue"* ]]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "notify-failure: knows the timeout-minutes of every job of check-updates.yml" {
+  local workflow="$GITHUB_DIR/workflows/check-updates.yml" table
+  table=$(yq '.jobs.notify.steps[0].run' "$NOTIFY" | command grep -oE '\{"image": [^}]*\}')
+  [ -n "$table" ]
+  [ "$(jq -cS . <<<"$table")" = "$(yq -o=json '.jobs' "$workflow" | jq -cS 'to_entries | map({(.value.name // .key): .value."timeout-minutes"}) | add')" ]
 }
 
 @test "notify-failure: opens the issue when the jobs cannot be listed" {
