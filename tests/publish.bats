@@ -1866,6 +1866,48 @@ EOF
   [ "$(pkg_get "$yml" .last_updated)" = "$(date -u +%Y-%m-%d)" ]
 }
 
+# The commit step commits nothing when the branch moved during the run, so the next
+# run finds the AUR at the version without the arch and the YAML from before the push
+@test "publish-pkg: writes arch_out when the YAML of the push that took the arch out was lost" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  setup_arch_prepare
+  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  cp "$yml" "$TEST_TMPDIR/yml.before"
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  cp "$TEST_TMPDIR/yml.before" "$yml"
+  mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
+  # The check of the next run finds no arch out, and prepare hands the AUR files over
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
+  [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
+}
+
+# Without a wait of this version, an arch the AUR dropped was dropped by its maintainer
+@test "publish-pkg: writes no arch_out on a sync without the arch_wait of the version" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  setup_arch_prepare
+  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  cp "$yml" "$TEST_TMPDIR/yml.before"
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  cp "$TEST_TMPDIR/yml.before" "$yml"
+  yq -i '.arch_wait.version = "28+22"' "$yml"
+  mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+}
+
 @test "publish-pkg: drops an arch that comes back at a new version from arch_out" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   setup_arch_prepare x86_64 powerpc64le riscv64
