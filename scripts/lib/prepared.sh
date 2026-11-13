@@ -403,6 +403,14 @@ _bumped_line() {
   [[ "$new" == "$(_bump_version "$old" "$3" "$4" "$5" "$6")" ]] || _bumped_with_dash "$old" "$new" "$3" "$4" "$7"
 }
 
+# Succeeds as _bumped_line does, also after each <version>-<pkgrel> of AUR line $1 takes the
+# pkgrel of the update; the last two arguments are the AUR pkgrel and that of the update
+_bumped_any_rel() {
+  _bumped_line "${@:1:9}" && return 0
+  [[ -n "${10}" && "${10}" != "${11}" ]] || return 1
+  _bumped_line "${1//"$3-${10}"/"$3-${11}"}" "${@:2:8}"
+}
+
 # Print "SKIP <arch suffix>:<index>" for each source of .SRCINFO $1 that is SKIP in every
 # checksum array of its arch suffix, and "HASH <arch suffix>:<index>" for every other one
 _source_checksums() {
@@ -476,8 +484,9 @@ check_prepared_srcinfo() {
     return 1
   fi
 
-  local old_ver old_up="" new_up=""
+  local old_ver old_rel old_up="" new_up=""
   old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
+  old_rel=$(awk -F' = ' '$1 ~ /^[ \t]*pkgrel$/ { print $2; exit }' "$1")
   if [[ -n "$format" ]]; then
     old_up=$(_unformat_version "$old_ver" "$format")
     new_up=$(_unformat_version "$version" "$format")
@@ -496,7 +505,7 @@ check_prepared_srcinfo() {
   # A group is the common sources and checksums, _, or those of one
   # architecture, _x86_64
   local -A arch_groups=() arches=() pinned_in=() changed_in=() sum_counts=() sum_moved=() renamed=()
-  local i old new key kind old_val new_val n expected group arch has_arch=false changed=false
+  local i old new key kind old_val new_val n expected group arch has_arch=false changed=false in_pkgbase=true
   for i in "${!new_lines[@]}"; do
     old="${old_lines[$i]}"
     new="${new_lines[$i]}"
@@ -552,7 +561,7 @@ check_prepared_srcinfo() {
         n="${source_counts[$key]:-0}"
         source_counts[$key]=$((n + 1))
         expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
-        if ! _bumped_line "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" &&
+        if ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel" &&
           ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
             _name_differs_in_digits "$expected" "$new"; }; then
           log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: ${new#"${new%%[![:space:]]*}"}, expected ${expected#"${expected%%[![:space:]]*}"}"
@@ -574,13 +583,14 @@ check_prepared_srcinfo() {
         fi
         ;;
       *)
-        [[ "$key" != arch ]] || arches["$new_val"]=1
+        [[ "$key" != pkgname ]] || in_pkgbase=false
+        [[ "$key" != arch || "$in_pkgbase" == false ]] || arches["$new_val"]=1
         if [[ "$text" == *"$old_val"* ]]; then
           if [[ "$new" != "$old" ]]; then
             log_err "Prepared .SRCINFO line $((i + 1)) changes a value the PKGBUILD holds as text: ${new#"${new%%[![:space:]]*}"}, expected ${old#"${old%%[![:space:]]*}"}"
             return 1
           fi
-        elif ! _bumped_line "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset"; then
+        elif ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel"; then
           expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
           log_err "Prepared .SRCINFO line $((i + 1)) does not follow the version as the PKGBUILD does: ${new#"${new%%[![:space:]]*}"}, expected ${expected#"${expected%%[![:space:]]*}"}"
           return 1

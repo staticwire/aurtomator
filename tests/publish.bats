@@ -4358,6 +4358,48 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+# A package with arch=(any) builds on each arch of pkgbase, from the sources of that arch
+@test "check_prepared_srcinfo: takes the arches of pkgbase alone" {
+  split_srcinfo() {
+    printf '%s\n' 'pkgbase = foo' $'\tpkgver = '"$2" $'\tpkgrel = 1' $'\tarch = x86_64' $'\tarch = aarch64' \
+      $'\tsource = LICENSE::https://example.org/LICENSE' $'\tsha256sums = cccc' \
+      $'\tsource_x86_64 = https://example.org/foo-'"$2"'-x86_64.tar.gz' $'\tsha256sums_x86_64 = '"$3" \
+      $'\tsource_aarch64 = https://example.org/foo-'"$2"'-aarch64.tar.gz' $'\tsha256sums_aarch64 = '"$4" \
+      '' 'pkgname = foo' '' 'pkgname = foo-docs' $'\tarch = any' >"$1"
+  }
+  split_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 aaaa dddd
+  split_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 bbbb eeee
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+  # An arch of pkgbase without a new source is still refused
+  split_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 bbbb dddd
+  sed -i 's/foo-2.0-aarch64/foo-1.0-aarch64/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+}
+
+# makepkg writes a value that holds $pkgver-$pkgrel with the pkgrel of the update
+@test "check_prepared_srcinfo: accepts a value with the pkgrel of the update" {
+  rel_srcinfo() {
+    printf '%s\n' 'pkgbase = foo' $'\tpkgver = '"$2" $'\tpkgrel = '"$3" $'\tarch = x86_64' \
+      $'\tsource = https://example.org/foo-'"$2"'.tar.gz' $'\tsha256sums = '"$4" \
+      '' 'pkgname = foo' $'\tdepends = foo-common='"$2-$3" '' 'pkgname = foo-common' >"$1"
+  }
+  rel_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 3 aaaa
+  rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 1 bbbb
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+  # A rebuild of the version raises pkgrel
+  rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.0 4 aaaa
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0 "" "" 4
+  [ "$status" -eq 0 ]
+  # A pkgrel other than that of the update is refused
+  rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 1 bbbb
+  sed -i 's/foo-common=2.0-1/foo-common=2.0-5/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+}
+
 # Helper: .SRCINFO with the given pkgver and one more line
 # Usage: write_srcinfo_line <path> <pkgver> <line>
 write_srcinfo_line() {
