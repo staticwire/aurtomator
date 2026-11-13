@@ -44,7 +44,7 @@ jobs:
           failed_jq='.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or
             (.conclusion == "cancelled" and .started_at != null and .completed_at != null and
               (.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601) >= 60 *
-              ({"image": 5, "check": 30, "prepare": 30, "verify": 30, "publish": 30, "status": 10}[.name | sub("^.* / "; "") | sub(" [(].*$"; "")] // 1e9) - 60)) | .name'
+              ({"image": 5, "check": 30, "prepare": 30, "verify": 30, "publish": 30, "status": 10, "pins": 5}[.name | sub("^.* / "; "") | sub(" [(].*$"; "")] // 1e9) - 60)) | .name'
 
           # A run without a failed job was canceled and gets no issue; a job list that cannot be
           # read opens the issue without the names

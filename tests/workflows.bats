@@ -3171,11 +3171,12 @@ EOF
 # GitHub gives a job stopped by timeout-minutes the conclusion `cancelled`, as one canceled by hand
 @test "notify-failure: names a canceled job that ran for its timeout-minutes" {
   GH_JOBS_JSON='{"jobs":[
+    {"name":"pins","conclusion":"cancelled","started_at":"2026-11-13T09:55:00Z","completed_at":"2026-11-13T09:59:10Z"},
     {"name":"check-updates / check","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:30:40Z"},
     {"name":"check-updates / prepare (demo)","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:02:00Z"},
     {"name":"check-updates / status","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:09:10Z"}]}' run_notify_step
   [ "$status" -eq 0 ]
-  grep -qF 'failed in `check-updates / check`, `check-updates / status`.' "$GH_LOG"
+  grep -qF 'failed in `pins`, `check-updates / check`, `check-updates / status`.' "$GH_LOG"
   grep -q -- '--paginate' "$GH_LOG"
 }
 
@@ -3194,11 +3195,13 @@ EOF
   [ "$output" = "0" ]
 }
 
-@test "notify-failure: knows the timeout-minutes of every job of check-updates.yml" {
-  local workflow="$GITHUB_DIR/workflows/check-updates.yml" table
+@test "notify-failure: knows the timeout-minutes of every job of check-updates.yml and of the job pins" {
+  local workflow="$GITHUB_DIR/workflows/check-updates.yml" table calling="$BATS_TEST_TMPDIR/calling.yml"
   table=$(yq '.jobs.notify.steps[0].run' "$NOTIFY" | command grep -oE '\{"image": [^}]*\}')
   [ -n "$table" ]
-  [ "$(jq -cS . <<<"$table")" = "$(yq -o=json '.jobs' "$workflow" | jq -cS 'to_entries | map({(.value.name // .key): .value."timeout-minutes"}) | add')" ]
+  calling_workflow 1 >"$calling"
+  [ "$(jq -cS . <<<"$table")" = "$({ yq -o=json '.jobs' "$workflow" && yq -o=json '{"pins": .jobs.pins}' "$calling"; } |
+    jq -cS -s 'add | to_entries | map({(.value.name // .key): .value."timeout-minutes"}) | add')" ]
 }
 
 @test "notify-failure: opens the issue when the jobs cannot be listed" {
@@ -3313,6 +3316,23 @@ calling_workflow() {
   calling_workflow 2 >"$validate"
   [ -s "$check" ]
   [ -s "$validate" ]
+
+  # The job pins checks the pins before a job calls aurtomator
+  run yq -o=json -I=0 '.jobs | keys' "$check"
+  [ "$output" = '["pins","check-updates","notify"]' ]
+  run yq '.jobs.check-updates.needs' "$check"
+  [ "$output" = "pins" ]
+  run yq -o=json -I=0 '.jobs | keys' "$validate"
+  [ "$output" = '["pins","validate"]' ]
+  run yq '.jobs.validate.needs' "$validate"
+  [ "$output" = "pins" ]
+  run yq -o=json -I=0 '.jobs.pins | del(.steps[0].uses)' "$check"
+  [ "$output" = '{"runs-on":"ubuntu-latest","timeout-minutes":5,"permissions":{"contents":"read"},"steps":[{"with":{"persist-credentials":false}},{"run":"./aurtomator.sh check-pins"}]}' ]
+  [ "$(yq -o=json -I=0 '.jobs.pins' "$validate")" = "$(yq -o=json -I=0 '.jobs.pins' "$check")" ]
+  run yq '.jobs.pins.steps[0].uses' "$check"
+  [[ "$output" =~ ^actions/checkout@[0-9a-f]{40}$ ]]
+  run yq '.jobs.pins.steps[0].uses | line_comment' "$check"
+  [[ "$output" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]
 
   run yq '.name' "$check"
   [ "$status" -eq 0 ]
