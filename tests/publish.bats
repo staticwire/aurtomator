@@ -2065,6 +2065,29 @@ EOF
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
 }
 
+@test "verify-pkg: needs a list after --arch-out" {
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$TEST_TMPDIR/out/demo" --arch-out
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--arch-out needs a list of arches, which may be empty"* ]]
+}
+
+@test "prepared_arch_words: needs one plain arch line in the AUR PKGBUILD" {
+  printf '%s\n' "pkgname=demo" "arch=('x86_64'" "  'aarch64')" >"$TEST_TMPDIR/aur.PKGBUILD"
+  run prepared_arch_words "$TEST_TMPDIR" "$TEST_TMPDIR/aur.PKGBUILD" "$TEST_TMPDIR/aur.PKGBUILD" "$TEST_TMPDIR/demo.yml" aarch64
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--arch-out needs one arch=(...) line of plain arch names in the PKGBUILD"* ]]
+}
+
+@test "_git_source_sum: refuses a fetched source that git archive cannot read" {
+  local url=https://example.com/demo.git fragment=tag=v1.1.0
+  setup_verify
+  mkdir "$TEST_TMPDIR/downloads"
+  git init -q --bare "$TEST_TMPDIR/downloads/$(printf '%s#%s' "$url" "$fragment" | sha256sum | cut -d' ' -f1).git"
+  run _git_source_sum "demo::git+$url#$fragment" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not archive v1.1.0 of $url"* ]]
+}
+
 @test "verify-pkg: checks an update without the arches of --arch-out and downloads none of theirs" {
   setup_arch_prepare
   archive_missing aarch64 28+23

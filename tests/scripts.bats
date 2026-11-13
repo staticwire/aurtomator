@@ -1321,6 +1321,16 @@ MOCKCURL
   [ "$output" = codeberg.org ]
 }
 
+@test "check-arch: refuses an arch_out that names no full commit id" {
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+arch_out:
+  aarch64: abc123"
+  run "$TEST_TMPDIR/scripts/check-arch.sh" mypkg 1.0.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mypkg: arch_out must map arch names to commit ids of 40 hex digits"* ]]
+}
+
 # Under a UTF-8 locale other than C.UTF-8, [a-z] in [[ =~ ]] takes letters such as é
 @test "lib.sh: the name checks take ASCII alone under a UTF-8 locale" {
   locale -a 2>/dev/null | command grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
