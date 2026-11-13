@@ -249,6 +249,28 @@ current: '$current'"
   [[ "$output" == *"upstream.host must be a host name, with a port or none: 'gitlab.com@127.0.0.1'"* ]]
 }
 
+@test "validate: no value holds a control character" {
+  local value
+  for value in '"https://example.invalid/x\e]0;PWNED\ay"' '"main\rx"' '"https://example.invalid/\u009b2J"'; do
+    create_test_package "mypkg" "git-latest" "upstream:
+  type: git
+  url: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: a value holds a control character"* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+    [[ "$output" != *$'\e'* && "$output" != *$'\r'* && "$output" != *$'\u009b'* ]]
+  done
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: git
+  url: https://example.invalid/x
+  branch: \"m\\e]0;PWNED\\an\""
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"a value holds a control character"* && "$output" != *$'\e'* ]]
+}
+
 @test "validate: upstream.url holds no user name" {
   local strategy extra
   for strategy in git-tag git-latest webpage-scrape; do
@@ -951,7 +973,7 @@ alerts:
   user_agent: \"Example/2.0\\r\\nX-Extra: 1\""
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"upstream.user_agent must hold printable ASCII only: \$'Example/2.0\\r\\nX-Extra: 1'"* ]]
+  [[ "$output" == *"packages/mypkg.yml: a value holds a control character"* ]]
 }
 
 @test "validate: webpage-scrape fails on a user_agent outside ASCII" {
@@ -1487,9 +1509,17 @@ alerts:
 
 @test "validate: an alert note that is not one line of text rejected" {
   local note
-  for note in "" "note: ''" "note: |
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    note: |
       First line
-      Second line" "note: [a, b]" "note: {text: x}"; do
+      Second line"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"packages/mypkg.yml: a value holds a control character"* ]]
+  for note in "" "note: ''" "note: [a, b]" "note: {text: x}"; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 alerts:

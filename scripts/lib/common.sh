@@ -174,6 +174,12 @@ host_memory() {
   [[ -n "${AURTOMATOR_HOSTS_DIR:-}" && -d "$AURTOMATOR_HOSTS_DIR" ]]
 }
 
+# Succeeds when text $1 holds a control character other than a tab, C1 ones in UTF-8 included
+has_control() {
+  local re=$'[\x01-\x08\x0a-\x1f\x7f]|\xc2[\x80-\x9f]'
+  (LC_ALL=C && [[ "$1" =~ $re ]])
+}
+
 # Print the host of https URL $1 in lower case. A URL with a user name or a
 # port gives none, since curl contacts another host or port than the name
 url_host() {

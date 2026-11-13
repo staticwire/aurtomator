@@ -169,6 +169,12 @@ validate_pkg() {
     log_err "$shown must be a map of fields"
     return 1
   fi
+  # The messages print values, and a terminal takes a control character as a command
+  if [[ $(CONTROL_RE='[\x00-\x08\x0a-\x1f\x7f\x{80}-\x{9f}]' yq \
+    '[.. | select(tag == "!!str") | select(test(strenv(CONTROL_RE)))] | length' "$file") != 0 ]]; then
+    log_err "$shown: a value holds a control character"
+    return 1
+  fi
 
   local name strategy
   name=$(pkg_get "$file" '.name // ""')

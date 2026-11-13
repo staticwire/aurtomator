@@ -383,6 +383,25 @@ stub_git_latest() {
   [ ! -e "$TEST_TMPDIR/pkgbuild-ran" ]
 }
 
+@test "draft: writes nothing for a .SRCINFO with a control character" {
+  local source i=0
+  for source in $'source = git+https://example.invalid/x\e]0;PWNED\ay' \
+    $'source = git+https://example.invalid/r#branch=m\e]0;PWNED\an' $'source = https://github.com/o/demo/archive/v1.0.0.tar.gz\r' \
+    $'source = https://example.invalid/\u009b2J' $'source = https://example.invalid/\e[2J' \
+    $'url = https://example.invalid/\e]0;title\a\e[2K' $'epoch = 2\e[2K'; do
+    i=$((i + 1))
+    aur_package "demo$i" 1.0.0 "$source"
+    cd "$TEST_TMPDIR"
+    run "$TEST_TMPDIR/scripts/draft.sh" "demo$i"
+    [ "$status" -eq 1 ] && [[ "$output" == *"The .SRCINFO of demo$i holds a control character, so no YAML is written"* ]] || {
+      echo "taken: ${source@Q}"
+      return 1
+    }
+    [[ "$output" != *$'\e'* && "$output" != *$'\a'* ]]
+    [ ! -e "$TEST_TMPDIR/packages/demo$i.yml" ]
+  done
+}
+
 @test "draft: writes nothing for a pkgver that is no version" {
   aur_package demo '1.0.0$(touch pwned)' 'source = https://github.com/o/demo/archive/v1.0.0.tar.gz'
   cd "$TEST_TMPDIR"
@@ -408,23 +427,12 @@ stub_git_latest() {
 
 # Whoever can push to the AUR package writes .SRCINFO, and a control byte
 # in the terminal moves the cursor, erases a line or sets the title
-@test "draft: prints the url and the sources with each control byte as ?" {
-  aur_package esc 1.0.0 $'url = https://example.invalid/\e]0;title\a\e[2K' \
-    $'source = local.patch\e[1A\e[2Kline hidden'
-  run "$TEST_TMPDIR/scripts/draft.sh" esc
+@test "draft: prints a tab of the url and the sources as ?" {
+  aur_package tab 1.0.0 $'url = https://example.invalid/a\tb' $'source = local.patch\tx'
+  run "$TEST_TMPDIR/scripts/draft.sh" tab
   [ "$status" -eq 1 ]
-  [[ "$output" != *$'\e'* && "$output" != *$'\a'* ]]
-  [[ "$output" == *"  url: https://example.invalid/?]0;title??[2K"* ]]
-  [[ "$output" == *"  source: local.patch?[1A?[2Kline hidden"* ]]
-}
-
-@test "draft: prints the source it takes and the epoch with each control byte as ?" {
-  aur_package demo 1.0.0 $'epoch = 2\e[2K' \
-    $'source = https://github.com/o/demo/archive/v1.0.0.tar.gz#\e]0;title\a'
-  run "$TEST_TMPDIR/scripts/draft.sh" demo
-  [[ "$output" != *$'\e'* && "$output" != *$'\a'* ]]
-  [[ "$output" == *"PKGBUILD sets epoch=2?[2K: an update keeps it"* ]]
-  [[ "$output" == *"packages/demo.yml: github-tag from https://github.com/o/demo/archive/v1.0.0.tar.gz#?]0;title?"* ]]
+  [[ "$output" == *"  url: https://example.invalid/a?b"* ]]
+  [[ "$output" == *"  source: local.patch?x"* ]]
 }
 
 @test "draft: keeps the file for an edit when the check fails" {
