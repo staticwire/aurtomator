@@ -1567,6 +1567,28 @@ use_source() {
   [ ! -e "$TEST_TMPDIR/git-fetch-args" ]
 }
 
+# Under en_US.UTF-8 the range [0-9a-fA-F] of bash takes letters such as à
+@test "verify-pkg: refuses a commit id outside ASCII under any locale" {
+  locale -a | grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  setup_verify
+  make_upstream
+  use_source "git+https://example.com/demo.git#commit=à$(printf 'a%.0s' {1..39})"
+  LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"git fetches a commit by its full id only"* ]]
+  [ ! -e "$TEST_TMPDIR/git-fetch-args" ]
+}
+
+# The checks before it read the prepared files in the C locale, where U+2003 is no space
+@test "verify-pkg: reads the prepared .SRCINFO in the C locale" {
+  setup_verify
+  printf '\t\xe2\x80\x83source = https://example.com/other.tar.gz\n' |
+    tee -a "$TEST_TMPDIR/aur-work-demo/.SRCINFO" >>"$PREPARED/.SRCINFO"
+  commit_aur_state "a line that starts with U+2003"
+  LANG=C.UTF-8 run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+}
+
 @test "verify-pkg: refuses a wrong checksum of a git source" {
   setup_verify
   make_upstream
