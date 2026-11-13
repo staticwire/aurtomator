@@ -2328,6 +2328,21 @@ current: '1.0.0'"
   [[ "$output" == *"yq is older than the scripts need, and this one prints: yq (https://github.com/mikefarah/yq/) version 4.12.0"* ]]
 }
 
+# validate-pkg.sh reads every scalar with the kind operator of yq 4.40.1
+@test "lib.sh: require_cmd yq refuses a mikefarah/yq without kind" {
+  local real
+  real=$(command -v yq)
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then' \
+    '  echo "yq (https://github.com/mikefarah/yq/) version 4.35.2"' '  exit 0' 'fi' \
+    'case "$*" in *kind*) echo "Error: unknown operator kind" >&2 && exit 1 ;; esac' \
+    "exec $real \"\$@\"" >"$MOCK_DIR/yq"
+  chmod +x "$MOCK_DIR/yq"
+  run require_cmd yq
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"yq is older than the scripts need, and this one prints: yq (https://github.com/mikefarah/yq/) version 4.35.2"* ]]
+}
+
 # Prints the four values that load_config of lib.sh reads from the
 # .aurtomator.conf of $TEST_TMPDIR, one per line
 load_config_values() {

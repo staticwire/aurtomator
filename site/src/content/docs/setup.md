@@ -8,7 +8,7 @@ Required:
 
 - Arch Linux, or an Arch-based system with `makepkg` and `updpkgsums`
 - `git`, `curl`, and `ssh-keygen` from `openssh`
-- `yq`, the [Go version by mikefarah](https://github.com/mikefarah/yq). The Python `yq` around `jq` does not work
+- `yq` 4.40.1 or newer, the [Go version by mikefarah](https://github.com/mikefarah/yq). The Python `yq` around `jq` does not work
 - an AUR account at <https://aur.archlinux.org> with at least one package you maintain
 
 Optional:
@@ -128,7 +128,7 @@ The pin comes from the one `uses:` line of `.github/workflows/check-updates.yml`
 
 The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or `$XDG_CACHE_HOME/aurtomator/<sha>`, and removes the copies fetched more than 30 days ago. Before the fetch it warns when no tag of `staticwire/aurtomator` points to the commit: GitHub serves a commit of any fork under the name of the repository too. `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
 
-The script needs mikefarah/yq with `-r` and `document_index`, and names the version of any other `yq` it finds.
+The script needs mikefarah/yq 4.40.1 or newer, and names the version of any other `yq` it finds.
 
 `./aurtomator.sh pin vX.Y.Z` reads the commit of the tag with `git ls-remote`, writes it and `# vX.Y.Z` into every `uses:` line of aurtomator in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, and prints those lines. It stops before it changes a file when the tag names no commit or `yq` reads a pin outside such a line. The next run of the script fetches the release, and CI takes it once the two files are pushed.
 

@@ -27,8 +27,8 @@ if [[ "$yq_version" != *mikefarah/yq* ]]; then
   echo "$0 needs mikefarah/yq, go-yq on Arch, and this yq prints: ${yq_version%%$'\n'*}" >&2
   exit 1
 fi
-# Older releases of mikefarah/yq have no -r and no document_index
-if [[ $(Y=x yq -N -r '(.a | test(strenv(Y))) and document_index == 0' <<<'a: x' 2>/dev/null) != true ]]; then
+# Releases of mikefarah/yq before 4.40.1 lack -r, document_index or kind
+if [[ $(Y=x yq -N -r '(.a | test(strenv(Y))) and document_index == 0 and (.a | kind) == "scalar"' <<<'a: x' 2>/dev/null) != true ]]; then
   echo "$0 needs a newer mikefarah/yq, and this yq prints: ${yq_version%%$'\n'*}" >&2
   exit 1
 fi

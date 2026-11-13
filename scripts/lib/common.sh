@@ -35,8 +35,8 @@ require_cmd() {
     log_err "yq must be mikefarah/yq, go-yq on Arch, and this one prints: $version"
     exit 1
   fi
-  # Older releases of mikefarah/yq have no -r and no document_index
-  if [[ "$cmd" == yq && $(Y=x yq -N -r '(.a | test(strenv(Y))) and document_index == 0' <<<'a: x' 2>/dev/null) != true ]]; then
+  # Releases of mikefarah/yq before 4.40.1 lack -r, document_index or kind
+  if [[ "$cmd" == yq && $(Y=x yq -N -r '(.a | test(strenv(Y))) and document_index == 0 and (.a | kind) == "scalar"' <<<'a: x' 2>/dev/null) != true ]]; then
     log_err "yq is older than the scripts need, and this one prints: $version"
     exit 1
   fi
