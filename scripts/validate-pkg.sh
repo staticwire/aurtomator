@@ -589,6 +589,9 @@ validate_pkg() {
       if [[ -z "$host" || "$host" == "null" ]]; then
         log_err "$shown: strategy '$strategy' requires 'upstream.host'"
         ((errors++))
+      elif [[ ! "$host" =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
+        log_err "$shown: upstream.host must be a host name, with a port or none: ${host@Q}"
+        ((errors++))
       fi
       if [[ -z "$project" || "$project" == "null" ]]; then
         log_err "$shown: strategy '$strategy' requires 'upstream.project'"
@@ -603,6 +606,9 @@ validate_pkg() {
         ((errors++))
       elif [[ "$url" != https://* ]]; then
         log_err "$shown: upstream.url must use HTTPS: $url"
+        ((errors++))
+      elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
+        log_err "$shown: upstream.url must hold no user name: ${url@Q}"
         ((errors++))
       fi
       ;;
@@ -629,6 +635,9 @@ validate_pkg() {
             if [[ -z "$host" || "$host" == "null" ]]; then
               log_err "$shown: git-latest type 'gitlab' requires 'upstream.host'"
               ((errors++))
+            elif [[ ! "$host" =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
+              log_err "$shown: upstream.host must be a host name, with a port or none: ${host@Q}"
+              ((errors++))
             fi
             if [[ -z "$project" || "$project" == "null" ]]; then
               log_err "$shown: git-latest type 'gitlab' requires 'upstream.project'"
@@ -643,6 +652,9 @@ validate_pkg() {
               ((errors++))
             elif [[ "$url" != https://* ]]; then
               log_err "$shown: upstream.url must use HTTPS: $url"
+              ((errors++))
+            elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
+              log_err "$shown: upstream.url must hold no user name: ${url@Q}"
               ((errors++))
             fi
             ;;
@@ -698,6 +710,9 @@ validate_pkg() {
         ((errors++))
       elif [[ "$url" != https://* ]]; then
         log_err "$shown: upstream.url must use HTTPS: $url"
+        ((errors++))
+      elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
+        log_err "$shown: upstream.url must hold no user name: ${url@Q}"
         ((errors++))
       fi
       if [[ -z "$pattern" || "$pattern" == "null" ]]; then

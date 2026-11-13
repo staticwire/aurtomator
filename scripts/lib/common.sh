@@ -174,9 +174,10 @@ host_memory() {
   [[ -n "${AURTOMATOR_HOSTS_DIR:-}" && -d "$AURTOMATOR_HOSTS_DIR" ]]
 }
 
-# Print the host of https URL $1 in lower case and without the port
+# Print the host of https URL $1 in lower case. A URL with a user name or a
+# port gives none, since curl contacts another host or port than the name
 url_host() {
-  [[ "$1" =~ ^https://([A-Za-z0-9.-]+) ]] || return 1
+  [[ "$1" =~ ^https://([A-Za-z0-9.-]+)([/?#]|$) ]] || return 1
   printf '%s\n' "${BASH_REMATCH[1],,}"
 }
 

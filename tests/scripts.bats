@@ -1286,9 +1286,9 @@ MOCKCURL
   [ "$output" = "https://silent.example/a: Operation timed out after 30000 milliseconds with 0 bytes received" ]
   [ "$(cat "$AURTOMATOR_HOSTS_DIR/silent")" = "silent.example" ]
   [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
-  run http_get https://SILENT.example:8443/b
+  run http_get https://SILENT.example/b
   [ "$status" -eq 28 ]
-  [ "$output" = "https://SILENT.example:8443/b: silent.example did not answer earlier in this run" ]
+  [ "$output" = "https://SILENT.example/b: silent.example did not answer earlier in this run" ]
   [ "$(cat "$TEST_TMPDIR/curl.log")" = "https://silent.example/a|https://silent.example/a https://silent.example/a" ]
 }
 
@@ -1302,6 +1302,33 @@ MOCKCURL
   [ "$status" -eq 7 ]
   CURL_RC=22 CURL_STDERR='https://gone.example/a\tThe requested URL returned error: 404\t404\t' run http_get https://gone.example/a
   [ "$status" -eq 22 ]
+  [ ! -s "$AURTOMATOR_HOSTS_DIR/silent" ]
+}
+
+@test "lib.sh: url_host gives no host for a URL with a user name or a port" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local url
+  for url in 'https://api.github.com@127.0.0.1:9/repos/a/b' 'https://user:pw@codeberg.org/api' \
+    'https://api.github.com:9/x' 'https://api.github.com:443' 'http://api.github.com/x'; do
+    run url_host "$url"
+    [ "$status" -eq 1 ] && [ -z "$output" ] || {
+      echo "keyed: $url as $output"
+      return 1
+    }
+  done
+  run url_host 'https://API.GitHub.com/repos?q=1'
+  [ "$output" = api.github.com ]
+  run url_host 'https://codeberg.org'
+  [ "$output" = codeberg.org ]
+}
+
+@test "lib.sh: a request with a user name in its URL remembers no host" {
+  keep_host_memory
+  timeout_curl
+  echo 'api.github.com@silent.example' >"$TEST_TMPDIR/silent-hosts"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get 'https://api.github.com@silent.example/a'
+  [ "$status" -eq 28 ]
   [ ! -s "$AURTOMATOR_HOSTS_DIR/silent" ]
 }
 
