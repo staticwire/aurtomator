@@ -6,11 +6,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before filing, please confirm:
+        Before filing, confirm:
 
         - You have read [Setup](https://aurtomator.dev/setup/) and [Overview](https://aurtomator.dev/overview/).
-        - You have searched existing issues (open and closed) for a duplicate.
-        - This is **not** a security issue. Report security bugs privately as described in [`SECURITY.md`](https://github.com/staticwire/aurtomator/blob/main/SECURITY.md).
+        - No open or closed issue reports the same bug.
+        - The bug is no security issue. A security bug goes privately, as [`SECURITY.md`](https://github.com/staticwire/aurtomator/blob/main/SECURITY.md) describes.
 
   - type: input
     id: version
@@ -65,7 +65,7 @@ body:
     id: actual
     attributes:
       label: Actual behavior
-      description: What actually happened. Include log output with secrets redacted.
+      description: What happened, with the log output and the secrets removed.
     validations:
       required: true
 
