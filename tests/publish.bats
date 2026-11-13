@@ -3097,6 +3097,25 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
 }
 
+# Slow sources early in the list would take the budget of the same packages in every run
+@test "check-all --verify: starts the loop at another package each hour" {
+  local name
+  for name in a b c; do
+    create_test_package "$name" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+    mkdir -p "$TEST_TMPDIR/out/prepared/$name" "$TEST_TMPDIR/out/status"
+    echo "new_version: 2.0.0" >"$TEST_TMPDIR/out/status/$name"
+    checked_status "$name" "new_version: 2.0.0"
+  done
+  stub_script verify-pkg.sh 0
+  printf '%s\n' '#!/bin/sh' 'if [ "$*" = "-u +%s" ]; then echo 7200; else exec /usr/bin/date "$@"; fi' >"$MOCK_DIR/date"
+  chmod +x "$MOCK_DIR/date"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cut -d ' ' -f 1 "$TEST_TMPDIR/verify-pkg.sh.args" | tr '\n' ' ')" = "c a b " ]
+}
+
 # The job has 30 minutes, and a package started late still takes up to 330 s
 @test "check-all --verify: starts no package after the time budget of the loop" {
   setup_check_verify

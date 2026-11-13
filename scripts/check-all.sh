@@ -145,8 +145,17 @@ fi
 # A failed verify, exit code 3 of a moved AUR repo included, takes the update
 # out with update_failed. Only package names from packages/ reach a path.
 if [[ "$MODE" == "verify" ]]; then
+  # Slow sources early in the list would take the budget of the same packages in
+  # every run, so the loop starts at another package each hour
+  verify_files=()
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-    [[ -f "$pkg_file" ]] || continue
+    if [[ -f "$pkg_file" ]]; then
+      verify_files+=("$pkg_file")
+    fi
+  done
+  verify_start=0
+  ((${#verify_files[@]} == 0)) || verify_start=$(($(date -u +%s) / 3600 % ${#verify_files[@]}))
+  for pkg_file in "${verify_files[@]:verify_start}" "${verify_files[@]:0:verify_start}"; do
     pkg_name=$(pkg_get "$pkg_file" .name)
     prepared="${WORK_DIR}/prepared/${pkg_name}"
     if [[ -L "${WORK_DIR}/prepared" || ! -d "$prepared" ]]; then
