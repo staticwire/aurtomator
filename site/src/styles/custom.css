@@ -12,3 +12,26 @@
   --sl-color-accent: #0f6fa6;
   --sl-color-accent-high: #0f2a3d;
 }
+
+/* A wide text column, for the tables and the demo GIF. */
+:root {
+  --sl-content-width: 80rem;
+}
+
+/* The search box takes the free width of the header. */
+site-search button[data-open-modal] {
+  max-width: none;
+}
+
+/* Code in a table cell stays on one line. On a narrower screen it wraps anywhere,
+   so a long URL leaves room for the other columns. */
+.sl-markdown-content td code {
+  white-space: nowrap;
+}
+
+@media (max-width: 100rem) {
+  .sl-markdown-content td code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
