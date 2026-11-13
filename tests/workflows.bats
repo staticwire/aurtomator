@@ -2289,7 +2289,10 @@ case "$endpoint" in
       [$blobs[].path | split("/") | range(1; length) as $i | .[:$i] | join("/")] | unique |
       {sha: "tree-of-head", tree: (map({path: ., type: "tree", sha: "0000000000000000000000000000000000000000"}) + $blobs)}' <<<"$GH_TREE")
     ;;
-  repos/owner/fork/git/blobs) json='{"sha": "blob"}' ;;
+  repos/owner/fork/git/blobs)
+    sha=$(tail -n 1 "$GH_LOG.blobs" | jq -r .content | command -p base64 -d | git hash-object --stdin)
+    json="{\"sha\": \"$sha\"}"
+    ;;
   repos/owner/fork/git/trees)
     echo "inputs: $inputs" >>"$GH_LOG"
     json='{"sha": "tree"}'
@@ -2348,7 +2351,7 @@ no_commit() {
   [ "$status" -eq 0 ]
   grep -qx "inputs: 1" "$GH_LOG"
   no_call "base_tree="
-  jq -e '.base_tree == "tree-of-head" and .tree == [{"path": "README.md", "mode": "100644", "type": "blob", "sha": "blob"}]' "$GH_LOG.tree"
+  jq -e --arg sha "$(git hash-object --stdin <"$BATS_TEST_TMPDIR/results/README.md")" '.base_tree == "tree-of-head" and .tree == [{"path": "README.md", "mode": "100644", "type": "blob", "sha": $sha}]' "$GH_LOG.tree"
 }
 
 @test "check-updates: the commit step commits on a moved head that left its files alone" {
@@ -2418,6 +2421,19 @@ no_commit() {
   grep -qx "api repos/owner/fork/git/blobs --jq .sha --method POST -H Content-Type: application/json --input -" "$GH_LOG"
   jq -r 'select(.encoding == "base64") | .content' "$GH_LOG.blobs" | base64 -d | cmp - "$journal"
   jq -e '[.tree[].path] == ["stats/events.csv"]' "$GH_LOG.tree"
+}
+
+# Without pipefail a failed base64 hands jq no input, and gh writes an empty blob
+@test "check-updates: the commit step stops on a blob that differs from the file" {
+  make_commit_repo README.md="new table"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/sh\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/base64"
+  chmod +x "$BATS_TEST_TMPDIR/bin/base64"
+  run_commit_step
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"::error::The blob of README.md differs from the file"* ]]
+  no_call "git/trees "
+  no_call "git/refs/heads/main "
 }
 
 # A blob would turn a tracked link into a file
@@ -2492,7 +2508,7 @@ make_runner_repo() {
   make_runner_repo "old runner" "new runner"
   run_commit_step
   [ "$status" -eq 0 ]
-  jq -e '.tree == [{"path": "aurtomator.sh", "mode": "100755", "type": "blob", "sha": "blob"}]' "$GH_LOG.tree"
+  jq -e --arg sha "$(git hash-object --stdin <"$BATS_TEST_TMPDIR/ws/aurtomator/aurtomator.sh")" '.tree == [{"path": "aurtomator.sh", "mode": "100755", "type": "blob", "sha": $sha}]' "$GH_LOG.tree"
   [ "$(jq -r .content "$GH_LOG.blobs" | base64 -d)" = "new runner" ]
   grep -qF -- "-f message=chore: update aurtomator.sh [skip ci] " "$GH_LOG"
 }
