@@ -22,9 +22,9 @@ arch_list_ok() {
 }
 
 # Succeeds for the arches $1 and the start $2 of the wait of a line of _arches,
-# each of which may be empty
+# each of which may be empty; a start after now would hold the wait for good
 arch_record_ok() {
-  arch_list_ok "$1" && { [[ -z "$2" ]] || valid_time "$2"; }
+  arch_list_ok "$1" && { [[ -z "$2" ]] || { valid_time "$2" && [[ ! "$2" > "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ]]; }; }
 }
 
 # Print the arches out of line $1 of _arches for version $2; fails for a line of

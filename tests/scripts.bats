@@ -4398,6 +4398,17 @@ arch_wait:
   [ "$ARCH_OUT" = "aarch64|"$'\n'"$since|" ]
 }
 
+@test "check-arch: a start of arch_wait after now starts a new wait" {
+  temurin_package "current: 28+22
+arch_wait:
+  version: 28+23
+  since: '2099-01-01T00:00:00Z'"
+  archive_missing aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  about_now "$(<"$TEST_TMPDIR/arch.out")"
+}
+
 @test "check-arch: arch_wait of another version starts a new wait" {
   temurin_package "current: 28+22
 arch_wait:

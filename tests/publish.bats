@@ -5583,7 +5583,7 @@ arch_out:
   local line
   stub_script update-pkg.sh 0
   for line in $'pkg\t2.0.0\taarch64' $'pkg\t1.0.0\taarch64\t' $'pkg\t2.0.0\tAArch64\t' $'pkg\t2.0.0\taarch64\tsoon' \
-    $'pkg\t2.0.0\tx86_64\t' $'pkg\t2.0.0\taarch64 x86_64\t'; do
+    $'pkg\t2.0.0\tx86_64\t' $'pkg\t2.0.0\taarch64 x86_64\t' $'pkg\t2.0.0\taarch64\t2099-01-01T00:00:00Z'; do
     checked_arch_package 1.0.0 "new_version: 2.0.0" "$line"
     run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
     [ "$status" -eq 0 ]
@@ -5639,7 +5639,7 @@ arch_out:
   local line
   stub_script verify-pkg.sh 0
   for line in $'pkg\t2.0.0\taarch64' $'pkg\t1.0.0\taarch64\t' $'pkg\t2.0.0\tAArch64\t' $'pkg\t2.0.0\taarch64\tsoon' \
-    $'pkg\t2.0.0\tx86_64\t'; do
+    $'pkg\t2.0.0\tx86_64\t' $'pkg\t2.0.0\taarch64\t2099-01-01T00:00:00Z'; do
     setup_check_verify
     printf '%s\n' "$line" >"$TEST_TMPDIR/.status/_arches"
     run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
@@ -5660,6 +5660,14 @@ arch_out:
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" '.arch_wait.version + " " + .arch_wait.since')" = "2.0.0 2026-11-11T10:00:00Z" ]
+}
+
+@test "check-all --publish: writes no arch_wait that starts after now" {
+  checked_arch_package 1.0.0 "pending: 2.0.0" $'pkg\t2.0.0\t\t2099-01-01T00:00:00Z'
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" '.arch_wait // "none"')" = none ]
 }
 
 @test "check-all --publish: keeps an arch_wait that holds the version and its start" {

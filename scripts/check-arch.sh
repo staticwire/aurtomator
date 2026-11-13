@@ -152,7 +152,7 @@ now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 start=$now
 if [[ "$(pkg_get "$PKG_FILE" '.arch_wait.version // ""')" == "$VERSION" ]]; then
   since=$(pkg_get "$PKG_FILE" '.arch_wait.since // ""')
-  ! valid_time "$since" || start=$since
+  ! valid_time "$since" || [[ "$since" > "$now" ]] || start=$since
 fi
 if (($(date -u -d "$now" +%s) - $(date -u -d "$start" +%s) < ARCH_WAIT)); then
   log_warn "$PKG_NAME $VERSION: no archive for ${leaving[*]}, pending for $((ARCH_WAIT / 3600)) h from $start"
