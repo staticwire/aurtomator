@@ -62,7 +62,7 @@ done
 readonly DRY_RUN ASSET ARCH_EDIT ARCH_OUT
 validate_pkgver "$VERSION" || exit 1
 if ! arch_list_ok "$ARCH_OUT"; then
-  log_err "--arch-out must name arches separated by single spaces: ${ARCH_OUT@Q}"
+  log_err "--arch-out must name arches other than x86_64, separated by single spaces: ${ARCH_OUT@Q}"
   exit 1
 fi
 PKG_FILE="$(pkg_file "$PKG_NAME")"

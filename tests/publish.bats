@@ -304,10 +304,10 @@ current: 28+22"
 @test "update-pkg: refuses an --arch-out of another form or without --prepare" {
   local value
   setup_arch_prepare
-  for value in 'a b!' AArch64 ' aarch64'; do
+  for value in 'a b!' AArch64 ' aarch64' x86_64 'aarch64 x86_64'; do
     run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --arch-out "$value" --prepare "$TEST_TMPDIR/out"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"--arch-out must name arches separated by single spaces"* ]]
+    [[ "$output" == *"--arch-out must name arches other than x86_64, separated by single spaces"* ]]
   done
   run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --arch-out aarch64
   [ "$status" -eq 1 ]
@@ -317,6 +317,8 @@ current: 28+22"
 
 @test "update-pkg --prepare: leaves at least one arch in arch=()" {
   local arch
+  # x86_64 never goes out, so the package of this test has none
+  local -a ARCH_ALL=(aarch64 powerpc64le riscv64)
   setup_arch_prepare
   for arch in "${ARCH_ALL[@]}"; do
     archive_missing "$arch" 28+23
@@ -2030,9 +2032,11 @@ EOF
   setup_arch_prepare
   archive_missing aarch64 28+23
   prepare_arch 28+23 aarch64
-  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out 'aarch64;x'
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"--arch-out must name arches separated by single spaces"* ]]
+  for value in 'aarch64;x' x86_64 'aarch64 x86_64'; do
+    run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out "$value"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"--arch-out must name arches other than x86_64, separated by single spaces"* ]]
+  done
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out
   [ "$status" -eq 1 ]
   [[ "$output" == *"--arch-out needs a list of arches, which may be empty"* ]]
@@ -2048,6 +2052,17 @@ EOF
   [ "$status" -eq 0 ]
   grep -qxF "$(arch_source_url riscv64 28+23)" "$TEST_TMPDIR/downloads.log"
   run ! grep -q aarch64 "$TEST_TMPDIR/downloads.log"
+}
+
+@test "verify-pkg: refuses an --arch-out that names x86_64 and downloads nothing" {
+  setup_arch_prepare
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  mock_arch_downloads
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out x86_64
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--arch-out must name arches other than x86_64, separated by single spaces: 'x86_64'"* ]]
+  [ ! -s "$TEST_TMPDIR/downloads.log" ]
 }
 
 @test "verify-pkg: downloads the archive of an arch that comes back" {
@@ -5567,7 +5582,8 @@ arch_out:
 @test "check-all --prepare: fails an arch record of another form" {
   local line
   stub_script update-pkg.sh 0
-  for line in $'pkg\t2.0.0\taarch64' $'pkg\t1.0.0\taarch64\t' $'pkg\t2.0.0\tAArch64\t' $'pkg\t2.0.0\taarch64\tsoon'; do
+  for line in $'pkg\t2.0.0\taarch64' $'pkg\t1.0.0\taarch64\t' $'pkg\t2.0.0\tAArch64\t' $'pkg\t2.0.0\taarch64\tsoon' \
+    $'pkg\t2.0.0\tx86_64\t' $'pkg\t2.0.0\taarch64 x86_64\t'; do
     checked_arch_package 1.0.0 "new_version: 2.0.0" "$line"
     run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
     [ "$status" -eq 0 ]
@@ -5622,7 +5638,8 @@ arch_out:
 @test "check-all --verify: fails an arch record of another form" {
   local line
   stub_script verify-pkg.sh 0
-  for line in $'pkg\t2.0.0\taarch64' $'pkg\t1.0.0\taarch64\t' $'pkg\t2.0.0\tAArch64\t' $'pkg\t2.0.0\taarch64\tsoon'; do
+  for line in $'pkg\t2.0.0\taarch64' $'pkg\t1.0.0\taarch64\t' $'pkg\t2.0.0\tAArch64\t' $'pkg\t2.0.0\taarch64\tsoon' \
+    $'pkg\t2.0.0\tx86_64\t'; do
     setup_check_verify
     printf '%s\n' "$line" >"$TEST_TMPDIR/.status/_arches"
     run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
