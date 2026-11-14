@@ -109,13 +109,15 @@ demo_hits() {
 @test "bashcov-bats.sh: traces no line of its own after bats" {
   require_bashcov
   local d=bc944ee1-0da4-4f64-aa1c-0fad89dcc1d9 script="$PROJECT_DIR/tests/helpers/bashcov-bats.sh"
-  local bats_line
+  local ps4 bats_line
+  ps4="+BASHCOV>$d\${LINENO-}$d\${BASH_SOURCE-}$d\${PWD-}$d\${OLDPWD-}$d"
   mkdir -p "$TEST_TMPDIR/bin"
   printf '#!/usr/bin/env bash\nexit 3\n' >"$TEST_TMPDIR/bin/bats"
   chmod +x "$TEST_TMPDIR/bin/bats"
+  # bash run by root takes no PS4 from the environment, so bashcov passes it in BASH_ENV
+  printf "export PS4='%s'\n" "$ps4" >"$TEST_TMPDIR/ps4"
   run env PATH="$TEST_TMPDIR/bin:$PATH" TMPDIR="$TEST_TMPDIR/tmp" SHELLOPTS=xtrace BASH_XTRACEFD=7 \
-    PS4="+BASHCOV>$d\${LINENO-}$d\${BASH_SOURCE-}$d\${PWD-}$d\${OLDPWD-}$d" \
-    timeout 30 "$script" 7>"$TEST_TMPDIR/trace"
+    BASH_ENV="$TEST_TMPDIR/ps4" PS4="$ps4" timeout 30 "$script" 7>"$TEST_TMPDIR/trace"
   [ "$status" -eq 3 ]
   bats_line=$(grep -n 'bats "\$@"' "$script" | cut -d: -f1)
   run gawk -v d="$d" -v script="$script" -v last="$bats_line" '
@@ -123,5 +125,8 @@ demo_hits() {
     NR > 1 && split($0, field, d) > 2 && field[2] == script { n++; if (field[1] > last) print }
     END { if (!n) print "no record of " script }' "$TEST_TMPDIR/trace"
   [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [ -z "$output" ] || {
+    echo "$output"
+    return 1
+  }
 }
