@@ -1291,6 +1291,20 @@ MOCKCURL
   [ "$(cat "$TEST_TMPDIR/curl.log")" = "https://silent.example/a|https://silent.example/a https://silent.example/a" ]
 }
 
+# curl maps such a host to an ASCII host through IDNA, and url_host gives it none
+@test "lib.sh: http_get refuses a host with a character beyond ASCII before curl runs" {
+  keep_host_memory
+  timeout_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local url
+  for url in 'https://ＧＩＴＨＵＢ.com/x' 'https://github。com/x' 'https://exÉmple.com/x'; do
+    run http_get "$url"
+    [ "$status" -ne 0 ]
+    [ "$output" = "$url: the host holds a character beyond ASCII" ]
+  done
+  [ ! -e "$TEST_TMPDIR/curl.log" ]
+}
+
 @test "lib.sh: http_get remembers no host after an answer, a refusal or an HTTP error" {
   keep_host_memory
   mock_curl_failure
