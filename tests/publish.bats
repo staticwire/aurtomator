@@ -297,6 +297,63 @@ current: 28+22"
   [ ! -e "$ARCH_OUT_DIR" ]
 }
 
+# Helper: jdk-temurin-ea-bin with SKIP in every checksum array, at 28+22 on the AUR and, with
+# arches given, at 28+23 with only those arches and the others in arch_out
+setup_skip_arch_prepare() {
+  local first arch skip='s/^(sha256sums_[a-z0-9_]+=\()[^)]*\)/\1'\''SKIP'\'')/; s/^(\tsha256sums_[a-z0-9_]+ = ).*/\1SKIP/'
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin" yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  setup_arch_prepare
+  first=$AUR_BASE
+  sed -i -E "$skip" "$work/PKGBUILD" "$work/.SRCINFO"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam skip
+  git -C "$work" push -q "$AUR_REMOTE" master
+  AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
+  if (($# > 0)); then
+    first=$AUR_BASE
+    arch_pkgbuild "$work/PKGBUILD" 28+23 "$@"
+    arch_srcinfo "$work/.SRCINFO" 28+23 "$@"
+    sed -i -E "$skip" "$work/PKGBUILD" "$work/.SRCINFO"
+    git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam 28+23
+    git -C "$work" push -q "$AUR_REMOTE" master
+    AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
+    yq -i '.current = "28+23"' "$yml"
+    for arch in "${ARCH_ALL[@]}"; do
+      [[ " $* " == *" $arch "* ]] || ARCH="$arch" COMMIT="$first" yq -i '.arch_out[strenv(ARCH)] = strenv(COMMIT)' "$yml"
+    done
+  fi
+  cat >"$MOCK_DIR/makepkg" <<EOF
+#!/usr/bin/env bash
+[[ " \$* " == *" --printsrcinfo "* ]] || exit 0
+source "$TESTS_DIR/helpers/setup.sh"
+source ./PKGBUILD
+arch_srcinfo /dev/stdout "\$pkgver" "\${arch[@]}" | sed -E '$skip'
+EOF
+  printf '#!/usr/bin/env bash\necho "updpkgsums ran" >&2\nexit 1\n' >"$MOCK_DIR/updpkgsums"
+}
+
+# makepkg -g writes no checksum array for an arch outside arch=(), and no updpkgsums runs for SKIP
+@test "update-pkg --prepare: drops the SKIP checksums of an arch it takes out" {
+  setup_skip_arch_prepare
+  archive_missing aarch64 28+23
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --arch-out aarch64 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  grep -qx "arch=('x86_64' 'powerpc64le' 'riscv64')" "$ARCH_OUT_DIR/PKGBUILD"
+  run ! grep -q '^sha256sums_aarch64=' "$ARCH_OUT_DIR/PKGBUILD"
+  grep -qx "sha256sums_riscv64=('SKIP')" "$ARCH_OUT_DIR/PKGBUILD"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$ARCH_OUT_DIR" --arch-out aarch64 --dry-run
+  [ "$status" -eq 0 ]
+}
+
+@test "update-pkg --prepare: takes back the SKIP checksums of an arch that comes back" {
+  setup_skip_arch_prepare x86_64 powerpc64le riscv64
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+24 --arch-out "" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  grep -qx "arch=('x86_64' 'aarch64' 'powerpc64le' 'riscv64')" "$ARCH_OUT_DIR/PKGBUILD"
+  grep -qx "sha256sums_aarch64=('SKIP')" "$ARCH_OUT_DIR/PKGBUILD"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$ARCH_OUT_DIR" --arch-out "" --dry-run
+  [ "$status" -eq 0 ]
+}
+
 @test "update-pkg: refuses an --arch-out of another form or without --prepare" {
   local value
   setup_arch_prepare
@@ -4459,6 +4516,46 @@ sha256sums_aarch64=('SKIP')"
   write_pkgbuild "$OLD" 1.0.0 2 "$sums"
   write_pkgbuild "$NEW" 1.1.0 1 "$sums"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "arch_sum_lines: ends an array at its parenthesis outside a comment" {
+  # shellcheck disable=SC2016
+  printf '%s\n' "sha256sums_x86_64=('SKIP')" "sha256sums_aarch64=('SKIP' # the arm build (no hash)" "  'SKIP')" \
+    'package() {' '  :' '}' >"$OLD"
+  run arch_sum_lines "$OLD" aarch64 drop $'b2sums_aarch64=(\'SKIP\')\n'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'sha256sums_x86_64=(\'SKIP\')\nb2sums_aarch64=(\'SKIP\')\npackage() {\n  :\n}' ]
+  run arch_sum_lines "$OLD" aarch64 keep
+  [ "$output" = $'sha256sums_aarch64=(\'SKIP\' # the arm build (no hash)\n  \'SKIP\')' ]
+  run arch_sum_lines "$OLD" aarch64 drop
+  [ "$output" = $'sha256sums_x86_64=(\'SKIP\')\npackage() {\n  :\n}' ]
+}
+
+# A run without updpkgsums drops the arrays of an arch that goes out where they stand
+@test "check_prepared_pkgbuild: accepts arrays that stay apart without those of an arch out" {
+  local x86='source_x86_64=("git+https://example.com/x86.git")' arm='source_aarch64=("git+https://example.com/arm.git")'
+  local rv='source_riscv64=("git+https://example.com/rv.git")'
+  write_pkgbuild "$OLD" 1.0.0 2 "$x86
+sha256sums_x86_64=('SKIP')
+$arm
+sha256sums_aarch64=('SKIP')
+$rv
+sha256sums_riscv64=('SKIP')"
+  write_pkgbuild "$NEW" 1.1.0 1 "$x86
+sha256sums_x86_64=('SKIP')
+$arm
+$rv
+sha256sums_riscv64=('SKIP')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0 1 "" "" "" aarch64 ""
+  [ "$status" -eq 0 ]
+  # The arrays of an arch that stays have to stay
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0 1 "" "" "" riscv64 ""
+  [ "$status" -eq 1 ]
+  # and those of an arch back come in anywhere
+  sed -i -e 's/^pkgver=.*/pkgver=1.0.0/' -e 's/^pkgrel=.*/pkgrel=2/' "$NEW"
+  sed -i -e 's/^pkgver=.*/pkgver=1.1.0/' -e 's/^pkgrel=.*/pkgrel=1/' "$OLD"
+  run check_prepared_pkgbuild "$NEW" "$OLD" 1.1.0 1 "" "" "" "" aarch64
   [ "$status" -eq 0 ]
 }
 

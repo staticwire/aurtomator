@@ -87,6 +87,48 @@ _merged_skel() {
   ' <<<"$2"
 }
 
+# Print the SKEL lines of parts $1 without the checksum arrays of the arches $2
+_arch_skel() {
+  awk -F'\t' -v arches=" $2 " '
+    $1 != "SKEL" { next }
+    $2 ~ /^SUMS / { name = substr($2, 6); sub(/^[a-z0-9]+sums_?/, "", name) }
+    $2 ~ /^SUMS / && name != "" && index(arches, " " name " ") { next }
+    { print }' <<<"$1"
+}
+
+# Print the lines of PKGBUILD $1 in the checksum arrays of the arches $2 with $3=keep, or all
+# other lines with $3=drop, the text $4 after the last line of the last array
+arch_sum_lines() {
+  EXTRA="${4:-}" awk -v list="$2" -v mode="$3" '
+    function ends(text) {
+      if (match(text, /(^|[ \t])#.*/)) text = substr(text, 1, RSTART - 1)
+      return index(text, ")") > 0
+    }
+    BEGIN { n = split(list, names, " "); for (i = 1; i <= n; i++) want[names[i]] = 1 }
+    {
+      line[NR] = $0
+      text = $0
+      if (!open && match($0, /^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?=\(/)) {
+        open = 1
+        name = substr($0, 1, index($0, "=") - 1)
+        sub(/^[a-z0-9]+sums_?/, "", name)
+        mine = name != "" && name in want
+        text = substr($0, index($0, "(") + 1)
+      }
+      if (open) {
+        ours[NR] = mine
+        last = NR
+        if (ends(text)) open = 0
+      }
+    }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if ((ours[i] == 1) == (mode == "keep")) print line[i]
+        if (mode == "drop" && i == last) printf "%s", ENVIRON["EXTRA"]
+      }
+    }' "$1"
+}
+
 # Print the checksum arrays of parts $1 wherever they stand: the name of each array and a
 # line per checksum, sorted by name, arrays of one name in file order
 _sum_arrays() {
@@ -203,9 +245,9 @@ check_prepared_pkgbuild() {
     printf '  %s\n' "${notes[@]@Q}" >&2
     return 1
   fi
-  # updpkgsums writes all checksum arrays in one block at the place of the
-  # first one, and a run without it leaves them where they stand
-  if [[ "$(grep $'^SKEL\t' <<<"$old_parts")" != "$(grep $'^SKEL\t' <<<"$new_parts")" ]] &&
+  # updpkgsums writes all checksum arrays in one block at the place of the first one, and a run
+  # without it leaves them where they stand, but for those of the arches that go and come back
+  if [[ "$(_arch_skel "$old_parts" "${8:-}")" != "$(_arch_skel "$new_parts" "${9:-}")" ]] &&
     [[ "$(_merged_skel all "$old_parts")" != "$(_merged_skel runs "$new_parts")" ]]; then
     log_err "Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"
     return 1
