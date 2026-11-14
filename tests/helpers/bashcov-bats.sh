@@ -33,12 +33,15 @@ exec {filter_fd}> >(LC_ALL=C gawk -v d="$delimiter" '
 ' >&"$trace_fd")
 filter_pid=$!
 
-# bats runs with the shell options bashcov passed
+# bats runs with the shell options bashcov passed. This shell traces nothing more: gawk writes its
+# last block only when its input closes, and a line traced here before that can split a record
 set +euo pipefail
-set -x
-BASH_XTRACEFD=$filter_fd bats "$@"
+(
+  BASH_XTRACEFD=$filter_fd
+  set -x
+  exec bats "$@"
+)
 status=$?
-set +x
 exec {filter_fd}>&-
 wait "$filter_pid"
 exit "$status"

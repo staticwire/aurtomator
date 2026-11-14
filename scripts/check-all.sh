@@ -353,16 +353,19 @@ arch_record_line() {
 # --publish keeps the start of the wait of record line $2 for version $3 in
 # arch_wait of package file $1, until publish-pkg.sh pushes the version
 keep_arch_wait() {
-  if [[ "$MODE" != publish || -z "$2" ]] || ! arch_record_out "$2" "$3" >/dev/null; then
+  local record=$'^[^\t]*\t[^\t]*\t([^\t]*)\t([^\t]*)(\t([0-9a-f]{40}))?$'
+  if [[ "$MODE" != publish || -z "$2" ]] || ! arch_record_out "$2" "$3" >/dev/null || [[ ! "$2" =~ $record ]]; then
     return 0
   fi
-  [[ -z "${2##*$'\t'}" ]] || set_arch_wait "$1" "$3" "${2##*$'\t'}"
+  # A line of a wait adds the arches it waits for and the AUR commit that builds them
+  [[ -z "${BASH_REMATCH[2]}" ]] ||
+    set_arch_wait "$1" "$3" "${BASH_REMATCH[2]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[4]:+${BASH_REMATCH[1]}}"
 }
 
 # Set ARCH_OUT to the arches out of an update of $2 (file $1) to version $3, from
 # check-arch.sh or _arches of the check run; a wait or a failure sets the status
 find_arches() {
-  local rc=0 err_file err text first second line in_flight
+  local rc=0 err_file err text first second line in_flight waited commit wait_re=$'^([^\n]+)\n([0-9a-f]{40})$'
   ARCH_OUT=""
   ARCH_RECORD=""
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
@@ -393,10 +396,12 @@ find_arches() {
   first=${text%%$'\n'*}
   second=""
   [[ "$text" != *$'\n'* ]] || second=${text#*$'\n'}
-  if ((rc == 3)) && valid_time "$text"; then
+  # A wait names its start, the arches it waits for and the AUR commit that builds them
+  if ((rc == 3)) && [[ "$second" =~ $wait_re ]] && waited=${BASH_REMATCH[1]} commit=${BASH_REMATCH[2]} &&
+    valid_time "$first" && arch_list_ok "$waited"; then
     printf '%s\n' "$err" >&2
     echo "pending: $3" >"${STATUS_DIR}/$2"
-    printf '%s\t%s\t\t%s\n' "$2" "$3" "$text" >>"${STATUS_DIR}/_arches"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$2" "$3" "$waited" "$first" "$commit" >>"${STATUS_DIR}/_arches"
     return 1
   fi
   if ((rc == 0)) && arch_record_ok "$first" "$second"; then
@@ -424,7 +429,17 @@ run_package() {
   local pkg_file="$1" pass="$2"
   local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false in_flight
   local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
-  pkg_name=$(package_name "$pkg_file") || return 0
+  local stem yaml_name
+  if ! pkg_name=$(package_name "$pkg_file"); then
+    # Its status keeps the issues of the file name open, since its YAML is still there
+    stem="${pkg_file##*/}"
+    stem="${stem%.yml}"
+    if [[ "$MODE" == check ]] && (LC_ALL=C && [[ "$stem" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
+      yaml_name=$(pkg_get "$pkg_file" .name 2>/dev/null) || yaml_name=""
+      echo "check_failed: packages/${stem}.yml: name ${yaml_name@Q} must equal the file name" >"${STATUS_DIR}/${stem}"
+    fi
+    return 0
+  fi
   # --prepare and --publish keep a wait for the cooldown from the check run
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ "${CHECKED[$pkg_name]:-}" == "cooldown: "* ]]; then
     if valid_date "${CHECKED[$pkg_name]#cooldown: }"; then
@@ -705,8 +720,9 @@ for pkg_file in "${check_files[@]:check_start}" "${check_files[@]:0:check_start}
   if check_time_left; then
     run_package "$pkg_file" 1
   elif pkg_name=$(package_name "$pkg_file"); then
-    log_err "$pkg_name: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run"
-    echo "check_failed: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run" >"${STATUS_DIR}/${pkg_name}"
+    # A package the loop does not reach keeps its issues and its row of the journal
+    log_warn "$pkg_name: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run"
+    echo "unchecked: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run" >"${STATUS_DIR}/${pkg_name}"
   fi
 done
 
@@ -722,9 +738,13 @@ if ((${#RECHECK[@]} > 0)) && check_time_left; then
 fi
 
 # The issues step closes the issues of a name this list lacks, since a package
-# without a YAML gets no check that would close them
+# without a YAML gets no check that would close them; a YAML of another name stays
 for pkg_file in "${check_files[@]}"; do
-  package_name "$pkg_file" 2>/dev/null || true
+  stem="${pkg_file##*/}"
+  stem="${stem%.yml}"
+  if (LC_ALL=C && [[ "$stem" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
+    printf '%s\n' "$stem"
+  fi
 done >"${STATUS_DIR}/_packages"
 
 # The arches each package lacks after the run, for the issues of arches out

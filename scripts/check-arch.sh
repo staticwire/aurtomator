@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Usage: check-arch.sh <package> <version> [--asset <value>], see https://aurtomator.dev/features/missing-arches/
 # Prints the arches out after an update and the start of their wait; exit 3 waits
+# and prints the start, the arches it waits for and the AUR commit that builds them
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -158,7 +159,7 @@ if [[ "$(pkg_get "$PKG_FILE" '.arch_wait.version // ""')" == "$VERSION" ]]; then
 fi
 if (($(date -u -d "$now" +%s) - $(date -u -d "$start" +%s) < ARCH_WAIT)); then
   log_warn "$PKG_NAME $VERSION: no archive for ${leaving[*]}, pending for $((ARCH_WAIT / 3600)) h from $start"
-  printf '%s\n' "$start"
+  printf '%s\n%s\n%s\n' "$start" "${leaving[*]}" "$(git -C "$aur" rev-parse HEAD)"
   exit 3
 fi
 finish "${leaving[*]}${staying[*]:+ ${staying[*]}}" "$start"

@@ -30,6 +30,7 @@ status_label() {
     pending:*) echo "⏳ ${1#pending: } pending" ;;
     cooldown:*) echo "💤 next update ${1#cooldown: }" ;;
     check_failed:* | update_failed:*) echo "❌ failed" ;;
+    unchecked:*) echo "⌛ not checked in this run" ;;
     *) echo "✅ tracking" ;;
   esac
 }
@@ -53,7 +54,7 @@ clean_statuses() {
       _*) continue ;;
     esac
     case "$status" in
-      up_to_date | check_failed:* | update_failed:*) continue ;;
+      up_to_date | check_failed:* | update_failed:* | unchecked:*) continue ;;
       "cooldown: "*) ! valid_date "${status#cooldown: }" || continue ;;
       "updated: "* | "downgrade: "* | "rebuilt: "* | "new_version: "* | "available_downgrade: "* | "new_build: "* | \
         "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
@@ -85,7 +86,7 @@ _clean_without() {
 # Print the Markdown summary of a run from status directory $1. An error
 # holds text from upstream, so it goes into a code block, as in its issue.
 run_summary() {
-  local file name status kind total=0 current=0 rows="" errors="" noun=packages
+  local file name status kind total=0 current=0 rows="" errors="" unchecked="" noun=packages
   for file in "$1"/*; do
     [[ -f "$file" ]] || continue
     name="${file##*/}"
@@ -94,6 +95,10 @@ run_summary() {
     ((++total))
     if [[ "$status" == up_to_date ]]; then
       ((++current))
+      continue
+    fi
+    if [[ "$status" == unchecked:* ]]; then
+      unchecked+="${unchecked:+, }\`$name\`"
       continue
     fi
     rows+=$(printf "| \`%s\` | %s |" "$name" "$(status_label "$status")")$'\n'
@@ -110,5 +115,7 @@ run_summary() {
     printf '%s %s, all up to date.\n' "$total" "$noun"
     return 0
   fi
-  printf '%s %s, %s up to date.\n\n| Package | Status |\n|---|---|\n%s%s' "$total" "$noun" "$current" "$rows" "$errors"
+  printf '%s %s, %s up to date.\n' "$total" "$noun" "$current"
+  [[ -z "$rows" ]] || printf '\n| Package | Status |\n|---|---|\n%s%s' "$rows" "$errors"
+  [[ -z "$unchecked" ]] || printf '\nNot checked in this run: %s.\n' "$unchecked"
 }

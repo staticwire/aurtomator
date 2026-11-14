@@ -838,7 +838,7 @@ jobs:
               # A check issue closes when the check passes, and an update or held issue when the
               # version is in the AUR
               case "$title:$status" in
-                "❌ $pkg_name: check failed:check_failed:"*) continue ;;
+                "❌ $pkg_name: check failed:check_failed:"* | "❌ $pkg_name: check failed:unchecked:"*) continue ;;
                 "❌ $pkg_name: check failed:"*) ;;
                 "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
                   "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "* | \
@@ -874,17 +874,20 @@ jobs:
           $arched"
           fi
 
-          # A host issue closes when fewer than HOST_ISSUE_MIN packages of the host failed to check
+          # A host issue closes when fewer than HOST_ISSUE_MIN packages of the host failed to check,
+          # in a run whose check reached every package
           hosts=$(lib failed_hosts "$STATUS_DIR")
           failing=$(cut -d ' ' -f 1 <<<"$hosts")
           host_re='^([a-z0-9.-]+): [0-9]+ packages failed to check$'
-          while read -r number title; do
-            [[ "$title" == "❌ "* && "${title#"❌ "}" =~ $host_re ]] || continue
-            host=${BASH_REMATCH[1]}
-            grep -qxF -e "$host" <<<"$failing" && continue
-            comment=$(lib host_close_comment "$host" "$RUN_URL")
-            gh issue close "$number" --comment "$comment"
-          done <<<"$open"
+          if ! grep -qs '^unchecked: ' "$STATUS_DIR"/*; then
+            while read -r number title; do
+              [[ "$title" == "❌ "* && "${title#"❌ "}" =~ $host_re ]] || continue
+              host=${BASH_REMATCH[1]}
+              grep -qxF -e "$host" <<<"$failing" && continue
+              comment=$(lib host_close_comment "$host" "$RUN_URL")
+              gh issue close "$number" --comment "$comment"
+            done <<<"$open"
+          fi
 
           # notify-failure opens this issue, and a run without a failed job closes it
           if [[ "$RUN_OK" == true ]]; then

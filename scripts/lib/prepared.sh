@@ -403,12 +403,28 @@ _bumped_line() {
   [[ "$new" == "$(_bump_version "$old" "$3" "$4" "$5" "$6")" ]] || _bumped_with_dash "$old" "$new" "$3" "$4" "$7"
 }
 
+# Print line $1 with pkgrel $4 in each <version $2>-<pkgrel $3> that has no digit or dot
+# before it and no digit after it
+_with_rel() {
+  local LC_ALL=C rest="$1" out="" find="$2-$3" before
+  while [[ "$rest" == *"$find"* ]]; do
+    before="${rest%%"$find"*}"
+    rest="${rest#*"$find"}"
+    if [[ "$before" == *[0-9.] || "$rest" == [0-9]* ]]; then
+      out+="$before$find"
+    else
+      out+="$before$2-$4"
+    fi
+  done
+  printf '%s\n' "$out$rest"
+}
+
 # Succeeds as _bumped_line does, also after each <version>-<pkgrel> of AUR line $1 takes the
 # pkgrel of the update; the last two arguments are the AUR pkgrel and that of the update
 _bumped_any_rel() {
   _bumped_line "${@:1:9}" && return 0
   [[ -n "${10}" && "${10}" != "${11}" ]] || return 1
-  _bumped_line "${1//"$3-${10}"/"$3-${11}"}" "${@:2:8}"
+  _bumped_line "$(_with_rel "$1" "$3" "${10}" "${11}")" "${@:2:8}"
 }
 
 # Print "SKIP <arch suffix>:<index>" for each source of .SRCINFO $1 that is SKIP in every
@@ -498,6 +514,10 @@ check_prepared_srcinfo() {
   local old_ver old_rel old_up="" new_up=""
   old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
   old_rel=$(awk -F' = ' '$1 ~ /^[ \t]*pkgrel$/ { print $2; exit }' "$1")
+  if [[ -n "$old_rel" && ! "$old_rel" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    log_err "The AUR .SRCINFO has pkgrel = $(_shown_line "$old_rel"), which makepkg does not write"
+    return 1
+  fi
   if [[ -n "$format" ]]; then
     old_up=$(_unformat_version "$old_ver" "$format")
     new_up=$(_unformat_version "$version" "$format")
@@ -618,8 +638,11 @@ check_prepared_srcinfo() {
       return 1
     fi
   elif [[ "$version" != "$old_ver" ]]; then
-    # The arch lines name every architecture, one that builds from the
-    # common sources alone too
+    # The arch lines of pkgbase name an architecture that builds from the common sources
+    # alone, and the AUR copy can list one with sources of its own elsewhere or nowhere
+    for group in "${!arch_groups[@]}"; do
+      [[ "$group" == _ ]] || arches["${group#_}"]=1
+    done
     for arch in "${!arches[@]}"; do
       if [[ -n "${pinned_in[_]:-}${pinned_in[_$arch]:-}" && -z "${changed_in[_]:-}${changed_in[_$arch]:-}" ]]; then
         log_err "Prepared .SRCINFO changes no source URL and no checksum for $arch, so the new version would hold the files of the old one"

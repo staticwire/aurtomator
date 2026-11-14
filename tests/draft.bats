@@ -401,6 +401,27 @@ stub_git_latest() {
   done
 }
 
+@test "draft: writes nothing for a .SRCINFO larger than 1 MiB" {
+  aur_package demo 1.0.0 "depends = $(head -c 1100000 /dev/zero | tr '\0' a)"
+  cd "$TEST_TMPDIR"
+  run timeout 20 "$TEST_TMPDIR/scripts/draft.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The .SRCINFO of demo is larger than 1 MiB, so no YAML is written"* ]]
+  [ ! -e "$TEST_TMPDIR/packages/demo.yml" ]
+}
+
+# One check of the whole file in place of a subshell for each of its lines
+@test "draft: reads a .SRCINFO of 20,000 lines in a few seconds" {
+  local -a deps
+  mapfile -t deps < <(seq -f 'depends = dep%g' 1 20000)
+  aur_package demo 1.0.0 "source = https://github.com/o/demo/archive/v1.0.0.tar.gz" "${deps[@]}"
+  cd "$TEST_TMPDIR"
+  SECONDS=0
+  run "$TEST_TMPDIR/scripts/draft.sh" demo
+  [ "$SECONDS" -lt 10 ]
+  [ -e "$TEST_TMPDIR/packages/demo.yml" ]
+}
+
 @test "draft: writes nothing for a pkgver that is no version" {
   aur_package demo '1.0.0$(touch pwned)' 'source = https://github.com/o/demo/archive/v1.0.0.tar.gz'
   cd "$TEST_TMPDIR"

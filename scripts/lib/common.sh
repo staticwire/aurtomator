@@ -168,7 +168,13 @@ url_host() {
 # Start a request to URL $1, with URL $2 for the HEAD check after a kill. Fails
 # for a host that did not answer earlier in the run, with the reason on stderr
 request_begin() {
-  local host
+  local host authority="${1#*://}" beyond='[^ -~]'
+  authority=${authority%%[/?#]*}
+  # curl maps such a host to an ASCII host, which url_host and host memory would not see
+  if (LC_ALL=C && [[ "$authority" =~ $beyond ]]); then
+    printf '%s: the host holds a character beyond ASCII\n' "$1" >&2
+    return 1
+  fi
   if ! host_memory || ! host=$(url_host "$1"); then
     return 0
   fi

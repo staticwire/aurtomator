@@ -2754,6 +2754,29 @@ run_bare_issues_step() {
   [ "$output" = "0" ]
 }
 
+# The names of the AUR, and titles that only look like those a run writes
+@test "check-updates: the close step reads the package of each title exactly" {
+  GH_OPEN=$'1 ❌ foo.bar: check failed\n2 ❌ x: update failed\n3 ❌ Foo-Bin: check failed\n4 ✋ c++: update held\n5 ⚠️ a@b_c: 1.0 without aarch64\n6 ❌ foo: check failed\n7 ❌ foo bar: check failed\n8 ❌ gone: check failed again\n9 Re: ❌ gone: check failed\n10 ✋ gone: update held twice\n11 ⚠️ gone: 1.0 without' \
+    run_close_step "_packages="$'fooxbar\nfoo-bin'
+  [ "$status" -eq 0 ]
+  local n
+  for n in 1 2 3 4 5 6; do
+    grep -q "^issue close $n " "$GH_LOG" || {
+      echo "kept $n"
+      return 1
+    }
+  done
+  run grep -c -E '^issue close (7|8|9|10|11) ' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the close step finds an arch issue of a removed package behind 30 others" {
+  local i
+  GH_OPEN="$(for i in {1..31}; do echo "$i ⚠️ pkg$i: 1.0 without aarch64"; done)" run_close_step _packages=kept
+  [ "$status" -eq 0 ]
+  grep -q '^issue close 31 ' "$GH_LOG"
+}
+
 @test "check-updates: the close step keeps the issues of every package without _packages" {
   GH_OPEN='1 ❌ gone: update failed' run_close_step kept=up_to_date
   [ "$status" -eq 0 ]
@@ -2903,6 +2926,17 @@ run_bare_issues_step() {
   grep -qx 'issue close 23 --comment Fewer than 5 packages of `gitlab.com` failed to check in https://example.invalid/run.' "$GH_LOG"
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "2" ]
+}
+
+# A package the check did not reach in this run tells nothing about its host
+@test "check-updates: closes no host issue in a run that left a package unchecked" {
+  local pairs
+  mapfile -t pairs < <(host_failures 4 api.github.com a)
+  GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check\n22 ❌ late: check failed' \
+    run_close_step "${pairs[@]}" "late=unchecked: the check ran out of its 20 minutes in this run"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "check-updates: closes the arch issue of a package that _without of publish lists no more" {
@@ -3189,6 +3223,15 @@ EOF
 
 @test "notify-failure: opens nothing for jobs canceled before their timeout-minutes" {
   GH_JOBS_JSON='{"jobs":[{"name":"check-updates / check","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:12:00Z"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::No job of the run failed, so the canceled run gets no issue"* ]]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+# A job canceled while it waited for a runner has no start
+@test "notify-failure: opens nothing for a job canceled before it started" {
+  GH_JOBS_JSON='{"jobs":[{"name":"check-updates / check","conclusion":"cancelled","started_at":null,"completed_at":"2026-11-13T10:40:00Z"}]}' run_notify_step
   [ "$status" -eq 0 ]
   [[ "$output" == *"::notice::No job of the run failed, so the canceled run gets no issue"* ]]
   run grep -c '^issue create' "$GH_LOG"

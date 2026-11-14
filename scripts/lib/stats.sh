@@ -55,8 +55,8 @@ stats_class() {
   esac
 }
 
-# Print event,version of final status $1 of a package at version $2, and
-# nothing for a status a later run publishes. Returns: 1 for other statuses
+# Print event,version of final status $1 of a package at version $2, and nothing for a
+# status a later run publishes or the check did not reach. Returns: 1 for other statuses
 stats_event() {
   local status="$1" current="$2" event version
   local LC_ALL=C
@@ -72,7 +72,7 @@ stats_event() {
       event=arch_added
       version=$(arch_status_version "${status#arch_added: }") || return 1
       ;;
-    "new_version: "* | "available_downgrade: "* | "new_build: "* | "arch_back: "*) return 0 ;;
+    "new_version: "* | "available_downgrade: "* | "new_build: "* | "arch_back: "* | unchecked:*) return 0 ;;
     *) return 1 ;;
   esac
   printf '%s,%s\n' "$event" "$version"

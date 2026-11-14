@@ -1661,6 +1661,23 @@ use_source() {
   [ "$(cat "$TEST_TMPDIR/git-fetch-traps")" = "trap -- '' SIGXFSZ" ]
 }
 
+# A pack of a few bytes can hold a large file, and git archive reads all of it
+@test "_git_source_sum: refuses a tree whose files pass the budget left" {
+  setup_verify
+  make_upstream
+  head -c 2097152 /dev/zero >"$TEST_TMPDIR/upstream-work/zeros"
+  tag_upstream "$TEST_TMPDIR/upstream-work" v1.2.0 2026-01-03T00:00:00Z
+  git -C "$TEST_TMPDIR/upstream-work" push -q "$TEST_TMPDIR/upstream.git" refs/tags/v1.2.0
+  mkdir "$TEST_TMPDIR/downloads"
+  truncate -s $((1024 * 1024 * 1024 - 1024 * 1024)) "$TEST_TMPDIR/downloads/earlier"
+  hash -r
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.2.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The files of tag=v1.2.0 of https://example.com/demo.git pass the budget of 1 GiB of the package"* ]]
+  # git streams a file above the threshold in place of holding it in memory
+  grep -q -- '-c core.bigFileThreshold=16m -c fetch.unpackLimit=1' "$TEST_TMPDIR/git-fetch-args"
+}
+
 @test "verify-pkg: refuses a checksum of a git source at a branch" {
   setup_verify
   make_upstream
@@ -1893,7 +1910,7 @@ EOF
 @test "publish-pkg: writes arch_out when the YAML of the push that took the arch out was lost" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   setup_arch_prepare
-  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
   cp "$yml" "$TEST_TMPDIR/yml.before"
   archive_missing aarch64 28+23
   prepare_arch 28+23 aarch64
@@ -1934,7 +1951,7 @@ EOF
 @test "publish-pkg: writes no arch_out on a sync of a version that a person pushed" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   setup_arch_prepare
-  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
   aur_arch_commit 28+23 x86_64 aarch64 >/dev/null
   run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 2 ]
@@ -1944,10 +1961,42 @@ EOF
   [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
 }
 
+# A co-maintainer can push a commit with the subject of a push of aurtomator over a parent
+# of their own, so the sync takes the arches and the commit of arch_wait alone
+@test "publish-pkg: writes the arches and the commit of arch_wait to arch_out on a sync" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin" crafted
+  setup_arch_prepare
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
+  cp "$yml" "$TEST_TMPDIR/yml.before"
+  crafted=$(aur_arch_commit 28+23 x86_64 aarch64 powerpc64le riscv64)
+  arch_pkgbuild "$work/PKGBUILD" 28+23 x86_64
+  arch_srcinfo "$work/.SRCINFO" 28+23 x86_64
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false \
+    commit -qam "28+23 release from webpage-scrape"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$crafted" != "$AUR_BASE" ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
+  [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
+
+  # arch_wait without the commit gives no arch_out
+  cp "$TEST_TMPDIR/yml.before" "$yml"
+  yq -i 'del(.arch_wait.commit) | del(.arch_wait.arches)' "$yml"
+  mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+}
+
 @test "publish-pkg: writes arch_out from a lost push under a later push of the version" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
   setup_arch_prepare
-  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
   cp "$yml" "$TEST_TMPDIR/yml.before"
   archive_missing aarch64 28+23
   prepare_arch 28+23 aarch64
@@ -1977,7 +2026,7 @@ EOF
   git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam 28+22
   git -C "$work" push -q "$AUR_REMOTE" master
   AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
-  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64 powerpc64le"}' "$yml"
   cp "$yml" "$TEST_TMPDIR/yml.before"
   archive_missing aarch64 28+23
   archive_missing powerpc64le 28+23
@@ -3039,14 +3088,24 @@ EOF
   [ "$(cat "$TEST_TMPDIR/.status/_packages")" = $'flaky\nsteady' ]
 }
 
+# Its issues stay open, since its YAML is still there
+@test "check-all: a YAML whose name differs from its file name fails its check and stays in _packages" {
+  flaky_check flaky
+  yq -i '.name = "other"' "$TEST_TMPDIR/packages/steady.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "check_failed: packages/steady.yml: name 'other' must equal the file name" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_packages")" = $'flaky\nsteady' ]
+}
+
 # A host that answers slowly takes the time of the packages after it
 @test "check-all: starts no check after the time budget of the loop" {
   flaky_check flaky
   AURTOMATOR_CHECK_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/checks" ]
-  [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "check_failed: the check ran out of its 0 minutes in this run" ]
-  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "check_failed: the check ran out of its 0 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "unchecked: the check ran out of its 0 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 0 minutes in this run" ]
 }
 
 @test "check-all: checks no package again after the time budget of the loop" {
@@ -3059,7 +3118,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/checks")" = flaky ]
   [ ! -e "$TEST_TMPDIR/sleeps" ]
-  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "check_failed: the check ran out of its 2 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 2 minutes in this run" ]
 }
 
 @test "check-all: starts the check loop one package later in each run" {
@@ -3667,6 +3726,25 @@ EOF
   [ "$output" = "example.org" ]
 }
 
+# A host with a letter beyond ASCII is no host that url_host accepts, so its package gets its own issue
+@test "failure_host: prints nothing for a host with a letter beyond ASCII, in every locale" {
+  local locale url locales=(C C.UTF-8)
+  if locale -a | grep -qix 'en_US.utf8'; then
+    locales+=(en_US.UTF-8)
+  fi
+  for locale in "${locales[@]}"; do
+    for url in 'https://exÉmple.com/x' 'https://gİthub.com/x' 'https://ＧＩＴＨＵＢ.com/x'; do
+      echo "check_failed: $url: error: 503" >"$TEST_TMPDIR/demo"
+      LC_ALL=$locale run failure_host "$TEST_TMPDIR/demo"
+      [ "$status" -eq 0 ]
+      [ -z "$output" ] || {
+        echo "taken under $locale: $url as $output"
+        return 1
+      }
+    done
+  done
+}
+
 @test "failure_host: prints nothing for an error without a URL or for a failed update" {
   echo "check_failed: timed out after 120 s" >"$TEST_TMPDIR/demo"
   run failure_host "$TEST_TMPDIR/demo"
@@ -3812,6 +3890,8 @@ EOF
   [ "$output" = "❌ failed" ]
   run status_label "cooldown: 2026-11-12"
   [ "$output" = "💤 next update 2026-11-12" ]
+  run status_label "unchecked: the check ran out of its 20 minutes in this run"
+  [ "$output" = "⌛ not checked in this run" ]
   run status_label "unknown: 1.0"
   [ "$output" = "✅ tracking" ]
 }
@@ -3832,10 +3912,12 @@ EOF
 @test "clean_statuses: a status that --publish would refuse becomes a check failure" {
   make_statuses ok=up_to_date failed="check_failed: <b>x</b>" new="new_version: 2.0" day="cooldown: 2026-11-12" \
     held="held: 1.0\` @octocat [x](https://example.invalid) \`" pending="pending: <b>x</b>" \
-    lines=$'updated: 2.0\n| x |' day2="cooldown: tomorrow" other="exploded: 1.0" _alerts=$'a\thold\tnote'
+    lines=$'updated: 2.0\n| x |' day2="cooldown: tomorrow" other="exploded: 1.0" _alerts=$'a\thold\tnote' \
+    late="unchecked: the check ran out of its 20 minutes in this run"
   run clean_statuses "$TEST_TMPDIR/st"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/st/ok")" = up_to_date ]
+  [ "$(cat "$TEST_TMPDIR/st/late")" = "unchecked: the check ran out of its 20 minutes in this run" ]
   [ "$(cat "$TEST_TMPDIR/st/failed")" = "check_failed: <b>x</b>" ]
   [ "$(cat "$TEST_TMPDIR/st/new")" = "new_version: 2.0" ]
   [ "$(cat "$TEST_TMPDIR/st/day")" = "cooldown: 2026-11-12" ]
@@ -3929,6 +4011,20 @@ c
 EOF
   )
   [ "$output" = "$expected" ]
+}
+
+@test "run_summary: names the packages the check did not reach in one line" {
+  make_statuses foo=up_to_date bar="unchecked: the check ran out of its 20 minutes in this run" \
+    baz="unchecked: the check ran out of its 20 minutes in this run"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'3 packages, 1 up to date.\n\nNot checked in this run: `bar`, `baz`.' ]
+
+  rm -rf "$TEST_TMPDIR/st"
+  make_statuses foo="check_failed: boom" bar="unchecked: the check ran out of its 20 minutes in this run"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [[ "$output" == $'2 packages, 0 up to date.\n\n| Package | Status |\n|---|---|\n| `foo` | ❌ failed |\n'*$'\nNot checked in this run: `bar`.' ]]
 }
 
 @test "run_summary: lists an update in its cooldown, not among the errors" {
@@ -4476,6 +4572,61 @@ EOF
   sed -i 's/foo-common=2.0-1/foo-common=2.0-5/' "$TEST_TMPDIR/new.SRCINFO"
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 1 ]
+}
+
+# The pkgrel of the update replaces a <pkgver>-<pkgrel> that stands alone, never one inside a number
+@test "check_prepared_srcinfo: takes the pkgrel of the update only where the AUR line holds <pkgver>-<pkgrel> alone" {
+  rel_source() {
+    printf '%s\n' 'pkgbase = foo' $'\tpkgver = '"$2" $'\tpkgrel = '"$3" $'\tarch = x86_64' \
+      $'\tsource = '"$4" $'\tsha256sums = '"$5" '' 'pkgname = foo' >"$1"
+  }
+  rel_source "$TEST_TMPDIR/old.SRCINFO" 1.2 3 https://example.com/foo-1.2-34.tar.gz aaaa
+  rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/foo-1.3-14.tar.gz bbbb
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 1 ]
+  rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/foo-1.3-34.tar.gz bbbb
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 0 ]
+
+  rel_source "$TEST_TMPDIR/old.SRCINFO" 1.2 3 https://example.com/11.2-3/foo-1.2.tar.gz aaaa
+  rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/11.2-1/foo-1.3.tar.gz bbbb
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 1 ]
+}
+
+# The maintainer writes the AUR .SRCINFO, and its pkgrel decides what the pkgrel step replaces
+@test "check_prepared_srcinfo: refuses an AUR pkgrel that makepkg does not write" {
+  printf '%s\n' 'pkgbase = foo' $'\tpkgver = 1.2' $'\tpkgrel = 3/../../other' $'\tarch = x86_64' \
+    $'\tsource = https://example.com/foo-1.2-3/../../other/foo-1.2.tar.gz' $'\tsha256sums = aaaa' \
+    '' 'pkgname = foo' >"$TEST_TMPDIR/old.SRCINFO"
+  printf '%s\n' 'pkgbase = foo' $'\tpkgver = 1.3' $'\tpkgrel = 1' $'\tarch = x86_64' \
+    $'\tsource = https://example.com/foo-1.3-1/foo-1.3.tar.gz' $'\tsha256sums = bbbb' \
+    '' 'pkgname = foo' >"$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR .SRCINFO has pkgrel = 3/../../other, which makepkg does not write"* ]]
+}
+
+# The maintainer writes the AUR .SRCINFO, so an arch with sources of its own counts without
+# an arch line in pkgbase
+@test "check_prepared_srcinfo: rejects an arch that keeps its files when pkgbase lacks its arch line" {
+  # $1 path, $2 version, $3 x86_64 checksum, $4 arch lines of pkgbase, $5 lines after pkgname
+  arch_srcinfo() {
+    printf '%s\n' 'pkgbase = demo' $'\tpkgver = '"$2" $'\tpkgrel = 1' ${4:+"$4"} \
+      $'\tsource_x86_64 = https://example.com/dl/tool-'"$2"'-x86_64.tar.gz' $'\tsha256sums_x86_64 = '"$3" \
+      $'\tsource_aarch64 = https://example.com/dl/tool-aarch64.tar.gz' $'\tsha256sums_aarch64 = '"$H2" \
+      '' 'pkgname = demo' ${5:+"$5"} >"$1"
+  }
+  local -a pkgbase=($'\tarch = x86_64' $'\tpkgname = demo\n\tarch = x86_64\n\tarch = aarch64' '')
+  local -a after=($'\tarch = aarch64' '' '')
+  local i
+  for i in 0 1 2; do
+    arch_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.3.0 "$H1" "${pkgbase[i]}" "${after[i]}"
+    arch_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "$H3" "${pkgbase[i]}" "${after[i]}"
+    run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for aarch64, so the new version would hold the files of the old one"* ]]
+  done
 }
 
 # Helper: .SRCINFO with the given pkgver and one more line
@@ -5962,6 +6113,17 @@ arch_out:
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" '.arch_wait.version + " " + .arch_wait.since')" = "2.0.0 2026-11-11T10:00:00Z" ]
+}
+
+@test "check-all --publish: writes the arches and the AUR commit of a wait to arch_wait" {
+  local commit
+  commit=$(printf 'c%.0s' {1..40})
+  checked_arch_package 1.0.0 "pending: 2.0.0" $'pkg\t2.0.0\taarch64 riscv64\t2026-11-11T10:00:00Z\t'"$commit"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" '[.arch_wait.version, .arch_wait.since, .arch_wait.commit, .arch_wait.arches] | join("|")')" = "2.0.0|2026-11-11T10:00:00Z|$commit|aarch64 riscv64" ]
 }
 
 @test "check-all --publish: writes no arch_wait that starts after now" {
