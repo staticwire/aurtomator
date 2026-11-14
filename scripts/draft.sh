@@ -45,17 +45,22 @@ if [[ -L "$info_file" || ! -f "$info_file" ]]; then
   exit 1
 fi
 
+# The AUR takes no blob above 256,000 bytes by default, and the checks below read the whole file
+if (($(stat -c %s "$info_file") > 1048576)); then
+  log_err "The .SRCINFO of $NAME is larger than 1 MiB, so no YAML is written"
+  exit 1
+fi
+# The YAML and the messages of its checks would carry such a character; has_control without
+# the newline, which ends each line of grep
+if LC_ALL=C grep -qE $'[\x01-\x08\x0b-\x1f\x7f]|\xc2[\x80-\x9f]' "$info_file"; then
+  log_err "The .SRCINFO of $NAME holds a control character, so no YAML is written"
+  exit 1
+fi
+
 # The pkgbase section ends at the first pkgname. Every value stays text.
 PKGVER="" EPOCH="" URL="" SOURCES=()
 line_re='^[[:space:]]*([a-z0-9_]+) = (.*)$'
 mapfile -t lines <"$info_file"
-# The YAML and the messages of its checks would carry such a character
-for line in "${lines[@]}"; do
-  if has_control "$line"; then
-    log_err "The .SRCINFO of $NAME holds a control character, so no YAML is written"
-    exit 1
-  fi
-done
 for line in "${lines[@]}"; do
   [[ "$line" =~ $line_re ]] || continue
   case "${BASH_REMATCH[1]}" in
