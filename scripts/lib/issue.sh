@@ -81,9 +81,10 @@ HOST_ISSUE_MIN=5
 # Print the host, in lower case and without the port, of the first URL in
 # check_failed status file $1: the URL that http_get or git failed on
 failure_host() {
-  local status
+  # The host ends where url_host ends it, so a host with a letter beyond ASCII has none
+  local LC_ALL=C status
   status=$(<"$1")
-  if [[ "$status" == check_failed:* && "$status" =~ https?://([A-Za-z0-9.-]+) ]]; then
+  if [[ "$status" == check_failed:* && "$status" =~ https?://([A-Za-z0-9.-]+)([/:?#[:space:]]|$) ]]; then
     printf '%s\n' "${BASH_REMATCH[1],,}"
   fi
 }

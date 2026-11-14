@@ -3709,6 +3709,22 @@ EOF
   [ "$output" = "example.org" ]
 }
 
+# A host with a letter beyond ASCII is no host that url_host accepts, so its package gets its own issue
+@test "failure_host: prints nothing for a host with a letter beyond ASCII, in every locale" {
+  local locale url
+  for locale in C C.UTF-8 en_US.UTF-8; do
+    for url in 'https://exÉmple.com/x' 'https://gİthub.com/x' 'https://ＧＩＴＨＵＢ.com/x'; do
+      echo "check_failed: $url: error: 503" >"$TEST_TMPDIR/demo"
+      LC_ALL=$locale run failure_host "$TEST_TMPDIR/demo"
+      [ "$status" -eq 0 ]
+      [ -z "$output" ] || {
+        echo "taken under $locale: $url as $output"
+        return 1
+      }
+    done
+  done
+}
+
 @test "failure_host: prints nothing for an error without a URL or for a failed update" {
   echo "check_failed: timed out after 120 s" >"$TEST_TMPDIR/demo"
   run failure_host "$TEST_TMPDIR/demo"

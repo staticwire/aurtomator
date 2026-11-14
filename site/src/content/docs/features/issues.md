@@ -21,7 +21,7 @@ A package gets no second issue of a kind while one is open, and an issue closed 
 
 A package whose YAML you delete gets no further check, so the next run closes its `update failed`, `check failed`, `update held` and arch issues with a comment that names the deleted file. A YAML whose `name` differs from its file name gets `check_failed` under the file name, and its issues stay open.
 
-The host of a failed check is that of the first `http://` or `https://` URL in its error, in lower case and without the port, and `api.github.com` and `github.com` are two hosts. An error without a URL, and every failed update, gets the issue of its package. When a host issue closes, each of its packages that still fails gets its own issue in the same run.
+The host of a failed check is that of the first `http://` or `https://` URL in its error, in lower case and without the port, and `api.github.com` and `github.com` are two hosts. An error without a URL or with a host that holds a letter beyond ASCII, and every failed update, gets the issue of its package. When a host issue closes, each of its packages that still fails gets its own issue in the same run.
 
 Issues close before new ones open, so a package whose check passes and whose update fails gets its check issue closed and an update issue opened in one run. A failed step or a failed `publish` closes nothing. In a repository with Issues turned off, the job prints a notice and opens nothing.
 
