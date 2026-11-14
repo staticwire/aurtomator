@@ -1336,14 +1336,14 @@ MOCKCURL
 }
 
 # check-all.sh runs no validate-pkg.sh, and the name reaches the paths of statuses
-@test "check-all: skips a package whose name is not its file name" {
+@test "check-all: checks no package whose name is not its file name, and fails it under the file name" {
   create_test_package "mypkg" "github-tag" "upstream:
   project: owner/repo"
   sed -i 's|^name: mypkg$|name: ../escape|' "$TEST_TMPDIR/packages/mypkg.yml"
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [[ "$output" == *"packages/mypkg.yml: name '../escape' must equal the file name"* ]]
   [ ! -e "$TEST_TMPDIR/escape" ]
-  [ ! -e "$TEST_TMPDIR/.status/mypkg" ]
+  [ "$(cat "$TEST_TMPDIR/.status/mypkg")" = "check_failed: packages/mypkg.yml: name '../escape' must equal the file name" ]
 }
 
 @test "check-update: refuses a strategy that is no plain name" {
