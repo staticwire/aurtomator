@@ -63,8 +63,43 @@ check_shape() {
     exit 1
   fi
 }
+# The repository of aurtomator, which every pin of the calling workflows names; a
+# fork writes its own here, and each run copies this file of the pinned commit
+repo=staticwire/aurtomator
+
+# Print in lower case the owner/name that GitHub reads from uses: value $1: the
+# first two parts of its path, split on / and \ with the empty parts dropped
+uses_repo() {
+  local LC_ALL=C part path="${1%%@*}"
+  local -a parts kept=()
+  IFS=/ read -r -a parts <<<"${path//\\//}"
+  for part in "${parts[@]}"; do
+    [[ -z "$part" ]] || kept+=("${part,,}")
+  done
+  ((${#kept[@]} < 2)) || printf '%s/%s\n' "${kept[0]}" "${kept[1]}"
+}
+
+# Succeeds for a uses: value that GitHub reads as one of this repository
+names_repo() {
+  local LC_ALL=C
+  [[ "$(uses_repo "$1")" == "${repo,,}" ]]
+}
+
+# Succeeds for a uses: value of this repository written as GitHub shows its name
+plain_uses() {
+  local LC_ALL=C
+  [[ "${1,,}" == "${repo,,}"[/@]* && "$1" != *//* && "$1" != *\\* ]]
+}
+
+# Succeeds for a uses: value that names a reusable workflow of a repository,
+# not one of the calling repository
+names_workflow() {
+  local path="${1//\\//}"
+  [[ "$path" != ./* && "$path" == */.github/workflows/* ]]
+}
+
 check_shape "$workflow"
-# The repository and the commit come from one uses: line, never a comment
+# The pin comes from one uses: line, never a comment
 uses='^[[:space:]]*uses:[[:space:]]+([[:alnum:]_.-]+/[[:alnum:]_.-]+)/\.github/workflows/check-updates\.yml@([0-9a-f]{40})([[:space:]]|$)'
 mapfile -t pins < <(grep -E "$uses" "$root/$workflow" || true)
 if [[ ${#pins[@]} -gt 1 ]]; then
@@ -78,15 +113,19 @@ if [[ ${#pins[@]} -eq 0 ]] && ! grep -qE '@[0-9a-f]{40}$' <<<"$read_out"; then
   echo "No commit SHA pinned in $workflow" >&2
   exit 1
 fi
-repo="" sha=""
+pin_repo="" sha=""
 if [[ ${#pins[@]} -eq 1 && "${pins[0]}" =~ $uses ]]; then
-  repo="${BASH_REMATCH[1]}"
+  pin_repo="${BASH_REMATCH[1]}"
   sha="${BASH_REMATCH[2]}"
 fi
 mapfile -t read_pins <<<"$read_out"
-if [[ ${#read_pins[@]} -ne 1 || "${read_pins[0]}" != "$repo/.github/workflows/check-updates.yml@$sha" ]]; then
+if [[ ${#read_pins[@]} -ne 1 || "${read_pins[0]}" != "$pin_repo/.github/workflows/check-updates.yml@$sha" ]]; then
   echo "Write the pin of check-updates.yml in $workflow on one uses: line without quotes. GitHub reads:" >&2
   printf '  %s\n' "${read_pins[@]:-none}" >&2
+  exit 1
+fi
+if ! names_repo "$pin_repo"; then
+  echo "$workflow pins $pin_repo, and this aurtomator.sh runs the pins of $repo only" >&2
   exit 1
 fi
 
@@ -116,11 +155,6 @@ check_release() {
   fi
 }
 
-# GitHub finds a repository by its name in any case
-names_repo() {
-  [[ "${1,,}" == "${repo,,}"[/@]* ]]
-}
-
 if [[ "${1:-}" == pin ]]; then
   if [[ $# -ne 2 || ! "$2" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Usage: $0 pin vX.Y.Z" >&2
@@ -144,9 +178,9 @@ if [[ "${1:-}" == pin ]]; then
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
     check_shape "$file"
-    mapfile -t on_lines < <(sed -nE "s|^[[:space:]]*uses:[[:space:]]+($repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40})([[:space:]].*)?$|\1|p" "$file" | sort)
+    mapfile -t on_lines < <(sed -nE "s|^[[:space:]]*uses:[[:space:]]+($pin_repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40})([[:space:]].*)?$|\1|p" "$file" | sort)
     read_out=$(yq -r 'explode(.) | .jobs[].uses | select(. != null)' "$file")
-    mapfile -t read_pins < <(grep -E "^$repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40}\$" <<<"$read_out" | sort)
+    mapfile -t read_pins < <(grep -E "^$pin_repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40}\$" <<<"$read_out" | sort)
     if [[ "${on_lines[*]}" != "${read_pins[*]}" ]]; then
       echo "Write each pin of $repo in $file on one uses: line without quotes. GitHub reads:" >&2
       printf '  %s\n' "${read_pins[@]:-none}" >&2
@@ -155,8 +189,8 @@ if [[ "${1:-}" == pin ]]; then
   done
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
-    sed -i -E "s|^([[:space:]]*uses:[[:space:]]+$repo/\.github/workflows/[a-z-]+\.yml@)[0-9a-f]{40}([[:space:]].*)?$|\1$new # $2|" "$file"
-    grep -nHE "^[[:space:]]*uses:[[:space:]]+$repo/\.github/workflows/[a-z-]+\.yml@$new # $2\$" "$file" || true
+    sed -i -E "s|^([[:space:]]*uses:[[:space:]]+$pin_repo/\.github/workflows/[a-z-]+\.yml@)[0-9a-f]{40}([[:space:]].*)?$|\1$new # $2|" "$file"
+    grep -nHE "^[[:space:]]*uses:[[:space:]]+$pin_repo/\.github/workflows/[a-z-]+\.yml@$new # $2\$" "$file" || true
   done
   exit 0
 fi
@@ -172,11 +206,22 @@ if [[ "${1:-}" == check-pins ]]; then
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
     check_shape "$file"
+    # A tagged value shows no plain uses: line, and GitHub runs no workflow with one today
+    tags=$(yq -r 'explode(.) | [.jobs[] | (.uses, .steps[]?.uses) | select(. != null) | tag | select(. != "!!str")] | unique | join(" ")' "$file")
+    if [[ -n "$tags" ]]; then
+      echo "$file holds a uses: value with the tag $tags; write every uses: value as plain text" >&2
+      exit 1
+    fi
     # The release comes from the uses: line, so every pin GitHub reads has to be on one
-    read_out=$(yq -r 'explode(.) | .jobs[] | (.uses, .steps[]?.uses) | select(tag == "!!str")' "$file")
+    read_out=$(yq -r 'explode(.) | .jobs[] | (.uses, .steps[]?.uses) | select(. != null)' "$file")
     read_pins=() values=() lines=()
     while IFS= read -r value; do
-      if names_repo "$value"; then read_pins+=("$value"); fi
+      if names_repo "$value"; then
+        read_pins+=("$value")
+      elif names_workflow "$value"; then
+        echo "$file runs $value, a workflow of another repository than $repo" >&2
+        exit 1
+      fi
     done < <(sort <<<"$read_out")
     while IFS= read -r line; do
       if [[ "$line" =~ $use_re ]] && names_repo "${BASH_REMATCH[2]}"; then
@@ -190,6 +235,10 @@ if [[ "${1:-}" == check-pins ]]; then
       exit 1
     fi
     for i in "${!lines[@]}"; do
+      if ! plain_uses "${values[i]}"; then
+        echo "$file writes the pin ${values[i]} of $repo with an extra slash or a backslash; write it as $repo/<path>@<sha>" >&2
+        exit 1
+      fi
       if [[ ! "${values[i]}" =~ @([0-9a-f]{40})$ ]]; then
         echo "$file runs ${values[i]}, which names no commit SHA" >&2
         exit 1

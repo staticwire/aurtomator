@@ -121,7 +121,7 @@ teardown() {
   [ "$(git -C "$XDG_CACHE_HOME/aurtomator/$TIP" rev-list --count HEAD)" -eq 1 ]
 }
 
-@test "runner: fetches from the repository of the uses: line" {
+@test "runner: refuses a pin of another repository, and a fork names its own in aurtomator.sh" {
   git init -q "$TEST_TMPDIR/fork"
   local forked
   forked=$(commit_aurtomator "$TEST_TMPDIR/fork" forked)
@@ -130,8 +130,24 @@ teardown() {
   pin "someone/aurtomator-fork/.github/workflows/check-updates.yml@$forked" v9.0.0
 
   run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/check-updates.yml pins someone/aurtomator-fork, and this aurtomator.sh runs the pins of staticwire/aurtomator only" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+
+  rm "$REPO/aurtomator.sh"
+  sed 's|^repo=staticwire/aurtomator$|repo=someone/aurtomator-fork|' "$RUNNER" >"$REPO/aurtomator.sh"
+  chmod +x "$REPO/aurtomator.sh"
+  run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 0 ]
   [ "$output" = "name: forked" ]
+}
+
+@test "runner: reads the release after a pin up to its end" {
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v1.0.0-rc1
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "Write the release after the pin in .github/workflows/check-updates.yml, as ./aurtomator.sh pin vX.Y.Z does: @$PINNED # vX.Y.Z" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
 @test "runner: keeps the copy in ~/.cache without XDG_CACHE_HOME" {
@@ -811,4 +827,65 @@ EOF
   run "$REPO/aurtomator.sh" check-pins
   [ "$status" -eq 1 ]
   [ "${lines[-1]}" = "Could not list the tags of staticwire/aurtomator" ]
+}
+
+@test "runner: pin names the repository whose tags it cannot list and changes no file" {
+  template_workflows "$PINNED" v1.0.0
+  cp "$REPO/.github/workflows/check-updates.yml" "$TEST_TMPDIR/before.yml"
+  rm -rf "$TEST_TMPDIR/github/staticwire/aurtomator"
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 1 ]
+  [ "${lines[-1]}" = "Could not list the tags of staticwire/aurtomator" ]
+  cmp "$TEST_TMPDIR/before.yml" "$REPO/.github/workflows/check-updates.yml"
+}
+
+@test "runner: check-pins reads the release after a pin up to its end" {
+  template_workflows "$PINNED" v1.0.0
+  sed -i "s|validate.yml@$PINNED # v1.0.0|validate.yml@$PINNED # v1.0.0-rc1|" "$REPO/.github/workflows/validate.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = "Write the release after the pin in .github/workflows/validate.yml, as ./aurtomator.sh pin vX.Y.Z does: @$PINNED # vX.Y.Z" ]
+}
+
+# GitHub runs a reusable workflow of any public repository
+@test "runner: check-pins refuses a workflow of another repository" {
+  template_workflows "$PINNED" v1.0.0
+  sed -i "s|uses: staticwire/aurtomator/.github/workflows/notify-failure.yml|uses: statlcwire/aurtomator/.github/workflows/notify-failure.yml|" \
+    "$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/check-updates.yml runs statlcwire/aurtomator/.github/workflows/notify-failure.yml@$PINNED, a workflow of another repository than staticwire/aurtomator" ]
+
+  template_workflows "$PINNED" v1.0.0
+  sed -i "s|uses: staticwire/aurtomator/.github/workflows/validate.yml@$PINNED # v1.0.0|uses: /statlcwire/aurtomator/.github/workflows/validate.yml@main|" \
+    "$REPO/.github/workflows/validate.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/validate.yml runs /statlcwire/aurtomator/.github/workflows/validate.yml@main, a workflow of another repository than staticwire/aurtomator" ]
+}
+
+# GitHub splits the path of a uses: value on / and \ and drops the empty parts
+@test "runner: check-pins refuses a pin of aurtomator spelled with an extra slash or a backslash" {
+  local path
+  for path in /staticwire/aurtomator/.github/actions/check staticwire//aurtomator/.github/actions/check \
+    'staticwire\aurtomator\.github\actions\check' staticwire/aurtomator//.github/actions/check; do
+    template_workflows "$PINNED" v1.0.0
+    printf 'jobs:\n  pins:\n    steps:\n      - uses: %s@%s # v1.0.0\n' "$path" "$PINNED" >"$REPO/.github/workflows/validate.yml"
+    run "$REPO/aurtomator.sh" check-pins
+    [ "$status" -eq 1 ]
+    [ "$output" = ".github/workflows/validate.yml writes the pin $path@$PINNED of staticwire/aurtomator with an extra slash or a backslash; write it as staticwire/aurtomator/<path>@<sha>" ]
+  done
+}
+
+# GitHub refuses a workflow with such a tag today, and the check does not rest on that
+@test "runner: check-pins refuses a uses: value with a tag" {
+  local tag
+  for tag in '!foo' '!'; do
+    template_workflows "$PINNED" v1.0.0
+    sed -i "s|^    uses: staticwire/aurtomator/.github/workflows/notify-failure.yml|    uses: $tag staticwire/aurtomator/.github/workflows/notify-failure.yml|" \
+      "$REPO/.github/workflows/check-updates.yml"
+    run "$REPO/aurtomator.sh" check-pins
+    [ "$status" -eq 1 ]
+    [ "$output" = ".github/workflows/check-updates.yml holds a uses: value with the tag $tag; write every uses: value as plain text" ]
+  done
 }
