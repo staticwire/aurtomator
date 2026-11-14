@@ -3728,8 +3728,11 @@ EOF
 
 # A host with a letter beyond ASCII is no host that url_host accepts, so its package gets its own issue
 @test "failure_host: prints nothing for a host with a letter beyond ASCII, in every locale" {
-  local locale url
-  for locale in C C.UTF-8 en_US.UTF-8; do
+  local locale url locales=(C C.UTF-8)
+  if locale -a | grep -qix 'en_US.utf8'; then
+    locales+=(en_US.UTF-8)
+  fi
+  for locale in "${locales[@]}"; do
     for url in 'https://exÉmple.com/x' 'https://gİthub.com/x' 'https://ＧＩＴＨＵＢ.com/x'; do
       echo "check_failed: $url: error: 503" >"$TEST_TMPDIR/demo"
       LC_ALL=$locale run failure_host "$TEST_TMPDIR/demo"
