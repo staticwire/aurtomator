@@ -103,3 +103,25 @@ demo_hits() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"not ok 1 demo"* ]]
 }
+
+# gawk writes its last block only when its input closes, so a line that bashcov-bats.sh traces
+# after bats can split a record, and bashcov stops reading at it
+@test "bashcov-bats.sh: traces no line of its own after bats" {
+  require_bashcov
+  local d=bc944ee1-0da4-4f64-aa1c-0fad89dcc1d9 script="$PROJECT_DIR/tests/helpers/bashcov-bats.sh"
+  local bats_line
+  mkdir -p "$TEST_TMPDIR/bin"
+  printf '#!/usr/bin/env bash\nexit 3\n' >"$TEST_TMPDIR/bin/bats"
+  chmod +x "$TEST_TMPDIR/bin/bats"
+  run env PATH="$TEST_TMPDIR/bin:$PATH" TMPDIR="$TEST_TMPDIR/tmp" SHELLOPTS=xtrace BASH_XTRACEFD=7 \
+    PS4="+BASHCOV>$d\${LINENO-}$d\${BASH_SOURCE-}$d\${PWD-}$d\${OLDPWD-}$d" \
+    timeout 30 "$script" 7>"$TEST_TMPDIR/trace"
+  [ "$status" -eq 3 ]
+  bats_line=$(grep -n 'bats "\$@"' "$script" | cut -d: -f1)
+  run gawk -v d="$d" -v script="$script" -v last="$bats_line" '
+    BEGIN { RS = "[+]+BASHCOV>" d }
+    NR > 1 && split($0, field, d) > 2 && field[2] == script { n++; if (field[1] > last) print }
+    END { if (!n) print "no record of " script }' "$TEST_TMPDIR/trace"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
