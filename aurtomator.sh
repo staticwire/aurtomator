@@ -219,12 +219,13 @@ if [[ "${1:-}" == check-pins ]]; then
       exit 1
     fi
     # A job runs a workflow, local or of this repository, and passes it the secrets it names
+    job_uses=$(yq -r 'explode(.) | .jobs[].uses | select(. != null)' "$file")
     while IFS= read -r value; do
       if [[ -n "$value" && "$value" != ./* ]] && ! names_repo "$value"; then
         echo "$file runs $value, a workflow of another repository than $repo" >&2
         exit 1
       fi
-    done < <(yq -r 'explode(.) | .jobs[].uses | select(. != null)' "$file")
+    done <<<"$job_uses"
     # The release comes from the uses: line, so every pin GitHub reads has to be on one
     read_out=$(yq -r 'explode(.) | .jobs[] | (.uses, .steps[]?.uses) | select(. != null)' "$file")
     read_pins=() values=() lines=()
