@@ -1012,6 +1012,13 @@ jobs:
                   echo "Issue already open for $pkg_name, skipping"
                   continue
                 fi
+                # The open issue of its host holds the failed check of a package, also in a run that
+                # left packages of the host unchecked and so counted fewer than HOST_ISSUE_MIN of them
+                host=$(lib failure_host "$status_file")
+                if [[ -n "$host" ]] && grep -qxE "❌ ${host//./\\.}: [0-9]+ packages failed to check" <<<"${titles[auto-update]}"; then
+                  echo "Issue of $host open, so $pkg_name gets none"
+                  continue
+                fi
 
                 body=$(lib failure_issue_body "$status_file" "$RUN_URL")
                 create_issue auto-update "❌ $pkg_name: ${kind//_/ }" "$body"

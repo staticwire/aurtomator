@@ -40,9 +40,9 @@ jobs:
           fi
 
           # GitHub gives a job stopped by timeout-minutes the conclusion `cancelled`, as one canceled by
-          # hand, so a canceled job counts as failed after the timeout-minutes of its job
+          # hand, so a canceled job that got a runner counts as failed after the timeout-minutes of its job
           failed_jq='.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or
-            (.conclusion == "cancelled" and .started_at != null and .completed_at != null and
+            (.conclusion == "cancelled" and .runner_name != null and .started_at != null and .completed_at != null and
               (.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601) >= 60 *
               ({"image": 5, "check": 30, "prepare": 30, "verify": 30, "publish": 30, "status": 10, "pins": 5}[.name | sub("^.* / "; "") | sub(" [(].*$"; "")] // 1e9) - 60)) | .name'
 

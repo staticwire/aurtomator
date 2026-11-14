@@ -2129,6 +2129,20 @@ host_failures() {
   [ "$output" = "0" ]
 }
 
+# Unchecked packages leave fewer failures of the host than HOST_ISSUE_MIN, and its issue stays open
+@test "check-updates: opens no issue of a package whose host has an open issue" {
+  local pairs
+  mapfile -t pairs < <(host_failures 3 api.github.com a)
+  GH_TITLES="❌ api.github.com: 5 packages failed to check" run_issue_step "${pairs[@]}" \
+    "a4=unchecked: the check ran out of its 20 minutes in this run" "a5=unchecked: the check ran out of its 20 minutes in this run" \
+    b="check_failed: https://github.com/o/b: error: 503" c="update_failed: https://api.github.com/x: error: 503"
+  [ "$status" -eq 0 ]
+  grep -q '^issue create --title ❌ b: check failed ' "$GH_LOG"
+  grep -q '^issue create --title ❌ c: update failed ' "$GH_LOG"
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "2" ]
+}
+
 @test "check-updates: only the title of the host issue holds it back" {
   local pairs
   mapfile -t pairs < <(host_failures 5 api.github.com a)
@@ -3205,10 +3219,10 @@ EOF
 # GitHub gives a job stopped by timeout-minutes the conclusion `cancelled`, as one canceled by hand
 @test "notify-failure: names a canceled job that ran for its timeout-minutes" {
   GH_JOBS_JSON='{"jobs":[
-    {"name":"pins","conclusion":"cancelled","started_at":"2026-11-13T09:55:00Z","completed_at":"2026-11-13T09:59:10Z"},
-    {"name":"check-updates / check","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:30:40Z"},
-    {"name":"check-updates / prepare (demo)","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:02:00Z"},
-    {"name":"check-updates / status","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:09:10Z"}]}' run_notify_step
+    {"name":"pins","conclusion":"cancelled","runner_name":"GitHub Actions 2","started_at":"2026-11-13T09:55:00Z","completed_at":"2026-11-13T09:59:10Z"},
+    {"name":"check-updates / check","conclusion":"cancelled","runner_name":"GitHub Actions 3","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:30:40Z"},
+    {"name":"check-updates / prepare (demo)","conclusion":"cancelled","runner_name":"GitHub Actions 4","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:02:00Z"},
+    {"name":"check-updates / status","conclusion":"cancelled","runner_name":"GitHub Actions 5","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:09:10Z"}]}' run_notify_step
   [ "$status" -eq 0 ]
   grep -qF 'failed in `pins`, `check-updates / check`, `check-updates / status`.' "$GH_LOG"
   grep -q -- '--paginate' "$GH_LOG"
@@ -3222,7 +3236,16 @@ EOF
 }
 
 @test "notify-failure: opens nothing for jobs canceled before their timeout-minutes" {
-  GH_JOBS_JSON='{"jobs":[{"name":"check-updates / check","conclusion":"cancelled","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:12:00Z"}]}' run_notify_step
+  GH_JOBS_JSON='{"jobs":[{"name":"check-updates / check","conclusion":"cancelled","runner_name":"GitHub Actions 2","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:12:00Z"}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::notice::No job of the run failed, so the canceled run gets no issue"* ]]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+# GitHub gives a job canceled in the queue the time it was created as its start
+@test "notify-failure: opens nothing for a job canceled while it waited for a runner" {
+  GH_JOBS_JSON='{"jobs":[{"name":"check-updates / check","conclusion":"cancelled","runner_name":null,"created_at":"2026-11-13T10:00:00Z","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:31:00Z"}]}' run_notify_step
   [ "$status" -eq 0 ]
   [[ "$output" == *"::notice::No job of the run failed, so the canceled run gets no issue"* ]]
   run grep -c '^issue create' "$GH_LOG"
