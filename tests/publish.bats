@@ -4478,6 +4478,61 @@ EOF
   [ "$status" -eq 1 ]
 }
 
+# The pkgrel of the update replaces a <pkgver>-<pkgrel> that stands alone, never one inside a number
+@test "check_prepared_srcinfo: takes the pkgrel of the update only where the AUR line holds <pkgver>-<pkgrel> alone" {
+  rel_source() {
+    printf '%s\n' 'pkgbase = foo' $'\tpkgver = '"$2" $'\tpkgrel = '"$3" $'\tarch = x86_64' \
+      $'\tsource = '"$4" $'\tsha256sums = '"$5" '' 'pkgname = foo' >"$1"
+  }
+  rel_source "$TEST_TMPDIR/old.SRCINFO" 1.2 3 https://example.com/foo-1.2-34.tar.gz aaaa
+  rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/foo-1.3-14.tar.gz bbbb
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 1 ]
+  rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/foo-1.3-34.tar.gz bbbb
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 0 ]
+
+  rel_source "$TEST_TMPDIR/old.SRCINFO" 1.2 3 https://example.com/11.2-3/foo-1.2.tar.gz aaaa
+  rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/11.2-1/foo-1.3.tar.gz bbbb
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 1 ]
+}
+
+# The maintainer writes the AUR .SRCINFO, and its pkgrel decides what the pkgrel step replaces
+@test "check_prepared_srcinfo: refuses an AUR pkgrel that makepkg does not write" {
+  printf '%s\n' 'pkgbase = foo' $'\tpkgver = 1.2' $'\tpkgrel = 3/../../other' $'\tarch = x86_64' \
+    $'\tsource = https://example.com/foo-1.2-3/../../other/foo-1.2.tar.gz' $'\tsha256sums = aaaa' \
+    '' 'pkgname = foo' >"$TEST_TMPDIR/old.SRCINFO"
+  printf '%s\n' 'pkgbase = foo' $'\tpkgver = 1.3' $'\tpkgrel = 1' $'\tarch = x86_64' \
+    $'\tsource = https://example.com/foo-1.3-1/foo-1.3.tar.gz' $'\tsha256sums = bbbb' \
+    '' 'pkgname = foo' >"$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR .SRCINFO has pkgrel = 3/../../other, which makepkg does not write"* ]]
+}
+
+# The maintainer writes the AUR .SRCINFO, so an arch with sources of its own counts without
+# an arch line in pkgbase
+@test "check_prepared_srcinfo: rejects an arch that keeps its files when pkgbase lacks its arch line" {
+  # $1 path, $2 version, $3 x86_64 checksum, $4 arch lines of pkgbase, $5 lines after pkgname
+  arch_srcinfo() {
+    printf '%s\n' 'pkgbase = demo' $'\tpkgver = '"$2" $'\tpkgrel = 1' ${4:+"$4"} \
+      $'\tsource_x86_64 = https://example.com/dl/tool-'"$2"'-x86_64.tar.gz' $'\tsha256sums_x86_64 = '"$3" \
+      $'\tsource_aarch64 = https://example.com/dl/tool-aarch64.tar.gz' $'\tsha256sums_aarch64 = '"$H2" \
+      '' 'pkgname = demo' ${5:+"$5"} >"$1"
+  }
+  local -a pkgbase=($'\tarch = x86_64' $'\tpkgname = demo\n\tarch = x86_64\n\tarch = aarch64' '')
+  local -a after=($'\tarch = aarch64' '' '')
+  local i
+  for i in 0 1 2; do
+    arch_srcinfo "$TEST_TMPDIR/old.SRCINFO" 2.3.0 "$H1" "${pkgbase[i]}" "${after[i]}"
+    arch_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.4.0 "$H3" "${pkgbase[i]}" "${after[i]}"
+    run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.4.0
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for aarch64, so the new version would hold the files of the old one"* ]]
+  done
+}
+
 # Helper: .SRCINFO with the given pkgver and one more line
 # Usage: write_srcinfo_line <path> <pkgver> <line>
 write_srcinfo_line() {
