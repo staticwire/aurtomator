@@ -1661,6 +1661,23 @@ use_source() {
   [ "$(cat "$TEST_TMPDIR/git-fetch-traps")" = "trap -- '' SIGXFSZ" ]
 }
 
+# A pack of a few bytes can hold a large file, and git archive reads all of it
+@test "_git_source_sum: refuses a tree whose files pass the budget left" {
+  setup_verify
+  make_upstream
+  head -c 2097152 /dev/zero >"$TEST_TMPDIR/upstream-work/zeros"
+  tag_upstream "$TEST_TMPDIR/upstream-work" v1.2.0 2026-01-03T00:00:00Z
+  git -C "$TEST_TMPDIR/upstream-work" push -q "$TEST_TMPDIR/upstream.git" refs/tags/v1.2.0
+  mkdir "$TEST_TMPDIR/downloads"
+  truncate -s $((1024 * 1024 * 1024 - 1024 * 1024)) "$TEST_TMPDIR/downloads/earlier"
+  hash -r
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.2.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The files of tag=v1.2.0 of https://example.com/demo.git pass the budget of 1 GiB of the package"* ]]
+  # git streams a file above the threshold in place of holding it in memory
+  grep -q -- '-c core.bigFileThreshold=16m -c fetch.unpackLimit=1' "$TEST_TMPDIR/git-fetch-args"
+}
+
 @test "verify-pkg: refuses a checksum of a git source at a branch" {
   setup_verify
   make_upstream

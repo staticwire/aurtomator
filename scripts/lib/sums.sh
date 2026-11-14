@@ -80,7 +80,7 @@ _source_file() {
 # archive of the ref, fetched alone, with export-subst and export-ignore off
 # Args: $1=source entry of a .SRCINFO, $2=algorithm, $3=AUR repo, $4=download directory
 _git_source_sum() {
-  local entry="$1" url="${1#*::}" name fragment="" ref dir sum refspec left
+  local entry="$1" url="${1#*::}" name fragment="" ref dir sum refspec left size
   local -x GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/etc/makepkg.d/gitconfig
   url="${url#git+}"
   if [[ "$url" == *#* ]]; then
@@ -134,7 +134,7 @@ _git_source_sum() {
     fi
     # The pack goes into one file under a size limit of the budget left, and a stall ends the
     # fetch as it ends a download; an ignored SIGXFSZ makes a write past the limit fail, no dump
-    if ! (trap '' XFSZ && ulimit -f "$((left / 1024))" && GIT_ALLOW_PROTOCOL=https git -c fetch.unpackLimit=1 \
+    if ! (trap '' XFSZ && ulimit -f "$((left / 1024))" && GIT_ALLOW_PROTOCOL=https git -c core.bigFileThreshold=16m -c fetch.unpackLimit=1 \
       -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 -C "$dir" fetch -q --depth 1 --no-tags "$url" "$refspec"); then
       if (($(du -sb -- "$dir" | cut -f1) >= left / 1024 * 1024)); then
         log_err "The fetch of ${fragment} of $url passes the budget of 1 GiB of the package"
@@ -144,14 +144,21 @@ _git_source_sum() {
       rm -rf "$dir"
       return 1
     fi
-    if ! _download_left "$4" >/dev/null 2>&1; then
+    if ! left=$(_download_left "$4" 2>/dev/null); then
       log_err "The fetch of ${fragment} of $url passes the budget of 1 GiB of the package"
+      return 1
+    fi
+    # A pack of a few bytes can hold a large file, and the archive reads every file
+    size=$(git -C "$dir" ls-tree -r -l "$ref" | awk '$2 == "blob" { s += $4 } END { printf "%d", s }') || size=0
+    if ((size > left)); then
+      log_err "The files of ${fragment} of $url pass the budget of 1 GiB of the package"
+      rm -rf "$dir"
       return 1
     fi
     mkdir -p "${dir}/info"
     echo "* -export-subst -export-ignore" >"${dir}/info/attributes"
   fi
-  if ! sum=$(git -c core.abbrev=no -C "$dir" archive --format tar "$ref" | "${2}sum"); then
+  if ! sum=$(git -c core.bigFileThreshold=16m -c core.abbrev=no -C "$dir" archive --format tar "$ref" | "${2}sum"); then
     log_err "Could not archive $ref of $url"
     return 1
   fi
