@@ -1305,6 +1305,26 @@ MOCKCURL
   [ ! -e "$TEST_TMPDIR/curl.log" ]
 }
 
+# curl reads a host out of each of these that url_host cannot name, so the host memory cannot hold it
+@test "lib.sh: http_get refuses an https URL whose host is no plain name, before curl runs" {
+  keep_host_memory
+  timeout_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local url
+  for url in 'https:///example.com/x' 'https:/example.com/x' 'https://api.git%68ub.com/x' 'https://a\@b/x'; do
+    run http_get "$url"
+    [ "$status" -ne 0 ]
+    [ "$output" = "$url: the host is no plain name of ASCII letters, digits, dots and dashes" ]
+  done
+  [ ! -e "$TEST_TMPDIR/curl.log" ]
+  # A port, and a letter beyond ASCII after the host, reach curl
+  for url in https://git.example.com:8443/x https://example.com/caf$'\xc3\xa9'; do
+    run http_get "$url"
+    [ "$status" -eq 0 ]
+    grep -qF -- "$url" "$TEST_TMPDIR/curl.log"
+  done
+}
+
 @test "lib.sh: http_get remembers no host after an answer, a refusal or an HTTP error" {
   keep_host_memory
   mock_curl_failure

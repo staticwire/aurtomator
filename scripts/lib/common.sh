@@ -175,6 +175,12 @@ request_begin() {
     printf '%s: the host holds a character beyond ASCII\n' "$1" >&2
     return 1
   fi
+  # curl takes https:/h, https:///h, %-escapes and \@ in a host, which url_host cannot name
+  if [[ "$1" == [Hh][Tt][Tt][Pp][Ss]:* ]] && ! url_host "$1" >/dev/null &&
+    ! (LC_ALL=C && [[ "$1" =~ ^https://[^/?#]*:[0-9]+([/?#]|$) ]]); then
+    printf '%s: the host is no plain name of ASCII letters, digits, dots and dashes\n' "$1" >&2
+    return 1
+  fi
   if ! host_memory || ! host=$(url_host "$1"); then
     return 0
   fi
@@ -549,23 +555,47 @@ capture_matches() {
   done < <(grep -oE -e "$pattern")
 }
 
+# bash compiles a pattern again for each line it reads, and nested counted repeats multiply
+# the size of a pattern, so a regex of a package YAML stays within these
+readonly REGEX_MAX_CHARS=256 REGEX_MAX_REPEAT=64 REGEX_MAX_KIB=262144
+
+# Succeeds when regex $1 holds at most REGEX_MAX_CHARS characters and no counted repeat
+# past REGEX_MAX_REPEAT, and when the command $2 compiles it within a second and REGEX_MAX_KIB
+_regex_bounded() {
+  local LC_ALL=C bound rc=0
+  if ((${#1} > REGEX_MAX_CHARS)); then
+    log_err "The regex holds more than $REGEX_MAX_CHARS characters"
+    return 1
+  fi
+  while IFS= read -r bound; do
+    if ((${#bound} > 3 || 10#$bound > REGEX_MAX_REPEAT)); then
+      log_err "The regex repeats a part more than $REGEX_MAX_REPEAT times"
+      return 1
+    fi
+  done < <(grep -oE '[{][0-9]+(,[0-9]*)?[}]' <<<"$1" | grep -oE '[0-9]+')
+  # bash ends with SIGSEGV when the compile hits the memory limit, so no core file is written
+  (ulimit -c 0 && timeout 1 bash -c "ulimit -v $REGEX_MAX_KIB; $2" _ "$1") 2>/dev/null || rc=$?
+  # 0 and 1 are a match and none, 2 a pattern that does not compile
+  if ((rc > 2)); then
+    log_err "The regex takes more than a second or $((REGEX_MAX_KIB / 1024)) MiB to compile"
+  fi
+  ((rc < 2))
+}
+
 # Succeeds when bash accepts ERE $1, as capture_matches needs. bash refuses some
 # patterns that grep -E takes, (?:x) and *x among them.
 ere_valid() {
-  local rc=0
   # [[ =~ ]] returns 2 for a pattern bash cannot compile
-  # shellcheck disable=SC2319
-  [[ "" =~ $1 ]] 2>/dev/null || rc=$?
-  ((rc != 2))
+  # shellcheck disable=SC2016
+  _regex_bounded "$1" '[[ "" =~ $1 ]]'
 }
 
 # Succeeds when grep -P compiles Perl regex $1. github-nightly reads the version
 # out of a release body with such a regex.
 pcre_valid() {
-  local rc=0
   # grep exits 2 for a pattern it cannot compile
-  grep -qP -e "$1" </dev/null 2>/dev/null || rc=$?
-  ((rc != 2))
+  # shellcheck disable=SC2016
+  _regex_bounded "$1" 'grep -qP -e "$1" </dev/null'
 }
 
 # === LOGGING ===

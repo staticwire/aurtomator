@@ -179,6 +179,21 @@ validate_pkg() {
     log_err "$shown: a key or a value holds a control character"
     return 1
   fi
+  # A diff shows no zero-width or bidi character, so a value outside the notes for people is
+  # printable ASCII or a tab, and a note holds no format character and no space but U+0020
+  local hidden note_path='^alerts[.][0-9]+[.]note$'
+  hidden=$(NOTE_PATH="$note_path" ASCII_RE='[^\t -~]' yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
+    | select(path | join(".") | test(strenv(NOTE_PATH)) | not) | select(test(strenv(ASCII_RE)))] | length' "$file")
+  if [[ "$hidden" != 0 ]]; then
+    log_err "$shown: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"
+    return 1
+  fi
+  hidden=$(NOTE_PATH="$note_path" HIDDEN_RE='[\p{Cf}\p{Zl}\p{Zp}]|[^ \P{Zs}]' yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
+    | select(path | join(".") | test(strenv(NOTE_PATH))) | select(test(strenv(HIDDEN_RE)))] | length' "$file")
+  if [[ "$hidden" != 0 ]]; then
+    log_err "$shown: alerts[].note holds a format character or a space other than U+0020"
+    return 1
+  fi
 
   local name strategy
   name=$(pkg_get "$file" '.name // ""')
@@ -634,6 +649,9 @@ validate_pkg() {
       elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
         log_err "$shown: upstream.url must hold no user name: ${url@Q}"
         ((errors++))
+      elif [[ ! "$url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?([/?#]|$) ]]; then
+        log_err "$shown: upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most: ${url@Q}"
+        ((errors++))
       fi
       ;;
     git-latest)
@@ -679,6 +697,9 @@ validate_pkg() {
               ((errors++))
             elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
               log_err "$shown: upstream.url must hold no user name: ${url@Q}"
+              ((errors++))
+            elif [[ ! "$url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?([/?#]|$) ]]; then
+              log_err "$shown: upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most: ${url@Q}"
               ((errors++))
             fi
             ;;
@@ -735,6 +756,9 @@ validate_pkg() {
         ((errors++))
       elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
         log_err "$shown: upstream.url must hold no user name: ${url@Q}"
+        ((errors++))
+      elif [[ ! "$url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?([/?#]|$) ]]; then
+        log_err "$shown: upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most: ${url@Q}"
         ((errors++))
       fi
       if [[ -z "$pattern" || "$pattern" == "null" ]]; then

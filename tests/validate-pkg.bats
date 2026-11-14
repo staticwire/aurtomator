@@ -256,7 +256,7 @@ current: '$current'"
   project: owner/repo"
   LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"upstream.host must be a host name, with a port or none: \$'g\\304\\261tlab.com'"* ]]
+  [[ "$output" == *"a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]]
 }
 
 @test "validate: no value holds a control character" {
@@ -321,6 +321,120 @@ current: '$current'"
   printf 'name: mypkg\r\nstrategy: github-tag\r\nupstream:\r\n  project: owner/repo\r\n' >"$TEST_TMPDIR/packages/mypkg.yml"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 0 ]
+}
+
+# A diff shows no zero-width or bidi character, and a hold whose match hides one never fires
+@test "validate: a key or a value outside alerts[].note is printable ASCII or a tab" {
+  local entry
+  # U+200B in a match, U+202E and U+00E9 in a project, as UTF-8 bytes
+  for entry in $'.alerts[0].match|^2\xe2\x80\x8b\\.' $'.upstream.project|p\xe2\x80\xaeq/repo' $'.upstream.project|caf\xc3\xa9/repo'; do
+    create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '^3'"
+    V="${entry#*|}" yq -i "${entry%%|*} = strenv(V)" "$TEST_TMPDIR/packages/mypkg.yml"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]] || {
+      echo "taken: ${entry@Q}"
+      return 1
+    }
+  done
+}
+
+@test "validate: alerts[].note holds no format character and no space but U+0020" {
+  local note
+  for note in '"a\u200bb"' '"a\u202eb"' '"a\u00a0b"' '"a\u3000b"' '"a\u2028b"'; do
+    create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '^3'
+    note: $note"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: alerts[].note holds a format character or a space other than U+0020"* ]] || {
+      echo "taken: $note"
+      return 1
+    }
+  done
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '^3'
+    note: 'Qt 7 needs a rebuild of café'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+# curl reads these as hosts that url_host cannot name, so the host memory cannot hold them
+@test "validate: upstream.url names its host in ASCII letters, digits, dots and dashes" {
+  local url
+  for url in 'https:///example.com/x' 'https://api.git%68ub.com/x' 'https://git.example.com\/x'; do
+    create_test_package "mypkg" "git-tag" "upstream:
+  url: '$url'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most"* ]] || {
+      echo "taken: $url"
+      return 1
+    }
+  done
+  for url in https://git.example.com:8443/repo.git https://git.example.com https://git.example.com?x; do
+    create_test_package "mypkg" "git-tag" "upstream:
+  url: '$url'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
+}
+
+# bash compiles a pattern again for each line it reads, and nested counted repeats
+# multiply the size of a pattern
+@test "validate: refuses a regex past 256 characters, 64 repeats or a cheap compile" {
+  local entry
+  local -a cases=(
+    "pattern|((a{1,80}){1,80}){1,80}|repeats a part more than 64 times"
+    "pattern|v([0-9]{1,65})|repeats a part more than 64 times"
+    "pattern|v([0-9]+)$(printf 'x%.0s' {1..250})|holds more than 256 characters"
+    "pattern|(((a{1,32}){1,32}){1,32}){1,32}|takes more than a second or 256 MiB to compile"
+    "pattern|((a{1,64}){1,64}){1,64}|takes more than a second or 256 MiB to compile"
+    "match|((a{1,80}){1,80}){1,80}|repeats a part more than 64 times"
+  )
+  for entry in "${cases[@]}"; do
+    IFS='|' read -r field regex expected <<<"$entry"
+    if [[ "$field" == pattern ]]; then
+      create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '$regex'"
+    else
+      create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '$regex'"
+    fi
+    SECONDS=0
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"$expected"* ]] && ((SECONDS < 5)) || {
+      echo "taken: $entry in $SECONDS s"
+      echo "$output"
+      return 1
+    }
+  done
+  create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '([0-9a-f]{7,40})-((a{1,64}){1,64})'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: refuses a PCRE version_pattern past 64 repeats" {
+  create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: release_body
+  version_pattern: '((a{1,80}){1,80}){1,80}'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"repeats a part more than 64 times"* ]]
 }
 
 @test "validate: upstream.url holds no user name" {
@@ -505,7 +619,12 @@ EOF
 # The runs check such a package and then drop its status; the AUR allows no such name
 @test "validate: fails on a name outside the characters of an AUR package name" {
   local name shown
-  for name in "space name" fée -dash 'quo"te'; do
+  # A name beyond ASCII meets the check of every value first
+  printf "name: 'fée'\nstrategy: github-release\nupstream:\n  project: owner/repo\n" >"$TEST_TMPDIR/packages/fée.yml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/fée.yml: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]]
+  for name in "space name" -dash 'quo"te'; do
     rm -f "$TEST_TMPDIR"/packages/*.yml
     printf 'name: %s\nstrategy: github-release\nupstream:\n  project: owner/repo\n' "'$name'" >"$TEST_TMPDIR/packages/$name.yml"
     # validate-pkg.sh quotes the name in the C locale
@@ -1080,7 +1199,7 @@ alerts:
   user_agent: 'Exämple/2.0'"
   run env LC_ALL=C.UTF-8 "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"upstream.user_agent must hold printable ASCII only"* ]]
+  [[ "$output" == *"a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]]
 }
 
 @test "validate: webpage-scrape fails without upstream.url" {

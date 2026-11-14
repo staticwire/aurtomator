@@ -1735,6 +1735,24 @@ use_source() {
   grep -q -- '-c core.bigFileThreshold=16m -c fetch.unpackLimit=1' "$TEST_TMPDIR/git-fetch-args"
 }
 
+@test "_git_source_sum: takes a tree whose files fill the budget left to the byte" {
+  local size
+  setup_verify
+  make_upstream
+  head -c 2097152 /dev/zero >"$TEST_TMPDIR/upstream-work/zeros"
+  tag_upstream "$TEST_TMPDIR/upstream-work" v1.2.0 2026-01-03T00:00:00Z
+  git -C "$TEST_TMPDIR/upstream-work" push -q "$TEST_TMPDIR/upstream.git" refs/tags/v1.2.0
+  size=$(git -C "$TEST_TMPDIR/upstream-work" ls-tree -r -l v1.2.0 | awk '{ s += $4 } END { print s }')
+  mkdir "$TEST_TMPDIR/downloads"
+  # du gives the downloads the size that leaves the files of the tree as the budget
+  printf '#!/usr/bin/env bash\nprintf "%%s\\t%%s\\n" %s "${*: -1}"\n' "$((1024 * 1024 * 1024 - size))" >"$MOCK_DIR/du"
+  chmod +x "$MOCK_DIR/du"
+  hash -r
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.2.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"budget"* ]]
+}
+
 @test "verify-pkg: refuses a checksum of a git source at a branch" {
   setup_verify
   make_upstream
@@ -3841,6 +3859,17 @@ EOF
   echo "check_failed: http://example.org/demo: Protocol \"http\" disabled" >"$TEST_TMPDIR/demo"
   run failure_host "$TEST_TMPDIR/demo"
   [ "$output" = "example.org" ]
+  # A host ends at #, ?, a space or the end of the text
+  local url
+  for url in 'https://example.com#frag: error: 503' 'https://example.com?q=1: error: 503' \
+    'https://example.com timed out' 'https://example.com'; do
+    echo "check_failed: $url" >"$TEST_TMPDIR/demo"
+    run failure_host "$TEST_TMPDIR/demo"
+    [ "$output" = "example.com" ] || {
+      echo "taken: $url as $output"
+      return 1
+    }
+  done
 }
 
 # A host with a letter beyond ASCII is no host that url_host accepts, so its package gets its own issue
