@@ -123,10 +123,10 @@ teardown() {
 
 @test "runner: refuses a pin of another repository, and a fork names its own in aurtomator.sh" {
   git init -q "$TEST_TMPDIR/fork"
-  local forked
+  local forked fork_repo="$TEST_TMPDIR/fork-repo"
   forked=$(commit_aurtomator "$TEST_TMPDIR/fork" forked)
   git -C "$TEST_TMPDIR/fork" tag v9.0.0
-  publish someone/aurtomator-fork "$TEST_TMPDIR/fork"
+  publish Someone/Aurtomator-Fork "$TEST_TMPDIR/fork"
   pin "someone/aurtomator-fork/.github/workflows/check-updates.yml@$forked" v9.0.0
 
   run "$REPO/aurtomator.sh" sample
@@ -134,12 +134,18 @@ teardown() {
   [ "$output" = ".github/workflows/check-updates.yml pins someone/aurtomator-fork, and this aurtomator.sh runs the pins of staticwire/aurtomator only" ]
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 
-  rm "$REPO/aurtomator.sh"
-  sed 's|^repo=staticwire/aurtomator$|repo=someone/aurtomator-fork|' "$RUNNER" >"$REPO/aurtomator.sh"
-  chmod +x "$REPO/aurtomator.sh"
-  run "$REPO/aurtomator.sh" sample
+  # bashcov finds the file of a traced line by its path after the line ran, so the link
+  # stays, and the copy of the fork goes into a repository of its own
+  mkdir -p "$fork_repo/.github/workflows"
+  cp "$REPO/.github/workflows/check-updates.yml" "$fork_repo/.github/workflows/"
+  sed 's|^repo=staticwire/aurtomator$|repo=Someone/Aurtomator-Fork|' "$RUNNER" >"$fork_repo/aurtomator.sh"
+  chmod +x "$fork_repo/aurtomator.sh"
+  run "$fork_repo/aurtomator.sh" sample
   [ "$status" -eq 0 ]
   [ "$output" = "name: forked" ]
+  run "$fork_repo/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  [ "$output" = ".github/workflows/check-updates.yml:3:    uses: someone/aurtomator-fork/.github/workflows/check-updates.yml@$forked # v9.0.0" ]
 }
 
 @test "runner: reads the release after a pin up to its end" {
@@ -599,6 +605,18 @@ EOF
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
+# GitHub finds a repository by its name in any case
+@test "runner: pin moves a pin of aurtomator spelled in another case" {
+  calling_workflows "$PINNED" v1.0.0
+  sed -i 's|^    uses: staticwire/aurtomator/\(.github/workflows/notify-failure.yml\)|    uses: StaticWire/Aurtomator/\1|' \
+    "$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = ".github/workflows/check-updates.yml:3:    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP # v1.1.0" ]
+  [ "${lines[1]}" = ".github/workflows/check-updates.yml:8:    uses: StaticWire/Aurtomator/.github/workflows/notify-failure.yml@$TIP # v1.1.0" ]
+  [ "${#lines[@]}" -eq 3 ]
+}
+
 @test "runner: pin needs no aurtomator line in validate.yml, nor the file" {
   calling_workflows "$PINNED" v1.0.0
   printf 'jobs: {}\n' >"$REPO/.github/workflows/validate.yml"
@@ -864,11 +882,66 @@ EOF
   [ "$output" = ".github/workflows/validate.yml runs /statlcwire/aurtomator/.github/workflows/validate.yml@main, a workflow of another repository than staticwire/aurtomator" ]
 }
 
+# The uses: value of a job always names a workflow, which gets the secrets the job passes
+@test "runner: check-pins refuses a job that runs a workflow of another repository in any spelling" {
+  local value
+  for value in 'evil/repo/.github//workflows/w.yml@main' 'evil/repo/.github\workflows\w.yml@main' \
+    evil/repo/.github/./workflows/w.yml@main evil/repo/.GITHUB/workflows/w.yml@main evil/repo/w.yml@main; do
+    template_workflows "$PINNED" v1.0.0
+    printf '  extra:\n    needs: pins\n    uses: %s\n    secrets: inherit\n' "$value" >>"$REPO/.github/workflows/check-updates.yml"
+    run "$REPO/aurtomator.sh" check-pins
+    [ "$status" -eq 1 ]
+    [ "$output" = ".github/workflows/check-updates.yml runs $value, a workflow of another repository than staticwire/aurtomator" ]
+  done
+
+  # A workflow of the calling repository
+  template_workflows "$PINNED" v1.0.0
+  printf '  extra:\n    uses: ./.github/workflows/local.yml\n' >>"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 4 ]
+}
+
+# A step runs an action of any repository; a step that names a workflow is refused in each
+# spelling GitHub reads, and an action of the calling repository passes
+@test "runner: check-pins refuses a step that names a workflow of another repository in any spelling" {
+  local value
+  for value in 'statlcwire\aurtomator\.github\workflows\validate.yml@main' 'evil/repo/.github//workflows/w.yml@main' \
+    evil/repo/.github/./workflows/w.yml@main evil/repo/.GITHUB/workflows/w.yml@main; do
+    template_workflows "$PINNED" v1.0.0
+    printf 'jobs:\n  pins:\n    steps:\n      - uses: %s\n' "$value" >"$REPO/.github/workflows/validate.yml"
+    run "$REPO/aurtomator.sh" check-pins
+    [ "$status" -eq 1 ]
+    [ "$output" = ".github/workflows/validate.yml runs $value, a workflow of another repository than staticwire/aurtomator" ]
+  done
+
+  template_workflows "$PINNED" v1.0.0
+  printf 'jobs:\n  pins:\n    steps:\n      - uses: ./x/.github/workflows/y.yml\n' >"$REPO/.github/workflows/validate.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "runner: check-pins checks the release of a pin of aurtomator without a path" {
+  template_workflows "$PINNED" v1.0.0
+  printf 'jobs:\n  pins:\n    steps:\n      - uses: staticwire/aurtomator@%s # v1.0.0\n' "$PINNED" >"$REPO/.github/workflows/validate.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  [ "${lines[2]}" = ".github/workflows/validate.yml:4:      - uses: staticwire/aurtomator@$PINNED # v1.0.0" ]
+  [ "${#lines[@]}" -eq 3 ]
+
+  sed -i 's|# v1.0.0$|# v1.1.0|' "$REPO/.github/workflows/validate.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = "The pin $PINNED in .github/workflows/validate.yml is not the commit of v1.1.0 of staticwire/aurtomator; ./aurtomator.sh pin vX.Y.Z pins the commit of a release" ]
+}
+
 # GitHub splits the path of a uses: value on / and \ and drops the empty parts
 @test "runner: check-pins refuses a pin of aurtomator spelled with an extra slash or a backslash" {
   local path
   for path in /staticwire/aurtomator/.github/actions/check staticwire//aurtomator/.github/actions/check \
-    'staticwire\aurtomator\.github\actions\check' staticwire/aurtomator//.github/actions/check; do
+    'staticwire\aurtomator\.github\actions\check' staticwire/aurtomator//.github/actions/check \
+    'staticwire/aurtomator/.github\actions\check'; do
     template_workflows "$PINNED" v1.0.0
     printf 'jobs:\n  pins:\n    steps:\n      - uses: %s@%s # v1.0.0\n' "$path" "$PINNED" >"$REPO/.github/workflows/validate.yml"
     run "$REPO/aurtomator.sh" check-pins
@@ -888,4 +961,10 @@ EOF
     [ "$status" -eq 1 ]
     [ "$output" = ".github/workflows/check-updates.yml holds a uses: value with the tag $tag; write every uses: value as plain text" ]
   done
+
+  template_workflows "$PINNED" v1.0.0
+  sed -i 's|- uses: staticwire/|- uses: !foo staticwire/|' "$REPO/.github/workflows/validate.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/validate.yml holds a uses: value with the tag !foo; write every uses: value as plain text" ]
 }
