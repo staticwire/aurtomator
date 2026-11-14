@@ -1243,9 +1243,9 @@ MOCKCURL
 @test "lib.sh: http_get names the URL and the exit code when curl writes nothing" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
-  CURL_RC=3 CURL_STDERR='' run http_get 'https://[bad'
+  CURL_RC=3 CURL_STDERR='' run http_get 'https://example.invalid/[bad'
   [ "$status" -eq 3 ]
-  [ "$output" = "https://[bad: curl exit 3" ]
+  [ "$output" = "https://example.invalid/[bad: curl exit 3" ]
 }
 
 # curl writes its own message for an unknown option, -s or not
