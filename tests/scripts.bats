@@ -1346,6 +1346,40 @@ MOCKCURL
   [ "$(cat "$TEST_TMPDIR/.status/mypkg")" = "check_failed: packages/mypkg.yml: name '../escape' must equal the file name" ]
 }
 
+# _packages and the status files carry one name a line, of the characters of an AUR name
+@test "check-all: checks and lists a file only under a stem of an AUR package name" {
+  local stem
+  local -a stems=($'a\nb' .hidden -x)
+  ! locale -a 2>/dev/null | grep -qix 'en_US.utf8' || stems+=(fée)
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  for stem in "${stems[@]}"; do
+    printf 'name: %s\nstrategy: step\ncurrent: 1.0.0\n' "${stem@Q}" >"$TEST_TMPDIR/packages/$stem.yml"
+  done
+  LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_packages")" = pkg ]
+  [ "$(find "$TEST_TMPDIR/.status" -mindepth 1 -maxdepth 1 ! -name '_*' -printf '%f\n')" = pkg ]
+}
+
+# --prepare and --publish read the statuses of the check run, and a YAML that YAML cannot read
+# gets one under its file name
+@test "check-all: fails a YAML it cannot read under its file name, in the check run alone" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  printf 'name: [broken\n' >"$TEST_TMPDIR/packages/bad.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/bad")" = "check_failed: packages/bad.yml: name '' must equal the file name" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+
+  rm -rf "$TEST_TMPDIR/.status"
+  mkdir -p "$TEST_TMPDIR/.status"
+  printf 'new_version: 2.0.0\n' >"$TEST_TMPDIR/.status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ ! -e "$TEST_TMPDIR/out/status/bad" ]
+}
+
 @test "check-update: refuses a strategy that is no plain name" {
   create_test_package "mypkg" "../../escape" "upstream:
   project: owner/repo"

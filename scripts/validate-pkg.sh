@@ -191,6 +191,9 @@ validate_pkg() {
   if [[ -z "$name" || "$name" == "null" ]]; then
     log_err "$shown: missing required field 'name'"
     ((errors++))
+  elif [[ ! "$name" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]; then
+    log_err "$shown: name ${name@Q} holds a character outside [A-Za-z0-9@._+-], or starts with . or -"
+    ((errors++))
   elif [[ "$name" != "$stem" ]]; then
     log_err "$shown: name '$name' must equal the file name '$stem'"
     ((errors++))
@@ -787,6 +790,14 @@ validate_pkg() {
 if [[ "${1:-}" == "--all" ]]; then
   total=0
   failed=0
+  strays=0
+  while IFS= read -r -d '' entry; do
+    entry="${entry##*/}"
+    [[ "$entry" == .gitkeep || "$entry" == example.yml.sample || ("$entry" == *.yml && "$entry" != .*) ]] && continue
+    ! has_control "$entry" || entry=${entry@Q}
+    log_err "packages/$entry: no run reads it, as the runs read packages/<name>.yml alone"
+    ((strays++)) || true
+  done < <(find "${AURTOMATOR_DATA_DIR}/packages" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     [[ -f "$pkg_file" ]] || continue
     ((total++)) || true
@@ -794,7 +805,7 @@ if [[ "${1:-}" == "--all" ]]; then
       ((failed++)) || true
     fi
   done
-  if [[ "$total" -eq 0 ]]; then
+  if [[ "$total" -eq 0 && "$strays" -eq 0 ]]; then
     log_warn "No packages found in packages/"
     exit 0
   fi
@@ -802,6 +813,7 @@ if [[ "${1:-}" == "--all" ]]; then
     log_err "Validation failed: $failed/$total packages have errors"
     exit 1
   fi
+  ((strays == 0)) || exit 1
   log_ok "All $total packages valid"
   exit 0
 fi

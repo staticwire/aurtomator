@@ -502,6 +502,51 @@ EOF
   [[ "$output" == *"packages/a.yml: name 'b' must equal the file name 'a'"* ]]
 }
 
+# The runs check such a package and then drop its status; the AUR allows no such name
+@test "validate: fails on a name outside the characters of an AUR package name" {
+  local name shown
+  for name in "space name" fée -dash 'quo"te'; do
+    rm -f "$TEST_TMPDIR"/packages/*.yml
+    printf 'name: %s\nstrategy: github-release\nupstream:\n  project: owner/repo\n' "'$name'" >"$TEST_TMPDIR/packages/$name.yml"
+    # validate-pkg.sh quotes the name in the C locale
+    shown=$(
+      LC_ALL=C
+      printf '%s' "${name@Q}"
+    )
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"packages/$name.yml: name $shown holds a character outside [A-Za-z0-9@._+-], or starts with . or -"* ]] || {
+      echo "taken: $name"
+      return 1
+    }
+  done
+}
+
+# The runs read packages/<name>.yml alone
+@test "validate --all: fails on a file of packages/ that no run reads" {
+  local file
+  create_test_package a github-release "upstream:
+  project: owner/repo"
+  for file in x.yaml .x.yml notes.txt; do
+    : >"$TEST_TMPDIR/packages/$file"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"packages/$file: no run reads it, as the runs read packages/<name>.yml alone"* ]] || {
+      echo "taken: $file"
+      return 1
+    }
+    rm "$TEST_TMPDIR/packages/$file"
+  done
+  : >"$TEST_TMPDIR/packages/.gitkeep"
+  cp "$PROJECT_DIR/packages/example.yml.sample" "$TEST_TMPDIR/packages/"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  # A file no run reads fails beside no package at all
+  mv "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/a.yaml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+}
+
 @test "validate: fails on missing strategy" {
   cat >"$TEST_TMPDIR/packages/bad.yml" <<'EOF'
 name: bad
@@ -1419,6 +1464,8 @@ arch_wait:
   local commit_value arches
   local -a cases=(
     "main|aarch64|arch_wait.commit must be a commit id of 40 hex digits: 'main'"
+    "${commit}0|aarch64|arch_wait.commit must be a commit id of 40 hex digits: '${commit}0'"
+    "x$commit|aarch64|arch_wait.commit must be a commit id of 40 hex digits: 'x$commit'"
     "$commit|x86_64|arch_wait.arches must name arches other than x86_64, separated by single spaces: 'x86_64'"
     "$commit||arch_wait.arches must name arches other than x86_64, separated by single spaces: ''"
   )
