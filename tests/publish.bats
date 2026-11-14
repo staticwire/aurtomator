@@ -1893,7 +1893,7 @@ EOF
 @test "publish-pkg: writes arch_out when the YAML of the push that took the arch out was lost" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   setup_arch_prepare
-  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
   cp "$yml" "$TEST_TMPDIR/yml.before"
   archive_missing aarch64 28+23
   prepare_arch 28+23 aarch64
@@ -1934,7 +1934,7 @@ EOF
 @test "publish-pkg: writes no arch_out on a sync of a version that a person pushed" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   setup_arch_prepare
-  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
   aur_arch_commit 28+23 x86_64 aarch64 >/dev/null
   run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 2 ]
@@ -1944,10 +1944,42 @@ EOF
   [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
 }
 
+# A co-maintainer can push a commit with the subject of a push of aurtomator over a parent
+# of their own, so the sync takes the arches and the commit of arch_wait alone
+@test "publish-pkg: writes the arches and the commit of arch_wait to arch_out on a sync" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin" crafted
+  setup_arch_prepare
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
+  cp "$yml" "$TEST_TMPDIR/yml.before"
+  crafted=$(aur_arch_commit 28+23 x86_64 aarch64 powerpc64le riscv64)
+  arch_pkgbuild "$work/PKGBUILD" 28+23 x86_64
+  arch_srcinfo "$work/.SRCINFO" 28+23 x86_64
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false \
+    commit -qam "28+23 release from webpage-scrape"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$crafted" != "$AUR_BASE" ]
+  [ "$(pkg_get "$yml" '.arch_out | to_entries | map(.key + "=" + .value) | join(" ")')" = "aarch64=$AUR_BASE" ]
+  [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
+
+  # arch_wait without the commit gives no arch_out
+  cp "$TEST_TMPDIR/yml.before" "$yml"
+  yq -i 'del(.arch_wait.commit) | del(.arch_wait.arches)' "$yml"
+  mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+}
+
 @test "publish-pkg: writes arch_out from a lost push under a later push of the version" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
   setup_arch_prepare
-  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
   cp "$yml" "$TEST_TMPDIR/yml.before"
   archive_missing aarch64 28+23
   prepare_arch 28+23 aarch64
@@ -1977,7 +2009,7 @@ EOF
   git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam 28+22
   git -C "$work" push -q "$AUR_REMOTE" master
   AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
-  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64 powerpc64le"}' "$yml"
   cp "$yml" "$TEST_TMPDIR/yml.before"
   archive_missing aarch64 28+23
   archive_missing powerpc64le 28+23
@@ -6017,6 +6049,17 @@ arch_out:
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" '.arch_wait.version + " " + .arch_wait.since')" = "2.0.0 2026-11-11T10:00:00Z" ]
+}
+
+@test "check-all --publish: writes the arches and the AUR commit of a wait to arch_wait" {
+  local commit
+  commit=$(printf 'c%.0s' {1..40})
+  checked_arch_package 1.0.0 "pending: 2.0.0" $'pkg\t2.0.0\taarch64 riscv64\t2026-11-11T10:00:00Z\t'"$commit"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/pkg.yml" '[.arch_wait.version, .arch_wait.since, .arch_wait.commit, .arch_wait.arches] | join("|")')" = "2.0.0|2026-11-11T10:00:00Z|$commit|aarch64 riscv64" ]
 }
 
 @test "check-all --publish: writes no arch_wait that starts after now" {

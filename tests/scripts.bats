@@ -4429,8 +4429,11 @@ $line"
   archive_missing aarch64 28+23
   check_arch 28+23
   [ "$ARCH_RC" -eq 3 ]
-  [ "$(wc -l <"$TEST_TMPDIR/arch.out")" -eq 1 ]
-  about_now "$(<"$TEST_TMPDIR/arch.out")"
+  [ "$(wc -l <"$TEST_TMPDIR/arch.out")" -eq 3 ]
+  about_now "$(sed -n 1p "$TEST_TMPDIR/arch.out")"
+  # The arches it waits for and the AUR commit that builds them
+  [ "$(sed -n 2p "$TEST_TMPDIR/arch.out")" = aarch64 ]
+  [ "$(sed -n 3p "$TEST_TMPDIR/arch.out")" = "$(git -C "$AUR_REMOTE" rev-parse HEAD)" ]
   grep -q "aarch64" "$TEST_TMPDIR/arch.err"
 }
 
@@ -4444,7 +4447,7 @@ arch_wait:
   archive_missing aarch64 28+23
   check_arch 28+23
   [ "$ARCH_RC" -eq 3 ]
-  [ "$ARCH_OUT" = "$since|" ]
+  [ "$ARCH_OUT" = "$since|"$'\n'"aarch64|"$'\n'"$(git -C "$AUR_REMOTE" rev-parse HEAD)|" ]
 
   since=$(date -u -d '-25 hours' +%Y-%m-%dT%H:%M:%SZ)
   yq -i ".arch_wait.since = \"$since\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
@@ -4461,7 +4464,7 @@ arch_wait:
   archive_missing aarch64 28+23
   check_arch 28+23
   [ "$ARCH_RC" -eq 3 ]
-  about_now "$(<"$TEST_TMPDIR/arch.out")"
+  about_now "$(sed -n 1p "$TEST_TMPDIR/arch.out")"
 }
 
 @test "check-arch: arch_wait of another version starts a new wait" {
@@ -4472,7 +4475,7 @@ arch_wait:
   archive_missing aarch64 28+23
   check_arch 28+23
   [ "$ARCH_RC" -eq 3 ]
-  about_now "$(<"$TEST_TMPDIR/arch.out")"
+  about_now "$(sed -n 1p "$TEST_TMPDIR/arch.out")"
 }
 
 @test "check-arch: a missing x86_64 or every arch missing fails the update as today" {
@@ -4845,16 +4848,34 @@ stand_in_arch() {
   chmod +x "$TEST_TMPDIR/scripts/check-arch.sh"
 }
 
-@test "check-all: writes pending and the start of the wait while an arch is missing" {
+@test "check-all: writes pending, the start of the wait, its arches and the AUR commit while an arch is missing" {
+  local commit
+  commit=$(printf 'c%.0s' {1..40})
   stand_in_strategy step 2.0.0
   create_test_package "pkg" "step" "current: '1.0.0'"
-  stand_in_arch $'2026-11-11T10:00:00Z\n' 3
+  stand_in_arch $'2026-11-11T10:00:00Z\naarch64 riscv64\n'"$commit"$'\n' 3
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "pending: 2.0.0" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t2.0.0\t\t2026-11-11T10:00:00Z' ]
+  [ "$(cat "$TEST_TMPDIR/.status/_arches")" = $'pkg\t2.0.0\taarch64 riscv64\t2026-11-11T10:00:00Z\t'"$commit" ]
   [ "$(cat "$TEST_TMPDIR/check-arch.args")" = "pkg 2.0.0" ]
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+}
+
+@test "check-all: a wait needs its arches and an AUR commit" {
+  local out
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  for out in $'2026-11-11T10:00:00Z\n' $'2026-11-11T10:00:00Z\naarch64\nmain\n' $'2026-11-11T10:00:00Z\nx86_64\n'"$(printf 'c%.0s' {1..40})"$'\n'; do
+    stand_in_arch "$out" 3
+    rm -rf "$TEST_TMPDIR/.status"
+    run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ]
+    [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "check_failed: "*"check-arch.sh printed"* ]] || {
+      echo "taken: ${out@Q}"
+      return 1
+    }
+  done
 }
 
 @test "check-all: records the arches that stay out of a new version" {

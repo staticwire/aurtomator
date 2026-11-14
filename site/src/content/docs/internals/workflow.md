@@ -97,7 +97,7 @@ While `packages/` holds no package, the script writes nothing, so a repository f
 | `.status/<name>` | `update_failed: <error>` | the update failed |
 | `.status/_alerts` | the package, `hold` or `notice`, the note | one line for each alert that fired |
 | `.status/_assets` | the package, the asset value | one line for each value found |
-| `.status/_arches` | the package, the version, the arches out, the start of the wait | see [Versions without some arches](/features/missing-arches/) |
+| `.status/_arches` | the package, the version, the arches out or those a wait waits for, the start of the wait, and for a wait the AUR commit that builds them | see [Versions without some arches](/features/missing-arches/) |
 | `.status/_without` | the package, `current`, the arches out | written by `--publish` for each package with `arch_out` |
 | `.status/_upstream` | `newer: 0.7.0` or `current: 0.6.0` | the latest release of aurtomator against `VERSION` |
 

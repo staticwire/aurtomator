@@ -40,11 +40,13 @@ The wait starts in the first run that finds the archive missing, and a newer ver
 arch_wait:
   version: 28+23
   since: "2026-11-06T11:17:00Z"
+  commit: 3a5f6f12a7c9176a4c87bb402f1a3e938ec04011
+  arches: aarch64
 arch_out:
   aarch64: 3a5f6f12a7c9176a4c87bb402f1a3e938ec04011
 ```
 
-`arch_wait` holds the waiting version and the start of its wait, and the push removes it. `arch_out` maps each arch left out to the last AUR commit that built it. Later checks build the URLs of the arch from that commit, and verify and publish compare the arch with it when it comes back. An arch leaves `arch_out` with the first push whose `arch=()` lists it, also when the maintainer put it back by hand. An arch that the maintainer removes from `arch=()` never enters `arch_out`, and neither does an arch that the `.SRCINFO` of the commit does not list. When the commit of the YAML after the push is lost, the next run finds the version on the AUR and writes `arch_out` from the push of aurtomator, the commit named `<version> release from <strategy>`.
+`arch_wait` holds the waiting version, the start of its wait, the arches it waits for and the AUR commit that built them when the wait started, and the push removes it. `arch_out` maps each arch left out to the last AUR commit that built it. Later checks build the URLs of the arch from that commit, and verify and publish compare the arch with it when it comes back. An arch leaves `arch_out` with the first push whose `arch=()` lists it, also when the maintainer put it back by hand. An arch that the maintainer removes from `arch=()` never enters `arch_out`, and neither does an arch that the `.SRCINFO` of the commit does not list. When the commit of the YAML after the push is lost, the next run finds the version on the AUR and writes to `arch_out` the arches of `arch_wait` that the AUR lacks, with the commit of `arch_wait`. The AUR log plays no part there, since anyone who can push to the package writes it.
 
 ## Statuses and README
 

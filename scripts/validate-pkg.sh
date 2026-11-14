@@ -319,13 +319,26 @@ validate_pkg() {
     ((errors++))
   fi
 
-  local wait_tag wait_version since
+  local wait_tag wait_keys wait_version since wait_commit wait_arches
   wait_tag=$(pkg_get "$file" '.arch_wait | tag')
+  [[ "$wait_tag" != "!!map" ]] || wait_keys=$(pkg_get "$file" '.arch_wait | keys | sort | join(" ")')
   if [[ "$wait_tag" != "!!null" ]]; then
-    if [[ "$wait_tag" != "!!map" || $(pkg_get "$file" '.arch_wait | keys | sort | join(" ")') != "since version" ]]; then
-      log_err "$shown: arch_wait must be a map with version and since, and no other key"
+    if [[ "$wait_tag" != "!!map" || ("$wait_keys" != "since version" && "$wait_keys" != "arches commit since version") ]]; then
+      log_err "$shown: arch_wait must be a map with version and since, or version, since, commit and arches, and no other key"
       ((errors++))
     else
+      if [[ "$wait_keys" == "arches commit since version" ]]; then
+        wait_commit=$(pkg_get "$file" '.arch_wait.commit')
+        wait_arches=$(pkg_get "$file" '.arch_wait.arches')
+        if [[ ! "$wait_commit" =~ ^[0-9a-f]{40}$ ]]; then
+          log_err "$shown: arch_wait.commit must be a commit id of 40 hex digits: ${wait_commit@Q}"
+          ((errors++))
+        fi
+        if [[ -z "$wait_arches" ]] || ! arch_list_ok "$wait_arches"; then
+          log_err "$shown: arch_wait.arches must name arches other than x86_64, separated by single spaces: ${wait_arches@Q}"
+          ((errors++))
+        fi
+      fi
       wait_version=$(pkg_get "$file" '.arch_wait.version')
       since=$(pkg_get "$file" '.arch_wait.since')
       if ! validate_pkgver "$wait_version" 2>/dev/null; then

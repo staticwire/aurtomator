@@ -1378,17 +1378,54 @@ arch_wait:
   done
 }
 
+@test "validate: arch_wait with the arches it waits for and the AUR commit that builds them" {
+  local commit entry expected
+  commit=$(printf 'c%.0s' {1..40})
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+arch_wait:
+  version: 28+23
+  since: 2026-11-06T11:17:00Z
+  commit: $commit
+  arches: aarch64 riscv64"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+
+  local commit_value arches
+  local -a cases=(
+    "main|aarch64|arch_wait.commit must be a commit id of 40 hex digits: 'main'"
+    "$commit|x86_64|arch_wait.arches must name arches other than x86_64, separated by single spaces: 'x86_64'"
+    "$commit||arch_wait.arches must name arches other than x86_64, separated by single spaces: ''"
+  )
+  for entry in "${cases[@]}"; do
+    IFS='|' read -r commit_value arches expected <<<"$entry"
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+arch_wait:
+  version: 28+23
+  since: 2026-11-06T11:17:00Z
+  commit: '$commit_value'
+  arches: '$arches'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$expected"* ]] || {
+      echo "taken: $entry"
+      return 1
+    }
+  done
+}
+
 @test "validate: arch_wait without a version and a UTC time of the past rejected" {
   local later entry expected
   later=$(date -u -d '1 hour' +%Y-%m-%dT%H:%M:%SZ)
   local -a cases=(
-    "arch_wait: 28+23|arch_wait must be a map with version and since, and no other key"
+    "arch_wait: 28+23|arch_wait must be a map with version and since, or version, since, commit and arches, and no other key"
     "arch_wait:
-  version: 28+23|arch_wait must be a map with version and since, and no other key"
+  version: 28+23|arch_wait must be a map with version and since, or version, since, commit and arches, and no other key"
     "arch_wait:
   version: 28+23
   since: 2026-11-06T11:17:00Z
-  arches: aarch64|arch_wait must be a map with version and since, and no other key"
+  arches: aarch64|arch_wait must be a map with version and since, or version, since, commit and arches, and no other key"
     "arch_wait:
   version: '28 23'
   since: 2026-11-06T11:17:00Z|arch_wait.version must hold a digit and at most 64 characters of A-Za-z0-9 . _ +: '28 23'"

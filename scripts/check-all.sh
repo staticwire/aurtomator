@@ -353,16 +353,19 @@ arch_record_line() {
 # --publish keeps the start of the wait of record line $2 for version $3 in
 # arch_wait of package file $1, until publish-pkg.sh pushes the version
 keep_arch_wait() {
-  if [[ "$MODE" != publish || -z "$2" ]] || ! arch_record_out "$2" "$3" >/dev/null; then
+  local record=$'^[^\t]*\t[^\t]*\t([^\t]*)\t([^\t]*)(\t([0-9a-f]{40}))?$'
+  if [[ "$MODE" != publish || -z "$2" ]] || ! arch_record_out "$2" "$3" >/dev/null || [[ ! "$2" =~ $record ]]; then
     return 0
   fi
-  [[ -z "${2##*$'\t'}" ]] || set_arch_wait "$1" "$3" "${2##*$'\t'}"
+  # A line of a wait adds the arches it waits for and the AUR commit that builds them
+  [[ -z "${BASH_REMATCH[2]}" ]] ||
+    set_arch_wait "$1" "$3" "${BASH_REMATCH[2]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[4]:+${BASH_REMATCH[1]}}"
 }
 
 # Set ARCH_OUT to the arches out of an update of $2 (file $1) to version $3, from
 # check-arch.sh or _arches of the check run; a wait or a failure sets the status
 find_arches() {
-  local rc=0 err_file err text first second line in_flight
+  local rc=0 err_file err text first second line in_flight waited commit wait_re=$'^([^\n]+)\n([0-9a-f]{40})$'
   ARCH_OUT=""
   ARCH_RECORD=""
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
@@ -393,10 +396,12 @@ find_arches() {
   first=${text%%$'\n'*}
   second=""
   [[ "$text" != *$'\n'* ]] || second=${text#*$'\n'}
-  if ((rc == 3)) && valid_time "$text"; then
+  # A wait names its start, the arches it waits for and the AUR commit that builds them
+  if ((rc == 3)) && [[ "$second" =~ $wait_re ]] && waited=${BASH_REMATCH[1]} commit=${BASH_REMATCH[2]} &&
+    valid_time "$first" && arch_list_ok "$waited"; then
     printf '%s\n' "$err" >&2
     echo "pending: $3" >"${STATUS_DIR}/$2"
-    printf '%s\t%s\t\t%s\n' "$2" "$3" "$text" >>"${STATUS_DIR}/_arches"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$2" "$3" "$waited" "$first" "$commit" >>"${STATUS_DIR}/_arches"
     return 1
   fi
   if ((rc == 0)) && arch_record_ok "$first" "$second"; then

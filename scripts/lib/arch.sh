@@ -30,7 +30,7 @@ arch_record_ok() {
 # Print the arches out of line $1 of _arches for version $2; fails for a line of
 # another form or of another version
 arch_record_out() {
-  local record=$'^[^\t]*\t([^\t]*)\t([^\t]*)\t([^\t]*)$' version first second
+  local record=$'^[^\t]*\t([^\t]*)\t([^\t]*)\t([^\t]*)(\t[0-9a-f]{40})?$' version first second
   [[ "$1" =~ $record ]] || return 1
   version=${BASH_REMATCH[1]}
   first=${BASH_REMATCH[2]}
@@ -52,11 +52,16 @@ arch_minus() {
   printf '%s\n' "$rest"
 }
 
-# Write arch_wait of package file $1 for version $2 since $3, unless it holds
-# them already
+# Write arch_wait of package file $1 for version $2 since $3, with the AUR commit $4 and the
+# arches $5 it waits for when given, unless it holds that version and start already
 set_arch_wait() {
   [[ "$(pkg_get "$1" '.arch_wait.version // ""')" != "$2" || "$(pkg_get "$1" '.arch_wait.since // ""')" != "$3" ]] || return 0
-  VERSION="$2" SINCE="$3" yq -i '.arch_wait = {"version": strenv(VERSION), "since": strenv(SINCE)}' "$1"
+  if [[ -n "${4:-}" && -n "${5:-}" ]]; then
+    VERSION="$2" SINCE="$3" COMMIT="$4" ARCHES="$5" \
+      yq -i '.arch_wait = {"version": strenv(VERSION), "since": strenv(SINCE), "commit": strenv(COMMIT), "arches": strenv(ARCHES)}' "$1"
+  else
+    VERSION="$2" SINCE="$3" yq -i '.arch_wait = {"version": strenv(VERSION), "since": strenv(SINCE)}' "$1"
+  fi
 }
 
 # Write the arch state of package file $1 after an update to the arch words $2
@@ -110,27 +115,20 @@ srcinfo_built() {
   printf '%s\n' "$built"
 }
 
-# Print the arches that the push of aurtomator of version $2 under HEAD of AUR clone $1
-# took out and HEAD lacks, then the parent of that push; $3 holds the arches of HEAD
-lost_push_out() {
+# Print the arches of arch_wait of package file $1 that HEAD of AUR clone $2 lacks, $3 holding
+# the arches of HEAD, and that the commit of arch_wait builds, then that commit
+wait_out() {
   local -x LC_ALL=C
-  local push parent out
-  # aur_commit_push writes "<version> release from <strategy>", with -<pkgrel> past 1
-  push=$(git -C "$1" log --format='%H %s' HEAD | awk -v v="$2" '!found {
-    s = $0
-    sub(/^[^ ]+ /, "", s)
-    if (index(s, v " release from ") == 1 ||
-      (index(s, v "-") == 1 && substr(s, length(v) + 2) ~ /^[0-9]+ release from /)) {
-      found = 1
-      print $1
-    }
-  }') || return 1
-  [[ -n "$push" ]] || return 0
-  parent=$(git -C "$1" rev-parse -q --verify "${push}^") || return 0
-  out=$(arch_minus "$(pkgbuild_arch_words <(git -C "$1" show "${parent}:PKGBUILD") | tr '\n' ' ')" \
-    "$(pkgbuild_arch_words <(git -C "$1" show "${push}:PKGBUILD") | tr '\n' ' ') $3 x86_64")
-  out=$(srcinfo_built <(git -C "$1" show "${parent}:.SRCINFO") "$out")
-  [[ -z "$out" ]] || printf '%s\n%s\n' "$out" "$parent"
+  local commit arches out
+  commit=$(pkg_get "$1" '.arch_wait.commit // ""')
+  arches=$(pkg_get "$1" '.arch_wait.arches // ""')
+  if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]] || ! arch_list_ok "$arches" ||
+    ! git -C "$2" cat-file -e "${commit}^{commit}" 2>/dev/null; then
+    return 0
+  fi
+  out=$(arch_minus "$arches" "$3 x86_64")
+  out=$(srcinfo_built <(git -C "$2" show "${commit}:.SRCINFO") "$out")
+  [[ -z "$out" ]] || printf '%s\n%s\n' "$out" "$commit"
 }
 
 # Print each line of .SRCINFO $1 that belongs to arch $2, after the header of its

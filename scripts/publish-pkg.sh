@@ -105,11 +105,11 @@ if ((handed_rc == 0)); then
     pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
   fi
   pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
-  # The arch_wait of this version stays when the YAML commit of a push of aurtomator that
-  # took arches out was lost: the arches its parent builds and the head lacks go to arch_out
+  # The arch_wait of this version stays when the YAML commit of the push that took arches out
+  # was lost: the arches it waits for that the head lacks go to arch_out with its commit
   lost_out=()
   if [[ -n "$final_words" && "$(pkg_get "$PKG_FILE" '.arch_wait.version // ""')" == "$VERSION" ]]; then
-    mapfile -t lost_out < <(lost_push_out "$aur_dir" "$VERSION" "$final_words")
+    mapfile -t lost_out < <(wait_out "$PKG_FILE" "$aur_dir" "$final_words")
   fi
   arch_state_after "$PKG_FILE" "$final_words" "${lost_out[0]:-}" "${lost_out[1]:-}"
   exit 2
