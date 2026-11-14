@@ -8,9 +8,9 @@ Before it touches an issue, the job writes the summary of the run, which the pag
 
 | Title | Label | Opens on | Closes on |
 |---|---|---|---|
-| `❌ <package>: check failed` | `auto-update` | `check_failed` | any other status |
+| `❌ <package>: check failed` | `auto-update` | `check_failed` | any other status but `unchecked` |
 | `❌ <package>: update failed` | `auto-update` | `update_failed` | `up_to_date`, `updated`, `downgrade`, `rebuilt` or `arch_added`, so the version is in the AUR |
-| `❌ <host>: <count> packages failed to check` | `auto-update` | 5 or more failed checks on one host | fewer than 5 failed checks on the host |
+| `❌ <host>: <count> packages failed to check` | `auto-update` | 5 or more failed checks on one host | fewer than 5 failed checks on the host, in a run whose check reached every package |
 | `✋ <package>: update held` | `update-held` | `held`, see [Update alerts](/features/update-alerts/) | the statuses that close `update failed` |
 | `🔔 <package>: <version> notice` | `update-notice` | a push with an alert note | the maintainer, after the edit |
 | `⚠️ <package>: <version> without <arches>` | `arch-missing` | a push without some arches, see [Versions without some arches](/features/missing-arches/) | every arch is back |
@@ -19,7 +19,7 @@ Before it touches an issue, the job writes the summary of the run, which the pag
 
 A package gets no second issue of a kind while one is open, and an issue closed while its package still fails comes back in the next run. Each body links the run. An error holds text from upstream, so it stands in a code block, where links, images and mentions do not render, and keeps its last 4000 characters. A closing comment names the run and shows the new status.
 
-A package whose YAML you delete gets no further check, so the next run closes its `update failed`, `check failed`, `update held` and arch issues with a comment that names the deleted file.
+A package whose YAML you delete gets no further check, so the next run closes its `update failed`, `check failed`, `update held` and arch issues with a comment that names the deleted file. A YAML whose `name` differs from its file name gets `check_failed` under the file name, and its issues stay open.
 
 The host of a failed check is that of the first `http://` or `https://` URL in its error, in lower case and without the port, and `api.github.com` and `github.com` are two hosts. An error without a URL, and every failed update, gets the issue of its package. When a host issue closes, each of its packages that still fails gets its own issue in the same run.
 

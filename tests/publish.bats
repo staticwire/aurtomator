@@ -3071,14 +3071,24 @@ EOF
   [ "$(cat "$TEST_TMPDIR/.status/_packages")" = $'flaky\nsteady' ]
 }
 
+# Its issues stay open, since its YAML is still there
+@test "check-all: a YAML whose name differs from its file name fails its check and stays in _packages" {
+  flaky_check flaky
+  yq -i '.name = "other"' "$TEST_TMPDIR/packages/steady.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "check_failed: packages/steady.yml: name 'other' must equal the file name" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_packages")" = $'flaky\nsteady' ]
+}
+
 # A host that answers slowly takes the time of the packages after it
 @test "check-all: starts no check after the time budget of the loop" {
   flaky_check flaky
   AURTOMATOR_CHECK_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/checks" ]
-  [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "check_failed: the check ran out of its 0 minutes in this run" ]
-  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "check_failed: the check ran out of its 0 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/flaky")" = "unchecked: the check ran out of its 0 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 0 minutes in this run" ]
 }
 
 @test "check-all: checks no package again after the time budget of the loop" {
@@ -3091,7 +3101,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/checks")" = flaky ]
   [ ! -e "$TEST_TMPDIR/sleeps" ]
-  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "check_failed: the check ran out of its 2 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 2 minutes in this run" ]
 }
 
 @test "check-all: starts the check loop one package later in each run" {
@@ -3844,6 +3854,8 @@ EOF
   [ "$output" = "❌ failed" ]
   run status_label "cooldown: 2026-11-12"
   [ "$output" = "💤 next update 2026-11-12" ]
+  run status_label "unchecked: the check ran out of its 20 minutes in this run"
+  [ "$output" = "⌛ not checked in this run" ]
   run status_label "unknown: 1.0"
   [ "$output" = "✅ tracking" ]
 }
@@ -3864,10 +3876,12 @@ EOF
 @test "clean_statuses: a status that --publish would refuse becomes a check failure" {
   make_statuses ok=up_to_date failed="check_failed: <b>x</b>" new="new_version: 2.0" day="cooldown: 2026-11-12" \
     held="held: 1.0\` @octocat [x](https://example.invalid) \`" pending="pending: <b>x</b>" \
-    lines=$'updated: 2.0\n| x |' day2="cooldown: tomorrow" other="exploded: 1.0" _alerts=$'a\thold\tnote'
+    lines=$'updated: 2.0\n| x |' day2="cooldown: tomorrow" other="exploded: 1.0" _alerts=$'a\thold\tnote' \
+    late="unchecked: the check ran out of its 20 minutes in this run"
   run clean_statuses "$TEST_TMPDIR/st"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/st/ok")" = up_to_date ]
+  [ "$(cat "$TEST_TMPDIR/st/late")" = "unchecked: the check ran out of its 20 minutes in this run" ]
   [ "$(cat "$TEST_TMPDIR/st/failed")" = "check_failed: <b>x</b>" ]
   [ "$(cat "$TEST_TMPDIR/st/new")" = "new_version: 2.0" ]
   [ "$(cat "$TEST_TMPDIR/st/day")" = "cooldown: 2026-11-12" ]
@@ -3961,6 +3975,20 @@ c
 EOF
   )
   [ "$output" = "$expected" ]
+}
+
+@test "run_summary: names the packages the check did not reach in one line" {
+  make_statuses foo=up_to_date bar="unchecked: the check ran out of its 20 minutes in this run" \
+    baz="unchecked: the check ran out of its 20 minutes in this run"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'3 packages, 1 up to date.\n\nNot checked in this run: `bar`, `baz`.' ]
+
+  rm -rf "$TEST_TMPDIR/st"
+  make_statuses foo="check_failed: boom" bar="unchecked: the check ran out of its 20 minutes in this run"
+  run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [[ "$output" == $'2 packages, 0 up to date.\n\n| Package | Status |\n|---|---|\n| `foo` | ❌ failed |\n'*$'\nNot checked in this run: `bar`.' ]]
 }
 
 @test "run_summary: lists an update in its cooldown, not among the errors" {

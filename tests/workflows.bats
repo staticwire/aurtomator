@@ -2905,6 +2905,17 @@ run_bare_issues_step() {
   [ "$output" = "2" ]
 }
 
+# A package the check did not reach in this run tells nothing about its host
+@test "check-updates: closes no host issue in a run that left a package unchecked" {
+  local pairs
+  mapfile -t pairs < <(host_failures 4 api.github.com a)
+  GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check\n22 ❌ late: check failed' \
+    run_close_step "${pairs[@]}" "late=unchecked: the check ran out of its 20 minutes in this run"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "check-updates: closes the arch issue of a package that _without of publish lists no more" {
   GH_OPEN=$'12 ⚠️ foo: 28+23 without aarch64\n13 ⚠️ bar: 1.0 without riscv64' \
     run_close_step foo=up_to_date bar=up_to_date _without=$'bar\t1.1\triscv64'

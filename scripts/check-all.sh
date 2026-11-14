@@ -429,7 +429,17 @@ run_package() {
   local pkg_file="$1" pass="$2"
   local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false in_flight
   local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
-  pkg_name=$(package_name "$pkg_file") || return 0
+  local stem yaml_name
+  if ! pkg_name=$(package_name "$pkg_file"); then
+    # Its status keeps the issues of the file name open, since its YAML is still there
+    stem="${pkg_file##*/}"
+    stem="${stem%.yml}"
+    if [[ "$MODE" == check ]] && (LC_ALL=C && [[ "$stem" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
+      yaml_name=$(pkg_get "$pkg_file" .name 2>/dev/null) || yaml_name=""
+      echo "check_failed: packages/${stem}.yml: name ${yaml_name@Q} must equal the file name" >"${STATUS_DIR}/${stem}"
+    fi
+    return 0
+  fi
   # --prepare and --publish keep a wait for the cooldown from the check run
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ "${CHECKED[$pkg_name]:-}" == "cooldown: "* ]]; then
     if valid_date "${CHECKED[$pkg_name]#cooldown: }"; then
@@ -710,8 +720,9 @@ for pkg_file in "${check_files[@]:check_start}" "${check_files[@]:0:check_start}
   if check_time_left; then
     run_package "$pkg_file" 1
   elif pkg_name=$(package_name "$pkg_file"); then
-    log_err "$pkg_name: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run"
-    echo "check_failed: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run" >"${STATUS_DIR}/${pkg_name}"
+    # A package the loop does not reach keeps its issues and its row of the journal
+    log_warn "$pkg_name: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run"
+    echo "unchecked: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run" >"${STATUS_DIR}/${pkg_name}"
   fi
 done
 
@@ -727,9 +738,13 @@ if ((${#RECHECK[@]} > 0)) && check_time_left; then
 fi
 
 # The issues step closes the issues of a name this list lacks, since a package
-# without a YAML gets no check that would close them
+# without a YAML gets no check that would close them; a YAML of another name stays
 for pkg_file in "${check_files[@]}"; do
-  package_name "$pkg_file" 2>/dev/null || true
+  stem="${pkg_file##*/}"
+  stem="${stem%.yml}"
+  if (LC_ALL=C && [[ "$stem" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
+    printf '%s\n' "$stem"
+  fi
 done >"${STATUS_DIR}/_packages"
 
 # The arches each package lacks after the run, for the issues of arches out
