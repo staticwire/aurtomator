@@ -29,7 +29,7 @@ upstream:
 current: "2.1.0"
 ```
 
-`validate-pkg.sh` refuses a key that is not in the table and an `upstream` key that the strategy does not read, so a misspelled key cannot go unread: `allow_downgrades` gives `packages/<name>.yml: unknown key: allow_downgrades`, and `upstream.projet` gives `upstream.projet is not a field of any strategy`. It also refuses a value with a control character other than a tab, and a `current` without a digit or with a character outside `A-Za-z0-9._+`.
+`validate-pkg.sh` refuses a key that is not in the table and an `upstream` key that the strategy does not read, so a misspelled key cannot go unread: `allow_downgrades` gives `packages/<name>.yml: unknown key: allow_downgrades`, and `upstream.projet` gives `upstream.projet is not a field of any strategy`. It also refuses a value with a control character other than a tab, and a `current` without a digit or with a character outside `A-Za-z0-9._+`. It refuses a file that holds a key twice in one mapping, since `yq` reads the last of the two, and a file with a carriage return inside a line, a NEL, a U+2028 or a U+2029: `yq` ends a line at each of them and a diff does not, so a review could read a key as part of a comment.
 
 `upstream.max_answer_mb`, a whole number from 1 to 500, sets the largest answer in megabytes that the requests of one package read. The default is 50, and 5 for the page of `webpage-scrape`. A larger answer fails the check. `git-tag` and `git-latest` read with git and take no `max_answer_mb`.
 

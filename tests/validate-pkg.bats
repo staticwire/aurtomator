@@ -298,6 +298,31 @@ current: '$current'"
   done
 }
 
+# yq ends a line at these characters and a diff does not, so a key can hide in what a
+# review reads as a comment, and yq reads the last of two equal keys
+@test "validate: refuses a line break that a diff does not show and a key twice in one mapping" {
+  local sep
+  for sep in $'\r' $'\xc2\x85' $'\xe2\x80\xa8' $'\xe2\x80\xa9'; do
+    printf 'name: mypkg\nstrategy: github-tag\nupstream:\n  project: owner/repo # upstream%s  project: example/evil\n' "$sep" \
+      >"$TEST_TMPDIR/packages/mypkg.yml"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml holds a carriage return inside a line, a NEL, a U+2028 or a U+2029, which yq reads as a line break"* ]] || {
+      echo "taken: ${sep@Q}"
+      return 1
+    }
+  done
+
+  printf 'name: mypkg\nstrategy: github-tag\nupstream:\n  project: owner/repo\n  project: example/evil\n' >"$TEST_TMPDIR/packages/mypkg.yml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/mypkg.yml holds a key twice in one mapping"* ]]
+
+  # A file with CRLF line ends stays valid
+  printf 'name: mypkg\r\nstrategy: github-tag\r\nupstream:\r\n  project: owner/repo\r\n' >"$TEST_TMPDIR/packages/mypkg.yml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
 @test "validate: upstream.url holds no user name" {
   local strategy extra
   for strategy in git-tag git-latest webpage-scrape; do

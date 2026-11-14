@@ -161,6 +161,17 @@ validate_pkg() {
     log_err "$shown must be a map of fields"
     return 1
   fi
+  # yq ends a line at these characters and a diff does not, so a review can read a key
+  # as part of a comment; a CR before a newline ends a line for both
+  if grep -q -e $'\r.' -e $'\xc2\x85' -e $'\xe2\x80\xa8' -e $'\xe2\x80\xa9' "$file"; then
+    log_err "$shown holds a carriage return inside a line, a NEL, a U+2028 or a U+2029, which yq reads as a line break"
+    return 1
+  fi
+  # yq reads the last of two equal keys, and a review reads the first
+  if [[ $(yq '[.. | select(tag == "!!map") | select((keys | length) != (keys | unique | length))] | length' "$file") != 0 ]]; then
+    log_err "$shown holds a key twice in one mapping"
+    return 1
+  fi
   # The messages print keys and values, and a terminal takes a control character as a
   # command; yq -r prints the text of a scalar of any tag, so the check reads them as text
   if [[ $(CONTROL_RE='[\x00-\x08\x0a-\x1f\x7f\x{80}-\x{9f}]' yq \
