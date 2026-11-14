@@ -279,7 +279,7 @@ Without a step, all steps run in order. Steps can be combined, as in `./aurtomat
 
 ## Configuration file
 
-The setup saves its state to `.aurtomator.conf` in the root of your repository, which the `.gitignore` of the template lists, since it holds local paths. The scripts read it as data and never run it. Each line holds one of the four names below and a value in single quotes. Empty lines and lines that start with `#` are skipped, and any other line stops the script with its line number.
+The setup saves its state to `.aurtomator.conf` in the root of your repository, which the `.gitignore` of the template lists, since it holds local paths. The scripts read it as data and never run it. Each line holds one of the four names below and a value in single quotes, and the setup refuses a value with a control character or a byte that is no UTF-8. Empty lines and lines that start with `#` are skipped, and any other line stops the script with its line number.
 
 ```bash
 GIT_AUTHOR_NAME='Jane Doe'

@@ -307,6 +307,18 @@ EOF
   [ ! -e "$TEST_TMPDIR/.aurtomator.conf" ]
 }
 
+# load_config refuses such a value under a UTF-8 locale
+@test "setup identity: refuses a value with a byte that is no UTF-8 in every locale" {
+  local locale
+  for locale in C C.UTF-8; do
+    LC_ALL=$locale run "$TEST_TMPDIR/scripts/setup.sh" identity \
+      --git-name $'Jos\xe9' --git-email "jane@example.com" --non-interactive
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"GIT_AUTHOR_NAME holds a byte that is no UTF-8, which .aurtomator.conf cannot keep"* ]]
+    [ ! -e "$TEST_TMPDIR/.aurtomator.conf" ]
+  done
+}
+
 @test "setup identity: fails without git name in non-interactive" {
   # Override HOME to prevent git config --global detection
   HOME="$TEST_TMPDIR/emptyhome" run "$TEST_TMPDIR/scripts/setup.sh" identity \

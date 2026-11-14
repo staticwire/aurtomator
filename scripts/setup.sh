@@ -123,6 +123,11 @@ save_config() {
       fail "$name holds a control character, which .aurtomator.conf cannot keep"
       return 1
     fi
+    # load_config reads no line with a byte that is no UTF-8 under a UTF-8 locale
+    if ! printf '%s' "${!name}" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
+      fail "$name holds a byte that is no UTF-8, which .aurtomator.conf cannot keep"
+      return 1
+    fi
   done
   # Single quotes in every locale, since ${value@Q} writes $'...' for some values
   for name in GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GPG_KEY_ID AUR_SSH_KEY; do
