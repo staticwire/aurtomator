@@ -101,17 +101,29 @@ _arch_sum_arrays() {
     (name != "" && index(arches, " " name " ") > 0) == (mode == "keep")'
 }
 
-# Print .SRCINFO $1 without the lines of the arches $2 that srcinfo_arch_lines
-# prints, in every section
+# Print .SRCINFO $1 without the lines of the arches $2 that srcinfo_arch_lines prints: all in
+# pkgbase, and in a package section those .SRCINFO $3 lacks, since a package function sets its own
 _srcinfo_without() {
-  awk -v list="$2" '
-    BEGIN { n = split(list, names, " "); for (i = 1; i <= n; i++) out[names[i]] = 1 }
-    /^\tarch = / { value = substr($0, 9); if (value in out) next }
-    match($0, /^\t[a-z0-9]+_[a-z0-9_]+ = /) {
-      key = substr($0, 2, RLENGTH - 4)
+  awk -v list="$2" -v other="$3" '
+    function arch_of(line,   key) {
+      if (line ~ /^\tarch = /) return substr(line, 9)
+      if (!match(line, /^\t[a-z0-9]+_[a-z0-9_]+ = /)) return ""
+      key = substr(line, 2, RLENGTH - 4)
       sub(/^[a-z0-9]+_/, "", key)
-      if (key in out) next
+      return key
     }
+    BEGIN {
+      n = split(list, names, " ")
+      for (i = 1; i <= n; i++) out[names[i]] = 1
+      while (other != "" && (getline line <other) > 0) {
+        if (line ~ /^pkgname = /) section = substr(line, 11)
+        else if (arch_of(line) in out) kept[section, arch_of(line)] = 1
+      }
+      section = ""
+    }
+    /^pkgname = / { section = substr($0, 11) }
+    { arch = arch_of($0) }
+    arch in out && (section == "" || !((section, arch) in kept)) { next }
     { print }
   ' "$1"
 }
@@ -403,28 +415,34 @@ _bumped_line() {
   [[ "$new" == "$(_bump_version "$old" "$3" "$4" "$5" "$6")" ]] || _bumped_with_dash "$old" "$new" "$3" "$4" "$7"
 }
 
-# Print line $1 with pkgrel $4 in each <version $2>-<pkgrel $3> that has no digit or dot
-# before it and no digit after it
+# Print line $1 with pkgrel $4 in each <version $2>-<pkgrel $3> and <version>_<pkgrel> that has
+# no digit or dot before it and no digit, or dot and digit, after it
 _with_rel() {
-  local LC_ALL=C rest="$1" out="" find="$2-$3" before
-  while [[ "$rest" == *"$find"* ]]; do
-    before="${rest%%"$find"*}"
-    rest="${rest#*"$find"}"
-    if [[ "$before" == *[0-9.] || "$rest" == [0-9]* ]]; then
-      out+="$before$find"
-    else
-      out+="$before$2-$4"
-    fi
+  local LC_ALL=C line="$1" rest out find before joint
+  for joint in - _; do
+    rest="$line" out="" find="$2$joint$3"
+    while [[ "$rest" == *"$find"* ]]; do
+      before="${rest%%"$find"*}"
+      rest="${rest#*"$find"}"
+      if [[ "$before" == *[0-9.] || "$rest" == [0-9]* || "$rest" == .[0-9]* ]]; then
+        out+="$before$find"
+      else
+        out+="$before$2$joint$4"
+      fi
+    done
+    line="$out$rest"
   done
-  printf '%s\n' "$out$rest"
+  printf '%s\n' "$line"
 }
 
-# Succeeds as _bumped_line does, also after each <version>-<pkgrel> of AUR line $1 takes the
-# pkgrel of the update; the last two arguments are the AUR pkgrel and that of the update
+# Succeeds as _bumped_line does; when the AUR PKGBUILD expands pkgrel ($12=yes), each version
+# with AUR pkgrel $10 in line $1 first takes pkgrel $11 of the update, as _with_rel writes it
 _bumped_any_rel() {
-  _bumped_line "${@:1:9}" && return 0
-  [[ -n "${10}" && "${10}" != "${11}" ]] || return 1
-  _bumped_line "$(_with_rel "$1" "$3" "${10}" "${11}")" "${@:2:8}"
+  if [[ "${12:-}" == yes && -n "${10}" && "${10}" != "${11}" ]]; then
+    _bumped_line "$(_with_rel "$1" "$3" "${10}" "${11}")" "${@:2:8}"
+  else
+    _bumped_line "${@:1:9}"
+  fi
 }
 
 # Print "SKIP <arch suffix>:<index>" for each source of .SRCINFO $1 that is SKIP in every
@@ -502,8 +520,8 @@ check_prepared_srcinfo() {
     return 1
   fi
   local -a old_lines new_lines
-  mapfile -t old_lines < <(_srcinfo_without "$1" "${9:-}")
-  mapfile -t new_lines < <(_srcinfo_without "$2" "${10:-}")
+  mapfile -t old_lines < <(_srcinfo_without "$1" "${9:-}" "$2")
+  mapfile -t new_lines < <(_srcinfo_without "$2" "${10:-}" "$1")
   _drop_trailing_blank old_lines
   _drop_trailing_blank new_lines
   if [[ "${#old_lines[@]}" -ne "${#new_lines[@]}" ]]; then
@@ -511,13 +529,15 @@ check_prepared_srcinfo() {
     return 1
   fi
 
-  local old_ver old_rel old_up="" new_up=""
+  local old_ver old_rel old_up="" new_up="" expands=no rel_re='[$]([{]pkgrel[^A-Za-z0-9_]|pkgrel([^A-Za-z0-9_]|$))'
   old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
   old_rel=$(awk -F' = ' '$1 ~ /^[ \t]*pkgrel$/ { print $2; exit }' "$1")
   if [[ -n "$old_rel" && ! "$old_rel" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     log_err "The AUR .SRCINFO has pkgrel = $(_shown_line "$old_rel"), which makepkg does not write"
     return 1
   fi
+  # A line holds the pkgrel of the update only where the PKGBUILD expands pkgrel
+  [[ ! "$text" =~ $rel_re ]] || expands=yes
   if [[ -n "$format" ]]; then
     old_up=$(_unformat_version "$old_ver" "$format")
     new_up=$(_unformat_version "$version" "$format")
@@ -536,7 +556,7 @@ check_prepared_srcinfo() {
   # A group is the common sources and checksums, _, or those of one
   # architecture, _x86_64
   local -A arch_groups=() arches=() pinned_in=() changed_in=() sum_counts=() sum_moved=() renamed=()
-  local i old new key kind old_val new_val n expected group arch has_arch=false changed=false in_pkgbase=true
+  local i old new key kind old_val new_val n expected group arch has_arch=false changed=false in_pkgbase=true arch_changed=false
   for i in "${!new_lines[@]}"; do
     old="${old_lines[$i]}"
     new="${new_lines[$i]}"
@@ -592,7 +612,7 @@ check_prepared_srcinfo() {
         n="${source_counts[$key]:-0}"
         source_counts[$key]=$((n + 1))
         expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
-        if ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel" &&
+        if ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel" "$expands" &&
           ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
             _name_differs_in_digits "$expected" "$new"; }; then
           log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $(_shown_line "$new"), expected $(_shown_line "$expected")"
@@ -621,7 +641,7 @@ check_prepared_srcinfo() {
             log_err "Prepared .SRCINFO line $((i + 1)) changes a value the PKGBUILD holds as text: $(_shown_line "$new"), expected $(_shown_line "$old")"
             return 1
           fi
-        elif ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel"; then
+        elif ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel" "$expands"; then
           expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
           log_err "Prepared .SRCINFO line $((i + 1)) does not follow the version as the PKGBUILD does: $(_shown_line "$new"), expected $(_shown_line "$expected")"
           return 1
@@ -643,11 +663,19 @@ check_prepared_srcinfo() {
     for group in "${!arch_groups[@]}"; do
       [[ "$group" == _ ]] || arches["${group#_}"]=1
     done
+    # Once the sources of one arch change with the version, an arch with downloads of its own
+    # builds the version from them, and a change of the common sources no longer counts for it
+    for group in "${!changed_in[@]}"; do
+      [[ "$group" == _ ]] || arch_changed=true
+    done
     for arch in "${!arches[@]}"; do
-      if [[ -n "${pinned_in[_]:-}${pinned_in[_$arch]:-}" && -z "${changed_in[_]:-}${changed_in[_$arch]:-}" ]]; then
-        log_err "Prepared .SRCINFO changes no source URL and no checksum for $arch, so the new version would hold the files of the old one"
-        return 1
+      if [[ "$arch_changed" == true && -n "${pinned_in[_$arch]:-}" ]]; then
+        [[ -z "${changed_in[_$arch]:-}" ]] || continue
+      elif [[ -z "${pinned_in[_]:-}${pinned_in[_$arch]:-}" || -n "${changed_in[_]:-}${changed_in[_$arch]:-}" ]]; then
+        continue
       fi
+      log_err "Prepared .SRCINFO changes no source URL and no checksum for $arch, so the new version would hold the files of the old one"
+      return 1
     done
   fi
   if [[ "$changed" == false && "$new_asset" != "$old_asset" ]]; then

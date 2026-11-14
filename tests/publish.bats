@@ -2091,6 +2091,66 @@ EOF
   [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
 }
 
+# A maintainer who drops an arch for good drops its source_<arch> too, so it has nothing to
+# come back with
+@test "publish-pkg: drops an arch from arch_out once the AUR PKGBUILD has no source of it" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  sed -i '/^source_aarch64=/d; /^depends_aarch64=/d' "$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "drop aarch64"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
+  prepare_arch 28+24 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx "arch=('x86_64' 'powerpc64le' 'riscv64')"
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx 'pkgver=28+24'
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+}
+
+@test "publish-pkg: writes no arch_out on a sync for an arch the AUR PKGBUILD has no source of" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  setup_arch_prepare
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
+  arch_pkgbuild "$work/PKGBUILD" 28+23 x86_64 powerpc64le riscv64
+  sed -i '/^source_aarch64=/d; /^depends_aarch64=/d' "$work/PKGBUILD"
+  arch_srcinfo "$work/.SRCINFO" 28+23 x86_64 powerpc64le riscv64
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false \
+    commit -qam "28+23 release from webpage-scrape"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+  [ "$status" -eq 2 ]
+  [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
+  [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
+}
+
+# arch_wait comes from the YAML, which a pull request can change
+@test "publish-pkg: writes no arch_out on a sync from an arch_wait of another version or form" {
+  local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" wait
+  setup_arch_prepare
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 2 ]
+  for wait in '{"version": "28+22", "commit": strenv(C), "arches": "aarch64"}' \
+    '{"version": "28+23", "commit": "HEAD~1", "arches": "aarch64"}' \
+    '{"version": "28+23", "commit": strenv(C), "arches": "aarch64 x86_64"}'; do
+    yq -i 'del(.arch_out)' "$yml"
+    C="$AUR_BASE" yq -i ".arch_wait = $wait | .arch_wait.since = \"2026-11-10T09:00:00Z\"" "$yml"
+    run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$TEST_TMPDIR/out/jdk-temurin-ea-bin"
+    [ "$status" -eq 2 ]
+    [ "$(pkg_get "$yml" 'has("arch_out")')" = false ] || {
+      echo "taken: $wait"
+      return 1
+    }
+  done
+}
+
 @test "publish-pkg: drops arch_wait after a push without --arch-out" {
   setup_publish
   yq -i '.arch_wait = {"version": "1.1.0", "since": "2026-11-10T09:00:00Z"}' "$TEST_TMPDIR/packages/demo.yml"
@@ -4559,18 +4619,25 @@ EOF
       $'\tsource = https://example.org/foo-'"$2"'.tar.gz' $'\tsha256sums = '"$4" \
       '' 'pkgname = foo' $'\tdepends = foo-common='"$2-$3" '' 'pkgname = foo-common' >"$1"
   }
+  # shellcheck disable=SC2016
+  local text='  depends=("foo-common=${pkgver}-${pkgrel}")'
   rel_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 3 aaaa
   rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 1 bbbb
-  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+  # The AUR pkgrel 1.1 of a rebuild
+  rel_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 1.1 aaaa
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 0 ]
   # A rebuild of the version raises pkgrel
+  rel_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 3 aaaa
   rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.0 4 aaaa
-  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0 "" "" 4
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0 "" "" 4
   [ "$status" -eq 0 ]
   # A pkgrel other than that of the update is refused
   rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 1 bbbb
   sed -i 's/foo-common=2.0-1/foo-common=2.0-5/' "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 1 ]
 }
 
@@ -4580,18 +4647,96 @@ EOF
     printf '%s\n' 'pkgbase = foo' $'\tpkgver = '"$2" $'\tpkgrel = '"$3" $'\tarch = x86_64' \
       $'\tsource = '"$4" $'\tsha256sums = '"$5" '' 'pkgname = foo' >"$1"
   }
+  # shellcheck disable=SC2016
+  local text='source=("https://example.com/foo-${pkgver}-${pkgrel}.tar.gz")'
   rel_source "$TEST_TMPDIR/old.SRCINFO" 1.2 3 https://example.com/foo-1.2-34.tar.gz aaaa
   rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/foo-1.3-14.tar.gz bbbb
-  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
   [ "$status" -eq 1 ]
   rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/foo-1.3-34.tar.gz bbbb
-  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
   [ "$status" -eq 0 ]
 
   rel_source "$TEST_TMPDIR/old.SRCINFO" 1.2 3 https://example.com/11.2-3/foo-1.2.tar.gz aaaa
   rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/11.2-1/foo-1.3.tar.gz bbbb
-  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
   [ "$status" -eq 1 ]
+  # A digit or a dot before the token, a digit or a dot and a digit after it
+  local old new
+  for old in https://example.com/foo-0.1.2-3.tar.gz https://example.com/foo-1.2-3.4.tar.gz; do
+    new=${old/foo-1.2-/foo-1.3-}
+    rel_source "$TEST_TMPDIR/old.SRCINFO" 1.2 3 "$old" aaaa
+    rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 "$new" bbbb
+    run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+    [ "$status" -eq 0 ]
+  done
+  # A token the pkgrel skips keeps its text beside one it replaces
+  rel_source "$TEST_TMPDIR/old.SRCINFO" 1.2 3 https://example.com/11.2-3/foo-1.2-3.tar.gz aaaa
+  rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/11.2-3/foo-1.3-1.tar.gz bbbb
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 0 ]
+}
+
+# makepkg writes the pkgrel of the update where the PKGBUILD expands pkgrel, and the text of
+# the PKGBUILD elsewhere
+@test "check_prepared_srcinfo: takes the pkgrel form of a line from the AUR PKGBUILD" {
+  rel_line() {
+    printf '%s\n' 'pkgbase = foo' $'\tpkgver = '"$2" $'\tpkgrel = '"$3" $'\tarch = x86_64' \
+      $'\tsource = https://dl.example.com/'"$4" $'\tsha256sums = '"$5" '' 'pkgname = foo' >"$1"
+  }
+  # shellcheck disable=SC2016
+  local expands='source=("https://dl.example.com/rel_${pkgver}-${pkgrel}_amd64.deb")'
+  # shellcheck disable=SC2016
+  local literal='source=("https://dl.example.com/rel-${pkgver}-2.tar.gz")'
+  rel_line "$TEST_TMPDIR/old.SRCINFO" 1.2.3 2 rel_1.2.3-2_amd64.deb aaaa
+  rel_line "$TEST_TMPDIR/new.SRCINFO" 1.2.4 1 rel_1.2.4-1_amd64.deb bbbb
+  run check_prepared_srcinfo "$expands" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.2.4
+  [ "$status" -eq 0 ]
+  rel_line "$TEST_TMPDIR/new.SRCINFO" 1.2.4 1 rel_1.2.4-2_amd64.deb bbbb
+  run check_prepared_srcinfo "$expands" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.2.4
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is not the AUR source with the new version: source = https://dl.example.com/rel_1.2.4-2_amd64.deb"* ]]
+
+  rel_line "$TEST_TMPDIR/old.SRCINFO" 1.2.3 2 rel-1.2.3-2.tar.gz aaaa
+  rel_line "$TEST_TMPDIR/new.SRCINFO" 1.2.4 1 rel-1.2.4-2.tar.gz bbbb
+  run check_prepared_srcinfo "$literal" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.2.4
+  [ "$status" -eq 0 ]
+  rel_line "$TEST_TMPDIR/new.SRCINFO" 1.2.4 1 rel-1.2.4-1.tar.gz bbbb
+  run check_prepared_srcinfo "$literal" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.2.4
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is not the AUR source with the new version: source = https://dl.example.com/rel-1.2.4-1.tar.gz"* ]]
+  # $pkgrel without braces expands, and $pkgrel_deb is another variable
+  # shellcheck disable=SC2016
+  run check_prepared_srcinfo 'source=("https://dl.example.com/rel-${pkgver}-$pkgrel.tar.gz")' \
+    "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.2.4
+  [ "$status" -eq 0 ]
+  # shellcheck disable=SC2016
+  run check_prepared_srcinfo "$literal"$'\n_deb=$pkgrel_deb' "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.2.4
+  [ "$status" -eq 1 ]
+}
+
+# A .deb name joins the version and the pkgrel with _ as well as with -
+@test "check_prepared_srcinfo: takes the pkgrel of the update after - and after _" {
+  # shellcheck disable=SC2016
+  local text='source=("https://dl.example.com/${pkgver}-${pkgrel}/rel-${pkgver}_${pkgrel}.deb")'
+  printf '%s\n' 'pkgbase = foo' $'\tpkgver = 1.2.3' $'\tpkgrel = 2' $'\tarch = x86_64' \
+    $'\tsource = https://dl.example.com/1.2.3-2/rel-1.2.3_2.deb' $'\tsha256sums = aaaa' '' 'pkgname = foo' >"$TEST_TMPDIR/old.SRCINFO"
+  printf '%s\n' 'pkgbase = foo' $'\tpkgver = 1.2.4' $'\tpkgrel = 1' $'\tarch = x86_64' \
+    $'\tsource = https://dl.example.com/1.2.4-1/rel-1.2.4_1.deb' $'\tsha256sums = bbbb' '' 'pkgname = foo' >"$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.2.4
+  [ "$status" -eq 0 ]
+  sed -i 's|rel-1.2.4_1.deb|rel-1.2.4_2.deb|' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.2.4
+  [ "$status" -eq 1 ]
+}
+
+# A .SRCINFO written by hand can lack pkgrel, and the pkgrel of a line then stays as it is
+@test "check_prepared_srcinfo: takes an AUR .SRCINFO without pkgrel" {
+  printf '%s\n' 'pkgbase = foo' $'\tpkgver = 1.2' $'\tarch = x86_64' \
+    $'\tsource = https://example.com/foo-1.2.tar.gz' $'\tsha256sums = aaaa' '' 'pkgname = foo' >"$TEST_TMPDIR/old.SRCINFO"
+  sed -e 's/1\.2/1.3/' -e 's/aaaa/bbbb/' "$TEST_TMPDIR/old.SRCINFO" >"$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+  [ "$status" -eq 0 ]
 }
 
 # The maintainer writes the AUR .SRCINFO, and its pkgrel decides what the pkgrel step replaces
@@ -4605,6 +4750,13 @@ EOF
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
   [ "$status" -eq 1 ]
   [[ "$output" == *"The AUR .SRCINFO has pkgrel = 3/../../other, which makepkg does not write"* ]]
+  local rel
+  for rel in x3 3x4 1.2.3 .5 1.; do
+    sed -i "s|^\tpkgrel = .*|\tpkgrel = $rel|" "$TEST_TMPDIR/old.SRCINFO"
+    run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"The AUR .SRCINFO has pkgrel = $rel, which makepkg does not write"* ]]
+  done
 }
 
 # The maintainer writes the AUR .SRCINFO, so an arch with sources of its own counts without
@@ -4627,6 +4779,94 @@ EOF
     [ "$status" -eq 1 ]
     [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for aarch64, so the new version would hold the files of the old one"* ]]
   done
+}
+
+# The files of an arch with downloads of its own are those downloads; a new common source
+# leaves the old ones in its build
+@test "check_prepared_srcinfo: rejects an arch that keeps its downloads when the common sources change" {
+  # $1 path, $2 version, $3 common checksum, $4 x86_64 checksum, $5 aarch64 checksum
+  groups_srcinfo() {
+    printf '%s\n' 'pkgbase = demo' $'\tpkgver = '"$2" $'\tpkgrel = 1' $'\tarch = x86_64' $'\tarch = aarch64' \
+      $'\tsource = https://example.com/v'"$2"'/LICENSE' $'\tsha256sums = '"$3" \
+      $'\tsource_x86_64 = https://example.com/v'"$2"'/tool-x86_64.tar.gz' $'\tsha256sums_x86_64 = '"$4" \
+      $'\tsource_aarch64 = https://example.com/latest/tool-aarch64.tar.gz' $'\tsha256sums_aarch64 = '"$5" \
+      '' 'pkgname = demo' >"$1"
+  }
+  groups_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 "$H1" "$H1" "$H2"
+  groups_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" "$H3" "$H2"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for aarch64, so the new version would hold the files of the old one"* ]]
+
+  groups_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" "$H3" "$H4"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+  # A common source that stays counts for an arch whose own downloads change
+  groups_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 "$H1" "$H1" "$H2"
+  sed -i 's|/v1.0/LICENSE|/LICENSE|' "$TEST_TMPDIR/old.SRCINFO"
+  groups_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H1" "$H3" "$H4"
+  sed -i 's|/v2.0/LICENSE|/LICENSE|' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+  # An arch without sources of its own builds from the common ones that change
+  groups_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 "$H1" "$H1" "$H2"
+  sed -i '/aarch64 = /d; s/^\tarch = x86_64$/&\n\tarch = riscv64/' "$TEST_TMPDIR/old.SRCINFO"
+  groups_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" "$H3" "$H4"
+  sed -i '/aarch64 = /d; s/^\tarch = x86_64$/&\n\tarch = riscv64/' "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+}
+
+# An arch whose own sources are no downloads takes its files from the common sources
+@test "check_prepared_srcinfo: takes the common downloads for an arch whose own sources are no downloads" {
+  # $1 path, $2 version, $3 directory of the common download, $4 its checksum
+  patch_srcinfo() {
+    printf '%s\n' 'pkgbase = demo' $'\tpkgver = '"$2" $'\tpkgrel = 1' $'\tarch = x86_64' $'\tarch = aarch64' \
+      $'\tsource = https://example.com/'"$3"'/tool.tar.gz' $'\tsha256sums = '"$4" \
+      $'\tsource_aarch64 = tool-aarch64.patch' $'\tsha256sums_aarch64 = '"$H2" \
+      '' 'pkgname = demo' >"$1"
+  }
+  patch_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 v1.0 "$H1"
+  patch_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 v2.0 "$H3"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+
+  patch_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 latest "$H1"
+  patch_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 latest "$H1"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for "* ]]
+}
+
+# makepkg writes the arch lines of a package function as the function sets them, whatever
+# arch=() of pkgbase holds
+@test "check_prepared_srcinfo: an arch that goes out keeps the lines a package function writes" {
+  # $1 path, $2 version, $3 checksum, $4 arch lines of pkgbase, $5 lines of the package section
+  fn_srcinfo() {
+    printf '%s\n' 'pkgbase = demo' $'\tpkgver = '"$2" $'\tpkgrel = 1' "$4" \
+      $'\tsource = https://example.com/v'"$2"'/tool.tar.gz' $'\tsha256sums = '"$3" \
+      '' 'pkgname = demo' "$5" >"$1"
+  }
+  local both=$'\tarch = x86_64\n\tarch = aarch64'
+  fn_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 "$H1" "$both" "$both"$'\n\tdepends_aarch64 = libfoo'
+  fn_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" $'\tarch = x86_64' "$both"$'\n\tdepends_aarch64 = libfoo'
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0 "" "" 1 "" "" aarch64 ""
+  [ "$status" -eq 0 ]
+  # Without an arch of its own, the function follows pkgbase and its lines of the arch go
+  fn_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 "$H1" "$both" $'\tdepends_aarch64 = libfoo'
+  fn_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" $'\tarch = x86_64' ''
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0 "" "" 1 "" "" aarch64 ""
+  [ "$status" -eq 0 ]
+  # The lines of pkgbase go in any case
+  fn_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" "$both" ''
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0 "" "" 1 "" "" aarch64 ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO adds or removes lines"* ]]
+  # An arch that comes back has the lines of the function in both copies
+  fn_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 "$H1" $'\tarch = x86_64' "$both"
+  fn_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" "$both" "$both"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0 "" "" 1 "" "" "" aarch64
+  [ "$status" -eq 0 ]
 }
 
 # Helper: .SRCINFO with the given pkgver and one more line
@@ -6092,7 +6332,8 @@ arch_out:
   local line
   stub_script verify-pkg.sh 0
   for line in $'pkg\t2.0.0\taarch64' $'pkg\t1.0.0\taarch64\t' $'pkg\t2.0.0\tAArch64\t' $'pkg\t2.0.0\taarch64\tsoon' \
-    $'pkg\t2.0.0\tx86_64\t' $'pkg\t2.0.0\taarch64\t2099-01-01T00:00:00Z'; do
+    $'pkg\t2.0.0\tx86_64\t' $'pkg\t2.0.0\taarch64\t2099-01-01T00:00:00Z' \
+    $'pkg\t2.0.0\taarch64\t2026-11-10T09:00:00Z\t'"$(printf 'c%.0s' {1..41})"; do
     setup_check_verify
     printf '%s\n' "$line" >"$TEST_TMPDIR/.status/_arches"
     run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
@@ -6141,6 +6382,26 @@ arch_out:
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   cmp "$TEST_TMPDIR/pkg.yml.before" "$TEST_TMPDIR/packages/pkg.yml"
+}
+
+# A version sync after a lost YAML commit takes the arches out of arch_wait alone
+@test "check-all --publish: adds the arches of a later run of the wait and keeps its commit" {
+  local first second yml="$TEST_TMPDIR/packages/pkg.yml"
+  first=$(printf 'a%.0s' {1..40})
+  second=$(printf 'b%.0s' {1..40})
+  checked_arch_package 1.0.0 "pending: 2.0.0" $'pkg\t2.0.0\taarch64 riscv64\t2026-11-10T09:00:00Z\t'"$second"
+  F="$first" yq -i '.arch_wait = {"version": "2.0.0", "since": "2026-11-10T09:00:00Z", "commit": strenv(F), "arches": "aarch64"}' "$yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(pkg_get "$yml" '[.arch_wait.version, .arch_wait.since, .arch_wait.commit, .arch_wait.arches] | join("|")')" = "2.0.0|2026-11-10T09:00:00Z|$first|aarch64 riscv64" ]
+
+  # The wait of another start is a new one
+  rm -rf "$TEST_TMPDIR/out"
+  checked_arch_package 1.0.0 "pending: 2.0.0" $'pkg\t2.0.0\triscv64\t2026-11-11T09:00:00Z\t'"$second"
+  F="$first" yq -i '.arch_wait = {"version": "2.0.0", "since": "2026-11-10T09:00:00Z", "commit": strenv(F), "arches": "aarch64"}' "$yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(pkg_get "$yml" '[.arch_wait.version, .arch_wait.since, .arch_wait.commit, .arch_wait.arches] | join("|")')" = "2.0.0|2026-11-11T09:00:00Z|$second|riscv64" ]
 }
 
 @test "check-all --publish: writes arch_wait for an update without an arch that it could not push" {

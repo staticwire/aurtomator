@@ -53,26 +53,46 @@ arch_minus() {
 }
 
 # Write arch_wait of package file $1 for version $2 since $3, with the AUR commit $4 and the
-# arches $5 it waits for when given, unless it holds that version and start already
+# arches $5 it waits for when given; a later run of that wait adds the arches it finds missing
 set_arch_wait() {
-  [[ "$(pkg_get "$1" '.arch_wait.version // ""')" != "$2" || "$(pkg_get "$1" '.arch_wait.since // ""')" != "$3" ]] || return 0
-  if [[ -n "${4:-}" && -n "${5:-}" ]]; then
-    VERSION="$2" SINCE="$3" COMMIT="$4" ARCHES="$5" \
+  local commit="${4:-}" waits="${5:-}" waited added
+  if [[ "$(pkg_get "$1" '.arch_wait.version // ""')" == "$2" && "$(pkg_get "$1" '.arch_wait.since // ""')" == "$3" ]]; then
+    [[ -n "$commit" && -n "$waits" ]] || return 0
+    waited=$(pkg_get "$1" '.arch_wait.arches // ""')
+    added=$(arch_minus "$waits" "$waited")
+    [[ -n "$added" ]] || return 0
+    waits="$waited${waited:+ }$added"
+    # The commit stays that of the AUR head at the start of the wait
+    commit=$(pkg_get "$1" '.arch_wait.commit // ""')
+    commit="${commit:-$4}"
+  fi
+  if [[ -n "$commit" && -n "$waits" ]]; then
+    VERSION="$2" SINCE="$3" COMMIT="$commit" ARCHES="$waits" \
       yq -i '.arch_wait = {"version": strenv(VERSION), "since": strenv(SINCE), "commit": strenv(COMMIT), "arches": strenv(ARCHES)}' "$1"
   else
     VERSION="$2" SINCE="$3" yq -i '.arch_wait = {"version": strenv(VERSION), "since": strenv(SINCE)}' "$1"
   fi
 }
 
-# Write the arch state of package file $1 after an update to the arch words $2
-# that leaves out the arches $3 of AUR commit $4; a published version needs no wait
+# Succeeds when PKGBUILD $1 assigns source_$2; an arch without one was dropped by the
+# maintainer and has nothing to come back with
+pkgbuild_assigns_source() {
+  local -x LC_ALL=C
+  grep -qE "(^|[^A-Za-z0-9_])source_$2[+]?=" "$1"
+}
+
+# Write the arch state of package file $1 after an update to the arch words $2 that leaves out
+# the arches $3 of AUR commit $4, with PKGBUILD $5; a published version needs no wait
 arch_state_after() {
   local arch
   local -a keys out_arches
   mapfile -t keys < <(pkg_get "$1" '.arch_out // {} | keys | .[]')
   for arch in "${keys[@]}"; do
-    [[ -n "$arch" && " $2 " == *" $arch "* ]] || continue
-    ARCH="$arch" yq -i 'del(.arch_out[strenv(ARCH)])' "$1"
+    [[ "$arch" =~ ^[a-z0-9_]+$ ]] || continue
+    # An arch out that the PKGBUILD has no source_<arch> for can no longer come back
+    if [[ " $2 " == *" $arch "* ]] || ! pkgbuild_assigns_source "$5" "$arch"; then
+      ARCH="$arch" yq -i 'del(.arch_out[strenv(ARCH)])' "$1"
+    fi
   done
   read -ra out_arches <<<"$3"
   for arch in "${out_arches[@]}"; do
@@ -116,10 +136,11 @@ srcinfo_built() {
 }
 
 # Print the arches of arch_wait of package file $1 that HEAD of AUR clone $2 lacks, $3 holding
-# the arches of HEAD, and that the commit of arch_wait builds, then that commit
+# the arches of HEAD and $4 its PKGBUILD, and that the commit of arch_wait builds, then that commit
 wait_out() {
   local -x LC_ALL=C
-  local commit arches out
+  local commit arches out arch kept=""
+  local -a built
   commit=$(pkg_get "$1" '.arch_wait.commit // ""')
   arches=$(pkg_get "$1" '.arch_wait.arches // ""')
   if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]] || ! arch_list_ok "$arches" ||
@@ -128,7 +149,12 @@ wait_out() {
   fi
   out=$(arch_minus "$arches" "$3 x86_64")
   out=$(srcinfo_built <(git -C "$2" show "${commit}:.SRCINFO") "$out")
-  [[ -z "$out" ]] || printf '%s\n%s\n' "$out" "$commit"
+  # An arch that HEAD dropped together with its source_<arch> stays dropped
+  read -ra built <<<"$out"
+  for arch in "${built[@]}"; do
+    ! pkgbuild_assigns_source "$4" "$arch" || kept+="${kept:+ }$arch"
+  done
+  [[ -z "$kept" ]] || printf '%s\n%s\n' "$kept" "$commit"
 }
 
 # Print each line of .SRCINFO $1 that belongs to arch $2, after the header of its

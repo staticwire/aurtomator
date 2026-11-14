@@ -4536,6 +4536,48 @@ arch_wait:
   [ "$ARCH_OUT" = $'aarch64|\n|' ]
 }
 
+# A maintainer who drops an arch for good drops its source_<arch>, and the arch can never come back
+@test "check-arch: an arch of arch_out without its source in the AUR PKGBUILD stays out unasked" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  temurin_package "current: 28+23"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  aur_arch_commit 28+23 x86_64 powerpc64le riscv64 >/dev/null
+  sed -i '/^source_aarch64=/d' "$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "drop aarch64"
+  git -C "$work" push -q "$AUR_REMOTE" master
+
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+  run ! grep -q "$(arch_source_url aarch64 28+24)" "$TEST_TMPDIR/heads.log"
+  grep -q "the AUR PKGBUILD has no source_aarch64, so aarch64 stays out" "$TEST_TMPDIR/arch.err"
+
+  # A version without x86_64 keeps it out as well
+  archive_missing x86_64 28+24
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+
+  # An assignment in a block of the PKGBUILD keeps the arch, which comes back
+  : >"$TEST_TMPDIR/missing"
+  # shellcheck disable=SC2016
+  printf '%s\n' 'if true; then' '  source_aarch64=("${_release}/OpenJDK-jdk_aarch64_${_file}")' 'fi' >>"$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "aarch64 in a block"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+}
+
+@test "check-arch: a wait names each arch it waits for" {
+  temurin_package "current: 28+22"
+  archive_missing aarch64 28+23
+  archive_missing riscv64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  [ "$(sed -n 2p "$TEST_TMPDIR/arch.out")" = "aarch64 riscv64" ]
+}
+
 @test "check-arch: an arch the maintainer put back is no longer out" {
   temurin_package "current: 28+22"
   yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
@@ -4880,7 +4922,11 @@ stand_in_arch() {
   local out
   stand_in_strategy step 2.0.0
   create_test_package "pkg" "step" "current: '1.0.0'"
-  for out in $'2026-11-11T10:00:00Z\n' $'2026-11-11T10:00:00Z\naarch64\nmain\n' $'2026-11-11T10:00:00Z\nx86_64\n'"$(printf 'c%.0s' {1..40})"$'\n'; do
+  local commit
+  commit=$(printf 'c%.0s' {1..40})
+  for out in $'2026-11-11T10:00:00Z\n' $'2026-11-11T10:00:00Z\naarch64\nmain\n' $'2026-11-11T10:00:00Z\nx86_64\n'"$commit"$'\n' \
+    $'2026-11-11T10:00:00Z\n\n'"$commit"$'\n' $'2026-11-11T10:00:00Z\naarch64\n'"${commit}c"$'\n' \
+    $'2026-11-11T10:00:00Z\nAArch64\n'"$commit"$'\n'; do
     stand_in_arch "$out" 3
     rm -rf "$TEST_TMPDIR/.status"
     run "$TEST_TMPDIR/scripts/check-all.sh"
