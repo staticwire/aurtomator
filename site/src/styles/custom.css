@@ -46,3 +46,13 @@ starlight-theme-select:has(option[value='auto']:checked) svg.label-icon {
 starlight-theme-select:has(option[value='auto']:checked) svg.label-icon > * {
   display: none;
 }
+
+.github-lockup {
+  display: inline-block;
+  margin-top: 1rem;
+}
+
+.github-lockup img {
+  height: 24px;
+  width: auto;
+}

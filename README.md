@@ -12,6 +12,7 @@ aurtomator does the routine work of an AUR maintainer: it finds a new upstream v
   <a href="https://github.com/staticwire/aurtomator/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/staticwire/aurtomator?logo=github&amp;logoColor=white"></a>
   <a href="LICENSE"><img alt="License: BSD-3-Clause" src="https://img.shields.io/badge/license-BSD--3--Clause-lightgrey?logo=opensourceinitiative&amp;logoColor=white"></a>
   <a href="https://www.gnu.org/software/bash/"><img alt="Bash 5 or later" src="https://img.shields.io/badge/bash-5%2B-green?logo=gnubash&amp;logoColor=white"></a>
+  <a href="https://aurtomator.dev/setup/#the-calling-workflows"><img alt="Runs in GitHub Actions" src="https://img.shields.io/badge/GitHub_Actions-24292f?logo=github&amp;logoColor=white"></a>
 </p>
 
 <p align="center">
