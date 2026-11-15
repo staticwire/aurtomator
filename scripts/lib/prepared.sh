@@ -43,6 +43,8 @@ _pkgbuild_parts() {
       inner = substr(text, i + 2, end - 1)
       if (!end) return 0
       if (c == "(" && inner !~ /^[A-Za-z0-9 _.,:%+=\/@-]*$/) return 0
+      # The ) of a case pattern, as in $(case x in a), leaves the command open
+      if (c == "(" && (" " inner " ") ~ / (case|coproc|do|done|elif|else|esac|fi|for|function|if|in|select|then|time|until|while) /) return 0
       if (c == "{" && (inner ~ /^!|[{"\047`]/ || index(inner, "$("))) return 0
       skip = i + 1 + end
       return 1

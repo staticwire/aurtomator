@@ -4789,8 +4789,9 @@ sha256sums=('$H3' '$H4')"
 @test "check_prepared_pkgbuild: rejects checksum arrays after a command substitution with more than a plain command" {
   local lead
   # shellcheck disable=SC2016
+  # The ) of a case pattern leaves $(case x in a) open, and time takes a case after it
   for lead in '_v=$(echo "1")' '_v=$(echo 1 | cut -c1)' '_v=$(echo $pkgver)' '_v=$(echo a #)' '_v=$((1 + 2))' \
-    'POSIXLY_CORRECT=1' 'BASH_ALIASES[q]=x' '_v=${!pkgver}'; do
+    'POSIXLY_CORRECT=1' 'BASH_ALIASES[q]=x' '_v=${!pkgver}' '_v=$(case x in a)' '_v=$(time case x in a)'; do
     write_pkgbuild "$OLD" 1.0.0 2 "$lead
 sha256sums=('$H1' '$H2')"
     write_pkgbuild "$NEW" 1.1.0 1 "$lead
