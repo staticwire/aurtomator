@@ -128,7 +128,7 @@ current: '0.9.0'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "0.9.0" ]
 }
 
-# A package added without current gets the version the AUR has, and a
+# Packages added without current get the version the AUR has, and the
 # pkgrel the AUR maintainer raised has to stay
 @test "update-pkg --prepare: keeps the AUR pkgrel when the AUR has the version" {
   create_test_package "demo" "github-nightly" "upstream:
@@ -1304,7 +1304,7 @@ commit_aur_state() {
   grep -q -- " --max-filesize $((600 * 1024 * 1024)) --speed-limit 102400 --speed-time 60 -o " "$TEST_TMPDIR/curl.args"
 }
 
-# A sparse file stands for the downloads of the package before this one
+# Sparse files stand for the downloads of the package before this one
 @test "_source_file: gives a download what the budget of the package leaves" {
   local downloads="$TEST_TMPDIR/downloads" left
   mock_downloads
@@ -1382,7 +1382,7 @@ commit_aur_state() {
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
-# A source that changed under the same URL would pass verify with its new
+# Sources that changed under the same URL would pass verify with their new
 # checksum, while update-pkg.sh hands over the AUR files at that version
 @test "verify-pkg: takes only the files of the AUR at the version the AUR has" {
   setup_verify
@@ -1718,7 +1718,7 @@ use_source() {
   [ "$(cat "$TEST_TMPDIR/git-fetch-traps")" = "trap -- '' SIGXFSZ" ]
 }
 
-# A pack of a few bytes can hold a large file, and git archive reads all of it
+# Packs of a few bytes can hold a large file, and git archive reads all of it
 @test "_git_source_sum: refuses a tree whose files pass the budget left" {
   setup_verify
   make_upstream
@@ -2022,7 +2022,7 @@ EOF
   [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
 }
 
-# A co-maintainer can push the version during the wait and leave arches out on purpose
+# Co-maintainers can push the version during the wait and leave arches out on purpose
 @test "publish-pkg: writes no arch_out on a sync of a version that a person pushed" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   setup_arch_prepare
@@ -2036,7 +2036,7 @@ EOF
   [ "$(pkg_get "$yml" 'has("arch_wait")')" = false ]
 }
 
-# A co-maintainer can push a commit with the subject of a push of aurtomator over a parent
+# Co-maintainers can push a commit with the subject of an aurtomator push over a parent
 # of their own, so the sync takes the arches and the commit of arch_wait alone
 @test "publish-pkg: writes the arches and the commit of arch_wait to arch_out on a sync" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin" crafted
@@ -2079,7 +2079,7 @@ EOF
   [ "$status" -eq 0 ]
   cp "$TEST_TMPDIR/yml.before" "$yml"
   mv "$TEST_TMPDIR/out" "$TEST_TMPDIR/out-first"
-  # A person pushes the version again with another pkgdesc before the next run
+  # Someone pushes the version again with another pkgdesc before the next run
   git -C "$work" pull -q --ff-only "$AUR_REMOTE" master
   sed -i 's/early access JDK/early access JDK build/' "$work/PKGBUILD" "$work/.SRCINFO"
   git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam 28+23
@@ -2166,7 +2166,7 @@ EOF
   [ "$(pkg_get "$yml" 'has("arch_out")')" = false ]
 }
 
-# A maintainer who drops an arch for good drops its source_<arch> too, so it has nothing to
+# Maintainers who drop an arch for good drop its source_<arch> too, so it has nothing to
 # come back with
 @test "publish-pkg: drops an arch from arch_out once the AUR PKGBUILD has no source of it" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml" work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
@@ -3233,7 +3233,7 @@ EOF
   [ "$(cat "$TEST_TMPDIR/.status/_packages")" = $'flaky\nsteady' ]
 }
 
-# A host that answers slowly takes the time of the packages after it
+# Hosts that answer slowly take the time of the packages after them
 @test "check-all: starts no check after the time budget of the loop" {
   flaky_check flaky
   AURTOMATOR_CHECK_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh"
@@ -3587,7 +3587,7 @@ current: '1.0.0'"
   done
 }
 
-# A prepared update names neither the version nor the asset value that
+# Prepared updates name neither the version nor the asset value that
 # verify downloads
 @test "check-all --verify: takes out an update the check run found no new version for" {
   local found
@@ -3702,7 +3702,7 @@ Release notes: https://github.com/staticwire/aurtomator/releases/tag/v0.7.0
 Manual update: https://aurtomator.dev/setup/#the-calling-workflows
 Run: https://example.invalid/run
 
-Auto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.
+Auto-created by update workflow, which closes it once the pin of the calling workflows names this release, or once a newer release is out.
 EOF
   )
   [ "$output" = "$expected" ]
@@ -3734,7 +3734,7 @@ Run: https://github.com/owner/repo/actions/runs/1
 rejected '1.0.1 @octocat https://evil.example'
 ```
 
-Auto-created by update workflow. A run closes it when the package recovers.
+Auto-created by update workflow, which closes it when the package recovers.
 EOF
   )
   [ "$output" = "$expected" ]
@@ -3757,7 +3757,7 @@ EOF
   [ "${lines[5]}" = "[first 4 characters cut]" ]
   [ "${lines[6]}" = "$tail" ]
 
-  # An error of exactly 4000 characters stays whole
+  # Errors of exactly 4000 characters stay whole
   echo "update_failed: ${tail}" >"$TEST_TMPDIR/demo"
   run --keep-empty-lines failure_issue_body "$TEST_TMPDIR/demo" https://example.invalid/run
   [ "${lines[5]}" = "$tail" ]
@@ -3822,7 +3822,7 @@ Run: https://example.invalid/run
 
 The release of this version has no archive for these arches, so the AUR package builds without them. Each run asks for the archives again and puts an arch back once its archive is out.
 
-Auto-created by update workflow. A run closes it when every arch is back.
+Auto-created by update workflow, which closes it when every arch is back.
 EOF
   )
   [ "$output" = "$expected" ]
@@ -3859,7 +3859,7 @@ EOF
   echo "check_failed: http://example.org/demo: Protocol \"http\" disabled" >"$TEST_TMPDIR/demo"
   run failure_host "$TEST_TMPDIR/demo"
   [ "$output" = "example.org" ]
-  # A host ends at #, ?, a space or the end of the text
+  # Hosts end at #, ?, a space or the end of the text
   local url
   for url in 'https://example.com#frag: error: 503' 'https://example.com?q=1: error: 503' \
     'https://example.com timed out' 'https://example.com'; do
@@ -3872,7 +3872,7 @@ EOF
   done
 }
 
-# A host with a letter beyond ASCII is no host that url_host accepts, so its package gets its own issue
+# Hosts with a letter beyond ASCII are no hosts that url_host accepts, so their package gets its own issue
 @test "failure_host: prints nothing for a host with a letter beyond ASCII, in every locale" {
   local locale url locales=(C C.UTF-8)
   if locale -a | grep -qix 'en_US.utf8'; then
@@ -3975,7 +3975,7 @@ https://api.github.com/b: ``` @octocat
 second line
 ````
 
-Auto-created by update workflow. A run closes it when fewer than 5 packages of the host fail to check.
+Auto-created by update workflow, which closes it when fewer than 5 packages of the host fail to check.
 EOF
   )
   [ "$output" = "$expected" ]
@@ -4186,7 +4186,7 @@ EOF
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 
-  # A repository without packages leaves the directory empty
+  # Repositories without packages leave the directory empty
   rm "$TEST_TMPDIR/st/_upstream"
   run run_summary "$TEST_TMPDIR/st"
   [ "$status" -eq 0 ]
@@ -4534,7 +4534,7 @@ b2sums=('$H3' '$H4')"
   [ "$status" -eq 0 ]
 }
 
-# A run without updpkgsums keeps the layout of the AUR copy
+# Runs without updpkgsums keep the layout of the AUR copy
 @test "check_prepared_pkgbuild: accepts checksum arrays that stay apart as in the AUR copy" {
   local x86='source_x86_64=("git+https://example.com/x86.git")' arm='source_aarch64=("git+https://example.com/arm.git")'
   local sums="sha256sums=('SKIP' 'SKIP')
@@ -4561,7 +4561,7 @@ sha256sums_aarch64=('SKIP')"
   [ "$output" = $'sha256sums_x86_64=(\'SKIP\')\npackage() {\n  :\n}' ]
 }
 
-# A run without updpkgsums drops the arrays of an arch that goes out where they stand
+# Runs without updpkgsums drop the arrays of arches that go out where they stand
 @test "check_prepared_pkgbuild: accepts arrays that stay apart without those of an arch out" {
   local x86='source_x86_64=("git+https://example.com/x86.git")' arm='source_aarch64=("git+https://example.com/arm.git")'
   local rv='source_riscv64=("git+https://example.com/rv.git")'
@@ -4718,7 +4718,7 @@ EOF
   [[ "$output" == *"does not follow the version as the PKGBUILD does: \$'license = MIT\\r', expected license = MIT" ]]
 }
 
-# A package with arch=(any) builds on each arch of pkgbase, from the sources of that arch
+# Packages with arch=(any) build on each arch of pkgbase, from the sources of that arch
 @test "check_prepared_srcinfo: takes the arches of pkgbase alone" {
   split_srcinfo() {
     printf '%s\n' 'pkgbase = foo' $'\tpkgver = '"$2" $'\tpkgrel = 1' $'\tarch = x86_64' $'\tarch = aarch64' \
@@ -4731,7 +4731,7 @@ EOF
   split_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 bbbb eeee
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 0 ]
-  # An arch of pkgbase without a new source is still refused
+  # Arches of pkgbase without a new source are still refused
   split_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 bbbb dddd
   sed -i 's/foo-2.0-aarch64/foo-1.0-aarch64/' "$TEST_TMPDIR/new.SRCINFO"
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
@@ -4755,12 +4755,12 @@ EOF
   rel_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 1.1 aaaa
   run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 0 ]
-  # A rebuild of the version raises pkgrel
+  # Rebuilds of the version raise pkgrel
   rel_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 3 aaaa
   rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.0 4 aaaa
   run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.0 "" "" 4
   [ "$status" -eq 0 ]
-  # A pkgrel other than that of the update is refused
+  # pkgrel values other than that of the update are refused
   rel_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 1 bbbb
   sed -i 's/foo-common=2.0-1/foo-common=2.0-5/' "$TEST_TMPDIR/new.SRCINFO"
   run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
@@ -4787,7 +4787,7 @@ EOF
   rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/11.2-1/foo-1.3.tar.gz bbbb
   run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
   [ "$status" -eq 1 ]
-  # A digit or a dot before the token, a digit or a dot and a digit after it
+  # Digit or dot before the token, digit or dot and digit after it
   local old new
   for old in https://example.com/foo-0.1.2-3.tar.gz https://example.com/foo-1.2-3.4.tar.gz; do
     new=${old/foo-1.2-/foo-1.3-}
@@ -4796,7 +4796,7 @@ EOF
     run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
     [ "$status" -eq 0 ]
   done
-  # A token the pkgrel skips keeps its text beside one it replaces
+  # Tokens the pkgrel skips keep their text beside those it replaces
   rel_source "$TEST_TMPDIR/old.SRCINFO" 1.2 3 https://example.com/11.2-3/foo-1.2-3.tar.gz aaaa
   rel_source "$TEST_TMPDIR/new.SRCINFO" 1.3 1 https://example.com/11.2-3/foo-1.3-1.tar.gz bbbb
   run check_prepared_srcinfo "$text" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 1.3
@@ -4927,14 +4927,14 @@ EOF
   groups_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" "$H3" "$H4"
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 0 ]
-  # A common source that stays counts for an arch whose own downloads change
+  # Common sources that stay count for arches whose own downloads change
   groups_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 "$H1" "$H1" "$H2"
   sed -i 's|/v1.0/LICENSE|/LICENSE|' "$TEST_TMPDIR/old.SRCINFO"
   groups_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H1" "$H3" "$H4"
   sed -i 's|/v2.0/LICENSE|/LICENSE|' "$TEST_TMPDIR/new.SRCINFO"
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 0 ]
-  # An arch without sources of its own builds from the common ones that change
+  # Arches without sources of their own build from the common ones that change
   groups_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 "$H1" "$H1" "$H2"
   sed -i '/aarch64 = /d; s/^\tarch = x86_64$/&\n\tarch = riscv64/' "$TEST_TMPDIR/old.SRCINFO"
   groups_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" "$H3" "$H4"
@@ -4943,7 +4943,7 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-# An arch whose own sources are no downloads takes its files from the common sources
+# Arches whose own sources are no downloads take their files from the common sources
 @test "check_prepared_srcinfo: takes the common downloads for an arch whose own sources are no downloads" {
   # $1 path, $2 version, $3 directory of the common download, $4 its checksum
   patch_srcinfo() {
@@ -4988,7 +4988,7 @@ EOF
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0 "" "" 1 "" "" aarch64 ""
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO adds or removes lines"* ]]
-  # An arch that comes back has the lines of the function in both copies
+  # Arches that come back have the lines of the function in both copies
   fn_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 "$H1" $'\tarch = x86_64' "$both"
   fn_srcinfo "$TEST_TMPDIR/new.SRCINFO" 2.0 "$H3" "$both" "$both"
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0 "" "" 1 "" "" "" aarch64
@@ -5255,7 +5255,7 @@ write_srcinfo_sources() {
   [ "$status" -eq 0 ]
 }
 
-# A pin holds no version, so a bump that keeps it builds the old code
+# Pins hold no version, so bumps that keep them build the old code
 @test "check_prepared_srcinfo: rejects a bump that keeps a VCS source at its commit" {
   local src="git+https://example.com/demo.git?signed#commit=a2d30b96fbb026621ec11692272f0117f35a00fd"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.11.0 "$src" SKIP
@@ -5301,7 +5301,7 @@ write_srcinfo_sources() {
   [ "$status" -eq 0 ]
 }
 
-# A second repository pinned to a commit, as a submodule often is, may stay
+# Second repositories pinned to a commit, as submodules often are, may stay
 @test "check_prepared_srcinfo: accepts a VCS pin that stays when another source moves" {
   local sub="git+https://example.com/sub.git#commit=abc123"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 49.0 \
@@ -5335,7 +5335,7 @@ write_srcinfo_sources() {
   [ "$status" -eq 0 ]
 }
 
-# A VCS pin keeps the rule of the whole file, whatever name it is saved under
+# VCS pins keep the rule of the whole file, whatever name they are saved under
 @test "check_prepared_srcinfo: accepts a renamed VCS pin that stays next to a source that moves" {
   local pin="git+https://example.com/demo.git#commit=abc123"
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 1.4.0 \
@@ -5416,7 +5416,7 @@ write_srcinfo_archs() {
   [[ "$output" == *"Prepared .SRCINFO changes no source URL and no checksum for aarch64, so the new version would hold the files of the old one"* ]]
 }
 
-# An architecture without sources of its own builds from the common ones
+# Architectures without sources of their own build from the common ones
 @test "check_prepared_srcinfo: rejects an architecture with only common sources that all stay" {
   local common="https://example.com/deps/libbar-3.2.tar.gz"
   write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 2.3.0 "$common" "$H2" \
@@ -5510,7 +5510,7 @@ write_srcinfo_archs() {
   [[ "$output" == *"Prepared .SRCINFO line 4 is not the AUR source with the new version"* ]]
 }
 
-# An empty pattern matches the empty string at every pass
+# Empty patterns match the empty string at every pass
 @test "_undash_version: keeps the line for an empty version" {
   run timeout 10 bash -c 'source "$1/scripts/lib.sh"; _undash_version "demo-1-0" "" .' _ "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
@@ -5576,7 +5576,7 @@ write_srcinfo_archs() {
   [ "$status" -eq 0 ]
 }
 
-# An empty form matches at every position and never moves on
+# Empty forms match at every position and never move on
 @test "_bump_version: skips an empty upstream form" {
   run timeout 10 bash -c 'source "$1/scripts/lib.sh"; _bump_version "demo-1.0-1" 1.0 1.1 "" 2' _ "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
@@ -6062,7 +6062,7 @@ write_asset_dirs() {
   write_asset_dirs 2.4.6 "$V246_2" 1.1 2.4.6 "$V246_3" 2
   run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 2.4.6 drop "" _deb "$V246_3"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"A rebuild needs an integer pkgrel in the AUR PKGBUILD, it has 1.1"* ]]
+  [[ "$output" == *"Rebuilds need an integer pkgrel in the AUR PKGBUILD, it has 1.1"* ]]
 }
 
 # Helper: the AUR at <old pkgver>, <old _deb> and <old pkgrel> of the package of write_asset_pkgbuild,
@@ -6510,7 +6510,7 @@ arch_out:
   cmp "$TEST_TMPDIR/pkg.yml.before" "$TEST_TMPDIR/packages/pkg.yml"
 }
 
-# A version sync after a lost YAML commit takes the arches out of arch_wait alone
+# Version syncs after a lost YAML commit take the arches out of arch_wait alone
 @test "check-all --publish: adds the arches of a later run of the wait and keeps its commit" {
   local first second yml="$TEST_TMPDIR/packages/pkg.yml"
   first=$(printf 'a%.0s' {1..40})

@@ -144,7 +144,7 @@ setup_identity() {
   default_name=$(git config --global user.name 2>/dev/null || true)
   default_email=$(git config --global user.email 2>/dev/null || true)
 
-  # A saved value or a flag skips the question, which offers git config as the default
+  # Saved values and flags skip the question, which offers git config as the default
   if [[ -z "$GIT_AUTHOR_NAME" ]]; then
     printf "  AUR git commits need an author name and email.\n"
     printf "  This appears in %sgit log%s on your AUR package repos.\n\n" "$BOLD" "$RESET"
@@ -221,8 +221,8 @@ gpg_key_has_passphrase() {
   ! echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$1" >/dev/null 2>&1
 }
 
-# A key ID, long or short, or a fingerprint names the primary key when the
-# fingerprint of the primary key ends with it
+# Key IDs, long or short, and fingerprints name the primary key when the
+# fingerprint of the primary key ends with them
 # Args: $1=key id
 gpg_is_primary_key() {
   local id="${1#0x}" fpr
@@ -309,7 +309,7 @@ setup_gpg() {
       return 0
     fi
 
-    # A temporary keyring with the signing subkey alone gets the passphrase removed
+    # Passphrase removal runs in a temporary keyring with the signing subkey alone
     TMP_GNUPG=$(mktemp -d)
     trap remove_tmp_gnupg EXIT
     chmod 700 "$TMP_GNUPG"

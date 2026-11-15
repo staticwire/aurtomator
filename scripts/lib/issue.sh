@@ -15,7 +15,7 @@ upstream_issue_body() {
     setup="https://github.com/${AURTOMATOR_UPSTREAM}/blob/main/site/src/content/docs/setup.md#the-calling-workflows"
   fi
   # shellcheck disable=SC2016
-  printf 'aurtomator %s is out, and this repository runs %s.\n\nTo update: Insights > Dependency graph > Dependabot > Recent update jobs > Check for updates. Dependabot opens the pull request that moves the pin. The first run on the new pin also updates `aurtomator.sh` to this release.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nManual update: %s\nRun: %s\n\nAuto-created by update workflow. A run closes it once the pin of the calling workflows names this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$setup" "$2"
+  printf 'aurtomator %s is out, and this repository runs %s.\n\nTo update: Insights > Dependency graph > Dependabot > Recent update jobs > Check for updates. Dependabot opens the pull request that moves the pin. The first run on the new pin also updates `aurtomator.sh` to this release.\n\nRelease notes: https://github.com/%s/releases/tag/v%s\nManual update: %s\nRun: %s\n\nAuto-created by update workflow, which closes it once the pin of the calling workflows names this release, or once a newer release is out.\n' "$release" "$(aurtomator_version)" "$AURTOMATOR_UPSTREAM" "$release" "$setup" "$2"
 }
 
 # Body of the issue of a held update, or of a published one with a notice. The notes come from
@@ -37,7 +37,7 @@ alert_issue_body() {
 }
 
 # Print text $1 as a code block, where links, images and mentions do not
-# render. A longer text keeps its last $2 characters, 4000 by default.
+# render. Longer texts keep their last $2 characters, 4000 by default.
 _code_block() {
   local text="$1" fence='```' limit="${2:-4000}"
   # In the C locale of the job containers, bash counts bytes
@@ -60,7 +60,7 @@ failure_issue_body() {
   kind="${status%%:*}"
   # The backticks are Markdown code around the package name
   # shellcheck disable=SC2016
-  printf 'Package: `%s`\nStatus: %s\nRun: %s\n\n%s\n\nAuto-created by update workflow. A run closes it when the package recovers.\n' \
+  printf 'Package: `%s`\nStatus: %s\nRun: %s\n\n%s\n\nAuto-created by update workflow, which closes it when the package recovers.\n' \
     "${1##*/}" "${kind//_/ }" "$2" "$(_code_block "${status#*: }")"
 }
 
@@ -122,7 +122,7 @@ host_issue_body() {
     # shellcheck disable=SC2016
     printf '\nPackage: `%s`\n\n%s\n' "$package" "$(_code_block "${status#*: }" "$limit")"
   done
-  printf '\nAuto-created by update workflow. A run closes it when fewer than %s packages of the host fail to check.\n' "$HOST_ISSUE_MIN"
+  printf '\nAuto-created by update workflow, which closes it when fewer than %s packages of the host fail to check.\n' "$HOST_ISSUE_MIN"
 }
 
 # Print the comment for host $1 and run URL $2 on a host issue a run closes
@@ -137,7 +137,7 @@ host_close_comment() {
 arch_issue_body() {
   # The backticks are Markdown code around the package, version and arches
   # shellcheck disable=SC2016
-  printf 'Package: `%s`\nVersion: `%s`\nMissing arches: `%s`\nRun: %s\n\nThe release of this version has no archive for these arches, so the AUR package builds without them. Each run asks for the archives again and puts an arch back once its archive is out.\n\nAuto-created by update workflow. A run closes it when every arch is back.\n' "$1" "$2" "$3" "$4"
+  printf 'Package: `%s`\nVersion: `%s`\nMissing arches: `%s`\nRun: %s\n\nThe release of this version has no archive for these arches, so the AUR package builds without them. Each run asks for the archives again and puts an arch back once its archive is out.\n\nAuto-created by update workflow, which closes it when every arch is back.\n' "$1" "$2" "$3" "$4"
 }
 
 # Print the comment for package $1 and run URL $2 on an issue that a run closes since the YAML

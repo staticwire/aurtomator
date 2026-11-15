@@ -23,7 +23,7 @@ readonly VALID_STRATEGIES
 readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump allow_missing_arch arch_wait arch_out cooldown_days alerts upstream"
 
 # The upstream keys that each strategy reads, in the order of the strategy
-# table of README.md. A test compares them with the keys the scripts name.
+# table of README.md. One test compares them with the keys the scripts name.
 readonly UPSTREAM_KEYS=(
   "github-release: project tag_version_regex tag_version_replace asset_regex asset_var max_answer_mb"
   "github-tag: project tag_version_regex tag_version_replace asset_regex asset_var max_answer_mb"
@@ -145,7 +145,7 @@ validate_alert() {
 
 # Check one package YAML file; the errors go to stderr
 validate_pkg() {
-  # A bracket range of bash takes more than ASCII under a UTF-8 locale other than C.UTF-8
+  # Bash bracket ranges take more than ASCII under UTF-8 locales other than C.UTF-8
   local -x LC_ALL=C
   local file="$1"
   local errors=0
@@ -179,8 +179,8 @@ validate_pkg() {
     log_err "$shown: a key or a value holds a control character"
     return 1
   fi
-  # A diff shows no zero-width or bidi character, so a value outside the notes for people is
-  # printable ASCII or a tab, and a note holds no format character and no space but U+0020
+  # Diffs show no zero-width or bidi character, so values outside the notes for people are
+  # printable ASCII or tabs, and notes hold no format character and no space but U+0020
   local hidden note_path='^alerts[.][0-9]+[.]note$'
   hidden=$(NOTE_PATH="$note_path" ASCII_RE='[^\t -~]' yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
     | select(path | join(".") | test(strenv(NOTE_PATH)) | not) | select(test(strenv(ASCII_RE)))] | length' "$file")
@@ -318,7 +318,7 @@ validate_pkg() {
     ((errors++))
   fi
 
-  # A date in the future holds the cooldown of the package until it passes
+  # Future dates hold the cooldown of the package until they pass
   local last_updated
   last_updated=$(pkg_get "$file" '.last_updated // ""')
   if [[ -n "$last_updated" ]] && ! valid_date "$last_updated"; then
@@ -458,7 +458,7 @@ validate_pkg() {
     if [[ "$prerelease" != "!!bool" ]]; then
       log_err "$shown: upstream.prerelease must be true or false"
       ((errors++))
-    # A semver pre-release always holds a dash
+    # Semver pre-releases always hold a dash
     elif [[ $(pkg_get "$file" '.upstream.prerelease') == true && "$dash_set" == false ]]; then
       log_err "$shown: upstream.prerelease needs pkgver_dash"
       ((errors++))
@@ -513,7 +513,7 @@ validate_pkg() {
     fi
   fi
 
-  # A value from the name of a release asset, see https://aurtomator.dev/features/asset-values/;
+  # Value from a release asset name, see https://aurtomator.dev/features/asset-values/;
   # $regex|^ matches the empty string and fills BASH_REMATCH with every group of the regex
   local asset_regex_tag asset_var_tag asset_regex current_asset groups=0
   asset_regex_tag=$(pkg_get "$file" '.upstream.asset_regex | tag')
@@ -794,8 +794,8 @@ validate_pkg() {
         log_err "$shown: upstream.project must be a tarball name of A-Za-z0-9@._+-: $project"
         ((errors++))
       fi
-      # The path ends up in https://download.kde.org/<path>/. A segment that
-      # starts with a dot would allow ..
+      # The path ends up in https://download.kde.org/<path>/. Segments that
+      # start with a dot would allow ..
       if [[ -n "$path" && ! "$path" =~ ^[A-Za-z0-9_+-][A-Za-z0-9._+-]*(/[A-Za-z0-9_+-][A-Za-z0-9._+-]*)*$ ]]; then
         log_err "$shown: upstream.path must be a directory on download.kde.org, such as unstable/alkimia: $path"
         ((errors++))

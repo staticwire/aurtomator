@@ -370,7 +370,7 @@ EOF
 
 @test "audit_pkgbuild: allows SKIP + real checksums for local files (nightly pattern)" {
   source "$TEST_TMPDIR/scripts/lib.sh"
-  # A nightly-bin package: SKIP for the remote binary, and real hashes for local files of the
+  # nightly-bin package: SKIP for the remote binary, and real hashes for local files of the
   # AUR repo, such as .vim and .install
   cat >"$TEST_TMPDIR/test.PKGBUILD" <<'EOF'
 pkgname=test-nightly
@@ -652,7 +652,7 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-# A fossil clone is one file, which makepkg -g hashes as a download
+# Fossil clones are one file, which makepkg -g hashes as a download
 @test "audit_pkgbuild: blocks the SKIP of a fossil source next to a real hash" {
   source "$TEST_TMPDIR/scripts/lib.sh"
   local vcs
@@ -1317,7 +1317,7 @@ MOCKCURL
     [ "$output" = "$url: the host is no plain name of ASCII letters, digits, dots and dashes" ]
   done
   [ ! -e "$TEST_TMPDIR/curl.log" ]
-  # A port, and a letter beyond ASCII after the host, reach curl
+  # Ports, and letters beyond ASCII after the host, reach curl
   for url in https://git.example.com:8443/x https://example.com/caf$'\xc3\xa9'; do
     run http_get "$url"
     [ "$status" -eq 0 ]
@@ -1972,7 +1972,7 @@ EOF
   [ ! -e "$TEST_TMPDIR/pwned" ]
 }
 
-# A tag_version_regex, a scraped page or a registry can return a word
+# tag_version_regex, scraped pages and registries can return a word
 @test "check-update: rejects a word from the strategy" {
   cat >"$TEST_TMPDIR/strategies/word.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -2141,7 +2141,7 @@ EOF
   [[ "$output" == *"Checked: 0"* ]]
 }
 
-# A skipped downgrade is logged with the name of its package
+# Skipped downgrades are logged with the name of their package
 @test "check-all: reads the packages of AURTOMATOR_DATA_DIR and runs the strategies of the checkout" {
   mkdir -p "$BATS_TEST_TMPDIR/data/packages"
   cat >"$BATS_TEST_TMPDIR/data/packages/foo.yml" <<EOF
@@ -2308,7 +2308,7 @@ EOF
 }
 
 # version.sh assigns AURTOMATOR_UPSTREAM, so the environment cannot set it
-# for the script. A copy of version.sh with another value stands in.
+# for the script. Its copy with another value stands in.
 @test "update-readme: the badge block names the two calling workflows of the repository" {
   local data="$BATS_TEST_TMPDIR/data"
   mkdir -p "$data/packages" "$data/.status"
@@ -2489,7 +2489,7 @@ EOF
   [ "${lines[3]}" = "/srv/keys/aur key" ]
   [ ! -e PWNED ]
 
-  # A last line without a newline counts
+  # Last lines without a newline count
   printf "GIT_AUTHOR_NAME='a'\nGIT_AUTHOR_EMAIL='b'\nAUR_SSH_KEY='c'\nGPG_KEY_ID='KEY9'" >"$TEST_TMPDIR/.aurtomator.conf"
   run --keep-empty-lines load_config_values
   [ "$status" -eq 0 ]
@@ -2786,7 +2786,7 @@ EOF
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
 
-# A repository made from the template keeps its setup steps until its first
+# Repositories made from the template keep their setup steps until their first
 # package, whatever runs before it
 @test "update-readme: a README with both blocks stays as it is while there are no packages" {
   printf '%s\n' '# test' '<!-- BADGES:START -->' 'setup steps' '<!-- BADGES:END -->' '## Packages' \
@@ -2823,7 +2823,7 @@ EOF
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
 
-# A section is written up to its start marker and from its end marker, so a
+# Sections are written up to their start marker and from their end marker, so a
 # swapped or second marker would copy the README into itself on every run
 @test "update-readme: fails and keeps the README with the table markers swapped" {
   create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
@@ -3236,7 +3236,7 @@ pkgver() {
 EOF
   printf '%s\n' "pkgbase = test-vcs-ok" "pkgname = test-vcs-ok" >"$aur_dir/.SRCINFO"
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
-  # A bare remote, so the push of the copied clone succeeds
+  # Bare remote, so the push of the copied clone succeeds
   git init --bare -q "$TEST_TMPDIR/aur-bare-test-vcs-ok.git"
   git -C "$aur_dir" remote add origin "$TEST_TMPDIR/aur-bare-test-vcs-ok.git"
   git -C "$aur_dir" push -q -u origin HEAD
@@ -3692,7 +3692,7 @@ sha256sums=('SKIP')
 EOF
   printf '%s\n' "pkgbase = test-vcs" "pkgname = test-vcs" >"$aur_dir/.SRCINFO"
   git -C "$aur_dir" add . && git -C "$aur_dir" commit -q -m "init"
-  # A bare remote, so the push of the copied clone succeeds
+  # Bare remote, so the push of the copied clone succeeds
   git init --bare -q "$TEST_TMPDIR/aur-bare-test-vcs.git"
   git -C "$aur_dir" remote add origin "$TEST_TMPDIR/aur-bare-test-vcs.git"
   git -C "$aur_dir" push -q -u origin HEAD
@@ -3908,7 +3908,7 @@ current: '3.0.0'"
 }
 
 @test "check-all: writes 'downgrade:' status after successful --update causing downgrade" {
-  # A stub update-pkg.sh in the temp workspace always succeeds, so the test
+  # Stub update-pkg.sh in the temp workspace always succeeds, so the test
   # covers only how check-all.sh writes the status.
   create_test_package "pkg-down-upd" "github-release" "upstream:
   type: github
@@ -4590,7 +4590,7 @@ arch_wait:
   [ "$ARCH_OUT" = $'aarch64|\n|' ]
 }
 
-# A maintainer who drops an arch for good drops its source_<arch>, and the arch can never come back
+# Maintainers who drop an arch for good drop its source_<arch>, and the arch can never come back
 @test "check-arch: an arch of arch_out without its source in the AUR PKGBUILD stays out unasked" {
   local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
   temurin_package "current: 28+23"
@@ -4606,13 +4606,13 @@ arch_wait:
   run ! grep -q "$(arch_source_url aarch64 28+24)" "$TEST_TMPDIR/heads.log"
   grep -q "the AUR PKGBUILD has no source_aarch64, so aarch64 stays out" "$TEST_TMPDIR/arch.err"
 
-  # A version without x86_64 keeps it out as well
+  # Versions without x86_64 keep it out as well
   archive_missing x86_64 28+24
   check_arch 28+24
   [ "$ARCH_RC" -eq 0 ]
   [ "$ARCH_OUT" = $'aarch64|\n|' ]
 
-  # An assignment in a block of the PKGBUILD keeps the arch, which comes back
+  # Assignments in a block of the PKGBUILD keep the arch, which comes back
   : >"$TEST_TMPDIR/missing"
   # shellcheck disable=SC2016
   printf '%s\n' 'if true; then' '  source_aarch64=("${_release}/OpenJDK-jdk_aarch64_${_file}")' 'fi' >>"$work/PKGBUILD"
@@ -4734,7 +4734,7 @@ current_asset: '7'"
   [ "$status" -eq 0 ]
   [ "$(sort "$TEST_TMPDIR/heads.log")" = $'https://example.com/demo-1.1.0-8-aarch64.tar.gz\nhttps://example.com/demo-1.1.0-8-x86_64.tar.gz' ]
 
-  # A new asset value of the version the AUR has is a rebuild of every arch
+  # New asset values of the version the AUR has are rebuilds of every arch
   rm "$TEST_TMPDIR/heads.log"
   run --separate-stderr "$TEST_TMPDIR/scripts/check-arch.sh" arch-demo 1.0.0 --asset 8
   [ "$status" -eq 0 ]

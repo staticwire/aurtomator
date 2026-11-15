@@ -39,7 +39,7 @@ runs:
         WORK: /work
       run: |
         code=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)
-        # A directory of an earlier step could hold files that builder chose
+        # Directories of an earlier step could hold files that builder chose
         if [[ -e "$WORK" || -L "$WORK" ]]; then
           echo "::error::$WORK exists already"
           exit 1

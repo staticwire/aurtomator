@@ -164,7 +164,7 @@ package_name() {
   printf '%s\n' "$name"
 }
 
-# A failed verify, exit code 3 of a moved AUR repo included, takes the update
+# Failed verifies, exit code 3 of a moved AUR repo included, take the update
 # out with update_failed. Only package names from packages/ reach a path.
 if [[ "$MODE" == "verify" ]]; then
   # Slow sources early in the list would take the budget of the same packages in
@@ -236,7 +236,7 @@ fi
 rm -rf "$STATUS_DIR"
 mkdir -p "$STATUS_DIR"
 
-# A failed request for the latest release records nothing, so it closes no
+# Failed requests for the latest release record nothing, so they close no
 # issue; --prepare and --publish carry the record of the check run
 AURTOMATOR_VERSION=$(aurtomator_version)
 [[ -z "$AURTOMATOR_VERSION" ]] || log_info "aurtomator $AURTOMATOR_VERSION"
@@ -312,7 +312,7 @@ record_alerts() {
 }
 
 # Sets ASSET_VALUE from check-asset.sh, or from the check run in --prepare and
-# --publish, and records it in _assets. A fast failure goes on the second pass.
+# --publish, and records it in _assets. Fast failures go on the second pass.
 # Args: $1=package file, $2=package name, $3=version, $4=pass, 1 or 2
 # Returns: 1 after writing the status of a pending value or a failure
 find_asset() {
@@ -362,7 +362,7 @@ keep_arch_wait() {
   if [[ "$MODE" != publish || -z "$2" ]] || ! arch_record_out "$2" "$3" >/dev/null || [[ ! "$2" =~ $record ]]; then
     return 0
   fi
-  # A line of a wait adds the arches it waits for and the AUR commit that builds them
+  # Wait lines add the arches they wait for and the AUR commit that builds them
   [[ -z "${BASH_REMATCH[2]}" ]] ||
     set_arch_wait "$1" "$3" "${BASH_REMATCH[2]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[4]:+${BASH_REMATCH[1]}}"
 }
@@ -401,7 +401,7 @@ find_arches() {
   first=${text%%$'\n'*}
   second=""
   [[ "$text" != *$'\n'* ]] || second=${text#*$'\n'}
-  # A wait names its start, the arches it waits for and the AUR commit that builds them
+  # Waits name their start, the arches they wait for and the AUR commit that builds them
   if ((rc == 3)) && [[ "$second" =~ $wait_re ]] && waited=${BASH_REMATCH[1]} commit=${BASH_REMATCH[2]} &&
     valid_time "$first" && arch_list_ok "$waited"; then
     printf '%s\n' "$err" >&2
@@ -412,7 +412,7 @@ find_arches() {
   if ((rc == 0)) && arch_record_ok "$first" "$second"; then
     [[ -z "$err" ]] || printf '%s\n' "$err" >&2
     ARCH_OUT=$first
-    # A line with no arch and no wait tells prepare to put back every arch of arch_out
+    # Lines with no arch and no wait tell prepare to put back every arch of arch_out
     if [[ -n "$first$second" || -n "$(pkg_get "$1" '.arch_out // {} | keys | .[]')" ]]; then
       printf '%s\t%s\t%s\t%s\n' "$2" "$3" "$first" "$second" >>"${STATUS_DIR}/_arches"
     fi
@@ -428,7 +428,7 @@ find_arches() {
 }
 
 # Checks one package, then updates, prepares or publishes it by the mode and
-# writes its status. A strategy check that fails fast goes on the second pass.
+# writes its status. Strategy checks that fail fast go on the second pass.
 # Args: $1=package file, $2=pass, 1 or 2
 run_package() {
   local pkg_file="$1" pass="$2"
@@ -523,8 +523,8 @@ run_package() {
   fi
   rm -f "$err_file"
 
-  # An up-to-date package with asset_regex gets a rebuild when the asset value of
-  # its version is not current_asset; --prepare and --publish read it as a version
+  # Up-to-date packages with asset_regex get a rebuild when the asset value of
+  # their version is not current_asset; --prepare and --publish read it as a version
   current=$(pkg_get "$pkg_file" '.current // ""')
   asset_regex=$(pkg_get "$pkg_file" '.upstream.asset_regex // ""')
   ASSET_VALUE=""
@@ -533,8 +533,8 @@ run_package() {
     [[ "$ASSET_VALUE" == "$(pkg_get "$pkg_file" '.current_asset // ""')" ]] || latest="$current"
   fi
 
-  # An arch out whose archive answers again comes back at the version of the
-  # AUR; --prepare and --publish take it from the status of the check run
+  # Arches out whose archive answers again come back at the AUR version;
+  # --prepare and --publish take them from the status of the check run
   ARCH_BACK=""
   ARCH_OUT=""
   ARCH_RECORD=""
@@ -572,8 +572,8 @@ run_package() {
     return
   fi
 
-  # A first number that grows by two digits or more can be another version scheme,
-  # such as build tags beside release tags, so it needs allow_version_jump
+  # First numbers that grow by two digits or more can be another version scheme,
+  # such as build tags beside release tags, so they need allow_version_jump
   if version_jump "$current" "$latest" &&
     [[ "$(pkg_get "$pkg_file" '.allow_version_jump // false')" != "true" ]]; then
     log_warn "$pkg_name: version jump $current → $latest, skipped: allow_version_jump is not set"
@@ -581,8 +581,8 @@ run_package() {
     return
   fi
 
-  # An alert names a step of upstream that needs a hand edit. One with
-  # hold: true keeps the update back until the maintainer publishes it.
+  # Alerts name upstream steps that need a hand edit. Those with
+  # hold: true keep the update back until the maintainer publishes it.
   err_file=$(mktemp)
   check_rc=0
   alerts=$(fired_alerts "$pkg_file" "$current" "$latest" 2>"$err_file") || check_rc=$?
@@ -622,7 +622,7 @@ run_package() {
     echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
-  # An arch that comes back gives no new version, so it does not wait
+  # Arches that come back give no new version, so they do not wait
   if [[ -n "$push_day" && "$TODAY" < "$push_day" && -z "$ARCH_BACK" ]]; then
     log_info "$pkg_name: ${current:-none} → $latest waits until $push_day"
     echo "cooldown: ${push_day}" >"${STATUS_DIR}/${pkg_name}"
@@ -725,14 +725,14 @@ for pkg_file in "${check_files[@]:check_start}" "${check_files[@]:0:check_start}
   if check_time_left; then
     run_package "$pkg_file" 1
   elif pkg_name=$(package_name "$pkg_file"); then
-    # A package the loop does not reach keeps its issues and its row of the journal
+    # Packages the loop does not reach keep their issues and their journal row
     log_warn "$pkg_name: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run"
     echo "unchecked: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run" >"${STATUS_DIR}/${pkg_name}"
   fi
 done
 
-# A check that failed fast runs again after a pause. After a timeout or on a
-# silent host it does not, so a run without network stays within its time limit
+# Checks that failed fast run again after a pause. After a timeout or on a
+# silent host they do not, so runs without network stay within their time limit
 if ((${#RECHECK[@]} > 0)) && check_time_left; then
   log_info "Checking ${#RECHECK[@]} failed package(s) again in ${RECHECK_DELAY} s"
   sleep "$RECHECK_DELAY"

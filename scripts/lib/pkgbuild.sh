@@ -89,7 +89,7 @@ audit_pkgbuild() {
   local warnings=0
   local fatals=0
 
-  # A pkgver() blocks every strategy but git-latest and github-nightly, unless it only prints
+  # pkgver() blocks every strategy but git-latest and github-nightly, unless it only prints
   # pkgver; bash finds the function under any header form it accepts
   if bash -c 'source "$1" 2>/dev/null; declare -F pkgver >/dev/null' -- "$pkgbuild"; then
     if [[ "$strategy" != "git-latest" && "$strategy" != "github-nightly" ]] && ! pkgver_prints_pkgver "$pkgbuild"; then
@@ -100,8 +100,8 @@ audit_pkgbuild() {
     fi
   fi
 
-  # A real hash of a remote source makes update-pkg.sh run updpkgsums, which would hash a SKIP
-  # that makepkg does not write itself; a local file of the AUR repo keeps its hash
+  # Real hashes of remote sources make update-pkg.sh run updpkgsums, which would hash a SKIP
+  # that makepkg does not write itself; local files of the AUR repo keep their hash
   local -a fixed
   mapfile -t fixed < <(fixed_skip_sources "$pkgbuild")
   if ((${#fixed[@]} > 0)) && has_remote_hash "$pkgbuild"; then
@@ -120,7 +120,7 @@ audit_pkgbuild() {
     warnings=$((warnings + 1))
   fi
 
-  # An epoch warns, since pacman compares it before pkgver
+  # Epochs warn, since pacman compares them before pkgver
   local epoch
   epoch=$(bash -c 'source "$1" 2>/dev/null; printf "%s" "${epoch:-}"' -- "$pkgbuild" 2>/dev/null || true)
   if [[ -n "$epoch" && "$epoch" != 0 ]]; then

@@ -42,7 +42,7 @@ expect_yaml() {
   [ "$(cat "$TEST_TMPDIR/packages/$name.yml")" = "$(printf '%s\n' "$@")" ]
 }
 
-# A git-latest strategy that prints r12.def5678 and clones nothing
+# git-latest strategy that prints r12.def5678 and clones nothing
 stub_git_latest() {
   rm -f "$TEST_TMPDIR/strategies/git-latest.sh"
   printf '#!/bin/sh\necho r12.def5678\n' >"$TEST_TMPDIR/strategies/git-latest.sh"
@@ -307,7 +307,7 @@ stub_git_latest() {
   [ -z "$(ls -A "$TEST_TMPDIR/packages")" ]
 }
 
-# A link could read a file of the user as .SRCINFO
+# Links could read a file of the user as .SRCINFO
 @test "draft: reads no .SRCINFO that is a link" {
   aur_package demo 1.0.0 'source = https://github.com/o/demo/archive/v1.0.0.tar.gz'
   local work="$TEST_TMPDIR/aur-work/demo"
@@ -347,7 +347,7 @@ stub_git_latest() {
   [ ! -e "$TEST_TMPDIR/packages/demo.yml" ]
 }
 
-# A checkout would apply the attributes of the AUR repository with the git
+# Checkouts would apply the attributes of the AUR repository with the git
 # config of the user
 @test "draft: reads .SRCINFO without a checkout of the AUR repository" {
   aur_package demo 1.0.0 'source = https://github.com/o/demo/archive/v1.0.0.tar.gz'

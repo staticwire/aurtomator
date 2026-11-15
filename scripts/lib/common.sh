@@ -156,10 +156,10 @@ has_control() {
   (LC_ALL=C && [[ "$1" =~ $re ]])
 }
 
-# Print the host of https URL $1 in lower case. A URL with a user name or a
-# port gives none, since curl contacts another host or port than the name
+# Print the host of https URL $1 in lower case. URLs with a user name or a
+# port give none, since curl contacts another host or port than the name
 url_host() {
-  # A UTF-8 locale other than C.UTF-8 lets [A-Za-z] take letters such as é
+  # UTF-8 locales other than C.UTF-8 let [A-Za-z] take letters such as é
   local LC_ALL=C
   [[ "$1" =~ ^https://([A-Za-z0-9.-]+)([/?#]|$) ]] || return 1
   printf '%s\n' "${BASH_REMATCH[1],,}"
@@ -218,7 +218,7 @@ _curl_get() {
     -A "$USER_AGENT" -w "$HTTP_FAILURE" "${@:2}" "$1"
 }
 
-# GET a URL for a strategy. A failure prints the URL of the last answer and the error.
+# GET a URL for a strategy. Failures print the URL of the last answer and the error.
 # Usage: http_get <url> [curl option]...
 http_get() {
   local failure rc=0 url error code mitigated
@@ -246,8 +246,8 @@ http_get() {
   return "$rc"
 }
 
-# GET a URL that answers JSON. A bot check answers HTML with HTTP 200, so an answer
-# other than a JSON object or array fails and names the URL it came from.
+# GET a URL that answers JSON. Bot checks answer HTML with HTTP 200, so answers
+# other than a JSON object or array fail and name the URL they came from.
 http_get_json() {
   local answer url
   answer=$(http_get "$@" -w "\n%{url_effective}${HTTP_FAILURE}") || return
@@ -330,7 +330,7 @@ github_release_matching() {
     fi
   done
   tag=$(_newest_release_tag "${5:-}" "$2" "${6:-}" <<<"$matches") || return 1
-  # A release created between two reads repeats the last release of a page on
+  # Releases created between two reads repeat the last release of a page on
   # the next one, so the loop looks the tag up in every page
   for json in "${pages[@]}"; do
     release=$(TAG="$tag" yq -r '[.[] | select(.tag_name == strenv(TAG))][0]' <<<"$json")
@@ -483,8 +483,8 @@ newest_version() {
   fi
 }
 
-# The tags of the form v1.2.3 or 1.2.3 among tags $1, one per line. A tag strategy
-# without tag_version_regex reads only these, so a pre-release is never the version.
+# The tags of the form v1.2.3 or 1.2.3 among tags $1, one per line. Tag strategies
+# without tag_version_regex read only these, so pre-releases are never the version.
 release_tags() {
   grep -E '^v?[0-9]+(\.[0-9]+)*$' <<<"$1" || true
 }
@@ -631,7 +631,7 @@ _ere_bounded() {
       while ((j < ${#re})) && [[ "${re:j:1}" != ']' ]]; do
         rest=${re:j:2}
         if [[ "$rest" == '[:' || "$rest" == '[=' || "$rest" == '[.' ]]; then
-          # A class, an equivalence class or a collating symbol ends at :] =] or .]
+          # Classes, equivalence classes and collating symbols end at :] =] or .]
           rest=${re:j+2}
           [[ "$rest" == *"${re:j+1:1}]"* ]] && rest=${rest#*"${re:j+1:1}]"} || rest=''
           j=$((${#re} - ${#rest}))

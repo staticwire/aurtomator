@@ -148,7 +148,7 @@ _git_source_sum() {
       log_err "The fetch of ${fragment} of $url passes the budget of 1 GiB of the package"
       return 1
     fi
-    # A pack of a few bytes can hold a large file, and the archive reads every file
+    # Packs of a few bytes can hold a large file, and the archive reads every file
     size=$(git -C "$dir" ls-tree -r -l "$ref" | awk '$2 == "blob" { s += $4 } END { printf "%d", s }') || size=0
     if ((size > left)); then
       log_err "The files of ${fragment} of $url pass the budget of 1 GiB of the package"

@@ -343,7 +343,7 @@ _asset_pkgrel() {
     return 0
   fi
   if [[ ! "$old_rel" =~ ^[0-9]+$ ]]; then
-    log_err "A rebuild needs an integer pkgrel in the AUR PKGBUILD, it has ${old_rel}"
+    log_err "Rebuilds need an integer pkgrel in the AUR PKGBUILD, it has ${old_rel}"
     return 1
   fi
   echo "$((10#$old_rel + 1))"
@@ -373,7 +373,7 @@ _bump_version() {
     olds+=("${old%.*}")
     news+=("${new%.*}")
   fi
-  # An empty form would match at every position and never move on
+  # Empty forms would match at every position and never move on
   if [[ -n "${4:-}" && -n "${5:-}" ]]; then
     olds+=("$4")
     news+=("$5")
@@ -578,7 +578,7 @@ check_prepared_srcinfo() {
     log_err "The AUR .SRCINFO has pkgrel = $(_shown_line "$old_rel"), which makepkg does not write"
     return 1
   fi
-  # A line holds the pkgrel of the update only where the PKGBUILD expands pkgrel
+  # Lines hold the pkgrel of the update only where the PKGBUILD expands pkgrel
   [[ ! "$text" =~ $rel_re ]] || expands=yes
   if [[ -n "$format" ]]; then
     old_up=$(_unformat_version "$old_ver" "$format")
@@ -595,7 +595,7 @@ check_prepared_srcinfo() {
     fi
   done < <(_source_checksums "$1")
 
-  # A group is the common sources and checksums, _, or those of one
+  # Groups are the common sources and checksums, _, or those of one
   # architecture, _x86_64
   local -A arch_groups=() arches=() pinned_in=() changed_in=() sum_counts=() sum_moved=() renamed=()
   local i old new key kind old_val new_val n expected group arch has_arch=false changed=false in_pkgbase=true arch_changed=false

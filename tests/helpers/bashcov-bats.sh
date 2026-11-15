@@ -25,7 +25,7 @@ export TMPDIR AURTOMATOR_KEEP_TEST_DIRS=1
 (tail --pid="$PPID" -f /dev/null && rm -rf "$TMPDIR") </dev/null >/dev/null 2>&1 {trace_fd}>&- &
 
 # Every writer of a blocking pipe waits for bashcov, so only the records of .sh files reach it.
-# A record starts with one or more + and BASHCOV> and the delimiter; its second field is BASH_SOURCE.
+# Records start with one or more + and BASHCOV> and the delimiter; the second field is BASH_SOURCE.
 exec {filter_fd}> >(LC_ALL=C gawk -v d="$delimiter" '
   BEGIN { RS = "[+]+BASHCOV>" d; ORS = "" }
   NR > 1 && split($0, field, d) > 1 && field[2] ~ /\.sh$/ { print start $0 }

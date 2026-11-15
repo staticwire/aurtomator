@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Mock curl for the bats tests: answers by the pattern the URL matches.
-# A specific pattern comes before the wildcard that covers it, or shellcheck reports SC2221/SC2222.
+# Specific patterns come before the wildcard that covers them, or shellcheck reports SC2221/SC2222.
 
 # The URL is the last argument. curl takes the last -w.
 write_out=""
@@ -13,7 +13,7 @@ for arg in "$@"; do
   url="$arg"
 done
 
-# A failed request, as curl -f writes it with the -w texts of http_get and
+# Failed requests, as curl -f writes them with the -w texts of http_get and
 # http_get_json: the URL on stdout for the latter, the error on stderr
 http_error() {
   [[ "$write_out" != '\n%{url_effective}'* ]] || printf '\n%s' "$url"
@@ -42,7 +42,7 @@ case "$url" in
     echo '<!DOCTYPE html><html><body><h1>Are you Human?</h1></body></html>'
     ;;
 
-  # GitHub Release: a body without tag_name. A real 404 is exit 22 with
+  # GitHub Release: a body without tag_name. Real 404s are exit 22 with
   # no body, see the tests of curl exit codes.
   *api.github.com/repos/null-owner/null-repo/releases/latest)
     echo '{"message": "Not Found"}'
@@ -237,11 +237,11 @@ case "$url" in
   *"api.github.com/repos/dated-nightly/repo/releases?per_page=100&page=1")
     echo '[{"tag_name": "v0.7.0-rc1", "published_at": "2026-10-01T20:28:19Z"}, {"tag_name": "2026-10-20", "published_at": "2026-10-21T00:00:29Z"}, {"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z"}, {"tag_name": "2026-10-22", "published_at": null}, {"tag_name": "2026-10-19", "published_at": "2026-10-19T23:28:58Z"}]'
     ;;
-  # A last page of 2 releases without a match
+  # Last page of 2 releases without a match
   *"api.github.com/repos/short-nightly/repo/releases?per_page=100&page=1")
     echo '[{"tag_name": "v0.7.0-rc1", "published_at": "2026-10-01T20:28:19Z"}, {"tag_name": "v0.6.0-rc2", "published_at": "2026-09-24T16:52:22Z"}]'
     ;;
-  # A full page of 100 releases with the match among them, and a later
+  # Full page of 100 releases with the match among them, and a later
   # match on page 2
   *"api.github.com/repos/full-nightly/repo/releases?per_page=100&page=1")
     printf '[{"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z"}'
@@ -269,7 +269,7 @@ case "$url" in
   *"api.github.com/repos/two-lines/repo/releases?per_page=100&page=2")
     echo '[{"tag_name": "v1.0.100", "published_at": "2026-10-20T01:40:00Z", "prerelease": false}, {"tag_name": "v2.0.0", "published_at": "2026-09-01T00:00:00Z", "prerelease": false}]'
     ;;
-  # A page of 100 releases without a match, and the match on page 2
+  # Page of 100 releases without a match, and the match on page 2
   *"api.github.com/repos/later-nightly/repo/releases?per_page=100&page=2")
     echo '[{"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z"}]'
     ;;
@@ -341,7 +341,7 @@ case "$url" in
   *"api.github.com/repos/multi-product/repo/releases?per_page=100&page=1")
     echo '[{"tag_name": "app-desktop-release-361.0", "published_at": "2026-10-12T08:34:32Z", "prerelease": false}, {"tag_name": "app-web-release-362.0", "published_at": "2026-10-21T08:32:50Z", "prerelease": false}, {"tag_name": "app-desktop-release-363.0", "published_at": "2026-10-22T00:00:00Z", "prerelease": true}, {"tag_name": "app-desktop-release-362.0", "published_at": "2026-10-21T08:33:13Z", "prerelease": false}, {"tag_name": "app-desktop-release-364.0", "published_at": null, "prerelease": false}]'
     ;;
-  # A maintenance release of the old line, published after the new line,
+  # Maintenance release of the old line, published after the new line,
   # and a tag that gives an empty version
   *"api.github.com/repos/maint-line/repo/releases?per_page=100&page=1")
     echo '[{"tag_name": "v", "published_at": "2026-10-26T00:00:00Z", "prerelease": false}, {"tag_name": "v2.1.0-rc1", "published_at": "2026-10-25T00:00:00Z", "prerelease": true}, {"tag_name": "v1.9.5", "published_at": "2026-10-20T00:00:00Z", "prerelease": false}, {"tag_name": "v2.0.1", "published_at": "2026-10-01T00:00:00Z", "prerelease": false}, {"tag_name": "v2.0.0", "published_at": "2026-09-20T00:00:00Z", "prerelease": false}]'
@@ -409,7 +409,7 @@ case "$url" in
   *"codeberg.org/api/v1/repos/multi-product/repo/releases?limit=50&page=3")
     echo '[]'
     ;;
-  # A release list without an end: page N holds v1.N.0
+  # Release list without an end: page N holds v1.N.0
   *"codeberg.org/api/v1/repos/endless/repo/releases?limit=50&page="*)
     printf '[{"tag_name": "v1.%s.0", "prerelease": false, "draft": false}]\n' "${url##*page=}"
     ;;
@@ -480,7 +480,7 @@ case "$url" in
   *registry.npmjs.org/*/latest)
     echo '{"version": "4.0.0"}'
     ;;
-  # A crate whose highest version is a pre-release, as pijul
+  # Crate whose highest version is a pre-release, as pijul
   *crates.io/api/v1/crates/pre-crate)
     echo '{"crate": {"max_version": "1.0.0-beta.24", "max_stable_version": "0.15.0"}}'
     ;;
