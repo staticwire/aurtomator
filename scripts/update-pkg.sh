@@ -202,6 +202,17 @@ fi
 # audit_pkgbuild blocks a SKIP beside one that updpkgsums would turn into a hash
 if has_skip_checksums "${aur_dir}/PKGBUILD" && ! has_remote_hash "${aur_dir}/PKGBUILD"; then
   log_info "VCS package, skipping checksums"
+  # makepkg -g writes the arrays of arch=() alone: those of an arch that goes out go,
+  # and an arch that comes back takes those of its commit
+  gone=$(arch_minus "${arch_words[*]}" "${new_words[*]}")
+  if [[ -n "$gone$back" ]]; then
+    back_sums=""
+    for arch in $back; do
+      back_sums+=$(arch_sum_lines "${tmp_dir}/ref/$arch/PKGBUILD" "$arch" keep)$'\n'
+    done
+    arch_sum_lines "${aur_dir}/PKGBUILD" "$gone" drop "$back_sums" >"${tmp_dir}/PKGBUILD.sums"
+    cat "${tmp_dir}/PKGBUILD.sums" >"${aur_dir}/PKGBUILD"
+  fi
 else
   require_cmd updpkgsums
   log_info "Updating checksums"

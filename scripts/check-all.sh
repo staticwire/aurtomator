@@ -156,6 +156,11 @@ package_name() {
     log_err "packages/${stem}.yml: name ${name@Q} must equal the file name"
     return 1
   fi
+  # _packages and the statuses keep a name of these characters alone, one a line
+  if ! (LC_ALL=C && [[ "$name" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
+    log_err "packages/${stem@Q}.yml: the name holds a character outside [A-Za-z0-9@._+-], or starts with . or -"
+    return 1
+  fi
   printf '%s\n' "$name"
 }
 

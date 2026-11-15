@@ -410,6 +410,38 @@ stub_git_latest() {
   [ ! -e "$TEST_TMPDIR/packages/demo.yml" ]
 }
 
+@test "draft: takes a .SRCINFO of 1 MiB and refuses one byte more" {
+  local size pad
+  aur_package size0 1.0.0 "depends = "
+  size=$(stat -c %s "$TEST_TMPDIR/aur-work/size0/.SRCINFO")
+  for pad in 0 1; do
+    aur_package "demo$pad" 1.0.0 "depends = $(head -c $((1048576 - size + pad)) /dev/zero | tr '\0' a)"
+    [ "$(stat -c %s "$TEST_TMPDIR/aur-work/demo$pad/.SRCINFO")" -eq $((1048576 + pad)) ]
+    cd "$TEST_TMPDIR"
+    run timeout 20 "$TEST_TMPDIR/scripts/draft.sh" "demo$pad"
+    if ((pad == 0)); then
+      [[ "$output" != *"larger than 1 MiB"* ]]
+    else
+      [ "$status" -eq 1 ]
+      [[ "$output" == *"The .SRCINFO of demo1 is larger than 1 MiB, so no YAML is written"* ]]
+    fi
+  done
+}
+
+@test "draft: writes nothing for a .SRCINFO with any control character" {
+  local c i=0
+  for c in $'\x01' $'\x0b' $'\x1f' $'\x7f' $'\xc2\x9f'; do
+    i=$((i + 1))
+    aur_package "ctl$i" 1.0.0 "url = https://example.invalid/a${c}b"
+    cd "$TEST_TMPDIR"
+    run "$TEST_TMPDIR/scripts/draft.sh" "ctl$i"
+    [ "$status" -eq 1 ] && [[ "$output" == *"The .SRCINFO of ctl$i holds a control character, so no YAML is written"* ]] || {
+      echo "taken: ${c@Q}"
+      return 1
+    }
+  done
+}
+
 # One check of the whole file in place of a subshell for each of its lines
 @test "draft: reads a .SRCINFO of 20,000 lines in a few seconds" {
   local -a deps

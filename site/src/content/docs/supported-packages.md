@@ -23,7 +23,7 @@ source_x86_64=("https://example.com/app-${pkgver}-x86_64.tar.gz")
 source_aarch64=("https://example.com/app-${pkgver}-aarch64.tar.gz")
 ```
 
-The source check covers every `source_<arch>` array. `updpkgsums` writes all checksum arrays in one block at the place of the first one, so a `sha256sums_<arch>` array beside its `source_<arch>` moves into that block at the first update. A release without the archive of one arch goes out without that arch after 24 hours, see [Versions without some arches](/features/missing-arches/).
+The source check covers every `source_<arch>` array. `updpkgsums` writes all checksum arrays in one block at the place of the first one, so a `sha256sums_<arch>` array beside its `source_<arch>` moves into that block at the first update. A package with `SKIP` in every checksum gets no `updpkgsums`: its arrays stay where they stand, the arrays of an arch that goes out are dropped, and an arch that comes back takes those of the AUR commit that last built it. A release without the archive of one arch goes out without that arch after 24 hours, see [Versions without some arches](/features/missing-arches/).
 
 ### VCS packages (-git) with the git-latest strategy
 
@@ -131,7 +131,7 @@ A `SKIP` that makepkg writes itself does not count, since `updpkgsums` keeps it:
 
 A PKGBUILD whose sources take the version from another variable, as `_pkgver=2025-04-03` with `pkgver="${_pkgver//-/.}"`; a download URL without the version whose file has not changed; or a VCS source pinned to a commit the version does not set, as `git+https://example.org/player.git#commit=$_commit`. `sed` sets only `pkgver`, so the new version would hold the old files.
 
-**Detection:** the `.SRCINFO` check refuses a new `pkgver` when no source URL and no checksum changed while a download has a real checksum or a VCS source is pinned. It checks each architecture, the common sources counting for all of them. A download saved under the new version from the URL and the checksum of the old one is refused even when another source changes. A VCS pin that stays passes beside another source that changes.
+**Detection:** the `.SRCINFO` check refuses a new `pkgver` when no source URL and no checksum changed while a download has a real checksum or a VCS source is pinned. It checks each architecture, and the common sources count for all of them until the sources of one architecture change: from then on, an architecture with downloads of its own needs a change in those, since its build takes its files from them. A download saved under the new version from the URL and the checksum of the old one is refused even when another source changes. A VCS pin that stays passes beside another source that changes.
 
 **Correct approach:** make `pkgver` the literal and derive the other variable from it:
 

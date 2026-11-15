@@ -256,7 +256,7 @@ current: '$current'"
   project: owner/repo"
   LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"upstream.host must be a host name, with a port or none: \$'g\\304\\261tlab.com'"* ]]
+  [[ "$output" == *"a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]]
 }
 
 @test "validate: no value holds a control character" {
@@ -321,6 +321,171 @@ current: '$current'"
   printf 'name: mypkg\r\nstrategy: github-tag\r\nupstream:\r\n  project: owner/repo\r\n' >"$TEST_TMPDIR/packages/mypkg.yml"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 0 ]
+}
+
+# A diff shows no zero-width or bidi character, and a hold whose match hides one never fires
+@test "validate: a key or a value outside alerts[].note is printable ASCII or a tab" {
+  local entry
+  # U+200B in a match, U+202E and U+00E9 in a project, as UTF-8 bytes
+  for entry in $'.alerts[0].match|^2\xe2\x80\x8b\\.' $'.upstream.project|p\xe2\x80\xaeq/repo' $'.upstream.project|caf\xc3\xa9/repo'; do
+    create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '^3'"
+    V="${entry#*|}" yq -i "${entry%%|*} = strenv(V)" "$TEST_TMPDIR/packages/mypkg.yml"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]] || {
+      echo "taken: ${entry@Q}"
+      return 1
+    }
+  done
+}
+
+@test "validate: alerts[].note holds no format character and no space but U+0020" {
+  local note
+  for note in '"a\u200bb"' '"a\u202eb"' '"a\u00a0b"' '"a\u3000b"' '"a\u2028b"'; do
+    create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '^3'
+    note: $note"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: alerts[].note holds a format character or a space other than U+0020"* ]] || {
+      echo "taken: $note"
+      return 1
+    }
+  done
+  create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '^3'
+    note: 'Qt 7 needs a rebuild of café'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+# curl reads these as hosts that url_host cannot name, so the host memory cannot hold them
+@test "validate: upstream.url names its host in ASCII letters, digits, dots and dashes" {
+  local url
+  for url in 'https:///example.com/x' 'https://api.git%68ub.com/x' 'https://git.example.com\/x'; do
+    create_test_package "mypkg" "git-tag" "upstream:
+  url: '$url'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most"* ]] || {
+      echo "taken: $url"
+      return 1
+    }
+  done
+  for url in https://git.example.com:8443/repo.git https://git.example.com https://git.example.com?x; do
+    create_test_package "mypkg" "git-tag" "upstream:
+  url: '$url'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
+}
+
+# bash compiles a pattern again for each line it reads, and nested counted repeats
+# multiply the size of a pattern
+@test "validate: refuses a regex past 256 characters, 64 repeats or 128 parts" {
+  local entry field regex expected
+  local -a cases=(
+    'pattern;v([0-9]{,65});repeats a part more than 64 times'
+    'pattern;((a{1,80}){1,80}){1,80};repeats a part more than 64 times'
+    'pattern;v([0-9]{1,65});repeats a part more than 64 times'
+    "pattern;v([0-9]+)$(printf 'x%.0s' {1..250});holds more than 256 characters"
+    'pattern;v(x{63}x{63}y);holds more than 128 parts'
+    'pattern;(((a{1,32}){1,32}){1,32}){1,32};holds more than 128 parts'
+    'pattern;v((((a{4}){4}){4}){4});holds more than 128 parts'
+    'pattern;v((a{1,64}){1,64}){0}(x);holds more than 128 parts'
+    'match;((a{1,80}){1,80}){1,80};repeats a part more than 64 times'
+    'match;(a|b){32}x;holds more than 128 parts'
+  )
+  for entry in "${cases[@]}"; do
+    IFS=';' read -r field regex expected <<<"$entry"
+    if [[ "$field" == pattern ]]; then
+      create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '$regex'"
+    else
+      create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '$regex'"
+    fi
+    SECONDS=0
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"$expected"* ]] && ((SECONDS < 5)) || {
+      echo "taken: $entry in $SECONDS s"
+      echo "$output"
+      return 1
+    }
+  done
+  for regex in 'v(x{63}x{63})' 'v([{999}])' 'v(\{999\})'; do
+    create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $regex"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+@test "validate: refuses a loop after a group or a repeat and an anchor inside a regex" {
+  local entry regex expected
+  local -a cases=(
+    'v((a?)*);puts *, + or {n,} after a group or a repeat'
+    'v((x|y)+);puts *, + or {n,} after a group or a repeat'
+    'v(a?{2,});puts *, + or {n,} after a group or a repeat'
+    'v(\b[0-9]+);has an anchor other than ^ at its start or $ at its end'
+    'v([0-9]+)^;has an anchor other than ^ at its start or $ at its end'
+    'v(x$)y;has an anchor other than ^ at its start or $ at its end'
+  )
+  for entry in "${cases[@]}"; do
+    IFS=';' read -r regex expected <<<"$entry"
+    create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"$expected"* ]] || {
+      echo "taken: $entry"
+      echo "$output"
+      return 1
+    }
+  done
+  for regex in '^v([0-9.]+(-rc[0-9]+)?)$' '^([0-9a-f]{7,40})-(.*)$' 'v([\^$]+)' 'v(\^\$)' 'v([0-9]{2,}x*)'; do
+    create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $regex"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+@test "validate: refuses a PCRE version_pattern past 64 repeats" {
+  local regex
+  for regex in 'v\K[0-9]{,65}' '((a{1,80}){1,80}){1,80}'; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: release_body
+  version_pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"repeats a part more than 64 times"* ]] || {
+      echo "taken: $regex"
+      echo "$output"
+      return 1
+    }
+  done
 }
 
 @test "validate: upstream.url holds no user name" {
@@ -500,6 +665,56 @@ EOF
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
   [ "$status" -eq 1 ]
   [[ "$output" == *"packages/a.yml: name 'b' must equal the file name 'a'"* ]]
+}
+
+# The runs check such a package and then drop its status; the AUR allows no such name
+@test "validate: fails on a name outside the characters of an AUR package name" {
+  local name shown
+  # A name beyond ASCII meets the check of every value first
+  printf "name: 'fée'\nstrategy: github-release\nupstream:\n  project: owner/repo\n" >"$TEST_TMPDIR/packages/fée.yml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/fée.yml: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]]
+  for name in "space name" -dash 'quo"te'; do
+    rm -f "$TEST_TMPDIR"/packages/*.yml
+    printf 'name: %s\nstrategy: github-release\nupstream:\n  project: owner/repo\n' "'$name'" >"$TEST_TMPDIR/packages/$name.yml"
+    # validate-pkg.sh quotes the name in the C locale
+    shown=$(
+      LC_ALL=C
+      printf '%s' "${name@Q}"
+    )
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"packages/$name.yml: name $shown holds a character outside [A-Za-z0-9@._+-], or starts with . or -"* ]] || {
+      echo "taken: $name"
+      return 1
+    }
+  done
+}
+
+# The runs read packages/<name>.yml alone
+@test "validate --all: fails on a file of packages/ that no run reads" {
+  local file
+  create_test_package a github-release "upstream:
+  project: owner/repo"
+  for file in x.yaml .x.yml notes.txt; do
+    : >"$TEST_TMPDIR/packages/$file"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"packages/$file: no run reads it, as the runs read packages/<name>.yml alone"* ]] || {
+      echo "taken: $file"
+      return 1
+    }
+    rm "$TEST_TMPDIR/packages/$file"
+  done
+  : >"$TEST_TMPDIR/packages/.gitkeep"
+  cp "$PROJECT_DIR/packages/example.yml.sample" "$TEST_TMPDIR/packages/"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  # A file no run reads fails beside no package at all
+  mv "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/a.yaml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
 }
 
 @test "validate: fails on missing strategy" {
@@ -1035,7 +1250,7 @@ alerts:
   user_agent: 'Exämple/2.0'"
   run env LC_ALL=C.UTF-8 "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"upstream.user_agent must hold printable ASCII only"* ]]
+  [[ "$output" == *"a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]]
 }
 
 @test "validate: webpage-scrape fails without upstream.url" {
@@ -1419,6 +1634,8 @@ arch_wait:
   local commit_value arches
   local -a cases=(
     "main|aarch64|arch_wait.commit must be a commit id of 40 hex digits: 'main'"
+    "${commit}0|aarch64|arch_wait.commit must be a commit id of 40 hex digits: '${commit}0'"
+    "x$commit|aarch64|arch_wait.commit must be a commit id of 40 hex digits: 'x$commit'"
     "$commit|x86_64|arch_wait.arches must name arches other than x86_64, separated by single spaces: 'x86_64'"
     "$commit||arch_wait.arches must name arches other than x86_64, separated by single spaces: ''"
   )

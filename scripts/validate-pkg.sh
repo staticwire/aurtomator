@@ -179,6 +179,21 @@ validate_pkg() {
     log_err "$shown: a key or a value holds a control character"
     return 1
   fi
+  # A diff shows no zero-width or bidi character, so a value outside the notes for people is
+  # printable ASCII or a tab, and a note holds no format character and no space but U+0020
+  local hidden note_path='^alerts[.][0-9]+[.]note$'
+  hidden=$(NOTE_PATH="$note_path" ASCII_RE='[^\t -~]' yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
+    | select(path | join(".") | test(strenv(NOTE_PATH)) | not) | select(test(strenv(ASCII_RE)))] | length' "$file")
+  if [[ "$hidden" != 0 ]]; then
+    log_err "$shown: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"
+    return 1
+  fi
+  hidden=$(NOTE_PATH="$note_path" HIDDEN_RE='[\p{Cf}\p{Zl}\p{Zp}]|[^ \P{Zs}]' yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
+    | select(path | join(".") | test(strenv(NOTE_PATH))) | select(test(strenv(HIDDEN_RE)))] | length' "$file")
+  if [[ "$hidden" != 0 ]]; then
+    log_err "$shown: alerts[].note holds a format character or a space other than U+0020"
+    return 1
+  fi
 
   local name strategy
   name=$(pkg_get "$file" '.name // ""')
@@ -190,6 +205,9 @@ validate_pkg() {
   stem="${stem%.yml}"
   if [[ -z "$name" || "$name" == "null" ]]; then
     log_err "$shown: missing required field 'name'"
+    ((errors++))
+  elif [[ ! "$name" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]; then
+    log_err "$shown: name ${name@Q} holds a character outside [A-Za-z0-9@._+-], or starts with . or -"
     ((errors++))
   elif [[ "$name" != "$stem" ]]; then
     log_err "$shown: name '$name' must equal the file name '$stem'"
@@ -631,6 +649,9 @@ validate_pkg() {
       elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
         log_err "$shown: upstream.url must hold no user name: ${url@Q}"
         ((errors++))
+      elif [[ ! "$url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?([/?#]|$) ]]; then
+        log_err "$shown: upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most: ${url@Q}"
+        ((errors++))
       fi
       ;;
     git-latest)
@@ -676,6 +697,9 @@ validate_pkg() {
               ((errors++))
             elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
               log_err "$shown: upstream.url must hold no user name: ${url@Q}"
+              ((errors++))
+            elif [[ ! "$url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?([/?#]|$) ]]; then
+              log_err "$shown: upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most: ${url@Q}"
               ((errors++))
             fi
             ;;
@@ -733,6 +757,9 @@ validate_pkg() {
       elif [[ "$url" =~ ^https://[^/?#]*@ ]]; then
         log_err "$shown: upstream.url must hold no user name: ${url@Q}"
         ((errors++))
+      elif [[ ! "$url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?([/?#]|$) ]]; then
+        log_err "$shown: upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most: ${url@Q}"
+        ((errors++))
       fi
       if [[ -z "$pattern" || "$pattern" == "null" ]]; then
         log_err "$shown: strategy 'webpage-scrape' requires 'upstream.pattern'"
@@ -787,6 +814,14 @@ validate_pkg() {
 if [[ "${1:-}" == "--all" ]]; then
   total=0
   failed=0
+  strays=0
+  while IFS= read -r -d '' entry; do
+    entry="${entry##*/}"
+    [[ "$entry" == .gitkeep || "$entry" == example.yml.sample || ("$entry" == *.yml && "$entry" != .*) ]] && continue
+    ! has_control "$entry" || entry=${entry@Q}
+    log_err "packages/$entry: no run reads it, as the runs read packages/<name>.yml alone"
+    ((strays++)) || true
+  done < <(find "${AURTOMATOR_DATA_DIR}/packages" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     [[ -f "$pkg_file" ]] || continue
     ((total++)) || true
@@ -794,7 +829,7 @@ if [[ "${1:-}" == "--all" ]]; then
       ((failed++)) || true
     fi
   done
-  if [[ "$total" -eq 0 ]]; then
+  if [[ "$total" -eq 0 && "$strays" -eq 0 ]]; then
     log_warn "No packages found in packages/"
     exit 0
   fi
@@ -802,6 +837,7 @@ if [[ "${1:-}" == "--all" ]]; then
     log_err "Validation failed: $failed/$total packages have errors"
     exit 1
   fi
+  ((strays == 0)) || exit 1
   log_ok "All $total packages valid"
   exit 0
 fi

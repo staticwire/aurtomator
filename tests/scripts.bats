@@ -1243,9 +1243,9 @@ MOCKCURL
 @test "lib.sh: http_get names the URL and the exit code when curl writes nothing" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
-  CURL_RC=3 CURL_STDERR='' run http_get 'https://[bad'
+  CURL_RC=3 CURL_STDERR='' run http_get 'https://example.invalid/[bad'
   [ "$status" -eq 3 ]
-  [ "$output" = "https://[bad: curl exit 3" ]
+  [ "$output" = "https://example.invalid/[bad: curl exit 3" ]
 }
 
 # curl writes its own message for an unknown option, -s or not
@@ -1305,6 +1305,26 @@ MOCKCURL
   [ ! -e "$TEST_TMPDIR/curl.log" ]
 }
 
+# curl reads a host out of each of these that url_host cannot name, so the host memory cannot hold it
+@test "lib.sh: http_get refuses an https URL whose host is no plain name, before curl runs" {
+  keep_host_memory
+  timeout_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local url
+  for url in 'https:///example.com/x' 'https:/example.com/x' 'https://api.git%68ub.com/x' 'https://a\@b/x'; do
+    run http_get "$url"
+    [ "$status" -ne 0 ]
+    [ "$output" = "$url: the host is no plain name of ASCII letters, digits, dots and dashes" ]
+  done
+  [ ! -e "$TEST_TMPDIR/curl.log" ]
+  # A port, and a letter beyond ASCII after the host, reach curl
+  for url in https://git.example.com:8443/x https://example.com/caf$'\xc3\xa9'; do
+    run http_get "$url"
+    [ "$status" -eq 0 ]
+    grep -qF -- "$url" "$TEST_TMPDIR/curl.log"
+  done
+}
+
 @test "lib.sh: http_get remembers no host after an answer, a refusal or an HTTP error" {
   keep_host_memory
   mock_curl_failure
@@ -1344,6 +1364,40 @@ MOCKCURL
   [[ "$output" == *"packages/mypkg.yml: name '../escape' must equal the file name"* ]]
   [ ! -e "$TEST_TMPDIR/escape" ]
   [ "$(cat "$TEST_TMPDIR/.status/mypkg")" = "check_failed: packages/mypkg.yml: name '../escape' must equal the file name" ]
+}
+
+# _packages and the status files carry one name a line, of the characters of an AUR name
+@test "check-all: checks and lists a file only under a stem of an AUR package name" {
+  local stem
+  local -a stems=($'a\nb' .hidden -x)
+  ! locale -a 2>/dev/null | grep -qix 'en_US.utf8' || stems+=(fée)
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  for stem in "${stems[@]}"; do
+    printf 'name: %s\nstrategy: step\ncurrent: 1.0.0\n' "${stem@Q}" >"$TEST_TMPDIR/packages/$stem.yml"
+  done
+  LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_packages")" = pkg ]
+  [ "$(find "$TEST_TMPDIR/.status" -mindepth 1 -maxdepth 1 ! -name '_*' -printf '%f\n')" = pkg ]
+}
+
+# --prepare and --publish read the statuses of the check run, and a YAML that YAML cannot read
+# gets one under its file name
+@test "check-all: fails a YAML it cannot read under its file name, in the check run alone" {
+  stand_in_strategy step 2.0.0
+  create_test_package "pkg" "step" "current: '1.0.0'"
+  printf 'name: [broken\n' >"$TEST_TMPDIR/packages/bad.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/bad")" = "check_failed: packages/bad.yml: name '' must equal the file name" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+
+  rm -rf "$TEST_TMPDIR/.status"
+  mkdir -p "$TEST_TMPDIR/.status"
+  printf 'new_version: 2.0.0\n' >"$TEST_TMPDIR/.status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ ! -e "$TEST_TMPDIR/out/status/bad" ]
 }
 
 @test "check-update: refuses a strategy that is no plain name" {
@@ -4536,6 +4590,48 @@ arch_wait:
   [ "$ARCH_OUT" = $'aarch64|\n|' ]
 }
 
+# A maintainer who drops an arch for good drops its source_<arch>, and the arch can never come back
+@test "check-arch: an arch of arch_out without its source in the AUR PKGBUILD stays out unasked" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  temurin_package "current: 28+23"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  aur_arch_commit 28+23 x86_64 powerpc64le riscv64 >/dev/null
+  sed -i '/^source_aarch64=/d' "$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "drop aarch64"
+  git -C "$work" push -q "$AUR_REMOTE" master
+
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+  run ! grep -q "$(arch_source_url aarch64 28+24)" "$TEST_TMPDIR/heads.log"
+  grep -q "the AUR PKGBUILD has no source_aarch64, so aarch64 stays out" "$TEST_TMPDIR/arch.err"
+
+  # A version without x86_64 keeps it out as well
+  archive_missing x86_64 28+24
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+
+  # An assignment in a block of the PKGBUILD keeps the arch, which comes back
+  : >"$TEST_TMPDIR/missing"
+  # shellcheck disable=SC2016
+  printf '%s\n' 'if true; then' '  source_aarch64=("${_release}/OpenJDK-jdk_aarch64_${_file}")' 'fi' >>"$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "aarch64 in a block"
+  git -C "$work" push -q "$AUR_REMOTE" master
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'|\n|' ]
+}
+
+@test "check-arch: a wait names each arch it waits for" {
+  temurin_package "current: 28+22"
+  archive_missing aarch64 28+23
+  archive_missing riscv64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 3 ]
+  [ "$(sed -n 2p "$TEST_TMPDIR/arch.out")" = "aarch64 riscv64" ]
+}
+
 @test "check-arch: an arch the maintainer put back is no longer out" {
   temurin_package "current: 28+22"
   yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
@@ -4880,7 +4976,11 @@ stand_in_arch() {
   local out
   stand_in_strategy step 2.0.0
   create_test_package "pkg" "step" "current: '1.0.0'"
-  for out in $'2026-11-11T10:00:00Z\n' $'2026-11-11T10:00:00Z\naarch64\nmain\n' $'2026-11-11T10:00:00Z\nx86_64\n'"$(printf 'c%.0s' {1..40})"$'\n'; do
+  local commit
+  commit=$(printf 'c%.0s' {1..40})
+  for out in $'2026-11-11T10:00:00Z\n' $'2026-11-11T10:00:00Z\naarch64\nmain\n' $'2026-11-11T10:00:00Z\nx86_64\n'"$commit"$'\n' \
+    $'2026-11-11T10:00:00Z\n\n'"$commit"$'\n' $'2026-11-11T10:00:00Z\naarch64\n'"${commit}c"$'\n' \
+    $'2026-11-11T10:00:00Z\nAArch64\n'"$commit"$'\n'; do
     stand_in_arch "$out" 3
     rm -rf "$TEST_TMPDIR/.status"
     run "$TEST_TMPDIR/scripts/check-all.sh"

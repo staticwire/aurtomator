@@ -175,6 +175,12 @@ request_begin() {
     printf '%s: the host holds a character beyond ASCII\n' "$1" >&2
     return 1
   fi
+  # curl takes https:/h, https:///h, %-escapes and \@ in a host, which url_host cannot name
+  if [[ "$1" == [Hh][Tt][Tt][Pp][Ss]:* ]] && ! url_host "$1" >/dev/null &&
+    ! (LC_ALL=C && [[ "$1" =~ ^https://[^/?#]*:[0-9]+([/?#]|$) ]]); then
+    printf '%s: the host is no plain name of ASCII letters, digits, dots and dashes\n' "$1" >&2
+    return 1
+  fi
   if ! host_memory || ! host=$(url_host "$1"); then
     return 0
   fi
@@ -549,10 +555,113 @@ capture_matches() {
   done < <(grep -oE -e "$pattern")
 }
 
+# bash compiles a pattern again for each line it reads, and the cost of a compile grows with
+# the parts of the pattern, a loop after a group and an anchor inside it
+REGEX_MAX_CHARS=256 REGEX_MAX_REPEAT=64 REGEX_MAX_PARTS=128
+
+# Succeeds when regex $1 holds at most REGEX_MAX_CHARS characters
+_regex_short() {
+  local LC_ALL=C
+  if ((${#1} > REGEX_MAX_CHARS)); then
+    log_err "The regex holds more than $REGEX_MAX_CHARS characters"
+    return 1
+  fi
+}
+
+# Succeeds when the count $1 of a counted repeat is at most REGEX_MAX_REPEAT
+_repeat_count_ok() {
+  if ((${#1} > 3 || 10#${1:-0} > REGEX_MAX_REPEAT)); then
+    log_err "The regex repeats a part more than $REGEX_MAX_REPEAT times"
+    return 1
+  fi
+}
+
+# Succeeds when ERE $1 repeats no part past REGEX_MAX_REPEAT, holds at most REGEX_MAX_PARTS
+# parts with its repeats written out, loops only after an atom and has anchors at its ends
+_ere_bounded() {
+  local LC_ALL=C re="$1" interval='^[{]([0-9]*)(,([0-9]*))?[}]' c rest i=0 j d=0 p lo hi
+  local anchor='The regex has an anchor other than ^ at its start or $ at its end'
+  # Per depth of groups: the parts of the closed alternatives, of the open one and of its last
+  # element, and 1 when that element is an atom, the one element *, + and {n,} may follow
+  local -a alt=(0) seq=(0) last=(0) atom=(0)
+  while ((i < ${#re} && alt[d] + seq[d] <= REGEX_MAX_PARTS)); do
+    c=${re:i:1} i=$((i + 1))
+    if [[ "$c" == '(' ]]; then
+      d=$((d + 1))
+      alt[d]=0 seq[d]=0 last[d]=0 atom[d]=0
+      continue
+    elif [[ "$c" == '|' ]]; then
+      alt[d]=$((alt[d] + seq[d] + 1)) seq[d]=0 last[d]=0 atom[d]=0
+      continue
+    elif [[ "$c" == ')' ]] && ((d > 0)); then
+      p=$((alt[d] + seq[d] + 1)) d=$((d - 1))
+      seq[d]=$((seq[d] + p)) last[d]=$p atom[d]=0
+      continue
+    elif [[ "$c" == [*+?] ]] || { [[ "$c" == '{' && "${re:i-1}" =~ $interval ]] && [[ -n "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" ]]; }; then
+      case "$c" in
+        '*') lo=0 hi=-1 ;;
+        '+') lo=1 hi=-1 ;;
+        '?') lo=0 hi=1 ;;
+        *)
+          _repeat_count_ok "${BASH_REMATCH[1]}" || return 1
+          _repeat_count_ok "${BASH_REMATCH[3]}" || return 1
+          lo=$((10#${BASH_REMATCH[1]:-0})) hi=$((10#${BASH_REMATCH[3]:-0}))
+          [[ -n "${BASH_REMATCH[2]}" ]] || hi=$lo
+          [[ -z "${BASH_REMATCH[2]}" || -n "${BASH_REMATCH[3]}" ]] || hi=-1
+          i=$((i - 1 + ${#BASH_REMATCH[0]}))
+          ;;
+      esac
+      if ((hi < 0 && last[d] && ! atom[d])); then
+        log_err "The regex puts *, + or {n,} after a group or a repeat"
+        return 1
+      fi
+      p=$((hi < 0 ? lo + 1 : hi > 0 ? hi : 1))
+      seq[d]=$((seq[d] + last[d] * (p - 1))) last[d]=$((last[d] * p)) atom[d]=0
+      continue
+    elif [[ "$c" == "\\" ]]; then
+      c=${re:i:1} i=$((i + 1))
+      if [[ -n "$c" && "bB<>\`'" == *"$c"* ]]; then
+        log_err "$anchor"
+        return 1
+      fi
+    elif [[ "$c" == '[' ]]; then
+      j=$i
+      [[ "${re:j:1}" != '^' ]] || j=$((j + 1))
+      [[ "${re:j:1}" != ']' ]] || j=$((j + 1))
+      while ((j < ${#re})) && [[ "${re:j:1}" != ']' ]]; do
+        rest=${re:j:2}
+        if [[ "$rest" == '[:' || "$rest" == '[=' || "$rest" == '[.' ]]; then
+          # A class, an equivalence class or a collating symbol ends at :] =] or .]
+          rest=${re:j+2}
+          [[ "$rest" == *"${re:j+1:1}]"* ]] && rest=${rest#*"${re:j+1:1}]"} || rest=''
+          j=$((${#re} - ${#rest}))
+        else
+          j=$((j + 1))
+        fi
+      done
+      i=$((j + 1))
+    elif [[ "$c" == '^' || "$c" == '$' ]] && [[ "$c$i" != '^1' && "$c$i" != "\$${#re}" ]]; then
+      log_err "$anchor"
+      return 1
+    fi
+    seq[d]=$((seq[d] + 1)) last[d]=1 atom[d]=1
+  done
+  while ((d > 0)); do
+    p=$((alt[d] + seq[d] + 1)) d=$((d - 1))
+    seq[d]=$((seq[d] + p))
+  done
+  if ((alt[0] + seq[0] > REGEX_MAX_PARTS)); then
+    log_err "The regex holds more than $REGEX_MAX_PARTS parts with its repeats written out"
+    return 1
+  fi
+}
+
 # Succeeds when bash accepts ERE $1, as capture_matches needs. bash refuses some
 # patterns that grep -E takes, (?:x) and *x among them.
 ere_valid() {
   local rc=0
+  _regex_short "$1" || return 1
+  _ere_bounded "$1" || return 1
   # [[ =~ ]] returns 2 for a pattern bash cannot compile
   # shellcheck disable=SC2319
   [[ "" =~ $1 ]] 2>/dev/null || rc=$?
@@ -562,7 +671,11 @@ ere_valid() {
 # Succeeds when grep -P compiles Perl regex $1. github-nightly reads the version
 # out of a release body with such a regex.
 pcre_valid() {
-  local rc=0
+  local bound rc=0
+  _regex_short "$1" || return 1
+  while IFS= read -r bound; do
+    _repeat_count_ok "$bound" || return 1
+  done < <(LC_ALL=C grep -oE '[{]([0-9]+(,[0-9]*)?|,[0-9]+)[}]' <<<"$1" | LC_ALL=C grep -oE '[0-9]+')
   # grep exits 2 for a pattern it cannot compile
   grep -qP -e "$1" </dev/null 2>/dev/null || rc=$?
   ((rc != 2))

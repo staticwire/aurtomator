@@ -88,11 +88,16 @@ if ! arch_text=$(pkgbuild_arch_words "$work/HEAD/PKGBUILD"); then
 fi
 mapfile -t arches <<<"$arch_text"
 
-# An arch of arch_out that arch=() names again was put back by hand
+# An arch of arch_out that arch=() names again was put back by hand, and one without its
+# source_<arch> was dropped: it stays out unasked until a push takes it out of arch_out
 out_now=()
+dropped=()
 for arch in "${out_keys[@]}"; do
   if [[ " ${arches[*]} " == *" $arch "* ]]; then
     log_info "$PKG_NAME: $arch of arch_out is in arch=() of the AUR again"
+  elif ! pkgbuild_assigns_source "$work/HEAD/PKGBUILD" "$arch"; then
+    log_info "$PKG_NAME: the AUR PKGBUILD has no source_$arch, so $arch stays out"
+    dropped+=("$arch")
   else
     out_now+=("$arch")
   fi
@@ -135,7 +140,7 @@ for arch in "${ask[@]}"; do
 done
 
 leaving=()
-staying=()
+staying=("${dropped[@]}")
 for arch in "${arches[@]}"; do
   [[ -z "${missing[$arch]:-}" ]] || leaving+=("$arch")
 done
@@ -147,7 +152,7 @@ if ((${#leaving[@]} == 0)); then
 fi
 if [[ " ${leaving[*]} " == *" x86_64 "* ]] || ((${#leaving[@]} == ${#arches[@]})); then
   log_warn "$PKG_NAME $VERSION: without x86_64 or without every arch there is no update"
-  finish ""
+  finish "${dropped[*]}"
 fi
 
 # The wait counts from the first run that saw the version without an arch

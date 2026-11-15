@@ -109,9 +109,9 @@ if ((handed_rc == 0)); then
   # was lost: the arches it waits for that the head lacks go to arch_out with its commit
   lost_out=()
   if [[ -n "$final_words" && "$(pkg_get "$PKG_FILE" '.arch_wait.version // ""')" == "$VERSION" ]]; then
-    mapfile -t lost_out < <(wait_out "$PKG_FILE" "$aur_dir" "$final_words")
+    mapfile -t lost_out < <(wait_out "$PKG_FILE" "$aur_dir" "$final_words" "${PREPARED}/PKGBUILD")
   fi
-  arch_state_after "$PKG_FILE" "$final_words" "${lost_out[0]:-}" "${lost_out[1]:-}"
+  arch_state_after "$PKG_FILE" "$final_words" "${lost_out[0]:-}" "${lost_out[1]:-}" "${PREPARED}/PKGBUILD"
   exit 2
 fi
 ((handed_rc == 2)) || exit 1
@@ -158,5 +158,5 @@ log_ok "Pushed $PKG_NAME $VERSION to AUR"
 
 pkg_set_current "$PKG_FILE" "$VERSION" "$ASSET"
 [[ -n "$put_back" ]] || pkg_set "$PKG_FILE" .last_updated "\"$(date -u +%Y-%m-%d)\""
-arch_state_after "$PKG_FILE" "$final_words" "$taken_out" "$base"
+arch_state_after "$PKG_FILE" "$final_words" "$taken_out" "$base" "${PREPARED}/PKGBUILD"
 log_ok "Updated $PKG_FILE with current: $VERSION"

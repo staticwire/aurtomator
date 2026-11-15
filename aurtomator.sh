@@ -91,11 +91,17 @@ plain_uses() {
   [[ "${1,,}" == "${repo,,}"[/@]* && "$1" != *//* && "$1" != *\\* ]]
 }
 
-# Succeeds for a uses: value that names a reusable workflow of a repository,
-# not one of the calling repository
+# Succeeds for a uses: value that names a reusable workflow of a repository, not one
+# of the calling repository: its path holds .github/workflows in any case and spelling
 names_workflow() {
-  local path="${1//\\//}"
-  [[ "$path" != ./* && "$path" == */.github/workflows/* ]]
+  local LC_ALL=C part path=""
+  local -a parts
+  [[ "$1" != ./* ]] || return 1
+  IFS=/ read -r -a parts <<<"${1//\\//}"
+  for part in "${parts[@]}"; do
+    [[ -z "$part" || "$part" == . ]] || path+="/${part,,}"
+  done
+  [[ "$path" == /*/.github/workflows/* ]]
 }
 
 check_shape "$workflow"
@@ -173,14 +179,14 @@ if [[ "${1:-}" == pin ]]; then
     exit 1
   fi
   cd "$root"
-  # sed moves a pin on a uses: line alone, so every pin GitHub reads in the
-  # two files has to be on one before any file changes
+  # sed moves a pin on a uses: line alone, so every pin GitHub reads in the two files
+  # has to be on one before any file changes. GitHub reads the repository in any case.
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
     check_shape "$file"
-    mapfile -t on_lines < <(sed -nE "s|^[[:space:]]*uses:[[:space:]]+($pin_repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40})([[:space:]].*)?$|\1|p" "$file" | sort)
+    mapfile -t on_lines < <(sed -nE "s|^[[:space:]]*uses:[[:space:]]+($repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40})([[:space:]].*)?$|\1|Ip" "$file" | sort)
     read_out=$(yq -r 'explode(.) | .jobs[].uses | select(. != null)' "$file")
-    mapfile -t read_pins < <(grep -E "^$pin_repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40}\$" <<<"$read_out" | sort)
+    mapfile -t read_pins < <(grep -iE "^$repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40}\$" <<<"$read_out" | sort)
     if [[ "${on_lines[*]}" != "${read_pins[*]}" ]]; then
       echo "Write each pin of $repo in $file on one uses: line without quotes. GitHub reads:" >&2
       printf '  %s\n' "${read_pins[@]:-none}" >&2
@@ -189,8 +195,8 @@ if [[ "${1:-}" == pin ]]; then
   done
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
-    sed -i -E "s|^([[:space:]]*uses:[[:space:]]+$pin_repo/\.github/workflows/[a-z-]+\.yml@)[0-9a-f]{40}([[:space:]].*)?$|\1$new # $2|" "$file"
-    grep -nHE "^[[:space:]]*uses:[[:space:]]+$pin_repo/\.github/workflows/[a-z-]+\.yml@$new # $2\$" "$file" || true
+    sed -i -E "s|^([[:space:]]*uses:[[:space:]]+$repo/\.github/workflows/[a-z-]+\.yml@)[0-9a-f]{40}([[:space:]].*)?$|\1$new # $2|I" "$file"
+    grep -nHiE "^[[:space:]]*uses:[[:space:]]+$repo/\.github/workflows/[a-z-]+\.yml@$new # $2\$" "$file" || true
   done
   exit 0
 fi
@@ -212,6 +218,14 @@ if [[ "${1:-}" == check-pins ]]; then
       echo "$file holds a uses: value with the tag $tags; write every uses: value as plain text" >&2
       exit 1
     fi
+    # A job runs a workflow, local or of this repository, and passes it the secrets it names
+    job_uses=$(yq -r 'explode(.) | .jobs[].uses | select(. != null)' "$file")
+    while IFS= read -r value; do
+      if [[ -n "$value" && "$value" != ./* ]] && ! names_repo "$value"; then
+        echo "$file runs $value, a workflow of another repository than $repo" >&2
+        exit 1
+      fi
+    done <<<"$job_uses"
     # The release comes from the uses: line, so every pin GitHub reads has to be on one
     read_out=$(yq -r 'explode(.) | .jobs[] | (.uses, .steps[]?.uses) | select(. != null)' "$file")
     read_pins=() values=() lines=()
