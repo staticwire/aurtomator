@@ -2229,7 +2229,7 @@ EOF
   BODY_LOG="$BATS_TEST_TMPDIR/body.log"
   : >"$GH_LOG"
   : >"$BODY_LOG"
-  step_run issues "Close resolved issues" >"$BATS_TEST_TMPDIR/step.sh"
+  step_run issues "${CLOSE_STEP:-Close resolved issues}" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -2663,7 +2663,7 @@ make_runner_repo() {
 
 @test "check-updates: the close step runs before the issue step, and not after a failed step or publish" {
   run yq '[.jobs.issues.steps[].name] | join(",")' "$CHECK_UPDATES"
-  [[ "$output" == *"Close resolved issues,Create issues" ]]
+  [[ "$output" == *"Close resolved issues,Close resolved host issues,Create issues" ]]
   run yq '.jobs.issues.steps[] | select(.name == "Close resolved issues") | .if' "$CHECK_UPDATES"
   [ "$output" = "needs.publish.result == 'success' || needs.publish.result == 'skipped'" ]
   run yq '.jobs.issues.steps[] | select(.name == "Create issues") | .if' "$CHECK_UPDATES"
@@ -2741,7 +2741,7 @@ run_bare_issues_step() {
 
 @test "check-updates: the issues job runs on without statuses" {
   local step
-  for step in "Write the run summary" "Close resolved issues" "Create issues"; do
+  for step in "Write the run summary" "Close resolved issues" "Close resolved host issues" "Create issues"; do
     run run_bare_issues_step "$step"
     [ "$status" -eq 0 ]
   done
@@ -2934,7 +2934,7 @@ run_bare_issues_step() {
   local pairs
   mapfile -t pairs < <(host_failures 4 api.github.com a && host_failures 5 apixgithub.com x && host_failures 5 cdn.gitlab.com y)
   GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check\n22 ❌ apixgithub.com: 5 packages failed to check\n23 ❌ gitlab.com: 7 packages failed to check\n24 ❌ gitlab.com: many packages failed to check' \
-    run_close_step "${pairs[@]}"
+    CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}"
   [ "$status" -eq 0 ]
   grep -qx 'issue close 21 --comment Fewer than 5 packages of `api.github.com` failed to check in https://example.invalid/run.' "$GH_LOG"
   grep -qx 'issue close 23 --comment Fewer than 5 packages of `gitlab.com` failed to check in https://example.invalid/run.' "$GH_LOG"
@@ -2947,10 +2947,25 @@ run_bare_issues_step() {
   local pairs
   mapfile -t pairs < <(host_failures 4 api.github.com a)
   GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check\n22 ❌ late: check failed' \
-    run_close_step "${pairs[@]}" "late=unchecked: the check ran out of its 20 minutes in this run"
+    CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}" "late=unchecked: the check ran out of its 20 minutes in this run"
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# Failed publish runs leave the check statuses, and the failing packages of a host under the
+# minimum get their issues in the same run once its host issue is closed
+@test "check-updates: closes host issues after a failed publish, before the issue step" {
+  local pairs
+  run yq '.jobs.issues.steps[] | select(.name == "Close resolved host issues") | .if' "$CHECK_UPDATES"
+  [ "$output" = "always() && steps.clean.outcome == 'success'" ]
+  [ "$(step_index issues "Close resolved host issues")" -lt "$(step_index issues "Create issues")" ]
+  run yq '.jobs.issues.steps[] | select(.name == "Close resolved issues") | .run' "$CHECK_UPDATES"
+  [[ "$output" != *host_close_comment* ]]
+  mapfile -t pairs < <(host_failures 2 api.github.com a)
+  GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check' CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 21 --comment Fewer than 5 packages of `api.github.com` failed to check in https://example.invalid/run.' "$GH_LOG"
 }
 
 @test "check-updates: closes the arch issue of a package that _without of publish lists no more" {
@@ -3226,6 +3241,17 @@ EOF
   [ "$status" -eq 0 ]
   grep -qF 'failed in `pins`, `check-updates / check`, `check-updates / status`.' "$GH_LOG"
   grep -q -- '--paginate' "$GH_LOG"
+}
+
+# GitHub can end a run with a job that never got a runner and has no conclusion; the notify job
+# itself runs while it reads the list
+@test "notify-failure: names a job that never left the queue" {
+  GH_JOBS_JSON='{"jobs":[
+    {"name":"check-updates / check","status":"completed","conclusion":"success"},
+    {"name":"check-updates / status","status":"queued","conclusion":null,"runner_name":null,"started_at":"2026-11-14T10:00:00Z","completed_at":null},
+    {"name":"notify / notify","status":"in_progress","conclusion":null,"runner_name":"GitHub Actions 9","started_at":"2026-11-14T10:40:00Z","completed_at":null}]}' run_notify_step
+  [ "$status" -eq 0 ]
+  grep -qF 'failed in `check-updates / status`.' "$GH_LOG"
 }
 
 # The AUR takes a package name that starts with @, which outside a code span mentions a user
