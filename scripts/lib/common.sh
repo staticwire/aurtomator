@@ -624,6 +624,11 @@ _ere_bounded() {
         log_err "$anchor"
         return 1
       fi
+      # glibc tries every split of the subject among the groups for a back reference
+      if [[ "$c" == [0-9] ]]; then
+        log_err "The regex has a back reference, \\$c"
+        return 1
+      fi
     elif [[ "$c" == '[' ]]; then
       j=$i
       [[ "${re:j:1}" != '^' ]] || j=$((j + 1))

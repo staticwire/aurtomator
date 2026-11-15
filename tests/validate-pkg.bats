@@ -352,7 +352,7 @@ alerts:
     match: '^3'
     note: $note"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: alerts[].note holds a format character or a space other than U+0020"* ]] || {
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: alerts[].note holds a format character, a blank letter or mark, or a space other than U+0020"* ]] || {
       echo "taken: $note"
       return 1
     }
@@ -367,23 +367,68 @@ alerts:
   [ "$status" -eq 0 ]
 }
 
-# curl reads these as hosts that url_host cannot name, so the host memory cannot hold them
-@test "validate: upstream.url names its host in ASCII letters, digits, dots and dashes" {
-  local url
-  for url in 'https:///example.com/x' 'https://api.git%68ub.com/x' 'https://git.example.com\/x'; do
-    create_test_package "mypkg" "git-tag" "upstream:
-  url: '$url'"
+# Hangul fillers and the blank Braille pattern are letters and symbols that show nothing, and a
+# combining mark after a space or at the start stands alone; YAML reads each escape of esc
+@test "validate: alerts[].note holds no blank letter, symbol or mark" {
+  local note
+  esc() { printf '\\%s%s' "$1" "$2"; }
+  for note in "a$(esc u 2029)b" "$(esc u 3164)" "a$(esc u 115f)b" "a$(esc u 1160)b" "a$(esc u ffa0)b" "a$(esc u 2800)b" \
+    "a$(esc U 0001d159)b" "a$(esc u 034f)b" "a$(esc u fe0e)b" "a$(esc u fe0f)b" "a $(esc u 0301)b" "$(esc u 0301)b"; do
+    create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '^3'
+    note: \"$note\""
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-    [ "$status" -eq 1 ] && [[ "$output" == *"upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most"* ]] || {
-      echo "taken: $url"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: alerts[].note holds a format character, a blank letter or mark, or a space other than U+0020"* ]] || {
+      echo "taken: $note"
       return 1
     }
   done
-  for url in https://git.example.com:8443/repo.git https://git.example.com https://git.example.com?x; do
-    create_test_package "mypkg" "git-tag" "upstream:
-  url: '$url'"
+  # A combining mark after a letter, and the emoji form after a symbol, stay
+  for note in "cafe$(esc u 0301) au lait" "$(esc u 26a0)$(esc u fe0f) Qt 7"; do
+    create_test_package "mypkg" "github-tag" "upstream:
+  project: owner/repo
+alerts:
+  - hold: true
+    match: '^3'
+    note: \"$note\""
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 0 ] || {
+      echo "refused: $note"
+      return 1
+    }
+  done
+}
+
+# curl reads these as hosts that url_host cannot name, so the host memory cannot hold them
+@test "validate: upstream.url names its host in ASCII letters, digits, dots and dashes" {
+  local url strategy extra
+  for strategy in git-tag git-latest webpage-scrape; do
+    extra=""
+    [[ "$strategy" != git-latest ]] || extra=$'\n  type: git'
+    [[ "$strategy" != webpage-scrape ]] || extra=$'\n  pattern: v([0-9.]+)'
+    for url in 'https:///example.com/x' 'https://api.git%68ub.com/x' 'https://git.example.com\/x' \
+      'https://git_x.example.com/x' 'https://git example.com/x'; do
+      create_test_package "mypkg" "$strategy" "upstream:$extra
+  url: '$url'"
+      run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+      [ "$status" -eq 1 ] && [[ "$output" == *"upstream.url must name its host after https:// in ASCII letters, digits, dots and dashes, with a port at most"* ]] || {
+        echo "taken: $strategy $url"
+        return 1
+      }
+    done
+    for url in https://git.example.com:8443/repo.git https://git.example.com https://git.example.com?x; do
+      create_test_package "mypkg" "$strategy" "upstream:$extra
+  url: '$url'"
+      run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+      [ "$status" -eq 0 ] || {
+        echo "refused: $strategy $url"
+        echo "$output"
+        return 1
+      }
+    done
   done
 }
 
@@ -466,6 +511,80 @@ alerts:
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -eq 0 ] || {
       echo "refused: $regex"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+# Each anchor of glibc other than ^ and $, counts with leading zeros, repeats after bracket
+# expressions, and the length limit at its edge
+@test "validate: refuses each escape anchor, counts read in octal and long bracket repeats" {
+  local entry regex expected long
+  long=$(printf 'a%.0s' {1..250})
+  local -a cases=(
+    'v(\B[0-9]+);has an anchor other than ^ at its start or $ at its end'
+    'v(\<[0-9]+);has an anchor other than ^ at its start or $ at its end'
+    'v(\>[0-9]+);has an anchor other than ^ at its start or $ at its end'
+    'v(\`[0-9]+);has an anchor other than ^ at its start or $ at its end'
+    "v(\\''[0-9]+);has an anchor other than ^ at its start or \$ at its end"
+    'v(a{077});repeats a part more than 64 times'
+    'v([[:alpha:]]{100});repeats a part more than 64 times'
+    'v([]a]{100});repeats a part more than 64 times'
+    "v([${long}a]x);holds more than 256 characters"
+  )
+  for entry in "${cases[@]}"; do
+    IFS=';' read -r regex expected <<<"$entry"
+    create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"$expected"* ]] || {
+      echo "taken: $entry"
+      echo "$output"
+      return 1
+    }
+  done
+  # A bracket expression ends at the ] after a class and not at a ] first in it
+  for regex in 'v(a{064})' "v([${long}]x)" 'v([]{999}])' 'v([[:alpha:]{999}])'; do
+    create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $regex"
+      echo "$output"
+      return 1
+    }
+  done
+  create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: release_body
+  version_pattern: 'v\K[0-9]+$(printf 'x%.0s' {1..250})'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"holds more than 256 characters"* ]]
+}
+
+# glibc matches a back reference by trying each split of the subject among the groups
+@test "validate: refuses a back reference in a regex" {
+  local field yaml
+  for field in tag_version_regex asset_regex pattern match; do
+    case "$field" in
+      tag_version_regex) yaml=$'upstream:\n  project: owner/repo\n  tag_version_regex: \'^v([0-9]*)\\1$\'' ;;
+      asset_regex) yaml=$'upstream:\n  project: owner/repo\n  asset_regex: \'^a-([0-9]*)\\1\\.deb$\'\n  asset_var: _deb' ;;
+      pattern) yaml=$'upstream:\n  url: https://example.com/download\n  pattern: \'v([0-9]*)\\1x\'' ;;
+      match) yaml=$'upstream:\n  project: owner/repo\nalerts:\n  - hold: true\n    match: \'(0*)\\1x\'' ;;
+    esac
+    if [[ "$field" == pattern ]]; then
+      create_test_package "mypkg" "webpage-scrape" "$yaml"
+    else
+      create_test_package "mypkg" "github-tag" "$yaml"
+    fi
+    SECONDS=0
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *'The regex has a back reference, \1'* ]] && ((SECONDS < 5)) || {
+      echo "taken: $field in $SECONDS s"
       echo "$output"
       return 1
     }

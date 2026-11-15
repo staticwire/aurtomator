@@ -179,8 +179,8 @@ validate_pkg() {
     log_err "$shown: a key or a value holds a control character"
     return 1
   fi
-  # Diffs show no zero-width or bidi character, so values outside the notes for people are
-  # printable ASCII or tabs, and notes hold no format character and no space but U+0020
+  # Diffs show no zero-width or bidi character, so values outside the notes for people are printable
+  # ASCII or tabs, and notes hold no format character, blank letter, lone mark or space but U+0020
   local hidden note_path='^alerts[.][0-9]+[.]note$'
   hidden=$(NOTE_PATH="$note_path" ASCII_RE='[^\t -~]' yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
     | select(path | join(".") | test(strenv(NOTE_PATH)) | not) | select(test(strenv(ASCII_RE)))] | length' "$file")
@@ -188,10 +188,13 @@ validate_pkg() {
     log_err "$shown: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"
     return 1
   fi
-  hidden=$(NOTE_PATH="$note_path" HIDDEN_RE='[\p{Cf}\p{Zl}\p{Zp}]|[^ \P{Zs}]' yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
+  # Hangul fillers, the blank Braille pattern and variation selectors show nothing, and the emoji
+  # form takes a symbol before it; combining marks after a space or at the start stand alone
+  local blank='\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}\x{1D159}\x{034F}\x{FE00}-\x{FE0E}\x{E0100}-\x{E01EF}'
+  hidden=$(NOTE_PATH="$note_path" HIDDEN_RE="[\\p{Cf}\\p{Zl}\\p{Zp}$blank]|[^ \\P{Zs}]|(^|[^\\p{So}])\\x{FE0F}|(^|\\s)\\p{Mn}" yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
     | select(path | join(".") | test(strenv(NOTE_PATH))) | select(test(strenv(HIDDEN_RE)))] | length' "$file")
   if [[ "$hidden" != 0 ]]; then
-    log_err "$shown: alerts[].note holds a format character or a space other than U+0020"
+    log_err "$shown: alerts[].note holds a format character, a blank letter or mark, or a space other than U+0020"
     return 1
   fi
 
