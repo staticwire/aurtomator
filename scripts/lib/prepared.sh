@@ -12,25 +12,108 @@ _has_nul() {
 
 # Split PKGBUILD $1, with asset_var $2 if any, into lines of six kinds without running it:
 #   SKEL<TAB>line      each line, with pkgver=, pkgrel=, $2=, a top-level arch= and each
-#                      top-level checksum array as a placeholder
+#                      checksum array of the leading assignments as a placeholder
 #   PKGVER|PKGREL|ASSET|ARCH<TAB>value   the value of such a line
 #   SUM<TAB>array<TAB>index<TAB>HASH|SKIP, SUMVAL<TAB>array<TAB>value   one of each per checksum
 #   NOTE<TAB>text      a comment in or after a checksum array, or an empty line in one
-#   BAD<TAB>text       anything else in a checksum array
+#   BAD<TAB>text       anything else in a checksum array, and arrays below the leading assignments
 _pkgbuild_parts() {
   awk -v asset="${2:-}" '
+    BEGIN { lead = 1 }
     function tokens(text,   n, i, t, parts) {
       n = split(text, parts, /[ \t]+/)
       for (i = 1; i <= n; i++) {
         t = parts[i]
         if (t == "") continue
-        if (t !~ /^(\047([0-9a-fA-F]+|SKIP)\047|"([0-9a-fA-F]+|SKIP)")$/) {
+        if (t !~ /^(\047([0-9a-fA-F]+|SKIP)\047|"([0-9a-fA-F]+|SKIP)"|[0-9a-fA-F]+|SKIP)$/) {
           print "BAD\t" NR ": " t
           continue
         }
         print "SUM\t" name "\t" idx++ "\t" (t ~ /SKIP/ ? "SKIP" : "HASH")
-        print "SUMVAL\t" name "\t" substr(t, 2, length(t) - 2)
+        print "SUMVAL\t" name "\t" (t ~ /^[\047"]/ ? substr(t, 2, length(t) - 2) : t)
       }
+    }
+    # Succeeds when the $ at $i of $text starts no command: then skip is the last character
+    # of the expansion, and ${...} on one line without quotes or another { counts as one
+    function dollar(text, i,   c, end, inner) {
+      c = substr(text, i + 1, 1)
+      skip = i
+      if (c == "(") return 0
+      if (c != "{") return 1
+      end = index(substr(text, i + 2), "}")
+      inner = substr(text, i + 2, end - 1)
+      if (!end || inner ~ /[{"\047`]/ || index(inner, "$(")) return 0
+      skip = i + 1 + end
+      return 1
+    }
+    # Succeeds when line $text holds only assignments and comments, as bash reads them after
+    # the quote and array that the lines before left open; aliases act only on a command word
+    function plain(text,   n, i, c, word, closed) {
+      n = length(text)
+      word = quote == "" && !list
+      for (i = 1; i <= n; i++) {
+        c = substr(text, i, 1)
+        if (quote == "s") {
+          if (c == "\047") quote = ""
+          continue
+        }
+        if (quote == "a") {
+          if (c == "\\") i++
+          else if (c == "\047") quote = ""
+          continue
+        }
+        if (quote == "d") {
+          if (c == "\\") i++
+          else if (c == "\"") quote = ""
+          else if (c == "`" || (c == "$" && !dollar(text, i))) return 0
+          else if (c == "$") i = skip
+          continue
+        }
+        if (c == " " || c == "\t") {
+          word = 1
+          closed = 0
+          continue
+        }
+        if (closed) return 0
+        if (c == "#" && (word || i == 1)) return 1
+        if (word && !list) {
+          if (!match(substr(text, i), /^[A-Za-z_][A-Za-z0-9_]*(\[[A-Za-z0-9_@*]*\])?[+]?=/)) return 0
+          i += RLENGTH - 1
+          word = 0
+          if (substr(text, i + 1, 1) == "(") {
+            list = 1
+            word = 1
+            i++
+          }
+          continue
+        }
+        word = 0
+        if (c == ")" && list) {
+          list = 0
+          closed = 1
+        } else if (c == ";" && !list) {
+          word = 1
+        } else if (c ~ /[()<>&|;`]/) {
+          return 0
+        } else if (c == "\\") {
+          if (i == n) return list
+          i++
+        } else if (c == "\047") {
+          quote = "s"
+        } else if (c == "\"") {
+          quote = "d"
+        } else if (c == "$" && substr(text, i + 1, 1) == "\047") {
+          quote = "a"
+          i++
+        } else if (c == "$" && substr(text, i + 1, 1) == "\"") {
+          quote = "d"
+          i++
+        } else if (c == "$") {
+          if (!dollar(text, i)) return 0
+          i = skip
+        }
+      }
+      return 1
     }
     # As in bash, a # that starts a word comments out the rest of the line, and a backslash
     # outside a comment joins the next line, which inside the parentheses only separates
@@ -57,12 +140,16 @@ _pkgbuild_parts() {
     in_sums && /^[ \t]*$/ { print "NOTE\t" }
     in_sums { in_sums = body($0); next }
     /^(ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums(_[A-Za-z0-9_]+)?=\(/ {
-      name = substr($0, 1, index($0, "=") - 1)
-      idx = 0
-      print "SKEL\tSUMS " name
-      in_sums = body(substr($0, index($0, "(") + 1))
-      next
+      if (lead && quote == "" && !list) {
+        name = substr($0, 1, index($0, "=") - 1)
+        idx = 0
+        print "SKEL\tSUMS " name
+        in_sums = body(substr($0, index($0, "(") + 1))
+        next
+      }
+      print "BAD\t" NR ": " $0
     }
+    lead && !plain($0) { lead = 0 }
     /^pkgver=/ { print "SKEL\tPKGVER"; print "PKGVER\t" substr($0, 8); next }
     /^pkgrel=/ { print "SKEL\tPKGREL"; print "PKGREL\t" substr($0, 8); next }
     asset != "" && index($0, asset "=") == 1 {
@@ -74,6 +161,14 @@ _pkgbuild_parts() {
     { print "SKEL\t" $0 }
     END { if (in_sums) print "BAD\tunterminated " name }
   ' "$1"
+}
+
+# Succeeds when the parts $1 of a PKGBUILD hold no BAD line; $2 names the file in the message
+_sum_parts_ok() {
+  grep -q $'^BAD\t' <<<"$1" || return 0
+  log_err "$2 has more than checksums, comments and line continuations in a checksum array, or a checksum array below a line that holds more than assignments and comments:"
+  grep $'^BAD\t' <<<"$1" | cut -f2- >&2
+  return 1
 }
 
 # Print the SKEL lines of parts $2 with a SUMS line for each run of checksum arrays with
@@ -96,8 +191,8 @@ _arch_skel() {
     { print }' <<<"$1"
 }
 
-# Print the lines of PKGBUILD $1 in the checksum arrays of the arches $2 with $3=keep, or all
-# other lines with $3=drop, the text $4 after the last line of the last array
+# Print the lines of PKGBUILD $1 in the checksum arrays of the arches $2 without comments with
+# $3=keep, or all other lines with $3=drop, the text $4 after the last line of the last array
 arch_sum_lines() {
   EXTRA="${4:-}" awk -v list="$2" -v mode="$3" '
     function ends(text) {
@@ -123,7 +218,14 @@ arch_sum_lines() {
     }
     END {
       for (i = 1; i <= NR; i++) {
-        if ((ours[i] == 1) == (mode == "keep")) print line[i]
+        if ((ours[i] == 1) == (mode == "keep")) {
+          # The AUR head lost the comments of the arrays it gets back, and updpkgsums writes none
+          if (mode == "keep") {
+            sub(/(^|[ \t]+)#.*/, "", line[i])
+            if (line[i] ~ /^[ \t]*$/) continue
+          }
+          print line[i]
+        }
         if (mode == "drop" && i == last) printf "%s", ENVIRON["EXTRA"]
       }
     }' "$1"
@@ -231,11 +333,9 @@ check_prepared_pkgbuild() {
     return 1
   fi
 
-  if grep -q $'^BAD\t' <<<"$new_parts"; then
-    log_err "Prepared PKGBUILD has more than quoted checksums, comments and line continuations in a checksum array:"
-    grep $'^BAD\t' <<<"$new_parts" | cut -f2- >&2
-    return 1
-  fi
+  # Code after an array or in a function of the AUR copy can turn dead code into live code
+  # once the prepared copy writes the array without it
+  _sum_parts_ok "$old_parts" "AUR PKGBUILD" && _sum_parts_ok "$new_parts" "Prepared PKGBUILD" || return 1
   # updpkgsums writes no comment, so any comment or empty line in an array
   # must be one the AUR copy has, as often as it has it
   mapfile -t notes < <(LC_ALL=C comm -23 <(grep $'^NOTE\t' <<<"$new_parts" | LC_ALL=C sort) \
@@ -597,7 +697,7 @@ check_prepared_srcinfo() {
 
   # Groups are the common sources and checksums, _, or those of one
   # architecture, _x86_64
-  local -A arch_groups=() arches=() pinned_in=() changed_in=() sum_counts=() sum_moved=() renamed=()
+  local -A arch_groups=() arches=() pinned_in=() vcs_in=() changed_in=() sum_counts=() sum_moved=() renamed=()
   local i old new key kind old_val new_val n expected group arch has_arch=false changed=false in_pkgbase=true arch_changed=false
   for i in "${!new_lines[@]}"; do
     old="${old_lines[$i]}"
@@ -674,6 +774,7 @@ check_prepared_srcinfo() {
           _is_vcs_pin "$old_val"; then
           pinned_in["$group"]=1
         fi
+        ! _is_vcs_pin "$old_val" || vcs_in["$group"]=1
         ;;
       *)
         [[ "$key" != pkgname ]] || in_pkgbase=false
@@ -700,6 +801,11 @@ check_prepared_srcinfo() {
       return 1
     fi
   elif [[ "$version" != "$old_ver" ]]; then
+    # Every arch builds the commit of a common VCS pin, whatever its own downloads do
+    if [[ -n "${vcs_in[_]:-}" && -z "${changed_in[_]:-}" ]]; then
+      log_err "Prepared .SRCINFO changes no common source URL and no common checksum beside a VCS pin, so the new version would hold the files of the old one"
+      return 1
+    fi
     # The arch lines of pkgbase name an architecture that builds from the common sources
     # alone, and the AUR copy can list one with sources of its own elsewhere or nowhere
     for group in "${!arch_groups[@]}"; do
