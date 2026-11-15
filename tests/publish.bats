@@ -1762,6 +1762,49 @@ use_source() {
   grep -q -- '-c core.bigFileThreshold=16m -c fetch.unpackLimit=1' "$TEST_TMPDIR/git-fetch-args"
 }
 
+# git archive reads every entry of the tree into memory before it writes a file
+@test "_git_source_sum: refuses a tree of more files than git archive takes" {
+  setup_verify
+  make_upstream
+  mkdir "$TEST_TMPDIR/downloads"
+  hash -r
+  GIT_TREE_MAX=3 run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.1.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The tree of tag=v1.1.0 of https://example.com/demo.git holds more than 3 files"* ]]
+  [ -z "$(ls -A "$TEST_TMPDIR/downloads")" ]
+  GIT_TREE_MAX=4 run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.1.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$GIT_SUM"* ]]
+}
+
+# One delta of a few bytes can make git allocate gigabytes, once in each thread of index-pack
+@test "_git_source_sum: limits each allocation of git to the budget left and index-pack to one thread" {
+  setup_verify
+  make_upstream
+  mkdir "$TEST_TMPDIR/downloads"
+  hash -r
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.1.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 0 ]
+  grep -q -- '-c pack.threads=1 ' "$TEST_TMPDIR/git-fetch-args"
+  [ "$(cut -d' ' -f1 "$TEST_TMPDIR/git-alloc" | sort -u)" = "$((600 * 1024 * 1024))" ]
+  grep -q ' fetch ' "$TEST_TMPDIR/git-alloc"
+  grep -q ' ls-tree ' "$TEST_TMPDIR/git-alloc"
+  grep -q ' archive ' "$TEST_TMPDIR/git-alloc"
+}
+
+@test "_git_source_sum: refuses a fetched source whose files git cannot list" {
+  setup_verify
+  make_upstream
+  mkdir "$TEST_TMPDIR/downloads"
+  mv "$MOCK_DIR/git" "$MOCK_DIR/git-mock"
+  printf '#!/usr/bin/env bash\n[[ " $* " != *" ls-tree "* ]] || exit 128\nexec "%s" "$@"\n' "$MOCK_DIR/git-mock" >"$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/git"
+  hash -r
+  run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.1.0" sha256 "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not list the files of tag=v1.1.0 of https://example.com/demo.git"* ]]
+}
+
 @test "_git_source_sum: takes a tree whose files fill the budget left to the byte" {
   local size
   setup_verify

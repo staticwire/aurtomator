@@ -7,6 +7,8 @@
 # The byte limits of one download and of all the downloads of one package
 SOURCE_FILE_MAX=$((600 * 1024 * 1024))
 SOURCES_MAX=$((1024 * 1024 * 1024))
+# git archive reads the whole tree of a git source into memory before it writes a file
+GIT_TREE_MAX=1000000
 
 # Print the bytes a download may still take: what SOURCES_MAX leaves beside
 # the downloads in directory $1, at most SOURCE_FILE_MAX
@@ -80,7 +82,7 @@ _source_file() {
 # archive of the ref, fetched alone, with export-subst and export-ignore off
 # Args: $1=source entry of a .SRCINFO, $2=algorithm, $3=AUR repo, $4=download directory
 _git_source_sum() {
-  local entry="$1" url="${1#*::}" name fragment="" ref dir sum refspec left size
+  local entry="$1" url="${1#*::}" name fragment="" ref dir sum refspec left size rc=0
   local -x GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/etc/makepkg.d/gitconfig
   url="${url#git+}"
   if [[ "$url" == *#* ]]; then
@@ -123,8 +125,12 @@ _git_source_sum() {
   # The tar holds the tree and the commit, so one ref without its history
   # gives the checksum of a full clone
   dir="${4}/$(printf '%s#%s' "$url" "$fragment" | sha256sum | cut -d' ' -f1).git"
+  # Deltas of a few bytes can make git allocate gigabytes at once, in each thread of
+  # index-pack, and the budget refuses such a file only after the fetch
+  local -x GIT_ALLOC_LIMIT=$SOURCE_FILE_MAX
   if [[ ! -d "$dir" ]]; then
     left=$(_download_left "$4") || return 1
+    GIT_ALLOC_LIMIT=$((left > 64 * 1024 * 1024 ? left : 64 * 1024 * 1024))
     refspec="$ref"
     [[ "${fragment%%=*}" != tag ]] || refspec="refs/tags/${ref}:refs/tags/${ref}"
     if ! git init -q --bare "$dir"; then
@@ -134,7 +140,7 @@ _git_source_sum() {
     fi
     # The pack goes into one file under a size limit of the budget left, and a stall ends the
     # fetch as it ends a download; an ignored SIGXFSZ makes a write past the limit fail, no dump
-    if ! (trap '' XFSZ && ulimit -f "$((left / 1024))" && GIT_ALLOW_PROTOCOL=https git -c core.bigFileThreshold=16m -c fetch.unpackLimit=1 \
+    if ! (trap '' XFSZ && ulimit -f "$((left / 1024))" && GIT_ALLOW_PROTOCOL=https git -c pack.threads=1 -c core.bigFileThreshold=16m -c fetch.unpackLimit=1 \
       -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 -C "$dir" fetch -q --depth 1 --no-tags "$url" "$refspec"); then
       if (($(du -sb -- "$dir" | cut -f1) >= left / 1024 * 1024)); then
         log_err "The fetch of ${fragment} of $url passes the budget of 1 GiB of the package"
@@ -148,8 +154,20 @@ _git_source_sum() {
       log_err "The fetch of ${fragment} of $url passes the budget of 1 GiB of the package"
       return 1
     fi
-    # Packs of a few bytes can hold a large file, and the archive reads every file
-    size=$(git -C "$dir" ls-tree -r -l "$ref" | awk '$2 == "blob" { s += $4 } END { printf "%d", s }') || size=0
+    # Packs of a few bytes can hold a large file or a tree of many, and the archive reads every file
+    size=$(git -C "$dir" ls-tree -r -l "$ref" | awk -v max="$GIT_TREE_MAX" '
+      NR > max { over = 1; exit }
+      $2 == "blob" { s += $4 }
+      END { if (over) exit 3; printf "%d", s }') || rc=$?
+    if ((rc == 3)); then
+      log_err "The tree of ${fragment} of $url holds more than $GIT_TREE_MAX files"
+      rm -rf "$dir"
+      return 1
+    elif ((rc != 0)); then
+      log_err "Could not list the files of ${fragment} of $url"
+      rm -rf "$dir"
+      return 1
+    fi
     if ((size > left)); then
       log_err "The files of ${fragment} of $url pass the budget of 1 GiB of the package"
       rm -rf "$dir"

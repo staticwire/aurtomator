@@ -89,6 +89,7 @@ make_aur_remote() {
   AUR_BASE=$(git -C "$AUR_REMOTE" rev-parse HEAD)
   cat >"$MOCK_DIR/git" <<EOF
 #!/usr/bin/env bash
+[[ -z "\${GIT_ALLOC_LIMIT:-}" ]] || echo "\$GIT_ALLOC_LIMIT \$*" >>"$TEST_TMPDIR/git-alloc"
 if [[ " \$* " == *" fetch "* && "\${@: -2:1}" == https://* ]]; then
   echo "\${@: -2:1}" >>"$TEST_TMPDIR/git-clone-urls"
   echo "\${GIT_ALLOW_PROTOCOL:-unset}" >>"$TEST_TMPDIR/git-allow"
