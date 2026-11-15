@@ -33,22 +33,25 @@ _pkgbuild_parts() {
         print "SUMVAL\t" name "\t" (t ~ /^[\047"]/ ? substr(t, 2, length(t) - 2) : t)
       }
     }
-    # Succeeds when the $ at $i of $text starts no command: then skip is the last character
-    # of the expansion, and ${...} on one line without quotes or another { counts as one
+    # Succeeds when the $ at $i of $text opens ${...} without quotes, ! or another {, or $(...) of a
+    # plain command, each closed on this line at its first } or ); skip is then its last character
     function dollar(text, i,   c, end, inner) {
       c = substr(text, i + 1, 1)
       skip = i
-      if (c == "(") return 0
-      if (c != "{") return 1
-      end = index(substr(text, i + 2), "}")
+      if (c != "{" && c != "(") return 1
+      end = index(substr(text, i + 2), c == "(" ? ")" : "}")
       inner = substr(text, i + 2, end - 1)
-      if (!end || inner ~ /[{"\047`]/ || index(inner, "$(")) return 0
+      if (!end) return 0
+      if (c == "(" && inner !~ /^[A-Za-z0-9 _.,:%+=\/@-]*$/) return 0
+      if (c == "{" && (inner ~ /^!|[{"\047`]/ || index(inner, "$("))) return 0
       skip = i + 1 + end
       return 1
     }
     # Succeeds when line $text holds only assignments and comments, as bash reads them after
     # the quote and array that the lines before left open; aliases act only on a command word
     function plain(text,   n, i, c, word, closed) {
+      # Aliases rewrite the command of a $(...), and assignments to these define them or turn them on
+      if (text ~ /BASH_ALIASES|POSIXLY_CORRECT/) return 0
       n = length(text)
       word = quote == "" && !list
       for (i = 1; i <= n; i++) {

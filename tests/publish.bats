@@ -4784,14 +4784,37 @@ sha256sums=('$H3' '$H4')"
   [[ "$output" == *"AUR PKGBUILD has"* ]]
 }
 
-@test "check_prepared_pkgbuild: rejects checksum arrays after a command substitution" {
-  write_pkgbuild "$OLD" 1.0.0 2 "_v=\$(echo 1)
+# Quotes, a # or a parenthesis can keep $(...) open past its first ), and aliases rewrite the
+# command in it, so the leading assignments end at such a line
+@test "check_prepared_pkgbuild: rejects checksum arrays after a command substitution with more than a plain command" {
+  local lead
+  # shellcheck disable=SC2016
+  for lead in '_v=$(echo "1")' '_v=$(echo 1 | cut -c1)' '_v=$(echo $pkgver)' '_v=$(echo a #)' '_v=$((1 + 2))' \
+    'POSIXLY_CORRECT=1' 'BASH_ALIASES[q]=x' '_v=${!pkgver}'; do
+    write_pkgbuild "$OLD" 1.0.0 2 "$lead
 sha256sums=('$H1' '$H2')"
-  write_pkgbuild "$NEW" 1.1.0 1 "_v=\$(echo 1)
+    write_pkgbuild "$NEW" 1.1.0 1 "$lead
+sha256sums=('$H3' '$H4')"
+    run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+    [ "$status" -eq 1 ] && [[ "$output" == *"AUR PKGBUILD has"* ]] || {
+      echo "taken: $lead"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+# Nightly packages put the date of the run into the name of a download
+@test "check_prepared_pkgbuild: reads checksum arrays after a plain command substitution" {
+  # shellcheck disable=SC2016
+  local lead='_date="$(date -u +%Y%m%d)"
+_arch=$(uname -m)'
+  write_pkgbuild "$OLD" 1.0.0 2 "$lead
+sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "$lead
 sha256sums=('$H3' '$H4')"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"AUR PKGBUILD has"* ]]
+  [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_pkgbuild: reads checksum arrays after quotes, expansions, comments and unquoted checksums" {

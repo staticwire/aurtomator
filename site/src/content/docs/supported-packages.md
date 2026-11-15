@@ -169,7 +169,7 @@ provides=("demo=${pkgver}")
 
 ### Checksum arrays below commands or functions (BLOCKED)
 
-Checksum arrays below the first line of the PKGBUILD that holds more than assignments and comments, such as a command, a function, a condition or a here-document, and text after the `)` of a checksum array.
+Checksum arrays below the first line of the PKGBUILD that holds more than assignments and comments, such as a command, a function, a condition or a here-document, and text after the `)` of a checksum array. Assignments may hold `$(...)` of a plain command, one without quotes, `$`, pipes, redirections or `#`, as `_date="$(date -u +%Y%m%d)"` does.
 
 **Detection:** verify and publish read the PKGBUILD as text, and only the assignments at its top show what bash assigns without running it: arrays inside a function, a string or a here-document read the same as arrays at the top. Updates of such a PKGBUILD stop in prepare, verify and publish with a message that names the line.
 
