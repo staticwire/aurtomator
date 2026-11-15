@@ -4161,6 +4161,35 @@ alerts:
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
+# The write-back of current takes regular files alone, so a linked YAML would find the same
+# version new in every run
+@test "check-all: fails the check of a package YAML that is a link" {
+  stand_in_strategy step 2.0
+  create_test_package "pkg-link" "step" "current: 1.0"
+  mv "$TEST_TMPDIR/packages/pkg-link.yml" "$TEST_TMPDIR/outside.yml"
+  ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/pkg-link.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-link")" = "check_failed: packages/pkg-link.yml is a link, and the runs read regular files alone" ]
+  grep -qx pkg-link "$TEST_TMPDIR/.status/_packages"
+}
+
+@test "check-all: fails the check of a package whose alerts run past the check timeout" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-slow" "step" "current: 28+25
+alerts:
+  - match: '^29'
+    note: New major"
+  create_test_package "pkg-next" "step" "current: 28+25"
+  # The test copy of scripts/ links the files of the repository, so the slow copy replaces the link
+  rm -f "$TEST_TMPDIR/scripts/lib/alerts.sh"
+  printf '%s\n' "$(cat "$PROJECT_DIR/scripts/lib/alerts.sh")" 'alert_fires() { sleep 15; }' >"$TEST_TMPDIR/scripts/lib/alerts.sh"
+  AURTOMATOR_CHECK_TIMEOUT=3 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-slow")" = "check_failed: alerts: timed out after 3 s" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-next")" = "new_version: 29+1" ]
+}
+
 @test "check-all: fails the check of a package with an alert note of several lines" {
   stand_in_strategy step 29+1
   create_test_package "pkg-note" "step" "current: 28+25

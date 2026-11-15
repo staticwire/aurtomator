@@ -2,7 +2,7 @@
 title: Package YAML
 ---
 
-Each package lives in `packages/<name>.yml`. `name` equals the file name and AUR `pkgbase`: runs find the file by `name`, and `validate-pkg.sh` refuses `name` values other than the file name. Names hold the characters `A-Z`, `a-z`, `0-9`, `@`, `.`, `_`, `+` and `-` and start with neither `.` nor `-`. `validate-pkg.sh --all` refuses files in `packages/` other than `<name>.yml`, `example.yml.sample` and `.gitkeep`, since no run reads them. `pkgbase` names the AUR git repository. It equals the package name, except for split packages such as `pkgbase=liblinear` with `pkgname=(liblinear python-liblinear)`.
+Each package lives in `packages/<name>.yml`. `name` equals the file name and AUR `pkgbase`: runs find the file by `name`, and `validate-pkg.sh` refuses `name` values other than the file name. Names hold the characters `A-Z`, `a-z`, `0-9`, `@`, `.`, `_`, `+` and `-` and start with neither `.` nor `-`. `validate-pkg.sh --all` refuses every entry of `packages/` but `example.yml.sample`, `.gitkeep` and regular files `<name>.yml`, links and directories of that name included, since no run reads them. `check-all.sh` fails the check of a YAML that is a link, since the write-back of `current` takes regular files alone. `pkgbase` names the AUR git repository. It equals the package name, except for split packages such as `pkgbase=liblinear` with `pkgname=(liblinear python-liblinear)`.
 
 | Field | Required | Description |
 |---|---|---|

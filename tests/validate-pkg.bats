@@ -697,16 +697,22 @@ EOF
   local file
   create_test_package a github-release "upstream:
   project: owner/repo"
-  for file in x.yaml .x.yml notes.txt; do
+  for file in x.yaml .x.yml notes.txt xyml; do
     : >"$TEST_TMPDIR/packages/$file"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
     [ "$status" -eq 1 ]
-    [[ "$output" == *"packages/$file: no run reads it, as the runs read packages/<name>.yml alone"* ]] || {
+    [[ "$output" == *"packages/$file: no run reads it, as the runs read the regular files packages/<name>.yml alone"* ]] || {
       echo "taken: $file"
       return 1
     }
     rm "$TEST_TMPDIR/packages/$file"
   done
+  # A terminal takes a control character in a file name as a command
+  : >"$TEST_TMPDIR/packages/bad"$'\e'"name"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/\$'bad\\Ename': no run reads it"* && "$output" != *$'\e'* ]]
+  rm "$TEST_TMPDIR/packages/bad"$'\e'"name"
   : >"$TEST_TMPDIR/packages/.gitkeep"
   cp "$PROJECT_DIR/packages/example.yml.sample" "$TEST_TMPDIR/packages/"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
@@ -715,6 +721,34 @@ EOF
   mv "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/a.yaml"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
   [ "$status" -eq 1 ]
+}
+
+# The runs read regular files alone, and the write-back of current takes no link
+@test "validate --all: fails on a directory, a link or a FIFO named like a package" {
+  local entry
+  create_test_package a github-release "upstream:
+  project: owner/repo"
+  cp "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/outside.yml"
+  for entry in dir link fifo dirlink; do
+    case "$entry" in
+      dir) mkdir "$TEST_TMPDIR/packages/foo.yml" ;;
+      link) ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/foo.yml" ;;
+      fifo) mkfifo "$TEST_TMPDIR/packages/foo.yml" ;;
+      dirlink) ln -s "$TEST_TMPDIR" "$TEST_TMPDIR/packages/foo.yml" ;;
+    esac
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+    [ "$status" -eq 1 ] &&
+      [[ "$output" == *"packages/foo.yml: no run reads it, as the runs read the regular files packages/<name>.yml alone"* ]] || {
+      echo "taken: $entry"
+      echo "$output"
+      return 1
+    }
+    if [[ -L "$TEST_TMPDIR/packages/foo.yml" || ! -d "$TEST_TMPDIR/packages/foo.yml" ]]; then
+      rm "$TEST_TMPDIR/packages/foo.yml"
+    else
+      rmdir "$TEST_TMPDIR/packages/foo.yml"
+    fi
+  done
 }
 
 @test "validate: fails on missing strategy" {

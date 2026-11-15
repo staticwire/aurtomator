@@ -815,15 +815,16 @@ if [[ "${1:-}" == "--all" ]]; then
   total=0
   failed=0
   strays=0
-  while IFS= read -r -d '' entry; do
-    entry="${entry##*/}"
-    [[ "$entry" == .gitkeep || "$entry" == example.yml.sample || ("$entry" == *.yml && "$entry" != .*) ]] && continue
+  while IFS= read -r -d '' path; do
+    entry="${path##*/}"
+    [[ "$entry" == .gitkeep || "$entry" == example.yml.sample ]] && continue
+    [[ "$entry" == *.yml && "$entry" != .* && -f "$path" && ! -L "$path" ]] && continue
     ! has_control "$entry" || entry=${entry@Q}
-    log_err "packages/$entry: no run reads it, as the runs read packages/<name>.yml alone"
+    log_err "packages/$entry: no run reads it, as the runs read the regular files packages/<name>.yml alone"
     ((strays++)) || true
   done < <(find "${AURTOMATOR_DATA_DIR}/packages" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-    [[ -f "$pkg_file" ]] || continue
+    [[ -f "$pkg_file" && ! -L "$pkg_file" ]] || continue
     ((total++)) || true
     if ! validate_pkg "$pkg_file"; then
       ((failed++)) || true

@@ -60,6 +60,13 @@ bounded() {
   fi
 }
 
+# Prints fired_alerts of package file $1 from version $2 to $3 under the check timeout, since
+# bash matches each alert in one call that no check of the time reaches
+bounded_alerts() {
+  # shellcheck disable=SC2016
+  bounded "$CHECK_TIMEOUT" bash -c 'source "$1/scripts/lib.sh" && fired_alerts "${@:2}"' _ "$AURTOMATOR_DIR" "$@"
+}
+
 # Prints the error of a per-package script: its stderr, or the budget it ran out
 # of and the URL $4 of a request in flight. $1=exit code, $2=stderr file, $3=budget
 script_error() {
@@ -435,6 +442,16 @@ run_package() {
   local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false in_flight
   local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
   local stem yaml_name
+  # The write-back of current takes regular files alone, so a linked YAML keeps its old current
+  if [[ -L "$pkg_file" ]]; then
+    stem="${pkg_file##*/}"
+    stem="${stem%.yml}"
+    log_err "packages/${stem@Q}.yml is a link, and the runs read regular files alone"
+    if [[ "$MODE" == check ]] && (LC_ALL=C && [[ "$stem" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
+      echo "check_failed: packages/${stem}.yml is a link, and the runs read regular files alone" >"${STATUS_DIR}/${stem}"
+    fi
+    return 0
+  fi
   if ! pkg_name=$(package_name "$pkg_file"); then
     # Its status keeps the issues of the file name open, since its YAML is still there
     stem="${pkg_file##*/}"
@@ -485,7 +502,7 @@ run_package() {
         fi
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         # The issue of a held update lists the notes of its alerts
-        [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(fired_alerts "$pkg_file" "$(pkg_get "$pkg_file" '.current // ""')" "${found#held: }" 2>/dev/null)"
+        [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(bounded_alerts "$pkg_file" "$(pkg_get "$pkg_file" '.current // ""')" "${found#held: }" 2>/dev/null)"
         [[ "$found" != "pending: "* ]] || keep_arch_wait "$pkg_file" "$(arch_record_line "$pkg_name")" "${found#pending: }"
         return
         ;;
@@ -585,8 +602,8 @@ run_package() {
   # hold: true keep the update back until the maintainer publishes it.
   err_file=$(mktemp)
   check_rc=0
-  alerts=$(fired_alerts "$pkg_file" "$current" "$latest" 2>"$err_file") || check_rc=$?
-  check_err=$(<"$err_file")
+  alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" 2>"$err_file") || check_rc=$?
+  check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT" alerts)
   rm -f "$err_file"
   if ((check_rc != 0)); then
     log_err "Failed to check $pkg_name: $check_err"
