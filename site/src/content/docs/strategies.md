@@ -498,7 +498,7 @@ upstream:
 | `upstream.pattern` | yes | ERE whose first capture group is the version |
 | `upstream.user_agent` | no | User-Agent in printable ASCII in place of `aurtomator/1.0`. SourceForge answers bare `Mozilla/5.0` with 403 |
 
-**Version:** the newest version by `vercmp` among the first capture groups of every match on the page. The page comes over HTTPS with at most 5 redirects. bash takes the groups, so the pattern may hold any character, `/` included, and `validate-pkg.sh` refuses patterns that bash cannot compile, such as those with `(?:...)`, and patterns without a group.
+**Version:** the newest version by `vercmp` among the first capture groups of every match on the page. The page comes over HTTPS with at most 5 redirects. bash takes the groups, so the pattern may hold any character, `/` included, and `validate-pkg.sh` refuses patterns that bash cannot compile, such as those with `(?:...)`, and patterns without a group. Patterns that take more than 30 seconds on the page fail the check. grep starts a match at each place that the first part of the pattern takes, so `([0-9.]+)\.tar\.gz` spends time that grows with the square of a long run of digits on the page, while patterns that start with fixed text, as `my-scrape-pkg-([0-9.]+)\.tar\.gz`, stay fast.
 
 ```yaml
 name: my-scrape-pkg

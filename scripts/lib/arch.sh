@@ -78,7 +78,7 @@ set_arch_wait() {
 # maintainer and has nothing to come back with
 pkgbuild_assigns_source() {
   local -x LC_ALL=C
-  grep -qE "(^|[^A-Za-z0-9_])source_$2[+]?=" "$1"
+  sed -E 's/(^|[[:space:]])#.*//' "$1" | grep -qE "(^|;)[[:space:]]*source_$2[+]?="
 }
 
 # Write the arch state of package file $1 after an update to the arch words $2 that leaves out

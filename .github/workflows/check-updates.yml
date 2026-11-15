@@ -874,21 +874,6 @@ jobs:
           $arched"
           fi
 
-          # Host issues close when fewer than HOST_ISSUE_MIN packages of the host failed to check,
-          # in runs whose check reached every package
-          hosts=$(lib failed_hosts "$STATUS_DIR")
-          failing=$(cut -d ' ' -f 1 <<<"$hosts")
-          host_re='^([a-z0-9.-]+): [0-9]+ packages failed to check$'
-          if ! grep -qs '^unchecked: ' "$STATUS_DIR"/*; then
-            while read -r number title; do
-              [[ "$title" == "❌ "* && "${title#"❌ "}" =~ $host_re ]] || continue
-              host=${BASH_REMATCH[1]}
-              grep -qxF -e "$host" <<<"$failing" && continue
-              comment=$(lib host_close_comment "$host" "$RUN_URL")
-              gh issue close "$number" --comment "$comment"
-            done <<<"$open"
-          fi
-
           # notify-failure opens this issue, and a run without a failed job closes it
           if [[ "$RUN_OK" == true ]]; then
             while read -r number title; do
@@ -921,6 +906,41 @@ jobs:
               gh issue close "$number" --comment "The aurtomator release status is \`$upstream\` in $RUN_URL."
             done <<<"$releases"
           fi
+
+      # Host issues rest on the statuses of check alone, so they close after a failed publish too,
+      # and before Create issues, which opens no package issue under an open host issue
+      - name: Close resolved host issues
+        if: always() && steps.clean.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          STATUS_DIR=".status"
+          [[ -d "$STATUS_DIR" ]] || exit 0
+          # Runs whose check left a package unchecked close none
+          if grep -qs '^unchecked: ' "$STATUS_DIR"/*; then
+            exit 0
+          fi
+
+          has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
+          [[ "$has_issues" != "false" ]] || exit 0
+          open=$(gh issue list --label "auto-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+
+          lib() {
+            bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
+          }
+
+          # Host issues close when fewer than HOST_ISSUE_MIN packages of the host failed to check
+          hosts=$(lib failed_hosts "$STATUS_DIR")
+          failing=$(cut -d ' ' -f 1 <<<"$hosts")
+          host_re='^([a-z0-9.-]+): [0-9]+ packages failed to check$'
+          while read -r number title; do
+            [[ "$title" == "❌ "* && "${title#"❌ "}" =~ $host_re ]] || continue
+            host=${BASH_REMATCH[1]}
+            grep -qxF -e "$host" <<<"$failing" && continue
+            comment=$(lib host_close_comment "$host" "$RUN_URL")
+            gh issue close "$number" --comment "$comment"
+          done <<<"$open"
 
       - name: Create issues
         if: always() && steps.clean.outcome == 'success'

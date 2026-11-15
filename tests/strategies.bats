@@ -15,6 +15,36 @@ teardown() {
   teardown_test_env
 }
 
+# [A-Za-z] takes letters such as é in en_US.UTF-8, and the runs of CI use C.UTF-8
+@test "newest_version: reads the letters of the C locale in any locale" {
+  local tags c_out
+  locale -a 2>/dev/null | command grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  source "$TEST_TMPDIR/scripts/lib/common.sh"
+  tags=$(printf '1.0-_1\n1.0-\xc3\xa91\n')
+  c_out=$(LC_ALL=C.UTF-8 newest_version <<<"$tags")
+  [ "$c_out" = "$(printf '1.0-\xc3\xa91')" ]
+  [ "$(LC_ALL=en_US.UTF-8 newest_version <<<"$tags")" = "$c_out" ]
+}
+
+# grep starts a match at every digit of a run that the class at the start of the pattern takes
+@test "capture_matches: stops a pattern that runs past CAPTURE_TIMEOUT on the page" {
+  local page
+  source "$TEST_TMPDIR/scripts/lib/common.sh"
+  CAPTURE_TIMEOUT=1
+  page="$(head -c 40000 /dev/zero | tr '\0' 7) <a href=\"tool-1.0.tar.gz\">"
+  SECONDS=0
+  run capture_matches '([0-9.]+)\.tar\.gz' <<<"$page"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The pattern took more than 1 s on the page"* ]]
+  ((SECONDS < 10))
+  run capture_matches '([0-9.]+)\.tar\.gz' <<<'<a href="tool-1.0.tar.gz">'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0" ]
+  run capture_matches '([0-9.]+)\.tar\.gz' <<<'none here'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 # === github-release ===
 
 @test "github-release: returns latest version" {

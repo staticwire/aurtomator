@@ -206,8 +206,11 @@ if has_skip_checksums "${aur_dir}/PKGBUILD" && ! has_remote_hash "${aur_dir}/PKG
   # and an arch that comes back takes those of its commit
   gone=$(arch_minus "${arch_words[*]}" "${new_words[*]}")
   if [[ -n "$gone$back" ]]; then
+    # The arrays move by their lines, which only the leading assignments keep apart from code
+    _sum_parts_ok "$(_pkgbuild_parts "${aur_dir}/PKGBUILD")" "AUR PKGBUILD" || exit 1
     back_sums=""
     for arch in $back; do
+      _sum_parts_ok "$(_pkgbuild_parts "${tmp_dir}/ref/$arch/PKGBUILD")" "PKGBUILD of arch_out.$arch" || exit 1
       back_sums+=$(arch_sum_lines "${tmp_dir}/ref/$arch/PKGBUILD" "$arch" keep)$'\n'
     done
     arch_sum_lines "${aur_dir}/PKGBUILD" "$gone" drop "$back_sums" >"${tmp_dir}/PKGBUILD.sums"

@@ -167,6 +167,21 @@ license=('Apache-2.0')
 provides=("demo=${pkgver}")
 ```
 
+### Checksum arrays below commands or functions (BLOCKED)
+
+Checksum arrays below the first line of the PKGBUILD that holds more than assignments and comments, such as a command, a function, a condition or a here-document, and text after the `)` of a checksum array. Assignments may hold `$(...)` of a plain command, one without quotes, `$`, pipes, redirections, `#` or shell keywords such as `case`, as `_date="$(date -u +%Y%m%d)"` does.
+
+**Detection:** verify and publish read the PKGBUILD as text, and only the assignments at its top show what bash assigns without running it: arrays inside a function, a string or a here-document read the same as arrays at the top. Updates of such a PKGBUILD stop in prepare, verify and publish with a message that names the line.
+
+**Correct approach:** keep the checksum arrays among the assignments above the first function:
+
+```bash
+source=("https://example.com/demo-${pkgver}.tar.gz")
+sha256sums=('...')
+
+package() {
+```
+
 ### Source URL returns HTML (BLOCKED)
 
 Upstream moves or renames a release, and the old URL redirects to an HTML error or download page.

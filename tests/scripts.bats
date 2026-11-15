@@ -1325,6 +1325,23 @@ MOCKCURL
   done
 }
 
+# curl takes HTTPS in any case, and the port form holds digits right after the host alone
+@test "lib.sh: http_get refuses HTTPS in capitals and ports beyond the host, before curl runs" {
+  keep_host_memory
+  timeout_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local url
+  for url in 'HTTPS:///example.com/x' 'Https://a\@b/x' 'https:///x:80' 'https://h:' 'https://h:80x' 'https://a\@b:80x'; do
+    run http_get "$url"
+    [ "$status" -ne 0 ] && [ "$output" = "$url: the host is no plain name of ASCII letters, digits, dots and dashes" ] || {
+      echo "taken: $url"
+      echo "$output"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/curl.log" ]
+}
+
 @test "lib.sh: http_get remembers no host after an answer, a refusal or an HTTP error" {
   keep_host_memory
   mock_curl_failure
@@ -4161,6 +4178,35 @@ alerts:
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
+# The write-back of current takes regular files alone, so a linked YAML would find the same
+# version new in every run
+@test "check-all: fails the check of a package YAML that is a link" {
+  stand_in_strategy step 2.0
+  create_test_package "pkg-link" "step" "current: 1.0"
+  mv "$TEST_TMPDIR/packages/pkg-link.yml" "$TEST_TMPDIR/outside.yml"
+  ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/pkg-link.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-link")" = "check_failed: packages/pkg-link.yml is a link, and the runs read regular files alone" ]
+  grep -qx pkg-link "$TEST_TMPDIR/.status/_packages"
+}
+
+@test "check-all: fails the check of a package whose alerts run past the check timeout" {
+  stand_in_strategy step 29+1
+  create_test_package "pkg-slow" "step" "current: 28+25
+alerts:
+  - match: '^29'
+    note: New major"
+  create_test_package "pkg-next" "step" "current: 28+25"
+  # The test copy of scripts/ links the files of the repository, so the slow copy replaces the link
+  rm -f "$TEST_TMPDIR/scripts/lib/alerts.sh"
+  printf '%s\n' "$(cat "$PROJECT_DIR/scripts/lib/alerts.sh")" 'alert_fires() { sleep 15; }' >"$TEST_TMPDIR/scripts/lib/alerts.sh"
+  AURTOMATOR_CHECK_TIMEOUT=3 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-slow")" = "check_failed: alerts: timed out after 3 s" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-next")" = "new_version: 29+1" ]
+}
+
 @test "check-all: fails the check of a package with an alert note of several lines" {
   stand_in_strategy step 29+1
   create_test_package "pkg-note" "step" "current: 28+25
@@ -4588,6 +4634,43 @@ arch_wait:
   check_arch 28+23
   [ "$ARCH_RC" -eq 0 ]
   [ "$ARCH_OUT" = $'aarch64|\n|' ]
+}
+
+@test "pkgbuild_assigns_source: takes assignments and leaves comments out" {
+  local line
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  for line in '#source_aarch64=("https://example.com/a.tar.gz")' 'x=1 # source_aarch64=(b)' '_note=source_aarch64=x'; do
+    printf '%s\n' 'pkgname=demo' "$line" >"$TEST_TMPDIR/PKGBUILD"
+    run pkgbuild_assigns_source "$TEST_TMPDIR/PKGBUILD" aarch64
+    [ "$status" -eq 1 ] || {
+      echo "taken: $line"
+      return 1
+    }
+  done
+  for line in 'source_aarch64=(a)' '  source_aarch64+=(b)' 'x=1; source_aarch64=(b)'; do
+    printf '%s\n' 'pkgname=demo' "$line" >"$TEST_TMPDIR/PKGBUILD"
+    run pkgbuild_assigns_source "$TEST_TMPDIR/PKGBUILD" aarch64
+    [ "$status" -eq 0 ] || {
+      echo "refused: $line"
+      return 1
+    }
+  done
+}
+
+# A commented-out line is no assignment of the source, so the arch is dropped as well
+@test "check-arch: an arch of arch_out whose source line the AUR PKGBUILD comments out stays out" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  temurin_package "current: 28+23"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  aur_arch_commit 28+23 x86_64 powerpc64le riscv64 >/dev/null
+  sed -i 's/^source_aarch64=/#&/' "$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "comment out aarch64"
+  git -C "$work" push -q "$AUR_REMOTE" master
+
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+  grep -q "the AUR PKGBUILD has no source_aarch64, so aarch64 stays out" "$TEST_TMPDIR/arch.err"
 }
 
 # Maintainers who drop an arch for good drop its source_<arch>, and the arch can never come back

@@ -179,8 +179,8 @@ validate_pkg() {
     log_err "$shown: a key or a value holds a control character"
     return 1
   fi
-  # Diffs show no zero-width or bidi character, so values outside the notes for people are
-  # printable ASCII or tabs, and notes hold no format character and no space but U+0020
+  # Diffs show no zero-width or bidi character, so values outside the notes for people are printable
+  # ASCII or tabs, and notes hold no format character, blank letter, lone mark or space but U+0020
   local hidden note_path='^alerts[.][0-9]+[.]note$'
   hidden=$(NOTE_PATH="$note_path" ASCII_RE='[^\t -~]' yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
     | select(path | join(".") | test(strenv(NOTE_PATH)) | not) | select(test(strenv(ASCII_RE)))] | length' "$file")
@@ -188,10 +188,13 @@ validate_pkg() {
     log_err "$shown: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"
     return 1
   fi
-  hidden=$(NOTE_PATH="$note_path" HIDDEN_RE='[\p{Cf}\p{Zl}\p{Zp}]|[^ \P{Zs}]' yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
+  # Hangul fillers, the blank Braille pattern and variation selectors show nothing, and the emoji
+  # form takes a symbol before it; combining marks after a space or at the start stand alone
+  local blank='\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}\x{1D159}\x{034F}\x{FE00}-\x{FE0E}\x{E0100}-\x{E01EF}'
+  hidden=$(NOTE_PATH="$note_path" HIDDEN_RE="[\\p{Cf}\\p{Zl}\\p{Zp}$blank]|[^ \\P{Zs}]|(^|[^\\p{So}])\\x{FE0F}|(^|\\s)\\p{Mn}" yq -r '[... | select(kind == "scalar") | (. tag = "!!str")
     | select(path | join(".") | test(strenv(NOTE_PATH))) | select(test(strenv(HIDDEN_RE)))] | length' "$file")
   if [[ "$hidden" != 0 ]]; then
-    log_err "$shown: alerts[].note holds a format character or a space other than U+0020"
+    log_err "$shown: alerts[].note holds a format character, a blank letter or mark, or a space other than U+0020"
     return 1
   fi
 
@@ -815,15 +818,16 @@ if [[ "${1:-}" == "--all" ]]; then
   total=0
   failed=0
   strays=0
-  while IFS= read -r -d '' entry; do
-    entry="${entry##*/}"
-    [[ "$entry" == .gitkeep || "$entry" == example.yml.sample || ("$entry" == *.yml && "$entry" != .*) ]] && continue
+  while IFS= read -r -d '' path; do
+    entry="${path##*/}"
+    [[ "$entry" == .gitkeep || "$entry" == example.yml.sample ]] && continue
+    [[ "$entry" == *.yml && "$entry" != .* && -f "$path" && ! -L "$path" ]] && continue
     ! has_control "$entry" || entry=${entry@Q}
-    log_err "packages/$entry: no run reads it, as the runs read packages/<name>.yml alone"
+    log_err "packages/$entry: no run reads it, as the runs read the regular files packages/<name>.yml alone"
     ((strays++)) || true
   done < <(find "${AURTOMATOR_DATA_DIR}/packages" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-    [[ -f "$pkg_file" ]] || continue
+    [[ -f "$pkg_file" && ! -L "$pkg_file" ]] || continue
     ((total++)) || true
     if ! validate_pkg "$pkg_file"; then
       ((failed++)) || true
