@@ -389,18 +389,22 @@ alerts:
 
 # bash compiles a pattern again for each line it reads, and nested counted repeats
 # multiply the size of a pattern
-@test "validate: refuses a regex past 256 characters, 64 repeats or a cheap compile" {
-  local entry
+@test "validate: refuses a regex past 256 characters, 64 repeats or 128 parts" {
+  local entry field regex expected
   local -a cases=(
-    "pattern|((a{1,80}){1,80}){1,80}|repeats a part more than 64 times"
-    "pattern|v([0-9]{1,65})|repeats a part more than 64 times"
-    "pattern|v([0-9]+)$(printf 'x%.0s' {1..250})|holds more than 256 characters"
-    "pattern|(((a{1,32}){1,32}){1,32}){1,32}|takes more than a second or 256 MiB to compile"
-    "pattern|((a{1,64}){1,64}){1,64}|takes more than a second or 256 MiB to compile"
-    "match|((a{1,80}){1,80}){1,80}|repeats a part more than 64 times"
+    'pattern;v([0-9]{,65});repeats a part more than 64 times'
+    'pattern;((a{1,80}){1,80}){1,80};repeats a part more than 64 times'
+    'pattern;v([0-9]{1,65});repeats a part more than 64 times'
+    "pattern;v([0-9]+)$(printf 'x%.0s' {1..250});holds more than 256 characters"
+    'pattern;v(x{63}x{63}y);holds more than 128 parts'
+    'pattern;(((a{1,32}){1,32}){1,32}){1,32};holds more than 128 parts'
+    'pattern;v((((a{4}){4}){4}){4});holds more than 128 parts'
+    'pattern;v((a{1,64}){1,64}){0}(x);holds more than 128 parts'
+    'match;((a{1,80}){1,80}){1,80};repeats a part more than 64 times'
+    'match;(a|b){32}x;holds more than 128 parts'
   )
   for entry in "${cases[@]}"; do
-    IFS='|' read -r field regex expected <<<"$entry"
+    IFS=';' read -r field regex expected <<<"$entry"
     if [[ "$field" == pattern ]]; then
       create_test_package "mypkg" "webpage-scrape" "upstream:
   url: https://example.com/download
@@ -420,21 +424,68 @@ alerts:
       return 1
     }
   done
-  create_test_package "mypkg" "webpage-scrape" "upstream:
+  for regex in 'v(x{63}x{63})' 'v([{999}])' 'v(\{999\})'; do
+    create_test_package "mypkg" "webpage-scrape" "upstream:
   url: https://example.com/download
-  pattern: '([0-9a-f]{7,40})-((a{1,64}){1,64})'"
-  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-  [ "$status" -eq 0 ]
+  pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $regex"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+@test "validate: refuses a loop after a group or a repeat and an anchor inside a regex" {
+  local entry regex expected
+  local -a cases=(
+    'v((a?)*);puts *, + or {n,} after a group or a repeat'
+    'v((x|y)+);puts *, + or {n,} after a group or a repeat'
+    'v(a?{2,});puts *, + or {n,} after a group or a repeat'
+    'v(\b[0-9]+);has an anchor other than ^ at its start or $ at its end'
+    'v([0-9]+)^;has an anchor other than ^ at its start or $ at its end'
+    'v(x$)y;has an anchor other than ^ at its start or $ at its end'
+  )
+  for entry in "${cases[@]}"; do
+    IFS=';' read -r regex expected <<<"$entry"
+    create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"$expected"* ]] || {
+      echo "taken: $entry"
+      echo "$output"
+      return 1
+    }
+  done
+  for regex in '^v([0-9.]+(-rc[0-9]+)?)$' '^([0-9a-f]{7,40})-(.*)$' 'v([\^$]+)' 'v(\^\$)' 'v([0-9]{2,}x*)'; do
+    create_test_package "mypkg" "webpage-scrape" "upstream:
+  url: https://example.com/download
+  pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $regex"
+      echo "$output"
+      return 1
+    }
+  done
 }
 
 @test "validate: refuses a PCRE version_pattern past 64 repeats" {
-  create_test_package "mypkg" "github-nightly" "upstream:
+  local regex
+  for regex in 'v\K[0-9]{,65}' '((a{1,80}){1,80}){1,80}'; do
+    create_test_package "mypkg" "github-nightly" "upstream:
   project: owner/repo
   version_source: release_body
-  version_pattern: '((a{1,80}){1,80}){1,80}'"
-  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"repeats a part more than 64 times"* ]]
+  version_pattern: '$regex'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"repeats a part more than 64 times"* ]] || {
+      echo "taken: $regex"
+      echo "$output"
+      return 1
+    }
+  done
 }
 
 @test "validate: upstream.url holds no user name" {
