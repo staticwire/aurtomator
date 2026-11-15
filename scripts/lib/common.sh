@@ -465,7 +465,8 @@ github_tags() {
 # Print the newest version on stdin by vercmp, which splits off pkgrel at a dash.
 # The comparison drops a dash before a letter and turns any other dash into a dot.
 newest_version() {
-  local version key newest="" newest_key=""
+  # [A-Za-z] takes the letters of the locale, and CI runs in C.UTF-8
+  local LC_ALL=C version key newest="" newest_key=""
   while IFS= read -r version; do
     [[ -n "$version" ]] || continue
     key=$version
@@ -544,15 +545,25 @@ latest_tag_version() {
   echo "$version"
 }
 
+# grep starts a match at each place the first part of a pattern takes, so a page with a long run
+# of what it takes costs time that grows with the square of the run
+CAPTURE_TIMEOUT=30
+
 # Print the first capture group of every match of ERE $1 in stdin. bash takes the
 # group, so no sed delimiter limits the pattern.
 capture_matches() {
-  local pattern="$1" match
+  local pattern="$1" match matches rc=0
+  matches=$(timeout --kill-after=5 "$CAPTURE_TIMEOUT" grep -oE -e "$pattern") || rc=$?
+  if ((rc == 124 || rc == 137)); then
+    echo "The pattern took more than $CAPTURE_TIMEOUT s on the page" >&2
+    return 1
+  fi
+  [[ -n "$matches" ]] || return 0
   while IFS= read -r match; do
     if [[ "$match" =~ $pattern ]]; then
       printf '%s\n' "${BASH_REMATCH[1]}"
     fi
-  done < <(grep -oE -e "$pattern")
+  done <<<"$matches"
 }
 
 # bash compiles a pattern again for each line it reads, and the cost of a compile grows with
