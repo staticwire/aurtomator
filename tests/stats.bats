@@ -126,7 +126,7 @@ lib() {
   [ "$output" = 'up_to_date,1.0' ]
   run lib stats_event "cooldown: 2026-11-12" 1.0
   [ "$output" = 'up_to_date,1.0' ]
-  # A package the check did not reach in this run keeps its last row
+  # Packages the check did not reach in this run keep their last row
   run lib stats_event "unchecked: the check ran out of its 20 minutes in this run" 1.0
   [ "$status" -eq 0 ]
   [ "$output" = "" ]

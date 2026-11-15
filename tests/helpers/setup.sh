@@ -191,8 +191,8 @@ archive_missing() {
   arch_source_url "$1" "$2" >>"$TEST_TMPDIR/missing"
 }
 
-# A curl that answers a HEAD request with 404 for a URL in $TEST_TMPDIR/missing,
-# with no status for one in silent and with a file otherwise; logs to heads.log
+# Mock curl that answers HEAD requests with 404 for URLs in $TEST_TMPDIR/missing,
+# with no status for those in silent and with a file otherwise; logs to heads.log
 mock_heads() {
   cat >"$MOCK_DIR/curl" <<EOF
 #!/usr/bin/env bash

@@ -317,13 +317,13 @@ current: '$current'"
   [ "$status" -eq 1 ]
   [[ "$output" == *"packages/mypkg.yml holds a key twice in one mapping"* ]]
 
-  # A file with CRLF line ends stays valid
+  # Files with CRLF line ends stay valid
   printf 'name: mypkg\r\nstrategy: github-tag\r\nupstream:\r\n  project: owner/repo\r\n' >"$TEST_TMPDIR/packages/mypkg.yml"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 0 ]
 }
 
-# A diff shows no zero-width or bidi character, and a hold whose match hides one never fires
+# Diffs show no zero-width or bidi character, and holds whose match hides one never fire
 @test "validate: a key or a value outside alerts[].note is printable ASCII or a tab" {
   local entry
   # U+200B in a match, U+202E and U+00E9 in a project, as UTF-8 bytes
@@ -670,7 +670,7 @@ EOF
 # The runs check such a package and then drop its status; the AUR allows no such name
 @test "validate: fails on a name outside the characters of an AUR package name" {
   local name shown
-  # A name beyond ASCII meets the check of every value first
+  # Names beyond ASCII meet the check of every value first
   printf "name: 'fée'\nstrategy: github-release\nupstream:\n  project: owner/repo\n" >"$TEST_TMPDIR/packages/fée.yml"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
   [ "$status" -eq 1 ]
@@ -711,7 +711,7 @@ EOF
   cp "$PROJECT_DIR/packages/example.yml.sample" "$TEST_TMPDIR/packages/"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
   [ "$status" -eq 0 ]
-  # A file no run reads fails beside no package at all
+  # Files no run reads fail beside no package at all
   mv "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/a.yaml"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
   [ "$status" -eq 1 ]
@@ -840,7 +840,7 @@ alerts:
   [[ "$output" == *"mypkg.yml: upstream.projet is not a field of any strategy"* ]]
 }
 
-# A key that a strategy script starts to read cannot be refused
+# Keys that a strategy script starts to read cannot be refused
 @test "validate: every upstream key a strategy script reads passes with that strategy" {
   local file strategy key extra
   for file in "$PROJECT_DIR"/strategies/*.sh; do
@@ -1968,7 +1968,7 @@ pkgver_dash: $value"
   done
 }
 
-# A semver pre-release always holds a dash
+# Semver pre-releases always hold a dash
 @test "validate: crates prerelease without pkgver_dash rejected" {
   create_test_package "mypkg" "crates" "upstream:
   registry: pijul
@@ -2057,7 +2057,7 @@ pkgver_dash: _"
   [[ "$output" == *"capture group"* ]]
 }
 
-# A strategy reads the field when its script names it
+# Strategies read the field when their script names it
 @test "validate: tag_version_regex for a strategy that does not read it rejected" {
   local file strategy
   for file in "$PROJECT_DIR"/strategies/*.sh; do
@@ -2116,7 +2116,7 @@ pkgver_dash: _"
   done
 }
 
-# A tag_version_regex there is refused as well, so asking for one would
+# tag_version_regex there is refused as well, so asking for one would
 # send the author in a circle
 @test "validate: tag_version_replace for github-nightly with another version_source rejected" {
   local source

@@ -7,7 +7,7 @@ set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
-# A UTF-8 locale widens [a-z], and grep leaves out a line with a byte that is no UTF-8
+# UTF-8 locales widen [a-z], and grep leaves out lines with bytes that are no UTF-8
 export LC_ALL=C
 
 readonly USAGE="Usage: check-arch.sh <package> <version> [--asset <value>]"
@@ -88,8 +88,8 @@ if ! arch_text=$(pkgbuild_arch_words "$work/HEAD/PKGBUILD"); then
 fi
 mapfile -t arches <<<"$arch_text"
 
-# An arch of arch_out that arch=() names again was put back by hand, and one without its
-# source_<arch> was dropped: it stays out unasked until a push takes it out of arch_out
+# Arches of arch_out that arch=() names again were put back by hand, and those without their
+# source_<arch> were dropped: they stay out unasked until a push takes them out of arch_out
 out_now=()
 dropped=()
 for arch in "${out_keys[@]}"; do

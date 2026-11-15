@@ -257,7 +257,7 @@ teardown() {
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
-# A hand edit can keep the old pin as a comment, and a pull request can add
+# Hand edits can keep the old pin as a comment, and pull requests can add
 # one: the repository and the commit both come from the uses: line
 @test "runner: takes the pin from the uses: line, not from a comment" {
   cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
@@ -545,7 +545,7 @@ shape() {
   [ -d "$cache/cafe" ]
   [ -d "$cache/$PINNED" ]
 
-  # A run with its copy in place removes nothing
+  # Runs with their copy in place remove nothing
   mkdir "$cache/$old"
   touch -d '40 days ago' "$cache/$old"
   run "$REPO/aurtomator.sh" sample
@@ -553,7 +553,7 @@ shape() {
   [ -d "$cache/$old" ]
 }
 
-# A run at the same time can remove its directory while find reads, and
+# Runs at the same time can remove their directory while find reads, and
 # find then fails: the cleanup must not stop the command
 @test "runner: a failed cleanup of the cache stops nothing" {
   local cache="$XDG_CACHE_HOME/aurtomator" old=0000000000000000000000000000000000000001 bin="$TEST_TMPDIR/norm"
@@ -817,7 +817,7 @@ EOF
   [ "${lines[2]}" = "  staticwire/aurtomator/.github/workflows/validate.yml@$PINNED" ]
   [ "${#lines[@]}" -eq 3 ]
 
-  # A uses: line in a block of text, which GitHub does not read
+  # uses: line in a block of text, which GitHub does not read
   template_workflows "$PINNED" v1.0.0
   printf '    with:\n      text: |\n        uses: staticwire/aurtomator/.github/workflows/validate.yml@%s # v1.0.0\n' "$PINNED" \
     >>"$REPO/.github/workflows/validate.yml"
@@ -894,7 +894,7 @@ EOF
     [ "$output" = ".github/workflows/check-updates.yml runs $value, a workflow of another repository than staticwire/aurtomator" ]
   done
 
-  # A workflow of the calling repository
+  # Workflow of the calling repository
   template_workflows "$PINNED" v1.0.0
   printf '  extra:\n    uses: ./.github/workflows/local.yml\n' >>"$REPO/.github/workflows/check-updates.yml"
   run "$REPO/aurtomator.sh" check-pins
@@ -902,7 +902,7 @@ EOF
   [ "${#lines[@]}" -eq 4 ]
 }
 
-# A step runs an action of any repository; a step that names a workflow is refused in each
+# Steps run actions of any repository; steps that name a workflow are refused in each
 # spelling GitHub reads, and an action of the calling repository passes
 @test "runner: check-pins refuses a step that names a workflow of another repository in any spelling" {
   local value

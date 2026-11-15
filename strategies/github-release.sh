@@ -26,7 +26,7 @@ if [[ -n "$tag_version_regex" ]]; then
     exit 1
   }
   if [[ -z "$release" ]]; then
-    # An empty list says nothing about the regex
+    # Empty lists say nothing about the regex
     if [[ "$(github_api "${api}/releases?per_page=1" | yq 'length')" == 0 ]]; then
       echo "The release list of ${owner_repo} is empty" >&2
     else

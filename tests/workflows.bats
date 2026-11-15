@@ -108,7 +108,7 @@ run_blocks() {
   [ "$count" -gt 1 ]
 }
 
-# A pinned image ages, and an old keyring rejects packages signed with a
+# Pinned images age, and old keyrings reject packages signed with a
 # newer packager key
 @test "workflows: pacman upgrades the keyring before the system" {
   local workflow
@@ -350,7 +350,7 @@ EOF
   [ "$output" = "0" ]
 }
 
-# A job missing from the needs could fail and still merge
+# Jobs missing from the needs could fail and still merge
 @test "ci-ok: needs every job of ci.yml but merge-image" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs | keys | map(select(. != "ci-ok" and . != "merge-image")) | sort | join(" ")' "$ci"
@@ -370,7 +370,7 @@ EOF
   [ "$output" = "always()" ]
 }
 
-# A skipped need passes, as pipeline is skipped for a pull request from a fork
+# Skipped needs pass, as pipeline is skipped for pull requests from forks
 @test "ci-ok: fails only when a need failed or was canceled" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs["ci-ok"].steps | length' "$ci"
@@ -403,7 +403,7 @@ EOF
 RELEASE="$GITHUB_DIR/workflows/release-please.yml"
 RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 
-# A fork or a template copy carries the workflow and must not open release PRs
+# Forks and template copies carry the workflow and must not open release PRs
 @test "release-please: runs only in the upstream repository" {
   run yq '.jobs[] | .if' "$RELEASE"
   [ "$status" -eq 0 ]
@@ -459,8 +459,8 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 
 CHECK_UPDATES="$GITHUB_DIR/workflows/check-updates.yml"
 
-# Prints the run block of step $2 in job $1 of check-updates.yml. A job in a
-# container runs a step as sh -e {0}, so the tests run it with sh -e as well.
+# Prints the run block of step $2 in job $1 of check-updates.yml. Jobs in a
+# container run steps as sh -e {0}, so the tests run them with sh -e as well.
 step_run() {
   yq ".jobs.$1.steps[] | select(.name == \"$2\") | .run" "$CHECK_UPDATES"
 }
@@ -564,7 +564,7 @@ id_of() {
   done
 }
 
-# A download by name takes any artifact of that name in the run and an empty id takes them all,
+# Downloads by name take any artifact of that name in the run and empty ids take them all,
 # so 0 stands in for no id; verify takes the handoffs of prepare by a pattern only they upload
 @test "check-updates: each job downloads an artifact by the id the job of its upload gave" {
   run yq '.jobs | to_entries[] | .key as $job | .value.steps[] | select(.uses | test("^actions/download-artifact@")) |
@@ -595,7 +595,7 @@ run_decide_step() {
   ln -sfn "${AURTOMATOR_TREE:-$BATS_TEST_DIRNAME/..}" "$ws/aurtomator"
   for pair in "$@"; do
     printf '%s\n' "${pair#*=}" >"$ws/statuses/${pair%%=*}"
-    # An outdated package has its YAML, except one named in $NO_YAML
+    # Outdated packages have their YAML, except those named in $NO_YAML
     if [[ "${pair#*=}" =~ ^(new_version|available_downgrade|new_build|arch_back): && " ${NO_YAML:-} " != *" ${pair%%=*} "* ]]; then
       mkdir -p "$ws/packages"
       printf 'name: %s\n' "${pair%%=*}" >"$ws/packages/${pair%%=*}.yml"
@@ -778,7 +778,7 @@ decide_stats() {
   [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
 }
 
-# A journal root cannot read would set work in every run, and publish would
+# Journals root cannot read would set work in every run, and publish would
 # record nothing
 @test "check-updates: Decide warns and leaves the run alone for a journal that is a link or no file" {
   local ws="$BATS_TEST_TMPDIR/ws"
@@ -841,7 +841,7 @@ decide_stats() {
   [ "$output" = "false" ]
 }
 
-# A job of prepare run again uploads a handoff of its own beside the one of
+# Jobs of prepare run again upload a handoff of their own beside the one of
 # the attempt before
 @test "check-updates: each job of prepare uploads the handoff of its package and attempt" {
   run yq -o=json -I=0 '[.jobs.prepare.steps[] | select(.uses | test("^actions/upload-artifact@")) | [.id, .with.name, .with.path, .with["if-no-files-found"]]]' "$CHECK_UPDATES"
@@ -1306,7 +1306,7 @@ make_builder_inputs() {
   done
 }
 
-# A directory left by an earlier step could hold files that builder chose
+# Directories left by an earlier step could hold files that builder chose
 @test "run-as-builder: refuses a directory of builder that exists already" {
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   mkdir -p "$BATS_TEST_TMPDIR/work"
@@ -1331,7 +1331,7 @@ make_builder_inputs() {
   [ ! -e "$SUDO_LOG" ]
 }
 
-# A wrong GITHUB_ACTION_PATH fails the step before it stops the workflow
+# Wrong GITHUB_ACTION_PATH values fail the step before it stops the workflow
 # commands and before builder runs anything
 @test "run-as-builder: fails at once when its checkout is missing" {
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
@@ -1507,7 +1507,7 @@ EOF
   [ ! -e "$CALLS/pkill" ]
 }
 
-# A job that failed before useradd has no builder and no checkout
+# Jobs that failed before useradd have no builder and no checkout
 @test "check-updates: Stop builder does nothing when the job has no builder" {
   NO_BUILDER=1 PS_RC=1 run_stop_builder_step
   [ "$status" -eq 0 ]
@@ -1632,7 +1632,7 @@ make_handoff() {
   [ "$output" = $'./prepared/bar/PKGBUILD\n./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/bar\n./status/foo' ]
 }
 
-# A link would put a file that root can read into an artifact anyone with
+# Links would put a file that root can read into an artifact anyone with
 # read access to the repository can download
 @test "check-updates: Hand over copies no link, also one that find lists" {
   local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work" bin="$BATS_TEST_TMPDIR/bin" round
@@ -1754,7 +1754,7 @@ make_handoff() {
   [ ! -s "$SUDO_LOG" ]
 }
 
-# A workspace with aurtomator linked in, package a at 1.0 before the run and
+# Workspace with aurtomator linked in, package a at 1.0 before the run and
 # at $1 after it, its status $2, and a journal of one run before
 make_stats_ws() {
   local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results"
@@ -1822,7 +1822,7 @@ run_stats_step() {
   [ -z "$(ls -A "$stats")" ]
 }
 
-# A stall of a script takes the path of its failure, so the commit lands
+# Stalled scripts take the path of their failure, so the commit lands
 @test "check-updates: Record statistics bounds the time of both scripts" {
   run step_run publish "Record statistics"
   [ "$status" -eq 0 ]
@@ -2235,7 +2235,7 @@ EOF
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
-# A repository at $BATS_TEST_TMPDIR/ws with README.md and two package YAMLs, and the copies that
+# Repository at $BATS_TEST_TMPDIR/ws with README.md and two package YAMLs, and the copies that
 # Hand over took from builder in $BATS_TEST_TMPDIR/results, with the given file=text edits
 make_commit_repo() {
   local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results" pair
@@ -2292,8 +2292,8 @@ while (($#)); do
   esac
   shift
 done
-# gh answers with the JSON of the API and applies --jq to it. A recursive
-# tree also lists each directory, as an entry of type tree.
+# gh answers with the JSON of the API and applies --jq to it. Recursive
+# trees also list each directory, as an entry of type tree.
 case "$endpoint" in
   repos/owner/fork/git/ref/heads/main) json="{\"object\": {\"sha\": \"$GH_HEAD\", \"type\": \"commit\"}}" ;;
   repos/owner/fork/git/commits/*) json='{"tree": {"sha": "tree-of-head"}}' ;;
@@ -2336,7 +2336,7 @@ EOF
 
 MOVED=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-# Fails when gh got a call that matches $1. A function, because bats does
+# Fails when gh got a call that matches $1. It is a function, because bats does
 # not fail a test on a negated command that is not the last one.
 no_call() {
   ! grep -q -e "$1" "$GH_LOG"
@@ -2449,7 +2449,7 @@ no_commit() {
   no_call "git/refs/heads/main "
 }
 
-# A blob would turn a tracked link into a file
+# Blobs would turn a tracked link into a file
 @test "check-updates: the commit step leaves a tracked link alone" {
   local ws="$BATS_TEST_TMPDIR/ws"
   make_commit_repo
@@ -2637,7 +2637,7 @@ make_runner_repo() {
   [[ "$output" == *"No changes to commit"* ]]
 }
 
-# A path under a file would replace that file in the tree, and one under a
+# Paths under a file would replace that file in the tree, and those under a
 # link would write through the link
 @test "check-updates: the commit step leaves out stats/ when stats is a file or a link to a directory" {
   local ws="$BATS_TEST_TMPDIR/ws"
@@ -2678,8 +2678,8 @@ make_runner_repo() {
   [ "$(step_index issues "Write the run summary")" = "$(($(step_index issues "Check the statuses") + 1))" ]
 }
 
-# A change that leaves the package table alone skips publish and still opens
-# or closes an issue
+# Changes that leave the package table alone skip publish and still open
+# or close an issue
 @test "check-updates: the issues job runs in every run that checked, after publish" {
   run yq '.jobs.issues.needs | join(" ")' "$CHECK_UPDATES"
   [ "$output" = "image check prepare verify publish" ]
@@ -2756,7 +2756,7 @@ run_bare_issues_step() {
   [ "$output" = $'alert_issue_body .status/bar https://example.invalid/run\nfailure_issue_body .status/foo https://example.invalid/run\nupstream_issue_body .status/_upstream https://example.invalid/run' ]
 }
 
-# A package without a YAML gets no check, so no status of a later run closes its issues
+# Packages without a YAML get no check, so no status of a later run closes their issues
 @test "check-updates: the close step closes the issues of a package whose YAML is gone" {
   GH_OPEN=$'1 ❌ gone: update failed\n2 ✋ gone: update held\n3 ⚠️ gone: 1.2 without aarch64\n4 ❌ kept: check failed' \
     run_close_step kept="check_failed: boom" _packages=kept
@@ -2901,7 +2901,7 @@ run_bare_issues_step() {
   [ "$output" = "5" ]
 }
 
-# An outage of upstream or a rate limit must not close the issue, or the next
+# Upstream outages and rate limits must not close the issue, or the next
 # held run opens it again under a new number
 @test "check-updates: keeps the held issue of a package whose version has not reached the AUR" {
   GH_OPEN=$'12 ✋ foo: update held\n13 ✋ bar: update held\n14 ✋ baz: update held' \
@@ -2942,7 +2942,7 @@ run_bare_issues_step() {
   [ "$output" = "2" ]
 }
 
-# A package the check did not reach in this run tells nothing about its host
+# Packages the check did not reach in this run tell nothing about their host
 @test "check-updates: closes no host issue in a run that left a package unchecked" {
   local pairs
   mapfile -t pairs < <(host_failures 4 api.github.com a)
@@ -3047,7 +3047,7 @@ run_bare_issues_step() {
   [ -f "$ssh_dir/known_hosts" ]
 }
 
-# A run before setup secrets pushes nothing and commits the README
+# Runs before setup secrets push nothing and commit the README
 @test "check-updates: publish sets up SSH and GPG only for a package to push" {
   local find
   find=$(step_index publish "Find packages to push")
@@ -3252,7 +3252,7 @@ EOF
   [ "$output" = "0" ]
 }
 
-# A job canceled while it waited for a runner has no start
+# Jobs canceled while they waited for a runner have no start
 @test "notify-failure: opens nothing for a job canceled before it started" {
   GH_JOBS_JSON='{"jobs":[{"name":"check-updates / check","conclusion":"cancelled","started_at":null,"completed_at":"2026-11-13T10:40:00Z"}]}' run_notify_step
   [ "$status" -eq 0 ]
@@ -3310,7 +3310,7 @@ EOF
 
 VALIDATE="$GITHUB_DIR/workflows/validate.yml"
 
-# A caller job `validate` shows them as `validate / image` and
+# Caller job `validate` shows them as `validate / image` and
 # `validate / packages`
 @test "validate: has the jobs image and packages" {
   run yq '.jobs | keys | join(" ")' "$VALIDATE"

@@ -10,9 +10,9 @@ sudo pacman -S --needed git curl go-yq pacman-contrib namcap
 sudo pacman -S --needed bats jq openssh shellcheck shfmt actionlint
 ```
 
-The commands of the next four sections and of [Draft a package](/add-a-package/#draft-a-package) run in your repository through `aurtomator.sh`, at the commit the calling workflows pin, so a local run uses the strategies and checks of CI, see [The aurtomator.sh script](/setup/#the-aurtomatorsh-script).
+The commands of the next four sections and of [Draft a package](/add-a-package/#draft-a-package) run in your repository through `aurtomator.sh`, at the commit the calling workflows pin, so local runs use the strategies and checks of CI, see [The aurtomator.sh script](/setup/#the-aurtomatorsh-script).
 
-A script takes the packages, `.status/`, `.aurtomator.conf` and `README.md` from the working directory, or from `AURTOMATOR_DATA_DIR`, which `./aurtomator.sh` sets to your repository. `AURTOMATOR_RUNNER`, which `./aurtomator.sh` sets to its own path, starts the commands that `setup.sh` and `draft.sh` print, as in `./aurtomator.sh setup verify`.
+Scripts take packages, `.status/`, `.aurtomator.conf` and `README.md` from the working directory, or from `AURTOMATOR_DATA_DIR`, which `./aurtomator.sh` sets to your repository. `AURTOMATOR_RUNNER`, which `./aurtomator.sh` sets to its own path, starts the commands that `setup.sh` and `draft.sh` print, as in `./aurtomator.sh setup verify`.
 
 ## Check a single package
 
@@ -28,7 +28,7 @@ The log goes to stderr, and a new version to stdout:
 2.0.0
 ```
 
-An up-to-date package leaves stdout empty:
+Up-to-date packages leave stdout empty:
 
 ```text
 → Checking my-package (strategy: github-release, current: 2.0.0)
@@ -41,7 +41,7 @@ An up-to-date package leaves stdout empty:
 ./aurtomator.sh update-pkg my-package 2.0.0 --dry-run
 ```
 
-It runs the steps of [Step-by-step](/internals/update-process/#step-by-step) up to the check of `PKGBUILD` and `.SRCINFO`, prints the diff of the PKGBUILD and pushes nothing. These steps run the PKGBUILD of the AUR on your machine, with your SSH key in reach of its code, so read the PKGBUILD first when someone else can push to the package.
+It runs the steps of [Step-by-step](/internals/update-process/#step-by-step) up to the `PKGBUILD` and `.SRCINFO` check, prints the PKGBUILD diff and pushes nothing. These steps run AUR PKGBUILD on your machine, with your SSH key in reach of its code, so read the PKGBUILD first when others can push to the package.
 
 ## Push an update
 
@@ -67,7 +67,7 @@ The last line counts the packages:
 
 ## Running BATS tests
 
-The tests and the linters check aurtomator itself and run in the root of a clone of aurtomator:
+Tests and linters check aurtomator itself and run in the root of an aurtomator clone:
 
 ```bash
 bats tests/ --recursive --timing
@@ -87,4 +87,4 @@ shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tes
 actionlint
 ```
 
-`shfmt -w` in place of `-d` fixes the formatting. CI also checks the `run:` blocks of `.github/actions/*/action.yml` and `aurtomator.sh`, see [Lint job](/develop/ci/#lint-job).
+`shfmt -w` in place of `-d` fixes formatting. CI also checks the `run:` blocks of `.github/actions/*/action.yml` and `aurtomator.sh`, see [Lint job](/develop/ci/#lint-job).

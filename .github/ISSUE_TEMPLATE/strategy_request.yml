@@ -23,7 +23,7 @@ body:
     id: upstream
     attributes:
       label: Example upstream URL
-      description: A representative project hosted on the platform or ecosystem this strategy targets.
+      description: Representative project hosted on the platform or ecosystem this strategy targets.
     validations:
       required: true
 

@@ -2,24 +2,24 @@
 # Every key: https://aurtomator.dev/package-yaml/
 # Every strategy and its upstream fields: https://aurtomator.dev/strategies/
 
-name: my-package          # pkgbase on the AUR, the file name without .yml
+name: my-package          # AUR pkgbase, file name without .yml
 strategy: github-release  # how the new version is found
-upstream:                 # the fields of the strategy
+upstream:                 # strategy fields
   project: owner/repo
-  # tag_version_regex: '^v([0-9.]+)$'  # an ERE whose first group is the version
-  # asset_regex: '^app_(.+)_amd64\.deb$'  # github-tag, github-release: a value from an asset name
-  # asset_var: _deb                    # the PKGBUILD variable of that value
-  # max_answer_mb: 50                  # the largest answer of a request, 1 to 500
+  # tag_version_regex: '^v([0-9.]+)$'  # ERE whose first group is the version
+  # asset_regex: '^app_(.+)_amd64\.deb$'  # github-tag, github-release: value from asset names
+  # asset_var: _deb                    # PKGBUILD variable of that value
+  # max_answer_mb: 50                  # largest answer of a request, 1 to 500
 
-# allow_downgrade: false     # true publishes a version below current
-# allow_version_jump: false  # true publishes a version whose first number gains two digits
-# allow_missing_arch: true   # false fails a release without the archive of an arch
-# cooldown_days: 0           # days a push waits after the last one, 7 for git-latest
+# allow_downgrade: false     # true publishes versions below current
+# allow_version_jump: false  # true publishes versions whose first number gains two digits
+# allow_missing_arch: true   # false fails releases without the archive of an arch
+# cooldown_days: 0           # days each push waits after the last one, 7 for git-latest
 # pkgver_dash: _             # what stands for each - of the upstream version: _, . or ''
-# pkgver_format: '4.%s'      # a fixed text around the upstream version
+# pkgver_format: '4.%s'      # fixed text around the upstream version
 # alerts:                    # versions that need a hand edit of the PKGBUILD
 #   - from: '2.0.0'
 #     hold: true
 #     note: Raise makedepends foo to 2
 
-# The runs write current, last_updated, current_asset, arch_wait and arch_out.
+# Runs write current, last_updated, current_asset, arch_wait and arch_out.

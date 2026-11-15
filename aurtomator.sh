@@ -212,13 +212,13 @@ if [[ "${1:-}" == check-pins ]]; then
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
     check_shape "$file"
-    # A tagged value shows no plain uses: line, and GitHub runs no workflow with one today
+    # Tagged values show no plain uses: line, and GitHub runs no workflow with one today
     tags=$(yq -r 'explode(.) | [.jobs[] | (.uses, .steps[]?.uses) | select(. != null) | tag | select(. != "!!str")] | unique | join(" ")' "$file")
     if [[ -n "$tags" ]]; then
       echo "$file holds a uses: value with the tag $tags; write every uses: value as plain text" >&2
       exit 1
     fi
-    # A job runs a workflow, local or of this repository, and passes it the secrets it names
+    # Jobs run a workflow, local or of this repository, and pass it the secrets they name
     job_uses=$(yq -r 'explode(.) | .jobs[].uses | select(. != null)' "$file")
     while IFS= read -r value; do
       if [[ -n "$value" && "$value" != ./* ]] && ! names_repo "$value"; then
@@ -274,10 +274,10 @@ if [[ ! -d "$copy" ]]; then
   git -C "$tmp" init -q
   git -C "$tmp" fetch -q --depth 1 "https://github.com/$repo" "$sha"
   git -C "$tmp" checkout -q FETCH_HEAD
-  # A run that started at the same time can make the copy first
+  # Runs that started at the same time can make the copy first
   mv -T "$tmp" "$copy" 2>/dev/null || rm -rf "$tmp"
-  # A pin still in use after 30 days is fetched again on its next run. A
-  # run at the same time can remove its own directory while find reads.
+  # Pins still in use after 30 days are fetched again on their next run.
+  # Runs at the same time can remove their own directory while find reads.
   find "${copy%/*}" -mindepth 1 -maxdepth 1 -regextype posix-extended -regex '.*/[0-9a-f]{40}' -mtime +30 -exec rm -rf -- {} + 2>/dev/null || true
 fi
 

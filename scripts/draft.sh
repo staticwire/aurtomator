@@ -31,7 +31,7 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export GIT_TERMINAL_PROMPT=0
-# A checkout would apply the attributes and filters of the AUR repository
+# Checkouts would apply the attributes and filters of the AUR repository
 aur_clone "https://aur.archlinux.org/${NAME}.git" "$tmp/aur" --depth 1 --no-checkout -q >&2 || exit 1
 aur_export "$tmp/aur" "$tmp/files" || exit 1
 info_file="$tmp/files/.SRCINFO"
@@ -114,8 +114,8 @@ kde_source() {
   [[ "$path" == "stable/$project" ]] || FIELDS+=("path=$path")
 }
 
-# Set the strategy from source $1, or fail when no rule matches it. A local
-# file and a signature match none.
+# Set the strategy from source $1, or fail when no rule matches it. Local
+# files and signatures match none.
 from_source() {
   local src="${1#*::}" fragment="" branch=""
   local repo='([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)'

@@ -89,7 +89,7 @@ arch_state_after() {
   mapfile -t keys < <(pkg_get "$1" '.arch_out // {} | keys | .[]')
   for arch in "${keys[@]}"; do
     [[ "$arch" =~ ^[a-z0-9_]+$ ]] || continue
-    # An arch out that the PKGBUILD has no source_<arch> for can no longer come back
+    # Arches out that the PKGBUILD has no source_<arch> for can no longer come back
     if [[ " $2 " == *" $arch "* ]] || ! pkgbuild_assigns_source "$5" "$arch"; then
       ARCH="$arch" yq -i 'del(.arch_out[strenv(ARCH)])' "$1"
     fi
@@ -149,7 +149,7 @@ wait_out() {
   fi
   out=$(arch_minus "$arches" "$3 x86_64")
   out=$(srcinfo_built <(git -C "$2" show "${commit}:.SRCINFO") "$out")
-  # An arch that HEAD dropped together with its source_<arch> stays dropped
+  # Arches that HEAD dropped together with their source_<arch> stay dropped
   read -ra built <<<"$out"
   for arch in "${built[@]}"; do
     ! pkgbuild_assigns_source "$4" "$arch" || kept+="${kept:+ }$arch"

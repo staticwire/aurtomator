@@ -40,7 +40,7 @@ if [[ -n "$nightly_tag_regex" ]]; then
     exit 1
   }
   if [[ -z "$release" ]]; then
-    # An empty list says nothing about the regex
+    # Empty lists say nothing about the regex
     if [[ "$(github_api "${api}/releases?per_page=1" | yq 'length')" == 0 ]]; then
       echo "The release list of ${owner_repo} is empty" >&2
     else
@@ -111,7 +111,7 @@ case "$version_source" in
     fi
     body=$(echo "$release" | yq -r '.body')
     version=$(echo "$body" | grep -oP -e "$version_pattern" | head -1 || true)
-    # A pkgver cannot hold a dash
+    # pkgver cannot hold a dash
     version="${version//-/+}"
     ;;
   published_date)

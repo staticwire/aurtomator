@@ -2,7 +2,7 @@
 title: GPG signing
 ---
 
-GPG is optional. With it, aurtomator signs every AUR commit with your key, and AUR users can check the signature with `git log --show-signature`. The key is stored as a CI secret, so a leak of the CI secrets exposes it. A dedicated signing subkey limits the damage: you revoke the subkey and keep your master key. The setup script refuses a master key, so pass the ID of the subkey marked `[S]`.
+GPG is optional. With it, aurtomator signs every AUR commit with your key, and AUR users can check the signature with `git log --show-signature`. The key lives in CI secrets, and leaked CI secrets expose it. Dedicated signing subkeys limit the damage: you revoke the subkey and keep your master key. The setup script refuses master keys, so pass the ID of the subkey marked `[S]`.
 
 ## Create a signing subkey
 
@@ -19,13 +19,13 @@ gpg --list-keys --keyid-format long your-email@example.com
 
 ## Export for CI
 
-With `gh`, the setup script exports the key. By hand, for a key without a passphrase:
+With `gh`, the setup script exports the key. By hand, for keys without a passphrase:
 
 ```bash
 gpg --export-secret-subkeys --armor '<subkey-id>!'
 ```
 
-The `!` exports that subkey alone. Without it, gpg exports every secret subkey of the key, an encryption subkey included. Paste the whole output, the `-----BEGIN PGP PRIVATE KEY BLOCK-----` and `-----END PGP PRIVATE KEY BLOCK-----` lines included, as the secret `GPG_SIGNING_KEY`.
+The `!` exports that subkey alone. Without it, gpg exports every secret subkey of the key, encryption subkeys included. Paste the whole output, the `-----BEGIN PGP PRIVATE KEY BLOCK-----` and `-----END PGP PRIVATE KEY BLOCK-----` lines included, as the secret `GPG_SIGNING_KEY`.
 
 ## Configure in setup
 
@@ -43,7 +43,7 @@ Or run the GPG step and answer `y` to "Enable GPG commit signing? (y/N)":
 
 ## Passphrase stripping (3 pinentry dialogs)
 
-CI needs a key without a passphrase. When your subkey has one, the setup script makes a copy without it in a temporary keyring, and three pinentry dialogs open:
+CI needs keys without a passphrase. When your subkey has one, the setup script makes a copy without it in a temporary keyring, and three pinentry dialogs open:
 
 | Dialog | Enter | Purpose |
 |---|---|---|
@@ -51,6 +51,6 @@ CI needs a key without a passphrase. When your subkey has one, the setup script 
 | 2nd | your passphrase again | unlocks the key in the temporary keyring, whose GPG agent has no cached passphrase |
 | 3rd | nothing, press OK | sets an empty passphrase on the copy |
 
-The passphrase goes through pinentry alone and never appears in a shell variable, an argument, the environment or a pipe. Your key stays as it is. With `gh`, the copy becomes the secret `GPG_SIGNING_KEY`, and without `gh` the script prints it for you to paste. The script deletes the temporary keyring right after, and also when it stops early, on an error, on `Ctrl-C` or when its terminal closes.
+The passphrase goes through pinentry alone and never appears in shell variables, arguments, the environment or pipes. Your key stays as it is. With `gh`, the copy becomes the secret `GPG_SIGNING_KEY`, and without `gh` the script prints it for you to paste. The script deletes the temporary keyring right after, and also when it stops early, on errors, on `Ctrl-C` or when its terminal closes.
 
-The copy exists only while the script runs, so run the two steps together: `./aurtomator.sh setup gpg secrets`. Run alone, `secrets` does not set `GPG_SIGNING_KEY` for a key with a passphrase and prints that command.
+The copy exists only while the script runs, so run the two steps together: `./aurtomator.sh setup gpg secrets`. Run alone, `secrets` does not set `GPG_SIGNING_KEY` for keys with a passphrase and prints that command.

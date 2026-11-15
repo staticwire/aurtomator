@@ -91,8 +91,8 @@ add_row() {
   ((++count))
 }
 
-# The rows of package $1 in the run. A push is always written, a move to
-# another class or to another version is, and nothing else
+# The rows of package $1 in the run. Pushes are always written, moves to
+# another class or to another version are, and nothing else
 record_package() {
   local name="$1" before after mapped event version last class
   before=$(current_of "${YAML[$name]}")

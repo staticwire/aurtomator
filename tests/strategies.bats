@@ -5,7 +5,7 @@ bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test_env
-  # A strategy needs scripts/lib/common.sh and nothing else of scripts/
+  # Strategies need scripts/lib/common.sh and nothing else of scripts/
   find "$TEST_TMPDIR/scripts" -type l ! -name common.sh -delete
   cp "$TESTS_DIR/helpers/mock-git.sh" "$MOCK_DIR/git"
   chmod +x "$MOCK_DIR/git"
@@ -1053,7 +1053,7 @@ EOF
   [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
 }
 
-# A bare clone of googleapis/mcp-toolbox, 1.4 GB, does not fit in the time of
+# Bare clones of googleapis/mcp-toolbox, 1.4 GB, do not fit in the time of
 # a check. The strategy reads commits and tags only.
 @test "git-latest: clones without trees" {
   fake_git_upstream
@@ -1798,7 +1798,7 @@ run_github_strategies() {
   [ "$(grep -c -- "--proto =https --proto-redir =https" "$TEST_TMPDIR/curl.args")" -eq "$calls" ]
 }
 
-# A request that goes around http_get makes one attempt
+# Requests that go around http_get make one attempt
 @test "strategies: send every request through http_get" {
   run grep -nE '^[^#]*\bcurl -' "$PROJECT_DIR"/strategies/*.sh
   [ "$status" -eq 1 ]
@@ -2346,7 +2346,7 @@ EOF
   [[ "$output" == *"No tag gives a version with upstream.tag_version_regex '^release-(.+)\$', tags read: 2"* ]]
 }
 
-# A pin to one release line leaves out v2.0.0 and the v2.1.0 rc tags
+# Pins to one release line leave out v2.0.0 and the v2.1.0 rc tags
 @test "github-tag: tag_version_regex pins a release line" {
   create_test_package "test-pin" "github-tag" "upstream:
   project: mixed-owner/mixed-repo

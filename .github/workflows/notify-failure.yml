@@ -46,8 +46,8 @@ jobs:
               (.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601) >= 60 *
               ({"image": 5, "check": 30, "prepare": 30, "verify": 30, "publish": 30, "status": 10, "pins": 5}[.name | sub("^.* / "; "") | sub(" [(].*$"; "")] // 1e9) - 60)) | .name'
 
-          # A run without a failed job was canceled and gets no issue; a job list that cannot be
-          # read opens the issue without the names
+          # Runs without a failed job were canceled and get no issue; job lists that cannot be
+          # read open the issue without the names
           if ! names=$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?per_page=100" --paginate --jq "$failed_jq"); then
             failed=""
           elif [[ -z "$names" ]]; then
@@ -60,7 +60,7 @@ jobs:
             failed="\`$(sed ':a;N;$!ba;s/\n/`, `/g' <<<"$names")\`"
           fi
 
-          # A code span ends at a run of as many backticks as it opens with, so its fence outruns every
+          # Code spans end at a run of as many backticks as they open with, so the fence outruns every
           # run in the branch name, and the spaces, which Markdown drops, let the name end in a backtick
           fence='`'
           while [[ "$RUN_BRANCH" == *"$fence"* ]]; do

@@ -83,8 +83,8 @@ _clean_without() {
   printf '%s' "$kept" >"$1"
 }
 
-# Print the Markdown summary of a run from status directory $1. An error
-# holds text from upstream, so it goes into a code block, as in its issue.
+# Print the Markdown summary of a run from status directory $1. Errors
+# hold text from upstream, so they go into a code block, as in their issue.
 run_summary() {
   local file name status kind total=0 current=0 rows="" errors="" unchecked="" noun=packages
   for file in "$1"/*; do

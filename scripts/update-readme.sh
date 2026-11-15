@@ -48,8 +48,8 @@ for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   [[ -f "$pkg_file" ]] || continue
   pkg_files+=("$pkg_file")
 done
-# A repository made from the template keeps its setup steps until its first
-# package, and the README of aurtomator stays as it is
+# Repositories made from the template keep their setup steps until their first
+# package, and the aurtomator README stays as it is
 if ((${#pkg_files[@]} == 0)); then
   log_info "packages/ holds no package, README.md stays as it is"
   exit 0

@@ -10,7 +10,7 @@ body:
 
         - You have read [Setup](https://aurtomator.dev/setup/) and [Overview](https://aurtomator.dev/overview/).
         - No open or closed issue reports the same bug.
-        - The bug is no security issue. A security bug goes privately, as [`SECURITY.md`](https://github.com/staticwire/aurtomator/blob/main/SECURITY.md) describes.
+        - The bug is no security issue. Security bugs go privately, as [`SECURITY.md`](https://github.com/staticwire/aurtomator/blob/main/SECURITY.md) describes.
 
   - type: input
     id: version

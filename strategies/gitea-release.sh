@@ -38,7 +38,7 @@ if [[ -z "$tag_version_regex" ]]; then
   exit 0
 fi
 
-# A repository with several products: the regex picks among the releases,
+# Repositories with several products: the regex picks among the releases,
 # by version as gitea-tag does
 tags=""
 total=0

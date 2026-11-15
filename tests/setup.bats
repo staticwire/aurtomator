@@ -118,7 +118,7 @@ exit 1
 MOCKEOF
   chmod +x "$MOCK_DIR/ssh"
 
-  # A gh that is logged in and answers from $GH_HAS_ISSUES, $GH_WORKFLOWS, $GH_SECRETS, $GH_RUN_ISSUE
+  # Mock gh that is logged in and answers from $GH_HAS_ISSUES, $GH_WORKFLOWS, $GH_SECRETS, $GH_RUN_ISSUE
   # and $GH_LATEST; $GH_API_FAIL fails its reads
   cat >"$MOCK_DIR/gh" <<'MOCKEOF'
 #!/usr/bin/env bash
@@ -469,7 +469,7 @@ EOF
   # First run: save GPG key
   "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key VALIDKEY123 --non-interactive 2>/dev/null
 
-  # A second run takes the saved key without --gpg-key
+  # The second run takes the saved key without --gpg-key
   run "$TEST_TMPDIR/scripts/setup.sh" gpg --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"GPG key: VALIDKEY123"* ]]
@@ -604,7 +604,7 @@ EOF
   [[ "$output" == *"$TEST_TMPDIR/scripts/setup.sh verify"* ]]
 }
 
-# An unknown host key, a refused key and the network fail the same check
+# Unknown host keys, refused keys and the network fail the same check
 @test "setup verify: shows why ssh failed" {
   write_full_config "VALIDKEY123"
   cat >"$TEST_TMPDIR/mock-bin/ssh" <<'EOF'
@@ -657,7 +657,7 @@ EOF
   grep -qx "AUR_SSH_KEY='$TEST_TMPDIR/ssh/aur.pem'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
-# A full setup runs every step in one go, and a step that fails ends it
+# Full setup runs every step in one go, and failed steps end it
 @test "setup: full setup keeps the identity when the ssh step fails" {
   mkdir -p "$TEST_TMPDIR/ssh-pass"
   ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
@@ -852,7 +852,7 @@ EOF
   mock_gpg_strip_flow
   write_full_config "PASSKEY003"
   mkdir -p "$TEST_TMPDIR/tmp"
-  # A gpg-connect-agent that removes the passphrase and then sends SIGHUP to the topmost setup.sh
+  # Mock gpg-connect-agent that removes the passphrase and then sends SIGHUP to the topmost setup.sh
   # process, as a closing terminal does
   cat >"$TEST_TMPDIR/mock-bin/gpg-connect-agent" <<'EOF'
 #!/usr/bin/env bash
@@ -948,7 +948,7 @@ EOF
 }
 
 @test "setup: color variables use dollar-single-quote syntax" {
-  # A color is $'\033[...', the escape character itself, in place of the text '\033[...'
+  # Colors are $'\033[...', the escape character itself, in place of the text '\033[...'
   grep -q "\\\$'\\\\033" "$TEST_TMPDIR/scripts/setup.sh"
 }
 
@@ -1092,7 +1092,7 @@ log_gh_calls() {
   [ ! -e "$TEST_TMPDIR/gh.args" ]
 }
 
-# A config saved before the ssh step refused such a key
+# Configs saved before the ssh step refused such keys
 @test "setup secrets: refuses a passphrase-protected key from the saved config" {
   mkdir -p "$TEST_TMPDIR/ssh-pass"
   ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
@@ -1139,7 +1139,7 @@ log_gh_calls() {
   grep -qx 'secret set AUR_SSH_KEY -R someone/repo' "$TEST_TMPDIR/gh.args"
 }
 
-# An origin that is no repository on github.com names no repository for gh
+# Origins that are no repository on github.com name no repository for gh
 @test "setup secrets: asks for the repo when origin is not on github.com" {
   local url
   write_full_config ""
@@ -1184,7 +1184,7 @@ log_gh_calls() {
   run grep -c '^secret set' "$TEST_TMPDIR/gh.args"
   [ "$output" = "0" ]
 
-  # An empty answer is yes
+  # Empty answers are yes
   for answer in "" y Y; do
     : >"$TEST_TMPDIR/gh.args"
     run "$TEST_TMPDIR/scripts/setup.sh" secrets <<<"$answer"

@@ -32,7 +32,7 @@ fi
 if [[ -n "$user_agent" ]]; then
   USER_AGENT=$user_agent
 fi
-# A page is at most 5 MB, or upstream.max_answer_mb
+# Pages hold at most 5 MB, or upstream.max_answer_mb
 page=$(http_get "$url" --max-redirs 5 --max-filesize "${MAX_ANSWER_MB:-5}M") || {
   echo "Failed to fetch $url" >&2
   exit 1

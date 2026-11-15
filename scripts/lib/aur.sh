@@ -9,8 +9,8 @@
 # Args: $1=url, $2=destination, $3...=options for git clone
 aur_clone() {
   local attempt delay="${AURTOMATOR_RETRY_DELAY:-5}"
-  # A pause before an SSH clone lowers the load of the shared GitHub Actions addresses on the
-  # SSH rate limit of the AUR; the HTTPS clones of prepare and verify skip it
+  # Pauses before SSH clones lower the load of the shared GitHub Actions addresses on the
+  # SSH rate limit of the AUR; the HTTPS clones of prepare and verify skip them
   if [[ "$1" == ssh://* ]]; then
     sleep "${AURTOMATOR_CLONE_DELAY:-2}"
   fi

@@ -1,10 +1,10 @@
 # Contributing to aurtomator
 
-aurtomator holds the scripts, the strategies and the reusable workflows. A user repository, made from the template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed), holds the package YAMLs and calls the workflows of aurtomator at a pinned SHA, see [The calling workflows](https://aurtomator.dev/setup/#the-calling-workflows). A fix or a new strategy therefore comes here by pull request.
+aurtomator holds scripts, strategies and reusable workflows. User repositories, made from template [staticwire/aurtomator-seed](https://github.com/staticwire/aurtomator-seed), hold package YAMLs and call aurtomator workflows at a pinned SHA, see [The calling workflows](https://aurtomator.dev/setup/#the-calling-workflows). Fixes and new strategies therefore come here by pull request.
 
 ## Before opening a PR
 
-For anything beyond a typo or a one-line fix, open an issue or a draft PR first to agree on the direction. A general-purpose build bot, a hosted build service or a multi-user orchestration system is out of scope, and the Alternatives section of `README.md` lists tools for that.
+For anything beyond a typo or a one-line fix, open an issue or a draft PR first to agree on the direction. General-purpose build bots, hosted build services and multi-user orchestration systems are out of scope, and the Alternatives section of `README.md` lists tools for them.
 
 ## Development setup
 
@@ -23,7 +23,7 @@ bats tests/ --recursive
 - Functions in `snake_case`, globals in `UPPER_SNAKE`, function variables declared with `local`.
 - Every expansion in double quotes: `"$var"`, `"${array[@]}"`.
 - Scripts pass `shellcheck`, and scripts and tests are formatted with `shfmt -i 2 -ci`.
-- A new script in `scripts/` or strategy in `strategies/` comes with BATS tests. Strategy tests mock the API answers, and the suite sends no request to the network.
+- New scripts in `scripts/` and strategies in `strategies/` come with BATS tests. Strategy tests mock the API answers, and the suite sends no request to the network.
 - Commit messages follow Conventional Commits with a component scope, as `feat(strategy): add forgejo-tag detection` or `fix(scripts): handle empty version output`.
 - GitHub Actions are pinned by commit SHA with the version in a comment: `uses: actions/checkout@abc1234def5678... # v4.1.7`.
 
@@ -42,15 +42,15 @@ shfmt -d -i 2 -ci aurtomator.sh
 bats tests/ --recursive
 ```
 
-CI runs the suite under bashcov, which passes `errexit`, `nounset` and `pipefail` to every script a test starts, so a mock has to work under `set -euo pipefail`. `ci.yml` also calls `validate.yml` and `check-updates.yml` of the same commit, with aurtomator itself as the repository of the packages, see [Validate and pipeline jobs](https://aurtomator.dev/develop/ci/#validate-and-pipeline-jobs). A pull request from a fork gets a read-only token, so the job `pipeline` runs only for a push and for a pull request from a branch of aurtomator.
+CI runs the suite under bashcov, which passes `errexit`, `nounset` and `pipefail` to every script a test starts, so mocks have to work under `set -euo pipefail`. `ci.yml` also calls `validate.yml` and `check-updates.yml` of the same commit, with aurtomator itself as the package repository, see [Validate and pipeline jobs](https://aurtomator.dev/develop/ci/#validate-and-pipeline-jobs). Pull requests from forks get a read-only token, so job `pipeline` runs only for pushes and for pull requests from aurtomator branches.
 
 ## PR workflow
 
-PRs are squash-merged, so the PR title becomes the commit subject on `main` and follows Conventional Commits with a scope, as `fix(strategy): handle empty release list from github-release`. One PR holds one logical change, and an unrelated refactor goes into another PR.
+PRs are squash-merged, so the PR title becomes the commit subject on `main` and follows Conventional Commits with a scope, as `fix(strategy): handle empty release list from github-release`. One PR holds one logical change, and unrelated refactors go into another PR.
 
 ## Releases
 
-aurtomator follows semantic versioning, and `VERSION` holds the version of the code. After a merge to `main`, release-please (`.github/workflows/release-please.yml`) opens or updates a release PR from the commit types since the last release: `fix` raises the patch number, `feat` the minor one, and before 1.0.0 a breaking change, marked with `!` as in `feat(workflow)!: run as a reusable workflow`, raises the minor one too. A `docs`, `ci`, `chore` or `test` commit opens no release PR and goes out with the next release. The release PR writes `VERSION`, and its merge tags `vX.Y.Z` and publishes the release with the notes GitHub generates. A line `Release-As: X.Y.Z` in the body of a squash commit sets another number.
+aurtomator follows semantic versioning, and `VERSION` holds the version of the code. After a merge to `main`, release-please (`.github/workflows/release-please.yml`) opens or updates a release PR from the commit types since the last release: `fix` raises the patch number, `feat` the minor one, and before 1.0.0 breaking changes, marked with `!` as in `feat(workflow)!: run as a reusable workflow`, raise the minor one too. `docs`, `ci`, `chore` and `test` commits open no release PR and go out with the next release. The release PR writes `VERSION`, and its merge tags `vX.Y.Z` and publishes the release with the notes GitHub generates. `Release-As: X.Y.Z` lines in the body of a squash commit set another number.
 
 release-please runs with the token of a GitHub App of the repository, which reads and writes contents, issues and pull requests, made from the variable `RELEASE_APP_CLIENT_ID` and the secret `RELEASE_APP_PRIVATE_KEY`. With the workflow token, GitHub would run the CI of the release PR only after an approval.
 
@@ -64,4 +64,4 @@ release-please runs with the token of a GitHub App of the repository, which read
 
 ## Reporting bugs
 
-Use the "Bug report" or "New strategy request" issue template. A security issue is never a public issue: follow `SECURITY.md`.
+Use the "Bug report" or "New strategy request" issue template. Security issues are never public issues: follow `SECURITY.md`.

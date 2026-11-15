@@ -191,8 +191,8 @@ if [[ -n "$ARCH_EDIT" ]]; then
   fi
 fi
 
-# A download with a SKIP checksum is checked too: no later step fetches it,
-# so a URL that answers 404 or with an HTML page would reach the AUR
+# Downloads with a SKIP checksum are checked too: no later step fetches them,
+# so URLs that answer 404 or with an HTML page would reach the AUR
 if ! validate_source_urls "${aur_dir}/PKGBUILD" "$skip_arches"; then
   log_err "Source URL validation failed, aborting"
   exit 1
