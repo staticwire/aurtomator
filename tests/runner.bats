@@ -986,6 +986,27 @@ EOF
 }
 
 # GitHub runs a reusable workflow of any public repository
+# GitHub reads a uses: value through an alias, and the line shows only the alias
+@test "runner: check-pins reads the uses: values of jobs through an alias" {
+  local pin="staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED # v1.0.0"
+  printf '%s\n' 'env:' '  LOCAL: &local ./.github/workflows/local.yml' 'jobs:' '  check-updates:' "    uses: $pin" \
+    '  again:' '    uses: *local' >"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+
+  printf '%s\n' 'env:' "  OTHER: &other someone/else/.github/workflows/x.yml@$PINNED" 'jobs:' '  check-updates:' \
+    "    uses: $pin" '  again:' '    uses: *other' >"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/check-updates.yml runs someone/else/.github/workflows/x.yml@$PINNED, a workflow of another repository than staticwire/aurtomator" ]
+
+  printf '%s\n' 'env:' "  PIN: &pin staticwire/aurtomator/.github/workflows/notify-failure.yml@$PINNED" 'jobs:' '  check-updates:' \
+    "    uses: $pin" '  notify:' '    uses: *pin' >"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "${lines[0]}" = "Write each pin of staticwire/aurtomator in .github/workflows/check-updates.yml on one uses: line without quotes. GitHub reads:" ]
+}
+
 @test "runner: check-pins refuses a workflow of another repository" {
   template_workflows "$PINNED" v1.0.0
   sed -i "s|uses: staticwire/aurtomator/.github/workflows/notify-failure.yml|uses: statlcwire/aurtomator/.github/workflows/notify-failure.yml|" \
@@ -1040,6 +1061,28 @@ EOF
   run "$REPO/aurtomator.sh" check-pins
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 2 ]
+}
+
+# Case folding of tr_TR turns I into a dotless i, so the names are folded in the C locale
+@test "runner: check-pins folds the case of names in the C locale under tr_TR.UTF-8" {
+  command -v localedef >/dev/null || skip "no localedef"
+  [[ -e /usr/share/i18n/locales/tr_TR ]] || skip "no source of the tr_TR locale"
+  mkdir "$TEST_TMPDIR/locale"
+  localedef -i tr_TR -f UTF-8 "$TEST_TMPDIR/locale/tr_TR.UTF-8" 2>/dev/null || skip "localedef cannot build tr_TR.UTF-8"
+  export LOCPATH="$TEST_TMPDIR/locale"
+  [ "$(LC_ALL=tr_TR.UTF-8 bash -c 'x=I; printf %s "${x,,}"')" != i ] || skip "tr_TR.UTF-8 folds I to i"
+
+  template_workflows "$PINNED" v1.0.0
+  printf 'jobs:\n  pins:\n    steps:\n      - uses: %s\n' evil/repo/.GITHUB/workflows/w.yml@main >"$REPO/.github/workflows/validate.yml"
+  LC_ALL=tr_TR.UTF-8 run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/validate.yml runs evil/repo/.GITHUB/workflows/w.yml@main, a workflow of another repository than staticwire/aurtomator" ]
+
+  template_workflows "$PINNED" v1.0.0
+  sed -i 's|uses: staticwire/aurtomator/.github/workflows/notify-failure.yml|uses: STATICWIRE/AURTOMATOR/.github/workflows/notify-failure.yml|' \
+    "$REPO/.github/workflows/check-updates.yml"
+  LC_ALL=tr_TR.UTF-8 run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
 }
 
 @test "runner: check-pins checks the release of a pin of aurtomator without a path" {

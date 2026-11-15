@@ -261,7 +261,9 @@ current: '$current'"
 
 @test "validate: no value holds a control character" {
   local value
-  for value in '"https://example.invalid/x\e]0;PWNED\ay"' '"main\rx"' '"https://example.invalid/\u009b2J"'; do
+  # YAML reads \x80 and \x9f as U+0080 and U+009F, the ends of the C1 controls
+  for value in '"https://example.invalid/x\e]0;PWNED\ay"' '"main\rx"' '"https://example.invalid/\u009b2J"' \
+    '"https://example.invalid/\x80x"' '"https://example.invalid/\x9fx"'; do
     create_test_package "mypkg" "git-latest" "upstream:
   type: git
   url: $value"
@@ -809,6 +811,25 @@ EOF
       return 1
     }
   done
+}
+
+# makepkg takes @, _ and + as the first character of a name, and neither . nor -
+@test "validate: takes a name that starts with @, _ or +, and refuses one that starts with ." {
+  local name
+  for name in @demo _demo +demo; do
+    rm -f "$TEST_TMPDIR"/packages/*.yml
+    printf 'name: %s\nstrategy: github-release\nupstream:\n  project: owner/repo\n' "'$name'" >"$TEST_TMPDIR/packages/$name.yml"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+    [ "$status" -eq 0 ] || {
+      echo "refused: $name"
+      echo "$output"
+      return 1
+    }
+  done
+  printf 'name: .demo\nstrategy: github-release\nupstream:\n  project: owner/repo\n' >"$TEST_TMPDIR/packages/.demo.yml"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" .demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"name '.demo' holds a character outside [A-Za-z0-9@._+-], or starts with . or -"* ]]
 }
 
 # The runs read packages/<name>.yml alone

@@ -1325,6 +1325,23 @@ MOCKCURL
   done
 }
 
+# curl takes HTTPS in any case, and the port form holds digits right after the host alone
+@test "lib.sh: http_get refuses HTTPS in capitals and ports beyond the host, before curl runs" {
+  keep_host_memory
+  timeout_curl
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local url
+  for url in 'HTTPS:///example.com/x' 'Https://a\@b/x' 'https:///x:80' 'https://h:' 'https://h:80x' 'https://a\@b:80x'; do
+    run http_get "$url"
+    [ "$status" -ne 0 ] && [ "$output" = "$url: the host is no plain name of ASCII letters, digits, dots and dashes" ] || {
+      echo "taken: $url"
+      echo "$output"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/curl.log" ]
+}
+
 @test "lib.sh: http_get remembers no host after an answer, a refusal or an HTTP error" {
   keep_host_memory
   mock_curl_failure
