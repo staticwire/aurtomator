@@ -4630,7 +4630,7 @@ b2sums=('$H3' '$H4')"
   printf "b2sums=('%s' '%s')\n" "$H3" "$H4" >>"$NEW"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
+  [[ "$output" == *"Prepared PKGBUILD has more than checksums, comments and line continuations in a checksum array, or a checksum array below a line that holds more than assignments and comments:"* ]]
 }
 
 @test "check_prepared_pkgbuild: rejects checksum arrays moved away from the place of the first one" {
@@ -4639,7 +4639,7 @@ b2sums=('$H3' '$H4')"
   sed -i -e '/^sha256sums=/d' -e "1i sha256sums=('$H3' '$H4')" "$NEW"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared PKGBUILD has more than checksums, comments and line continuations in a checksum array, or a checksum array below a line that holds more than assignments and comments:"* ]]
+  [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
 }
 
 # bash keeps the last of two arrays of one name
@@ -4693,49 +4693,6 @@ sha256sums=('SKIP' '$H4')"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Could not read"* ]]
 }
-
-# === _pkgbuild_text ===
-
-@test "_pkgbuild_text: drops pkgver, pkgrel, the asset_var line, the checksum arrays and comments" {
-  cat >"$OLD" <<'EOF'
-pkgname=demo
-pkgver=2.0
-pkgrel=1
-_bin=demo-2.0-x86_64
-arch=('x86_64')
-pkgdesc="A GPL-2.0 licensed tool"
-# provides=("tool=2.0")
-  # depends=('old')
-provides=("tool=${pkgver}")
-sha256sums=('1111'
-            'SKIP')
-b2sums_x86_64=('2222')
-
-package() {
-  # install the binary
-  install -Dm755 demo "$pkgdir/usr/bin/demo"
-}
-EOF
-  run _pkgbuild_text "$OLD" _bin
-  [ "$status" -eq 0 ]
-  [ "$output" = $'pkgname=demo\narch=(\'x86_64\')\npkgdesc="A GPL-2.0 licensed tool"\nprovides=("tool=${pkgver}")\n\npackage() {\n  install -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
-}
-
-@test "_pkgbuild_text: drops a comment indented with a tab" {
-  printf '%s\n' 'package() {' $'\t# provides=("tool=2.0")' $'\tinstall -Dm755 demo "$pkgdir/usr/bin/demo"' '}' >"$OLD"
-  run _pkgbuild_text "$OLD"
-  [ "$status" -eq 0 ]
-  [ "$output" = $'package() {\n\tinstall -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
-}
-
-@test "_pkgbuild_text: keeps the line of a variable that is no asset_var" {
-  printf '%s\n' 'pkgver=2.0' '_bin=demo-2.0' >"$OLD"
-  run _pkgbuild_text "$OLD"
-  [ "$status" -eq 0 ]
-  [ "$output" = "_bin=demo-2.0" ]
-}
-
-# === check_prepared_srcinfo ===
 
 @test "check_prepared_pkgbuild: rejects code after a checksum array of the AUR copy" {
   write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2') ; return 0"
@@ -4805,6 +4762,49 @@ sha256sums=('$H3' '$H4')"
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 0 ]
 }
+
+# === _pkgbuild_text ===
+
+@test "_pkgbuild_text: drops pkgver, pkgrel, the asset_var line, the checksum arrays and comments" {
+  cat >"$OLD" <<'EOF'
+pkgname=demo
+pkgver=2.0
+pkgrel=1
+_bin=demo-2.0-x86_64
+arch=('x86_64')
+pkgdesc="A GPL-2.0 licensed tool"
+# provides=("tool=2.0")
+  # depends=('old')
+provides=("tool=${pkgver}")
+sha256sums=('1111'
+            'SKIP')
+b2sums_x86_64=('2222')
+
+package() {
+  # install the binary
+  install -Dm755 demo "$pkgdir/usr/bin/demo"
+}
+EOF
+  run _pkgbuild_text "$OLD" _bin
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pkgname=demo\narch=(\'x86_64\')\npkgdesc="A GPL-2.0 licensed tool"\nprovides=("tool=${pkgver}")\n\npackage() {\n  install -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
+}
+
+@test "_pkgbuild_text: drops a comment indented with a tab" {
+  printf '%s\n' 'package() {' $'\t# provides=("tool=2.0")' $'\tinstall -Dm755 demo "$pkgdir/usr/bin/demo"' '}' >"$OLD"
+  run _pkgbuild_text "$OLD"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'package() {\n\tinstall -Dm755 demo "$pkgdir/usr/bin/demo"\n}' ]
+}
+
+@test "_pkgbuild_text: keeps the line of a variable that is no asset_var" {
+  printf '%s\n' 'pkgver=2.0' '_bin=demo-2.0' >"$OLD"
+  run _pkgbuild_text "$OLD"
+  [ "$status" -eq 0 ]
+  [ "$output" = "_bin=demo-2.0" ]
+}
+
+# === check_prepared_srcinfo ===
 
 @test "check_prepared_srcinfo: accepts the new version and checksums" {
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 2 "$H1" "$H2"
@@ -5544,6 +5544,36 @@ write_srcinfo_archs() {
   [ "$status" -eq 0 ]
 }
 
+# The downloads of the arches move, and the common sources would build the old commit
+@test "check_prepared_srcinfo: rejects common sources with a VCS pin that all stay beside arch sources that move" {
+  local pin="git+https://example.com/demo.git#commit=$(printf 'c%.0s' {1..40})"
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "$pin" SKIP \
+    x86_64 "https://example.com/v1.0/tool-x86_64.tar.gz" "$H1" aarch64 "https://example.com/v1.0/tool-aarch64.tar.gz" "$H2"
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "$pin" SKIP \
+    x86_64 "https://example.com/v2.0/tool-x86_64.tar.gz" "$H3" aarch64 "https://example.com/v2.0/tool-aarch64.tar.gz" "$H4"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared .SRCINFO changes no common source URL and no common checksum beside a VCS pin, so the new version would hold the files of the old one"* ]]
+  # A patch of the version in the sources of one arch moves no common source either
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "$pin" SKIP aarch64 "https://example.com/v1.0/arm.patch" SKIP
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "$pin" SKIP aarch64 "https://example.com/v2.0/arm.patch" SKIP
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"beside a VCS pin"* ]]
+}
+
+@test "check_prepared_srcinfo: accepts a VCS pin that stays beside a common source and arch sources that move" {
+  local pin="git+https://example.com/sub.git#commit=$(printf 'c%.0s' {1..40})"
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "https://example.com/v1.0/tool.tar.gz" "$H1" \
+    x86_64 "https://example.com/v1.0/tool-x86_64.tar.gz" "$H1" aarch64 "https://example.com/v1.0/tool-aarch64.tar.gz" "$H2"
+  sed -i "s|^\tsha256sums = $H1\$|&\n\tsource = $pin\n\tsha256sums = SKIP|" "$TEST_TMPDIR/old.SRCINFO"
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "https://example.com/v2.0/tool.tar.gz" "$H3" \
+    x86_64 "https://example.com/v2.0/tool-x86_64.tar.gz" "$H3" aarch64 "https://example.com/v2.0/tool-aarch64.tar.gz" "$H4"
+  sed -i "s|^\tsha256sums = $H3\$|&\n\tsource = $pin\n\tsha256sums = SKIP|" "$TEST_TMPDIR/new.SRCINFO"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
+  [ "$status" -eq 0 ]
+}
+
 @test "check_prepared_srcinfo: accepts architectures whose sources all move" {
   write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 2.3.0 "https://example.com/deps/libbar-3.2.tar.gz" "$H2" \
     x86_64 "https://example.com/dl/v2.3.0/tool-2.3.0-x86_64.tar.gz" "$H1" \
@@ -5584,36 +5614,6 @@ write_srcinfo_archs() {
   write_srcinfo_sources "$TEST_TMPDIR/old.SRCINFO" 2.5.0rc1 "$url/v2.5.0-rc1/demo-2.5.0-rc1.tgz" "$H1"
   write_srcinfo_sources "$TEST_TMPDIR/new.SRCINFO" 2.5.0 "$url/v2.5.0/demo-2.5.0.tgz" "$H2"
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0 drop
-  [ "$status" -eq 0 ]
-}
-
-# The downloads of the arches move, and the common sources would build the old commit
-@test "check_prepared_srcinfo: rejects common sources with a VCS pin that all stay beside arch sources that move" {
-  local pin="git+https://example.com/demo.git#commit=$(printf 'c%.0s' {1..40})"
-  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "$pin" SKIP \
-    x86_64 "https://example.com/v1.0/tool-x86_64.tar.gz" "$H1" aarch64 "https://example.com/v1.0/tool-aarch64.tar.gz" "$H2"
-  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "$pin" SKIP \
-    x86_64 "https://example.com/v2.0/tool-x86_64.tar.gz" "$H3" aarch64 "https://example.com/v2.0/tool-aarch64.tar.gz" "$H4"
-  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Prepared .SRCINFO changes no common source URL and no common checksum beside a VCS pin, so the new version would hold the files of the old one"* ]]
-  # A patch of the version in the sources of one arch moves no common source either
-  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "$pin" SKIP aarch64 "https://example.com/v1.0/arm.patch" SKIP
-  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "$pin" SKIP aarch64 "https://example.com/v2.0/arm.patch" SKIP
-  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"beside a VCS pin"* ]]
-}
-
-@test "check_prepared_srcinfo: accepts a VCS pin that stays beside a common source and arch sources that move" {
-  local pin="git+https://example.com/sub.git#commit=$(printf 'c%.0s' {1..40})"
-  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "https://example.com/v1.0/tool.tar.gz" "$H1" \
-    x86_64 "https://example.com/v1.0/tool-x86_64.tar.gz" "$H1" aarch64 "https://example.com/v1.0/tool-aarch64.tar.gz" "$H2"
-  sed -i "s|^\tsha256sums = $H1\$|&\n\tsource = $pin\n\tsha256sums = SKIP|" "$TEST_TMPDIR/old.SRCINFO"
-  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "https://example.com/v2.0/tool.tar.gz" "$H3" \
-    x86_64 "https://example.com/v2.0/tool-x86_64.tar.gz" "$H3" aarch64 "https://example.com/v2.0/tool-aarch64.tar.gz" "$H4"
-  sed -i "s|^\tsha256sums = $H3\$|&\n\tsource = $pin\n\tsha256sums = SKIP|" "$TEST_TMPDIR/new.SRCINFO"
-  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 0 ]
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.5.0
   [ "$status" -eq 1 ]
