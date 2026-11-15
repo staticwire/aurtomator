@@ -4590,6 +4590,43 @@ arch_wait:
   [ "$ARCH_OUT" = $'aarch64|\n|' ]
 }
 
+@test "pkgbuild_assigns_source: takes assignments and leaves comments out" {
+  local line
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  for line in '#source_aarch64=("https://example.com/a.tar.gz")' 'x=1 # source_aarch64=(b)' '_note=source_aarch64=x'; do
+    printf '%s\n' 'pkgname=demo' "$line" >"$TEST_TMPDIR/PKGBUILD"
+    run pkgbuild_assigns_source "$TEST_TMPDIR/PKGBUILD" aarch64
+    [ "$status" -eq 1 ] || {
+      echo "taken: $line"
+      return 1
+    }
+  done
+  for line in 'source_aarch64=(a)' '  source_aarch64+=(b)' 'x=1; source_aarch64=(b)'; do
+    printf '%s\n' 'pkgname=demo' "$line" >"$TEST_TMPDIR/PKGBUILD"
+    run pkgbuild_assigns_source "$TEST_TMPDIR/PKGBUILD" aarch64
+    [ "$status" -eq 0 ] || {
+      echo "refused: $line"
+      return 1
+    }
+  done
+}
+
+# A commented-out line is no assignment of the source, so the arch is dropped as well
+@test "check-arch: an arch of arch_out whose source line the AUR PKGBUILD comments out stays out" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  temurin_package "current: 28+23"
+  yq -i ".arch_out.aarch64 = \"$AUR_BASE\"" "$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
+  aur_arch_commit 28+23 x86_64 powerpc64le riscv64 >/dev/null
+  sed -i 's/^source_aarch64=/#&/' "$work/PKGBUILD"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "comment out aarch64"
+  git -C "$work" push -q "$AUR_REMOTE" master
+
+  check_arch 28+24
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$ARCH_OUT" = $'aarch64|\n|' ]
+  grep -q "the AUR PKGBUILD has no source_aarch64, so aarch64 stays out" "$TEST_TMPDIR/arch.err"
+}
+
 # Maintainers who drop an arch for good drop its source_<arch>, and the arch can never come back
 @test "check-arch: an arch of arch_out without its source in the AUR PKGBUILD stays out unasked" {
   local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
