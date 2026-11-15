@@ -568,6 +568,105 @@ shape() {
   [ -d "$cache/$old" ]
 }
 
+# SIGKILL ends a run before its EXIT trap removes the directory of the fetch
+@test "runner: the first run of a pin removes the fetch directories of killed runs made over 30 days ago" {
+  local cache="$XDG_CACHE_HOME/aurtomator" old=0000000000000000000000000000000000000001
+  mkdir -p "$cache/$old.abc123" "$cache/$old.def456"
+  touch -d '40 days ago' "$cache/$old.abc123"
+  touch -d '10 days ago' "$cache/$old.def456"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ ! -e "$cache/$old.abc123" ]
+  [ -d "$cache/$old.def456" ]
+}
+
+# Hooks of a linked worktree run with absolute GIT_DIR and GIT_INDEX_FILE of the user repository
+@test "runner: a first run with the git variables of a hook leaves their repository as it was" {
+  local user="$TEST_TMPDIR/user"
+  git init -q "$user"
+  echo text >"$user/file"
+  git -C "$user" add file
+  git -C "$user" -c user.name=t -c user.email=t@example.com commit -q -m init
+  cp "$user/.git/config" "$TEST_TMPDIR/config.before"
+  cp "$user/.git/index" "$TEST_TMPDIR/index.before"
+  GIT_DIR="$user/.git" GIT_INDEX_FILE="$user/.git/index" run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+  cmp "$user/.git/config" "$TEST_TMPDIR/config.before"
+  cmp "$user/.git/index" "$TEST_TMPDIR/index.before"
+  [ ! -e "$user/.git/FETCH_HEAD" ]
+  [ "$(git -C "$XDG_CACHE_HOME/aurtomator/$PINNED" rev-parse HEAD)" = "$PINNED" ]
+}
+
+@test "runner: fetches a damaged copy again" {
+  local copy="$XDG_CACHE_HOME/aurtomator/$PINNED" arg
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  # A cleaner that deletes files, a file with CRLF line ends and a regular file in place of the copy
+  for arg in missing crlf file; do
+    case "$arg" in
+      missing) rm "$copy/scripts/setup.sh" ;;
+      crlf) sed -i 's/$/\r/' "$copy/scripts/setup.sh" ;;
+      file) rm -rf "$copy" && echo junk >"$copy" ;;
+    esac
+    run "$REPO/aurtomator.sh" setup "$arg"
+    [ "$status" -eq 0 ] && [[ "$output" == *"The copy of aurtomator in $copy is damaged or writable by others, so it is fetched again"* ]] &&
+      [[ "$output" == *"arg: $arg"* ]] || {
+      echo "$arg: $output"
+      return 1
+    }
+  done
+  [ -d "$copy" ]
+}
+
+@test "runner: checks the copy out with LF line ends under core.autocrlf" {
+  git config --global core.autocrlf true
+  run "$REPO/aurtomator.sh" setup x
+  [ "$status" -eq 0 ]
+  run ! grep -q $'\r' "$XDG_CACHE_HOME/aurtomator/$PINNED/scripts/setup.sh"
+}
+
+# The copy holds the code that runs next with the keys and the gh login of the user
+@test "runner: fetches again a copy that others can write and refuses a link in its place" {
+  local copy="$XDG_CACHE_HOME/aurtomator/$PINNED"
+  run "$REPO/aurtomator.sh" sample
+  chmod g+w "$copy/scripts"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"is damaged or writable by others, so it is fetched again"* ]]
+  [ -z "$(find "$copy" ! -type l -perm /022)" ]
+
+  rm -rf "$copy"
+  mkdir "$TEST_TMPDIR/elsewhere"
+  ln -s "$TEST_TMPDIR/elsewhere" "$copy"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$copy is a link or belongs to another user; remove it, then run $REPO/aurtomator.sh again" ]
+}
+
+# The XDG Base Directory Specification calls a relative path invalid
+@test "runner: ignores a relative XDG_CACHE_HOME" {
+  local planted="$TEST_TMPDIR/cwd/rel-cache/aurtomator/$PINNED/scripts"
+  mkdir -p "$planted"
+  printf '#!/usr/bin/env bash\necho planted\n' >"$planted/setup.sh"
+  chmod +x "$planted/setup.sh"
+  export HOME="$TEST_TMPDIR/home"
+  cd "$TEST_TMPDIR/cwd"
+  XDG_CACHE_HOME=rel-cache run "$REPO/aurtomator.sh" setup x
+  [ "$status" -eq 0 ]
+  [[ "$output" != *planted* ]]
+  [[ "$output" == *"arg: x"* ]]
+  [ -d "$HOME/.cache/aurtomator/$PINNED" ]
+}
+
+@test "runner: names the file and the tag of a job uses: value that is no text" {
+  printf 'jobs:\n  check-updates:\n    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@%s # v1.0.0\n  odd:\n    uses: 123\n' \
+    "$PINNED" >"$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/check-updates.yml holds a uses: value with the tag !!int; write every uses: value as plain text" ]
+}
+
 # Writes the two calling workflows with every uses: line at pin $1 and comment $2, plus a uses:
 # line of another repository, a comment line and a pin one digit too long
 calling_workflows() {
@@ -614,6 +713,27 @@ EOF
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = ".github/workflows/check-updates.yml:3:    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP # v1.1.0" ]
   [ "${lines[1]}" = ".github/workflows/check-updates.yml:8:    uses: StaticWire/Aurtomator/.github/workflows/notify-failure.yml@$TIP # v1.1.0" ]
+  [ "${#lines[@]}" -eq 3 ]
+}
+
+@test "runner: pin moves the pins of aurtomator in steps and without a path, which check-pins checks" {
+  cat >"$REPO/.github/workflows/check-updates.yml" <<EOF
+jobs:
+  check-updates:
+    uses: staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED # v1.0.0
+  extra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: staticwire/aurtomator/.github/actions/run-as-builder@$PINNED # v1.0.0
+      - uses: staticwire/aurtomator@$PINNED # v1.0.0
+EOF
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 3 ]
+  grep -qxF "      - uses: staticwire/aurtomator/.github/actions/run-as-builder@$TIP # v1.1.0" "$REPO/.github/workflows/check-updates.yml"
+  grep -qxF "      - uses: staticwire/aurtomator@$TIP # v1.1.0" "$REPO/.github/workflows/check-updates.yml"
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 3 ]
 }
 

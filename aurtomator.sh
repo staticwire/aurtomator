@@ -63,6 +63,21 @@ check_shape() {
     exit 1
   fi
 }
+# Tagged values show no plain uses: line, and GitHub runs no workflow with one today
+check_tags() {
+  local tags
+  tags=$(yq -r 'explode(.) | [.jobs[] | (.uses, .steps[]?.uses) | select(. != null) | tag | select(. != "!!str")] | unique | join(" ")' "$root/$1")
+  if [[ -n "$tags" ]]; then
+    echo "$1 holds a uses: value with the tag $tags; write every uses: value as plain text" >&2
+    exit 1
+  fi
+}
+# git for the copy of aurtomator, without the variables that hooks of the user repository set
+cache_git() (
+  # shellcheck disable=SC2046
+  unset $(git rev-parse --local-env-vars)
+  git "$@"
+)
 # The repository of aurtomator, which every pin of the calling workflows names; a
 # fork writes its own here, and each run copies this file of the pinned commit
 repo=staticwire/aurtomator
@@ -105,6 +120,7 @@ names_workflow() {
 }
 
 check_shape "$workflow"
+check_tags "$workflow"
 # The pin comes from one uses: line, never a comment
 uses='^[[:space:]]*uses:[[:space:]]+([[:alnum:]_.-]+/[[:alnum:]_.-]+)/\.github/workflows/check-updates\.yml@([0-9a-f]{40})([[:space:]]|$)'
 mapfile -t pins < <(grep -E "$uses" "$root/$workflow" || true)
@@ -179,14 +195,16 @@ if [[ "${1:-}" == pin ]]; then
     exit 1
   fi
   cd "$root"
-  # sed moves a pin on a uses: line alone, so every pin GitHub reads in the two files
-  # has to be on one before any file changes. GitHub reads the repository in any case.
+  # sed moves a pin on a uses: line alone, so every pin GitHub reads in the two files, of jobs
+  # and of steps, has to be on one before any file changes. GitHub reads the repository in any case.
+  pinned="$repo(/[^@[:space:]]*)?@"
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
     check_shape "$file"
-    mapfile -t on_lines < <(sed -nE "s|^[[:space:]]*uses:[[:space:]]+($repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40})([[:space:]].*)?$|\1|Ip" "$file" | sort)
-    read_out=$(yq -r 'explode(.) | .jobs[].uses | select(. != null)' "$file")
-    mapfile -t read_pins < <(grep -iE "^$repo/\.github/workflows/[a-z-]+\.yml@[0-9a-f]{40}\$" <<<"$read_out" | sort)
+    check_tags "$file"
+    mapfile -t on_lines < <(sed -nE "s|^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+(${pinned}[0-9a-f]{40})([[:space:]].*)?$|\2|Ip" "$file" | sort)
+    read_out=$(yq -r 'explode(.) | .jobs[] | (.uses, .steps[]?.uses) | select(. != null)' "$file")
+    mapfile -t read_pins < <(grep -iE "^${pinned}[0-9a-f]{40}\$" <<<"$read_out" | sort)
     if [[ "${on_lines[*]}" != "${read_pins[*]}" ]]; then
       echo "Write each pin of $repo in $file on one uses: line without quotes. GitHub reads:" >&2
       printf '  %s\n' "${read_pins[@]:-none}" >&2
@@ -195,8 +213,8 @@ if [[ "${1:-}" == pin ]]; then
   done
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
-    sed -i -E "s|^([[:space:]]*uses:[[:space:]]+$repo/\.github/workflows/[a-z-]+\.yml@)[0-9a-f]{40}([[:space:]].*)?$|\1$new # $2|I" "$file"
-    grep -nHiE "^[[:space:]]*uses:[[:space:]]+$repo/\.github/workflows/[a-z-]+\.yml@$new # $2\$" "$file" || true
+    sed -i -E "s|^([[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+$pinned)[0-9a-f]{40}([[:space:]].*)?$|\1$new # $2|I" "$file"
+    grep -nHiE "^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+$pinned$new # $2\$" "$file" || true
   done
   exit 0
 fi
@@ -212,12 +230,7 @@ if [[ "${1:-}" == check-pins ]]; then
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
     check_shape "$file"
-    # Tagged values show no plain uses: line, and GitHub runs no workflow with one today
-    tags=$(yq -r 'explode(.) | [.jobs[] | (.uses, .steps[]?.uses) | select(. != null) | tag | select(. != "!!str")] | unique | join(" ")' "$file")
-    if [[ -n "$tags" ]]; then
-      echo "$file holds a uses: value with the tag $tags; write every uses: value as plain text" >&2
-      exit 1
-    fi
+    check_tags "$file"
     # Jobs run a workflow, local or of this repository, and pass it the secrets they name
     job_uses=$(yq -r 'explode(.) | .jobs[].uses | select(. != null)' "$file")
     while IFS= read -r value; do
@@ -265,20 +278,41 @@ if [[ "${1:-}" == check-pins ]]; then
   exit 0
 fi
 
-copy="${XDG_CACHE_HOME:-$HOME/.cache}/aurtomator/$sha"
+# The XDG Base Directory Specification calls a relative path invalid, to be ignored
+cache="${XDG_CACHE_HOME:-}"
+[[ "$cache" == /* ]] || cache="$HOME/.cache"
+copy="$cache/aurtomator/$sha"
+# Succeeds when the copy is the checkout of the pin as the fetch left it, which only the user can write
+copy_ok() {
+  local status
+  [[ -d "$copy" && ! -L "$copy" && -O "$copy" && -z "$(find "$copy" ! -type l -perm /022 -print -quit 2>/dev/null)" ]] &&
+    [[ "$(cache_git -C "$copy" rev-parse HEAD 2>/dev/null)" == "$sha" ]] &&
+    status=$(GIT_OPTIONAL_LOCKS=0 cache_git -C "$copy" status --porcelain --untracked-files=no 2>/dev/null) &&
+    [[ -z "$status" ]]
+}
+if [[ -e "$copy" || -L "$copy" ]] && ! copy_ok; then
+  if [[ -L "$copy" || ! -O "$copy" ]]; then
+    echo "$copy is a link or belongs to another user; remove it, then run $0 again" >&2
+    exit 1
+  fi
+  echo "The copy of aurtomator in $copy is damaged or writable by others, so it is fetched again" >&2
+  rm -rf -- "$copy"
+fi
 if [[ ! -d "$copy" ]]; then
   check_release "$workflow" "${pins[0]}" "$sha"
   mkdir -p "${copy%/*}"
   tmp="$(mktemp -d "$copy.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
-  git -C "$tmp" init -q
-  git -C "$tmp" fetch -q --depth 1 "https://github.com/$repo" "$sha"
-  git -C "$tmp" checkout -q FETCH_HEAD
+  cache_git -C "$tmp" init -q
+  cache_git -C "$tmp" fetch -q --depth 1 "https://github.com/$repo" "$sha"
+  cache_git -C "$tmp" -c core.autocrlf=false -c core.eol=lf checkout -q FETCH_HEAD
+  chmod -R go-w "$tmp"
   # Runs that started at the same time can make the copy first
   mv -T "$tmp" "$copy" 2>/dev/null || rm -rf "$tmp"
-  # Pins still in use after 30 days are fetched again on their next run.
-  # Runs at the same time can remove their own directory while find reads.
-  find "${copy%/*}" -mindepth 1 -maxdepth 1 -regextype posix-extended -regex '.*/[0-9a-f]{40}' -mtime +30 -exec rm -rf -- {} + 2>/dev/null || true
+  # Pins still in use after 30 days are fetched again on their next run, and SIGKILL leaves the
+  # directory of a fetch. Runs at the same time can remove their own directory while find reads.
+  find "${copy%/*}" -mindepth 1 -maxdepth 1 -regextype posix-extended -regex '.*/[0-9a-f]{40}([.][A-Za-z0-9]{6})?' -mtime +30 \
+    -exec rm -rf -- {} + 2>/dev/null || true
 fi
 
 # The documented commands. Another script of scripts/ is a step of the CI
