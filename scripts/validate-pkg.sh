@@ -560,6 +560,34 @@ validate_pkg() {
     fi
   fi
 
+  # Strategies put these fields into URL paths, where dot segments and characters such as
+  # [ ? # change the request
+  local field value bad_ref='[[:space:][:cntrl:]~^:?*[\]'
+  for field in project registry tag nightly_tag; do
+    value=$(pkg_get "$file" ".upstream.$field // \"\"")
+    [[ -n "$value" && "$value" != "null" ]] || continue
+    case "$field" in
+      project)
+        if [[ ! "$value" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ || "/$value/" == */./* || "/$value/" == */../* ]]; then
+          log_err "$shown: upstream.project must be names of A-Za-z0-9._- joined by /, none of them . or ..: ${value@Q}"
+          ((errors++))
+        fi
+        ;;
+      registry)
+        if [[ ! "$value" =~ ^(@[A-Za-z0-9._~-]+/)?[A-Za-z0-9._~-]+$ ]]; then
+          log_err "$shown: upstream.registry must be a package name of A-Za-z0-9._~-, after an @scope/ at most: ${value@Q}"
+          ((errors++))
+        fi
+        ;;
+      *)
+        if [[ "$value" =~ $bad_ref || "$value" == *..* || "$value" == *@\{* ]]; then
+          log_err "$shown: upstream.$field must be a git tag name, without spaces, control characters, ~ ^ : ? * [ \\, .. and @{: ${value@Q}"
+          ((errors++))
+        fi
+        ;;
+    esac
+  done
+
   case "$strategy" in
     github-release | github-tag | github-nightly)
       local project

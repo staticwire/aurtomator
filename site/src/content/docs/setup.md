@@ -161,9 +161,11 @@ The script needs mikefarah/yq 4.40.1 or newer, and names the version of any othe
 
 `./aurtomator.sh check-pins` reads every `uses:` line of aurtomator in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, in jobs and steps and with the repository name in any case. It prints these lines when each pin is the commit of the release written after it. It stops at the first pin that is not the commit of its release, at aurtomator `uses:` lines without a commit SHA and, as `pin` does, when `yq` reads a pin outside such a line. It also stops at jobs that call a workflow neither local nor of aurtomator, written in any spelling, since GitHub passes such workflows the secrets the job names, at steps that name a workflow of another repository, at aurtomator pins written with an extra slash or a backslash, which GitHub drops when it reads the name, and at `uses:` values with a YAML tag. It fetches nothing.
 
+In a pull request, `check-pins` also stops at a pin whose release is older than the newest release that the same file pins on the base branch, so pull requests cannot move the jobs with the secrets back to a release without the fixes made since. It reads the base branch from the first parent of the merge commit, which the checkout holds with `fetch-depth: 2` in the job `pins`. Without that parent it prints so and compares nothing. Pushes to the branch can still move a pin back.
+
 `aurtomator.sh` names the aurtomator repository, `staticwire/aurtomator`, and takes no pin of another repository, so pull requests that move a pin to a fork or to a name that looks the same fail `pins`. Forks of aurtomator write their own name in their `aurtomator.sh`, and runs copy that file into the repositories that pin the fork.
 
-In CI, the jobs check out your repository, then aurtomator into `aurtomator/` of that checkout, and create `upload`, `handoff`, `handoff-out`, `handoffs` and `statuses` there. Nothing in the root of your repository may take one of these names.
+In CI, the jobs check out your repository, then aurtomator into `aurtomator/` of that checkout, so nothing in the root of your repository may take the name `aurtomator`. The statuses and prepared updates of a run stay in `/data` of the job container, outside the checkout, so no file of your repository reaches a job as one of them.
 
 Each run of `check-updates.yml` compares your `aurtomator.sh` with that of the release it uses, and its commit replaces your copy when they differ. Local edits therefore last until the next run. Repositories without `aurtomator.sh` get none, and their job `pins` fails. Repositories created without the template take the file of the release they pin, here `vX.Y.Z`:
 
@@ -202,7 +204,7 @@ The `# Maintainer:` line of your PKGBUILD stays yours. aurtomator does not chang
 ssh-keygen -t ed25519 -f ~/.ssh/aur_ed25519 -C "aurtomator@aur"
 ```
 
-Leave the passphrase empty: CI uses the key without a prompt.
+Leave the passphrase empty: CI uses the key without a prompt. Keys of the other types of `ssh-keygen` work too, except the `-sk` types, which sign only with their security key.
 
 ### 2. Add the public key to your AUR account
 

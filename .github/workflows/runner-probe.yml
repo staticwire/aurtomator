@@ -1,7 +1,7 @@
 name: Runner probe
 
-# Run by hand after a new runner image or digest of ci-image/Dockerfile. It prints what builder rests
-# on, and fails when builder can write a runner file, use the Docker socket or read a runner variable
+# Run by hand after a new runner image or digest of ci-image/Dockerfile. It fails when builder can
+# write a runner file, read the checkout, use the Docker socket or read a runner variable
 on:
   workflow_dispatch:
 
@@ -74,6 +74,20 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The step of check-updates.yml, which tests/workflows.bats keeps equal
+      - name: Close files to builder
+        env:
+          DATA: /data
+        run: |
+          install -d -m 0700 "$DATA"
+          find . -mindepth 1 -path ./aurtomator -prune -o ! -type l -exec chmod go-rwx -- {} +
+          chmod 0711 .
+
       - name: The mounts
         run: |
           id builder
@@ -101,6 +115,9 @@ jobs:
           done
           check -r /var/run/docker.sock
           check -w /var/run/docker.sock
+          for path in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/README.md" /data; do
+            check -r "$path"
+          done
           names=$(sudo -u builder env | cut -d= -f1)
           echo "The variables of builder: $(paste -sd ' ' <<<"$names")"
           if leaked=$(grep -E '^(GITHUB|ACTIONS|RUNNER)_' <<<"$names"); then

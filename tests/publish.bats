@@ -144,6 +144,40 @@ current: '0.9.0'"
   cmp "$OLD" "$TEST_TMPDIR/out/demo/PKGBUILD"
 }
 
+# Without current, the rules of check-all.sh compare the new version with nothing, so
+# update-pkg.sh compares it with pkgver of the AUR .SRCINFO
+@test "update-pkg --prepare: without current, holds a downgrade, a jump and a held alert against the AUR" {
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+  # Runs update-pkg.sh for version $1 of a YAML without current that ends with $2
+  prepare_without_current() {
+    create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+$2"
+    rm -rf "$TEST_TMPDIR/out"
+    run "$TEST_TMPDIR/scripts/update-pkg.sh" demo "$1" --prepare "$TEST_TMPDIR/out"
+  }
+  prepare_without_current 0.5.0 ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo has no current, and 0.5.0 is below 1.0.0 of the AUR"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+  prepare_without_current 2026111600 ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo has no current, and 1.0.0 of the AUR to 2026111600 is a version jump"* ]]
+  prepare_without_current 2.0.0 $'alerts:\n  - when: major\n    hold: true\n    note: Split package'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo has no current, and an alert holds 1.0.0 of the AUR to 2.0.0: Split package"* ]]
+  prepare_without_current 0.5.0 "allow_downgrade: true"
+  [ "$status" -eq 0 ]
+  grep -qx 'pkgver=0.5.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
+  prepare_without_current 1.1.0 ""
+  [ "$status" -eq 0 ]
+  grep -qx 'pkgver=1.1.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
+}
+
 @test "update-pkg --prepare: hands over the AUR files when the AUR has the version in quotes" {
   create_test_package "demo" "github-nightly" "upstream:
   project: owner/repo
@@ -3452,7 +3486,7 @@ MOCKCURL
   [ "$(cat "$TEST_TMPDIR/.status/b")" = "check_failed: https://silent.example/b.git: silent.example did not answer earlier in this run" ]
   [ "$(cat "$TEST_TMPDIR/.status/c")" = "up_to_date" ]
   [ "$(cat "$TEST_TMPDIR/git-urls")" = "https://live.example/c.git" ]
-  [ "$(cat "$TEST_TMPDIR/curl.args")" = "-sI -o /dev/null --max-time 10 --proto =https -A aurtomator/1.0 -w %{http_code} https://silent.example/a.git/info/refs?service=git-upload-pack" ]
+  [ "$(cat "$TEST_TMPDIR/curl.args")" = "--globoff -sI -o /dev/null --max-time 10 --proto =https -A aurtomator/1.0 -w %{http_code} https://silent.example/a.git/info/refs?service=git-upload-pack" ]
   [ "$(cat "$TEST_TMPDIR/checks")" = $'a\nb\nc' ]
 }
 
@@ -4746,7 +4780,7 @@ sha256sums=('SKIP' '$H4')"
   [[ "$output" == *"; return 0"* ]]
 }
 
-# A function of the AUR copy returns before code that the prepared copy runs
+# Here the function of the AUR copy returns before code that the prepared copy runs
 @test "check_prepared_pkgbuild: rejects a checksum array in a function" {
   write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' '$H2')"
   write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
@@ -5621,7 +5655,7 @@ write_srcinfo_archs() {
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared .SRCINFO changes no common source URL and no common checksum beside a VCS pin, so the new version would hold the files of the old one"* ]]
-  # A patch of the version in the sources of one arch moves no common source either
+  # Patches of the version in the sources of one arch move no common source either
   write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 1.0 "$pin" SKIP aarch64 "https://example.com/v1.0/arm.patch" SKIP
   write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 2.0 "$pin" SKIP aarch64 "https://example.com/v2.0/arm.patch" SKIP
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.0

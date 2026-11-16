@@ -105,6 +105,32 @@ hand_over() {
   log_ok "Prepared $PKG_NAME $NEW_VERSION in $dest"
 }
 
+# Without current, check-all.sh compares the new version with nothing, so the rules of
+# downgrades, version jumps and held alerts compare it with pkgver of the AUR here
+if [[ -z "$(pkg_get "$PKG_FILE" '.current // ""')" ]]; then
+  aur_pkgver=$(srcinfo_pkgver "${aur_dir}/.SRCINFO")
+  if ! validate_pkgver "$aur_pkgver" 2>/dev/null; then
+    log_err "$PKG_NAME has no current, and the AUR .SRCINFO holds no pkgver to compare $NEW_VERSION with"
+    exit 1
+  fi
+  if [[ "$aur_pkgver" != "$NEW_VERSION" ]]; then
+    if [[ "$(vercmp "$aur_pkgver" "$NEW_VERSION")" -gt 0 && "$(pkg_get "$PKG_FILE" '.allow_downgrade // false')" != true ]]; then
+      log_err "$PKG_NAME has no current, and $NEW_VERSION is below $aur_pkgver of the AUR"
+      exit 1
+    fi
+    if version_jump "$aur_pkgver" "$NEW_VERSION" && [[ "$(pkg_get "$PKG_FILE" '.allow_version_jump // false')" != true ]]; then
+      log_err "$PKG_NAME has no current, and $aur_pkgver of the AUR to $NEW_VERSION is a version jump"
+      exit 1
+    fi
+    alerts=$(fired_alerts "$PKG_FILE" "$aur_pkgver" "$NEW_VERSION") || exit 1
+    held=$(awk -F'\t' '$1 == "hold" { print $2; exit }' <<<"$alerts")
+    if [[ -n "$held" ]]; then
+      log_err "$PKG_NAME has no current, and an alert holds $aur_pkgver of the AUR to $NEW_VERSION: $held"
+      exit 1
+    fi
+  fi
+fi
+
 warn_maintainer_line "${aur_dir}/PKGBUILD"
 
 audit_rc=0

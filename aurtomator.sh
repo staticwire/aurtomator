@@ -226,9 +226,23 @@ if [[ "${1:-}" == check-pins ]]; then
   fi
   cd "$root"
   use_re='^[0-9]+:[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+([^[:space:]]+)'
+  release_re='#[[:space:]]*(v[0-9]+[.][0-9]+[.][0-9]+)'
+  # The merge commit of a pull request has the base branch as its first parent
+  base=""
+  if [[ "${GITHUB_EVENT_NAME:-}" == pull_request* ]] && ! base=$(git rev-parse --verify -q 'HEAD^1^{commit}' 2>/dev/null); then
+    echo "The checkout holds no parent of the merge commit, so no pin is compared with the base branch; fetch-depth: 2 in the job pins adds it" >&2
+    base=""
+  fi
   checked=()
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
+    # The newest release that the base branch pins in this file
+    base_release=""
+    if [[ -n "$base" ]]; then
+      base_release=$(git show "$base:$file" 2>/dev/null |
+        grep -oiE "^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+${repo}[^@[:space:]]*@[0-9a-f]{40}[[:space:]]+${release_re}" |
+        grep -oE 'v[0-9]+[.][0-9]+[.][0-9]+$' | sort -V | tail -n 1) || base_release=""
+    fi
     check_shape "$file"
     check_tags "$file"
     # Jobs run a workflow, local or of this repository, and pass it the secrets they name
@@ -271,6 +285,12 @@ if [[ "${1:-}" == check-pins ]]; then
         exit 1
       fi
       check_release "$file" "${lines[i]}" "${BASH_REMATCH[1]}"
+      # Older releases miss the fixes made since, and the jobs with the secrets would run them
+      if [[ -n "$base_release" && "${lines[i]}" =~ $release_re ]] &&
+        [[ "$(printf '%s\n' "${BASH_REMATCH[1]}" "$base_release" | sort -V | head -n 1)" != "$base_release" ]]; then
+        echo "$file moves the pin of $repo from $base_release of the base branch back to ${BASH_REMATCH[1]}; pull requests move pins forward alone" >&2
+        exit 1
+      fi
       checked+=("$file:${lines[i]}")
     done
   done
@@ -307,8 +327,13 @@ if [[ ! -d "$copy" ]]; then
   cache_git -C "$tmp" fetch -q --depth 1 "https://github.com/$repo" "$sha"
   cache_git -C "$tmp" -c core.autocrlf=false -c core.eol=lf checkout -q FETCH_HEAD
   chmod -R go-w "$tmp"
-  # Runs that started at the same time can make the copy first
+  # Runs that started at the same time can make the copy first, and so can other accounts
+  # that write the cache
   mv -T "$tmp" "$copy" 2>/dev/null || rm -rf "$tmp"
+  if ! copy_ok; then
+    echo "$copy appeared during the fetch and is no checkout of $sha that only you can write; remove it, then run $0 again" >&2
+    exit 1
+  fi
   # Pins still in use after 30 days are fetched again on their next run, and SIGKILL leaves the
   # directory of a fetch. Runs at the same time can remove their own directory while find reads.
   find "${copy%/*}" -mindepth 1 -maxdepth 1 -regextype posix-extended -regex '.*/[0-9a-f]{40}([.][A-Za-z0-9]{6})?' -mtime +30 \

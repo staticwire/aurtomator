@@ -7,6 +7,8 @@ PROJECT_DIR="$(cd "$TESTS_DIR/.." && pwd)"
 
 # CI sets it for the repository of aurtomator, and update-readme.sh reads it
 unset GITHUB_REPOSITORY
+# CI sets it to pull_request, and check-pins of aurtomator.sh then compares pins with HEAD^1
+unset GITHUB_EVENT_NAME
 
 # Create temp workspace
 setup_test_env() {

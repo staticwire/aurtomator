@@ -26,6 +26,14 @@ inputs:
     description: true runs scripts/update-readme.sh as builder after a successful check-all.sh
     required: false
     default: "false"
+  statuses:
+    description: Directory of the statuses that builder gets as .status/
+    required: false
+    default: ""
+  handoff:
+    description: Directory of the prepared updates that builder gets as handoff/
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -33,9 +41,11 @@ runs:
     - shell: bash
       env:
         ARGS: ${{ inputs.args }}
+        HANDOFF: ${{ inputs.handoff }}
         KEEP_ENV: ${{ inputs.keep-env }}
         PACKAGE: ${{ inputs.package }}
         README_TOO: ${{ inputs.readme }}
+        STATUSES: ${{ inputs.statuses }}
         WORK: /work
       run: |
         code=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)
@@ -54,42 +64,44 @@ runs:
           exit 1
         fi
         install -d -m 0700 "$WORK"
-        # Copies $1 into $WORK when it is a regular file, never a link
+        # Copies $1 to $WORK/$2 when it is a regular file, never a link
         take() {
           [[ -f "$1" && ! -L "$1" ]] || return 0
-          install -D -m 0644 "$1" "$WORK/$1"
+          install -D -m 0644 "$1" "$WORK/$2"
         }
+        # The statuses and the handoff come from the artifacts of the run alone, never from
+        # the checkout, so only directories that the step names count
+        dir_ok() { [[ -n "$1" && -d "$1" && ! -L "$1" ]]; }
         if [[ -n "$PACKAGE" ]]; then
           # One package: its YAML, its status and the records check-all.sh reads
           if [[ -d packages && ! -L packages ]]; then
-            take "packages/$PACKAGE.yml"
+            take "packages/$PACKAGE.yml" "packages/$PACKAGE.yml"
           fi
-          if [[ -d .status && ! -L .status ]]; then
-            take ".status/$PACKAGE"
-            take .status/_arches
-            take .status/_assets
-            take .status/_upstream
+          if dir_ok "$STATUSES"; then
+            for name in "$PACKAGE" _arches _assets _upstream; do
+              take "$STATUSES/$name" ".status/$name"
+            done
           fi
         else
-          take README.md
+          take README.md README.md
           if [[ -d packages && ! -L packages ]]; then
             for f in packages/*.yml; do
               [[ "${f#packages/}" =~ ^${name_re}\.yml$ ]] || continue
-              take "$f"
+              take "$f" "$f"
             done
           fi
-          if [[ -d .status && ! -L .status ]]; then
-            for f in .status/*; do
-              [[ "${f#.status/}" =~ ^${name_re}$ ]] || continue
-              take "$f"
+          if dir_ok "$STATUSES"; then
+            for f in "$STATUSES"/*; do
+              [[ "${f##*/}" =~ ^${name_re}$ ]] || continue
+              take "$f" ".status/${f##*/}"
             done
           fi
-          if [[ -d handoff && ! -L handoff ]]; then
-            (cd handoff && find prepared status -type f -print0 2>/dev/null || true) |
+          if dir_ok "$HANDOFF"; then
+            (cd "$HANDOFF" && find prepared status -type f -print0 2>/dev/null || true) |
               while IFS= read -r -d '' f; do
                 if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
                   [[ "$f" =~ ^status/${name_re}$ ]]; then
-                  take "handoff/$f"
+                  take "$HANDOFF/$f" "handoff/$f"
                 fi
               done
           fi
