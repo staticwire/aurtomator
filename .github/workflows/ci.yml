@@ -113,19 +113,19 @@ jobs:
     permissions:
       contents: read
 
-  # Runs the pipeline with aurtomator as a packages repository without packages, which checks the
-  # checkouts, the action path, the artifacts and the issues job; a fork PR gets a read-only token
+  # Runs the pipeline as a packages repository without packages would. Forks get a read-only token,
+  # and Dependabot pull requests skip it too, since these permissions would give their code write
   pipeline:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
     uses: ./.github/workflows/check-updates.yml
     permissions:
       contents: write
       issues: write
 
-  # Merges a Dependabot pull request that changes only the CI image, once lint, test, validate,
-  # pipeline and ci-ok passed; off unless the repository variable CI_IMAGE_AUTO_MERGE is true
+  # Merges a Dependabot pull request that changes only the CI image, once lint, test, validate and
+  # ci-ok passed; off unless the repository variable CI_IMAGE_AUTO_MERGE is true
   merge-image:
-    needs: [lint, test, validate, pipeline, ci-ok]
+    needs: [lint, test, validate, ci-ok]
     if: >-
       vars.CI_IMAGE_AUTO_MERGE == 'true' &&
       github.event_name == 'pull_request' &&

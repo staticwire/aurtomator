@@ -1983,6 +1983,50 @@ EOF
   [ "$output" = "0" ]
 }
 
+# A commit can add README.md.tmp as a link, which a write to that fixed name would follow
+@test "update-readme: writes nothing through a README.md.tmp link" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
+  printf '%s\n' '<!-- BADGES:START -->' '<!-- BADGES:END -->' \
+    '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  chmod 0644 "$TEST_TMPDIR/README.md"
+  mkdir "$TEST_TMPDIR/outside"
+  echo keep >"$TEST_TMPDIR/outside/target"
+  ln -s outside/target "$TEST_TMPDIR/README.md.tmp"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/outside/target")" = keep ]
+  [ ! -L "$TEST_TMPDIR/README.md" ]
+  grep -qF '>pkg-a</a>' "$TEST_TMPDIR/README.md"
+  [ "$(stat -c %a "$TEST_TMPDIR/README.md")" = 644 ]
+  [ "$(find "$TEST_TMPDIR" -maxdepth 1 -name 'README.md.*' ! -name README.md.tmp)" = "" ]
+}
+
+# YAML reaches main without the validator by a direct push or a merge on a red check
+@test "update-readme: writes the values of the table as text" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo\ncurrent: \'1.0<b>&x\'\nlast_updated: \'"><img src=x>\''
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '<td>1.0&lt;b&gt;&amp;x</td>' "$TEST_TMPDIR/README.md"
+  grep -qF '<td nowrap>&quot;&gt;&lt;img src=x&gt;</td>' "$TEST_TMPDIR/README.md"
+  run grep -cE '<b>|<img src=x>' "$TEST_TMPDIR/README.md"
+  [ "$output" = 0 ]
+}
+
+@test "update-readme: refuses a README.md that is a link" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
+  mkdir "$TEST_TMPDIR/outside"
+  printf '%s\n' secret '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/outside/readme"
+  ln -s outside/readme "$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"README.md is a symbolic link"* ]]
+  [ -L "$TEST_TMPDIR/README.md" ]
+}
+
 # === tag_versions ===
 
 @test "lib.sh: tag_versions fills the groups and keeps every other character" {
@@ -2541,6 +2585,24 @@ EOF
   run load_config_values
   [ "$status" -eq 1 ]
   [ "$output" = "$TEST_TMPDIR/.aurtomator.conf is tracked by git, so a commit can set its values. Check them, then take the file out of the repository: git rm --cached .aurtomator.conf" ]
+}
+
+# setup.sh writes the file, so a link that a pull request adds would point it outside
+@test "lib.sh: load_config refuses a tracked link to a missing file" {
+  git -C "$TEST_TMPDIR" init -q
+  ln -s ../outside/created "$TEST_TMPDIR/.aurtomator.conf"
+  git -C "$TEST_TMPDIR" add -f .aurtomator.conf
+  run load_config_values
+  [ "$status" -eq 1 ]
+  [[ "$output" == "$TEST_TMPDIR/.aurtomator.conf is tracked by git"* ]]
+}
+
+@test "lib.sh: load_config refuses a link" {
+  printf "GIT_AUTHOR_NAME='a'\nGIT_AUTHOR_EMAIL='b'\nAUR_SSH_KEY='c'\nGPG_KEY_ID='d'\n" >"$TEST_TMPDIR/conf"
+  ln -s conf "$TEST_TMPDIR/.aurtomator.conf"
+  run load_config_values
+  [ "$status" -eq 1 ]
+  [ "$output" = "$TEST_TMPDIR/.aurtomator.conf is a symbolic link, so setup.sh would write the file it points to. Remove the link: rm .aurtomator.conf" ]
 }
 
 # A .aurtomator.conf that a pull request adds runs nothing

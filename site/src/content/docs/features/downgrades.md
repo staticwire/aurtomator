@@ -2,7 +2,7 @@
 title: Downgrades and version jumps
 ---
 
-Upstream versions below `current` reach the AUR only with `allow_downgrade: true` in the package YAML. Without it, `check-all.sh` writes `downgrade_skipped: <version>` and pushes nothing. Skipped downgrades open no issue and are not failures.
+Upstream versions below `current` reach the AUR only with `allow_downgrade: true` in the package YAML. Without it, `check-all.sh` writes `downgrade_skipped: <version>` and pushes nothing. Pushes by hand leave `current` below the AUR, so the update compares the new version with `pkgver` of the AUR as well and stops below it. Skipped downgrades open no issue and are not failures.
 
 The default protects against lower versions that upstream does not mean as a step back. Without `tag_version_regex`, `github-release` reads `/releases/latest`, and GitHub picks that release by its commit date. Publication dates do not count. Maintenance releases of an older line, made from a newer commit, become the latest release, and without the default aurtomator would push them as downgrades and push the newer version again at the next release.
 

@@ -94,8 +94,8 @@ jobs:
             echo "::error::builder has the uid of the account that owns $RUNNER_TEMP"
             exit 1
           fi
-          if ! owned=$(find /__w /__e \( -user builder -o -group builder \) -print -quit); then
-            echo "::error::find could not search /__w and /__e for the files of builder"
+          if ! owned=$(find /__w /__e /__t \( -user builder -o -group builder \) -print -quit); then
+            echo "::error::find could not search /__w, /__e and /__t for the files of builder"
             exit 1
           fi
           if [[ -n "$owned" ]]; then
@@ -126,6 +126,54 @@ jobs:
           install -d -m 0700 "$DATA"
           find . -mindepth 1 -path ./aurtomator -prune -o ! -type l -exec chmod go-rwx -- {} +
           chmod 0711 .
+          # The runner mounts its tool cache, the home of the steps and the event files read-write
+          for dir in /__t /github/home /github/workflow; do
+            if [ -d "$dir" ]; then
+              find "$dir" ! -type l -perm /022 -exec chmod go-w -- {} +
+            fi
+          done
+
+      # Fails when builder can write a file of the runner or of root steps, read the checkout,
+      # use the Docker socket or get a variable of the runner
+      - &check-builder
+        name: Check builder
+        run: |
+          if ! sudo -u builder true; then
+            echo "::error::sudo could not run a command as builder"
+            exit 1
+          fi
+          fail=0
+          # Runs test with flag $1 on path $2 as builder, which has to fail
+          check() {
+            if sudo -u builder test "$1" "$2"; then
+              echo "::error::builder passes test $1 $2"
+              fail=1
+            fi
+          }
+          for path in "$GITHUB_ENV" "$GITHUB_PATH" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP" \
+            "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/aurtomator" /__w /__w/_actions /__e /__t /github/home /github/workflow; do
+            check -w "$path"
+          done
+          check -r /var/run/docker.sock
+          check -w /var/run/docker.sock
+          for path in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/README.md" /data; do
+            check -r "$path"
+          done
+          # find skips the directories builder cannot list or enter, as the workspace after Close files
+          if ! writable=$(sudo -u builder find /__w /__e /__t /github \( -writable -print -quit \) \
+            -o \( -type d \( ! -readable -o ! -executable \) -prune \)); then
+            echo "::error::find could not search /__w, /__e, /__t and /github as builder"
+            fail=1
+          elif [ -n "$writable" ]; then
+            echo "::error::builder can write $writable"
+            fail=1
+          fi
+          leaked=$(sudo -u builder env | cut -d= -f1 | grep -E '^(GITHUB|ACTIONS|RUNNER)_' | paste -sd ' ' -)
+          if [ -n "$leaked" ]; then
+            echo "::error::sudo passes $leaked to builder"
+            fail=1
+          fi
+          exit "$fail"
 
       # builder works in /work, and the workspace and aurtomator/ stay root's
       - name: Check updates
@@ -347,6 +395,8 @@ jobs:
 
       - *close-files
 
+      - *check-builder
+
       # By the id of the upload, never by name. Empty ids would download every artifact of
       # the run, and no artifact has the id 0.
       - name: Download statuses
@@ -422,6 +472,8 @@ jobs:
           persist-credentials: false
 
       - *close-files
+
+      - *check-builder
 
       # The versions and the asset values that verify-pkg.sh checks against
       - name: Download statuses
@@ -533,6 +585,8 @@ jobs:
           persist-credentials: false
 
       - *close-files
+
+      - *check-builder
 
       - name: Download statuses
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

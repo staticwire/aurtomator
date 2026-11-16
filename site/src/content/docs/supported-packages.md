@@ -182,6 +182,20 @@ sha256sums=('...')
 package() {
 ```
 
+### Lines the update cannot rewrite (BLOCKED)
+
+Lines of `pkgver=`, `pkgrel=`, `arch=` and of the variable of `upstream.asset_var` below the first line of the PKGBUILD that holds more than assignments and comments, or inside a quote or an array, and `pkgver=` and `pkgrel=` lines with more than one word and a comment, such as a second assignment, a quote left open or `$(...)`. The word may expand variables, as `pkgver="${_pkgver//-/.}"` does.
+
+**Detection:** the update writes these lines whole. Text after the value goes, and a quote that the line opens would close nowhere, so text of the AUR copy could turn into code. Updates of such a PKGBUILD stop in prepare and verify with a message that names the lines. Comments after the value go at each update, since they describe the old value.
+
+**Correct approach:** one assignment on each of these lines, among the assignments above the first function:
+
+```bash
+pkgver=1.2.3
+pkgrel=1
+arch=('x86_64' 'aarch64')
+```
+
 ### Source URL returns HTML (BLOCKED)
 
 Upstream moves or renames a release, and the old URL redirects to an HTML error or download page.

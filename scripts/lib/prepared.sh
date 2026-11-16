@@ -10,16 +10,27 @@ _has_nul() {
   [[ "$(tr -d '\000' <"$1" | wc -c)" -ne "$(wc -c <"$1")" ]]
 }
 
-# Split PKGBUILD $1, with asset_var $2 if any, into lines of six kinds without running it:
+# Split PKGBUILD $1, with asset_var $2 if any, into lines of seven kinds without running it:
 #   SKEL<TAB>line      each line, with pkgver=, pkgrel=, $2=, a top-level arch= and each
 #                      checksum array of the leading assignments as a placeholder
 #   PKGVER|PKGREL|ASSET|ARCH<TAB>value   the value of such a line
 #   SUM<TAB>array<TAB>index<TAB>HASH|SKIP, SUMVAL<TAB>array<TAB>value   one of each per checksum
 #   NOTE<TAB>text      a comment in or after a checksum array, or an empty line in one
 #   BAD<TAB>text       anything else in a checksum array, and arrays below the leading assignments
+#   NOEDIT<TAB>text    a pkgver=, pkgrel=, $2= or arch= line that update-pkg.sh cannot write whole
 _pkgbuild_parts() {
   awk -v asset="${2:-}" '
     BEGIN { lead = 1 }
+    # Succeeds when text $text is one word and at most a comment; the word may expand variables,
+    # without a command, an assignment or a quote of its own inside the braces
+    function one_value(text) {
+      return text ~ /^([^ \t\047"\\`$;&|<>()]|\047[^\047]*\047|"([^"\\`$]|\$\{[A-Za-z0-9_][^}\047"`{$\\=]*\}|\$[A-Za-z_][A-Za-z0-9_]*)*"|\$\{[A-Za-z0-9_][^}\047"`{$\\=]*\}|\$[A-Za-z_][A-Za-z0-9_]*)+([ \t]+#.*|[ \t]*)$/
+    }
+    # update-pkg.sh writes these lines whole, which leaves the text around them as bash read it
+    # only for one value of an assignment among the leading ones; $col is the column of the value
+    function edit(col) {
+      if (inside || (col && !one_value(substr($0, col)))) print "NOEDIT\t" NR ": " $0
+    }
     function tokens(text,   n, i, t, parts) {
       n = split(text, parts, /[ \t]+/)
       for (i = 1; i <= n; i++) {
@@ -154,15 +165,17 @@ _pkgbuild_parts() {
       }
       print "BAD\t" NR ": " $0
     }
+    { inside = !lead || quote != "" || list }
     lead && !plain($0) { lead = 0 }
-    /^pkgver=/ { print "SKEL\tPKGVER"; print "PKGVER\t" substr($0, 8); next }
-    /^pkgrel=/ { print "SKEL\tPKGREL"; print "PKGREL\t" substr($0, 8); next }
+    /^pkgver=/ { edit(8); print "SKEL\tPKGVER"; print "PKGVER\t" substr($0, 8); next }
+    /^pkgrel=/ { edit(8); print "SKEL\tPKGREL"; print "PKGREL\t" substr($0, 8); next }
     asset != "" && index($0, asset "=") == 1 {
+      edit(0)
       print "SKEL\tASSET"
       print "ASSET\t" substr($0, length(asset) + 2)
       next
     }
-    /^arch=/ { print "SKEL\tARCH"; print "ARCH\t" substr($0, 6); next }
+    /^arch=/ { edit(0); print "SKEL\tARCH"; print "ARCH\t" substr($0, 6); next }
     { print "SKEL\t" $0 }
     END { if (in_sums) print "BAD\tunterminated " name }
   ' "$1"
@@ -173,6 +186,14 @@ _sum_parts_ok() {
   grep -q $'^BAD\t' <<<"$1" || return 0
   log_err "$2 has more than checksums, comments and line continuations in a checksum array, or a checksum array below a line that holds more than assignments and comments:"
   grep $'^BAD\t' <<<"$1" | cut -f2- >&2
+  return 1
+}
+
+# Succeeds when the parts $1 of a PKGBUILD hold no NOEDIT line; $2 names the file in the message
+_edit_parts_ok() {
+  grep -q $'^NOEDIT\t' <<<"$1" || return 0
+  log_err "$2 has lines the update cannot rewrite: pkgver=, pkgrel=, arch= and asset_var lines inside a quote or an array or below a line that holds more than assignments and comments, or pkgver= and pkgrel= lines with more than one value and a comment:"
+  grep $'^NOEDIT\t' <<<"$1" | cut -f2- >&2
   return 1
 }
 
@@ -341,6 +362,7 @@ check_prepared_pkgbuild() {
   # Code after an array or in a function of the AUR copy can turn dead code into live code
   # once the prepared copy writes the array without it
   _sum_parts_ok "$old_parts" "AUR PKGBUILD" && _sum_parts_ok "$new_parts" "Prepared PKGBUILD" || return 1
+  _edit_parts_ok "$old_parts" "AUR PKGBUILD" && _edit_parts_ok "$new_parts" "Prepared PKGBUILD" || return 1
   # updpkgsums writes no comment, so any comment or empty line in an array
   # must be one the AUR copy has, as often as it has it
   mapfile -t notes < <(LC_ALL=C comm -23 <(grep $'^NOTE\t' <<<"$new_parts" | LC_ALL=C sort) \

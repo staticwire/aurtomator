@@ -72,6 +72,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - run: ./aurtomator.sh check-pins
 
   check-updates:
@@ -118,6 +119,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - run: ./aurtomator.sh check-pins
 
   validate:
@@ -153,7 +155,7 @@ Commands are `sample`, `pin`, `check-pins` or the name of a script of `scripts/`
 
 The pin comes from the one `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA, and pins in comments change nothing. The script also reads the file with `yq`, as GitHub does, and stops unless the jobs call `check-updates.yml` once, at the pin of that line: pins in quotes, on the next line or through an alias stop it, and so do `uses:` lines inside a block of text. It stops as well on files with two YAML documents, a merge key `<<` or a key twice in one mapping.
 
-The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or `$XDG_CACHE_HOME/aurtomator/<sha>` when that variable holds an absolute path, and removes the copies and the fetch directories of killed runs made more than 30 days ago. The fetch writes LF line ends whatever `core.autocrlf` says and ignores the repository variables of git, such as `GIT_DIR` of a hook. Later runs use the copy while it is the checkout of the pin that only you can write, and fetch it again otherwise, as after a cleaner deleted one of its files; a link or a copy of another user at that path stops the script. Before the fetch it stops unless the pin is the commit of the release written after it, as in `@<sha> # vX.Y.Z`: GitHub serves commits of any fork under the name of the repository too. `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
+The first run of a pin fetches aurtomator at that commit into `~/.cache/aurtomator/<sha>`, or `$XDG_CACHE_HOME/aurtomator/<sha>` when that variable holds an absolute path, and removes the copies and the fetch directories of killed runs made more than 30 days ago. The fetch writes LF line ends whatever `core.autocrlf` says and ignores the repository variables of git, such as `GIT_DIR` of a hook. Later runs use the copy while it is the checkout of the pin that only you can write, and fetch it again otherwise, as after a cleaner deleted one of its files; a link or a copy of another user at that path stops the script. It also stops when `aurtomator/` of the cache belongs to another account or gives group or others write access, and when the cache directory belongs to an account other than yours or root or gives them write access without the sticky bit that `/tmp` has, since such accounts could swap the copy between its check and its run. The directories that the script makes get mode 0700. Before the fetch it stops unless the pin is the commit of the release written after it, as in `@<sha> # vX.Y.Z`: GitHub serves commits of any fork under the name of the repository too. `git ls-remote --tags https://github.com/staticwire/aurtomator` lists the tags and their commits.
 
 The script needs mikefarah/yq 4.40.1 or newer, and names the version of any other `yq` it finds.
 
@@ -161,7 +163,7 @@ The script needs mikefarah/yq 4.40.1 or newer, and names the version of any othe
 
 `./aurtomator.sh check-pins` reads every `uses:` line of aurtomator in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, in jobs and steps and with the repository name in any case. It prints these lines when each pin is the commit of the release written after it. It stops at the first pin that is not the commit of its release, at aurtomator `uses:` lines without a commit SHA and, as `pin` does, when `yq` reads a pin outside such a line. It also stops at jobs that call a workflow neither local nor of aurtomator, written in any spelling, since GitHub passes such workflows the secrets the job names, at steps that name a workflow of another repository, at aurtomator pins written with an extra slash or a backslash, which GitHub drops when it reads the name, and at `uses:` values with a YAML tag. It fetches nothing.
 
-In a pull request, `check-pins` also stops at a pin whose release is older than the newest release that the same file pins on the base branch, so pull requests cannot move the jobs with the secrets back to a release without the fixes made since. It reads the base branch from the first parent of the merge commit, which the checkout holds with `fetch-depth: 2` in the job `pins`. Without that parent it prints so and compares nothing. Pushes to the branch can still move a pin back.
+In a pull request, `check-pins` also stops at a pin whose release is older than the newest release that the same file pins on the base branch, so pull requests cannot move the jobs with the secrets back to a release without the fixes made since. It reads the base branch from the first parent of the merge commit, which the checkout holds with `fetch-depth: 2` in the job `pins`. Without that parent it fetches the merge commit with its parents from `origin`, and stops when the fetch fails. Pushes to the branch can still move a pin back.
 
 `aurtomator.sh` names the aurtomator repository, `staticwire/aurtomator`, and takes no pin of another repository, so pull requests that move a pin to a fork or to a name that looks the same fail `pins`. Forks of aurtomator write their own name in their `aurtomator.sh`, and runs copy that file into the repositories that pin the fork.
 
@@ -299,7 +301,7 @@ AUR_SSH_KEY='/home/<user>/.ssh/aur_ed25519'
 
 New runs of the setup do not ask again for the values the file holds. Options override saved values and save the new one.
 
-`setup.sh`, `update-pkg.sh` and `publish-pkg.sh` stop when git tracks `.aurtomator.conf`. Tracked files replace the ignored one at checkouts and merges, so pull requests that add one would choose the key that `secrets` uploads and the author of your AUR commits. Check its values, then `git rm --cached .aurtomator.conf` takes it out of the repository and keeps it on disk.
+`setup.sh`, `update-pkg.sh` and `publish-pkg.sh` stop when git tracks `.aurtomator.conf` or when it is a symbolic link. Tracked files replace the ignored one at checkouts and merges, so pull requests that add one would choose the key that `secrets` uploads and the author of your AUR commits, and links would send the answers of the setup to the file they point to. Check its values, then `git rm --cached .aurtomator.conf` takes it out of the repository and keeps it on disk.
 
 ## Pull requests to your repository
 

@@ -239,13 +239,15 @@ current: '$current'"
 }
 
 # Strategies put these fields into URL paths, where curl reads {} and [] as globs
-@test "validate: upstream.project, registry, tag and nightly_tag take no glob, query or dot segment" {
+@test "validate: upstream.project, registry, tag, nightly_tag, repology and archpkg take no glob, query or dot segment" {
   local entry strategy field value fields
   for entry in 'github-release|project|lab/demo{1,2}' 'github-release|project|lab/demo[1-2]' \
     'github-release|project|lab/../other' 'gitea-tag|project|./x' 'github-release|project|o/r?x=1' \
     'github-release|project|o/r#x' 'pypi|registry|pkg{a,b}' 'npm|registry|a/b/c' 'crates|registry|x[1]' \
     'github-asset|tag|v[1-9]' 'github-asset|tag|a b' 'github-asset|tag|v1..2' 'github-asset|tag|x@{1}' \
-    'github-nightly|nightly_tag|n?x'; do
+    'github-nightly|nightly_tag|n?x' 'repology|repology|firefox/../../robots.txt?x=[1-3]#' \
+    'repology|repology|a b' 'archpkg|archpkg|linux&repo=Testing&q=../x y' 'archpkg|archpkg|-x' \
+    'archpkg|archpkg|.x' 'repology|repology|:x'; do
     IFS='|' read -r strategy field value <<<"$entry"
     case "$strategy" in
       gitea-tag) fields="  host: codeberg.org" ;;
@@ -264,10 +266,13 @@ current: '$current'"
   done
 }
 
-@test "validate: upstream.project, registry and tag of real names pass" {
+@test "validate: upstream.project, registry, tag, repology and archpkg of real names pass" {
   local entry strategy field value fields
   for entry in 'github-release|project|owner/.github' 'gitlab-tag|project|group/sub/project_x-1.2' \
-    'npm|registry|@scope/pkg.js' 'pypi|registry|zope.interface' 'github-asset|tag|release/1.2+b{1}'; do
+    'npm|registry|@scope/pkg.js' 'pypi|registry|zope.interface' 'github-asset|tag|release/1.2+b{1}' \
+    'github-asset|tag|models#2026%1' 'repology|repology|ruby:rmagick' 'repology|repology|c++' \
+    'archpkg|archpkg|qt6-base' 'archpkg|archpkg|libc++' 'archpkg|archpkg|python-zope.interface' \
+    'kde-tarball|project|kdevelop-c++' 'kde-tarball|project|kde@x'; do
     IFS='|' read -r strategy field value <<<"$entry"
     case "$strategy" in
       gitlab-tag) fields="  host: gitlab.com" ;;

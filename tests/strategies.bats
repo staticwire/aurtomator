@@ -1301,6 +1301,31 @@ current: '1.2.0.r1.g0000000000'"
   [[ "$output" == *"0.12.0"* ]]
 }
 
+# Unencoded, # ends the path and % starts an escape
+@test "github-nightly: pattern A asks for nightly_tag encoded" {
+  create_test_package "test-nightly-pct" "github-nightly" "upstream:
+  project: owner/nightly-repo
+  nightly_tag: 'nightly%x'
+  version_source: release_body
+  version_pattern: 'NVIM v\\K\\S+'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-pct"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"0.12.0"* ]]
+}
+
+@test "github-asset: asks for the tag encoded" {
+  create_test_package "test-asset-hash" "github-asset" "upstream:
+  project: owner/models-repo
+  tag: 'models#2026'
+  assets:
+    - voice-a.tar.bz2"
+
+  run "$TEST_TMPDIR/strategies/github-asset.sh" "test-asset-hash"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20251202" ]
+}
+
 @test "github-nightly: pattern B, dated tags" {
   create_test_package "test-nightly-b" "github-nightly" "upstream:
   project: owner/dated-repo

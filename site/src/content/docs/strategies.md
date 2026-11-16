@@ -457,7 +457,7 @@ pkgver_dash: .
 
 | Field | Required | Description |
 |---|---|---|
-| `upstream.repology` | no | Repology project, the package `name` by default |
+| `upstream.repology` | no | Repology project, the package `name` by default. It holds the characters `A-Z`, `a-z`, `0-9`, `@`, `.`, `_`, `+`, `:` and `-` and starts with none of `.`, `-` and `:`, since it goes into the path of the API URL |
 
 **Version:** the version of the first `newest` entry outside the AUR, since the AUR entries hold the version of this package. When only the AUR is newest, the newest `outdated` version outside the AUR, and `current` values above it read as a downgrade. The version is the normalized `version` of Repology: the OpenBSD entry of qodem gives `1.0.1` for its `1.0.1p1`. It lags until a distribution other than the AUR packages the release. The request sends `User-Agent: aurtomator/1.0`, as Repology asks.
 
@@ -476,7 +476,7 @@ upstream:
 
 | Field | Required | Description |
 |---|---|---|
-| `upstream.archpkg` | no | official package, the package `name` by default |
+| `upstream.archpkg` | no | official package, the package `name` by default. It holds the characters of package names, `A-Z`, `a-z`, `0-9`, `@`, `.`, `_`, `+` and `-`, and starts with neither `.` nor `-`, since it goes into the query of the search URL |
 | `upstream.testing` | no | `true` reads `core-testing`, `extra-testing` and `multilib-testing` too. Default `false` |
 
 **Version:** the `pkgver` of the newest entry of `core`, `extra` and `multilib` by `vercmp`, the epoch included: ffmpeg `2:9.0.2-2` gives `9.0.2`. With `testing: true`, builds in testing win while they are newer than the stable one. Raised epochs, as `1:2.0` to `2:1.0`, give `1.0` after `2.0`, a skipped downgrade: the maintainer raises the epoch in the AUR package, publishes `1.0` by hand and sets `current`. Rebuilds in the official repositories raise only `pkgrel` and give no update, see [Packages needing a pkgrel bump](/supported-packages/#packages-needing-a-pkgrel-bump). Packages found in none of the repositories fail with `Package not found in core, extra, multilib: <name>`.

@@ -311,6 +311,13 @@ case "$url" in
   *api.github.com/repos/*/releases/tags/models)
     echo '{"tag_name": "models", "assets": [{"name": "voice-a.tar.bz2", "updated_at": "2025-12-02T06:55:38Z"}, {"name": "voice-b.tar.bz2", "updated_at": "2026-01-15T10:00:00Z"}, {"name": "voice-c.tar.bz2", "updated_at": "2024-03-09T00:00:00Z"}, {"name": "voice-d.tar.bz2", "updated_at": "soon"}]}'
     ;;
+  # Tags with # and %, which the strategies encode in the path
+  *api.github.com/repos/*/releases/tags/models%232026)
+    echo '{"tag_name": "models#2026", "assets": [{"name": "voice-a.tar.bz2", "updated_at": "2025-12-02T06:55:38Z"}]}'
+    ;;
+  *api.github.com/repos/*/releases/tags/nightly%25x)
+    printf '{"tag_name": "nightly%%x", "body": "NVIM v0.12.0-dev+2713+g925e9e8722", "published_at": "2026-03-27T05:43:19Z"}'
+    ;;
 
   # --- tag_version_regex test patterns (must be before wildcards) ---
 

@@ -13,10 +13,24 @@ require_cmd yq
 readonly README="${AURTOMATOR_DATA_DIR}/README.md"
 readonly STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
 
+if [[ -L "$README" ]]; then
+  log_err "README.md is a symbolic link, so the update would copy the text of the file it points to into README.md"
+  exit 1
+fi
 if [[ ! -f "$README" ]]; then
   log_err "README.md not found"
   exit 1
 fi
+
+# Fixed names such as README.md.tmp can be links that a commit added
+new_readme=""
+trap 'rm -f ${new_readme:+"$new_readme"}' EXIT
+
+# Move file $1, the new text of README.md, over README.md with the mode README.md has
+replace_readme() {
+  chmod --reference="$README" "$1"
+  mv "$1" "$README"
+}
 
 readonly BADGES_START="<!-- BADGES:START -->"
 readonly BADGES_END="<!-- BADGES:END -->"
@@ -88,12 +102,13 @@ if [[ "$has_badges" == true ]]; then
   # 1793d1 is the blue of the Arch Linux logo
   badges+="[![maintained with aurtomator](https://img.shields.io/badge/maintained%20with-aurtomator-1793d1?logo=archlinux&logoColor=white)](https://github.com/staticwire/aurtomator)"
 
+  new_readme=$(mktemp "${README}.XXXXXX")
   {
     sed -n "0,/^${BADGES_START}\$/p" "$README"
     echo "$badges"
     sed -n "/^${BADGES_END}\$/,\$p" "$README"
-  } >"${README}.tmp"
-  mv "${README}.tmp" "$README"
+  } >"$new_readme"
+  replace_readme "$new_readme"
   log_ok "Badges updated (repo: ${repo_url:-unknown})"
 fi
 
@@ -103,6 +118,15 @@ fi
 # keeps Strategy, Updated and Status on one line, and the package name wraps.
 table_row() {
   printf '\n<tr><td>%s</td><td>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td></tr>' "$@"
+}
+
+# Print value $1 as HTML text, for YAML that reached the branch without the validator
+html_text() {
+  local text="$1"
+  text=${text//'&'/'&amp;'}
+  text=${text//'<'/'&lt;'}
+  text=${text//'>'/'&gt;'}
+  printf '%s' "${text//'"'/'&quot;'}"
 }
 
 # The cards stats-card.sh draws in stats/, as a link to the journal. GitHub
@@ -135,8 +159,9 @@ for pkg_file in "${pkg_files[@]}"; do
     status="✅ tracking"
   fi
 
-  link="<a href=\"https://aur.archlinux.org/pkgbase/${name}\">${name}</a>"
-  table_rows+=$(table_row "$link" "$current" "$strategy" "$last_updated" "$status")
+  link="<a href=\"https://aur.archlinux.org/pkgbase/$(html_text "$name")\">$(html_text "$name")</a>"
+  table_rows+=$(table_row "$link" "$(html_text "$current")" "$(html_text "$strategy")" \
+    "$(html_text "$last_updated")" "$(html_text "$status")")
   ((pkg_count++)) || true
 done
 
@@ -153,11 +178,11 @@ if [[ -n "$version" ]]; then
   fi
 fi
 
+new_readme=$(mktemp "${README}.XXXXXX")
 {
   sed -n "0,/^${PKG_START}\$/p" "$README"
   echo "$table"
   sed -n "/^${PKG_END}\$/,\$p" "$README"
-} >"${README}.tmp"
-
-mv "${README}.tmp" "$README"
+} >"$new_readme"
+replace_readme "$new_readme"
 log_ok "README.md updated ($pkg_count packages)"

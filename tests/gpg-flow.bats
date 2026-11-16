@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 
-# Tests of the GPG steps of setup.sh and of commit signing, with real gpg keys
+# Tests of the GPG steps of setup.sh and of commit signing, with real gpg keys. Tests named
+# gpg tool: and git tool: run those tools alone, to show the behavior that the code relies on
 
 load helpers/setup.sh
 
@@ -113,13 +114,13 @@ teardown() {
 
 # === Key type detection ===
 
-@test "gpg-real: detects subkey with [S] capability" {
+@test "gpg tool: lists a signing subkey as ssb with [S]" {
   key_info=$(gpg --list-secret-keys --keyid-format long 2>/dev/null)
   echo "$key_info" | grep -q "^ssb"
   echo "$key_info" | grep "^ssb" | grep -q "\[S\]"
 }
 
-@test "gpg-real: distinguishes master from subkey" {
+@test "gpg tool: lists a subkey and its master key apart" {
   key_info=$(gpg --list-secret-keys --keyid-format long "$NOPASS_SUBKEY_ID" 2>/dev/null)
   echo "$key_info" | grep "^ssb" | grep -q "$NOPASS_SUBKEY_ID"
   echo "$key_info" | grep "^sec" | grep -q "$NOPASS_MASTER_ID"
@@ -127,21 +128,21 @@ teardown() {
 
 # === Passphrase detection as setup.sh does it ===
 
-@test "gpg-real: pinentry-mode error succeeds for no-passphrase key" {
+@test "gpg tool: signs with --pinentry-mode error for a key without passphrase" {
   gpgconf --kill gpg-agent 2>/dev/null || true
   echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$NOPASS_SUBKEY_ID" >/dev/null 2>&1
 }
 
 # gpg asks for the passphrase and gets no pinentry, as opposed to a key it
 # does not find
-@test "gpg-real: pinentry-mode error fails for passphrase key" {
+@test "gpg tool: fails with No pinentry for a subkey with passphrase" {
   gpgconf --kill gpg-agent 2>/dev/null || true
   run bash -c "echo test | gpg --batch --pinentry-mode error --sign --local-user '$WITHPASS_SUBKEY_ID' 2>&1 >/dev/null"
   [ "$status" -ne 0 ]
   [[ "$output" == *"signing failed: No pinentry"* ]]
 }
 
-@test "gpg-real: pinentry-mode error fails for master key with passphrase" {
+@test "gpg tool: fails with No pinentry for a master key with passphrase" {
   gpgconf --kill gpg-agent 2>/dev/null || true
   run bash -c "echo test | gpg --batch --pinentry-mode error --sign --local-user '$WITHPASS_MASTER_ID' 2>&1 >/dev/null"
   [ "$status" -ne 0 ]
@@ -207,7 +208,7 @@ teardown() {
 
 # === Commit signing ===
 
-@test "gpg-real: git commit signing works with subkey" {
+@test "git tool: signs a commit with a subkey" {
   cd "$AUR_DIR"
   sed -i 's/pkgver=1.0.0/pkgver=2.0.0/' PKGBUILD
   git add PKGBUILD
@@ -221,7 +222,7 @@ teardown() {
   git log --show-signature -1 2>&1 | grep -qi "good signature\|gpg"
 }
 
-@test "gpg-real: git commit signing works with master key" {
+@test "git tool: signs a commit with a master key" {
   cd "$AUR_DIR"
   sed -i 's/pkgver=1.0.0/pkgver=2.5.0/' PKGBUILD
   git add PKGBUILD
@@ -235,7 +236,7 @@ teardown() {
   git log --show-signature -1 2>&1 | grep -qi "good signature\|gpg"
 }
 
-@test "gpg-real: unsigned commit works without GPG" {
+@test "git tool: commits without a signature" {
   cd "$AUR_DIR"
   sed -i 's/pkgver=1.0.0/pkgver=3.0.0/' PKGBUILD
   git add PKGBUILD
@@ -340,7 +341,7 @@ stage_aur_update() {
   [[ "$output" == *"GPG signing skipped"* ]]
 }
 
-@test "gpg-real: signing with nonexistent key fails" {
+@test "gpg tool: fails to sign with a key it does not hold" {
   run bash -c "echo test | gpg --batch --sign --armor --local-user 'NONEXISTENT999' 2>&1"
   [ "$status" -ne 0 ]
   [[ "$output" == *'skipped "NONEXISTENT999": No secret key'* ]]

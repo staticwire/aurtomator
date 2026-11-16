@@ -29,12 +29,12 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--
 
 1. Read `.aurtomator.conf` as data, see [Configuration file](/setup/#configuration-file). In CI, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GPG_KEY_ID` come from the workflow.
 2. Clone `ssh://aur@aur.archlinux.org/<package-name>.git` after 2 seconds, with up to 3 attempts 5 seconds apart. Clones without a PKGBUILD stop the update.
-3. Reset `master` to `origin/master` when the clone lands on a detached `HEAD`, so the push is a fast-forward.
+3. Reset `master` to `origin/master` when the clone lands on a detached `HEAD`, so the push is a fast-forward. Then apply the rules of downgrades, version jumps and alerts with `hold: true` to the step from `pkgver` of the AUR `.SRCINFO` to the new version, since `current` lags the AUR after a push by hand. Versions they hold stop the update.
 4. Warn when the PKGBUILD has no `# Maintainer:` line.
 5. Audit the PKGBUILD: `pkgver()` with the wrong strategy and mixed checksums block the update, and patches and `epoch` other than 0 warn, see [Supported packages](/supported-packages/).
-6. Set `pkgver` with `sed` and `pkgrel` to 1, or to the AUR `pkgrel` when the AUR already has the version, and the `upstream.asset_var` line, see [Values from release asset names](/features/asset-values/). When AUR `pkgver` and `pkgrel` already hold these values, read as bash reads them, the script writes `current` and `current_asset` and exits with code 2. Dry runs write neither.
+6. Set `pkgver` with `sed` and `pkgrel` to 1, or to the AUR `pkgrel` when the AUR already has the version, and the `upstream.asset_var` line, see [Values from release asset names](/features/asset-values/). When AUR `pkgver` and `pkgrel` already hold these values, read as bash reads them, the script writes `current` and `current_asset` and exits with code 2. Dry runs write neither. Lines that the update cannot write whole stop it, see [Lines the update cannot rewrite](/supported-packages/#lines-the-update-cannot-rewrite-blocked).
 7. Check every `http` and `https` source URL, whatever its checksum. Then run `updpkgsums` and `makepkg --verifysource --skippgpcheck`, unless checksums hold `SKIP` that makepkg does not write itself, see [Packages with VCS checksums](/supported-packages/#packages-with-vcs-checksums-skip). Any failure stops the update.
-8. Run `namcap` when it is installed. Its errors stop the update, and its warnings are printed.
+8. Run `namcap` when it is installed. Its errors stop the update, and so do an exit code other than 0 and lines that are no findings, such as `Error: Problem reading`. Its warnings are printed.
 9. Regenerate `.SRCINFO` with `makepkg --printsrcinfo`.
 10. Check `PKGBUILD` and `.SRCINFO` against the clone, as steps 4 and 5 of publish do. Refused files stop the update.
 11. With `--dry-run`, print the PKGBUILD diff and stop.
