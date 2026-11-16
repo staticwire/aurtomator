@@ -32,19 +32,6 @@ if [[ -z "$asset_regex" ]]; then
   exit 1
 fi
 
-# Percent-encode tag $1 for the path of an API URL, byte by byte, keeping /
-url_path() {
-  local LC_ALL=C tag="$1" out="" c i
-  for ((i = 0; i < ${#tag}; i++)); do
-    c="${tag:i:1}"
-    if [[ "$c" != [A-Za-z0-9._~/-] ]]; then
-      printf -v c '%%%02X' "'$c"
-    fi
-    out+="$c"
-  done
-  printf '%s\n' "$out"
-}
-
 # Exit with 3 while date $1 of the GitHub API lies less than ASSET_WAIT back, and with 1 after
 # that or more than ASSET_WAIT ahead, with the reason on stderr; $2 names what is missing
 wait_or_fail() {

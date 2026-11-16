@@ -142,8 +142,11 @@ _git_source_sum() {
     # fetch as it ends a download; an ignored SIGXFSZ makes a write past the limit fail, no dump
     if ! (trap '' XFSZ && ulimit -f "$((left / 1024))" && GIT_ALLOW_PROTOCOL=https git -c pack.threads=1 -c core.bigFileThreshold=16m -c fetch.unpackLimit=1 \
       -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 -C "$dir" fetch -q --depth 1 --no-tags "$url" "$refspec"); then
-      if (($(du -sb -- "$dir" | cut -f1) >= left / 1024 * 1024)); then
+      size=$(du -sb -- "$dir" | cut -f1)
+      if ((size >= left / 1024 * 1024 && left < SOURCE_FILE_MAX)); then
         log_err "The fetch of ${fragment} of $url passes the budget of 1 GiB of the package"
+      elif ((size >= left / 1024 * 1024)); then
+        log_err "The fetch of ${fragment} of $url passes the limit of 600 MiB of one source"
       else
         log_err "Could not fetch ${fragment} of $url"
       fi

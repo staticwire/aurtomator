@@ -70,7 +70,7 @@ elif [[ "$nightly_tag" == *"-"* && "$nightly_tag" != "nightly" ]]; then
   release=$(echo "$releases_json" | NIGHTLY_TAG="$nightly_tag" yq -r '[.[] | select(.tag_name | contains(strenv(NIGHTLY_TAG)))][0]')
 else
   # Pattern A: fixed tag (default)
-  release=$(github_api "${api}/releases/tags/${nightly_tag}") || {
+  release=$(github_api "${api}/releases/tags/$(url_path "$nightly_tag")") || {
     echo "Failed to fetch release tag '${nightly_tag}' for ${owner_repo}" >&2
     exit 1
   }

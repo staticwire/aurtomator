@@ -117,6 +117,19 @@ pkg_file() {
 
 # === HTTP ===
 
+# Percent-encode tag $1 for the path of an API URL, byte by byte, keeping /
+url_path() {
+  local LC_ALL=C tag="$1" out="" c i
+  for ((i = 0; i < ${#tag}; i++)); do
+    c="${tag:i:1}"
+    if [[ "$c" != [A-Za-z0-9._~/-] ]]; then
+      printf -v c '%%%02X' "'$c"
+    fi
+    out+="$c"
+  done
+  printf '%s\n' "$out"
+}
+
 # The User-Agent of every strategy request, which webpage-scrape.sh replaces with
 # upstream.user_agent. SourceForge answers a bare Mozilla/5.0 with HTTP 403.
 USER_AGENT="aurtomator/1.0"

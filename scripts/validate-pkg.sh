@@ -563,11 +563,13 @@ validate_pkg() {
   # Strategies put these fields into URL paths, where dot segments and characters such as
   # [ ? # change the request
   local field value bad_ref='[[:space:][:cntrl:]~^:?*[\]'
-  for field in project registry tag nightly_tag; do
+  for field in project registry tag nightly_tag repology archpkg; do
     value=$(pkg_get "$file" ".upstream.$field // \"\"")
     [[ -n "$value" && "$value" != "null" ]] || continue
     case "$field" in
+      # kde-tarball takes tarball names, which its own rule below holds
       project)
+        [[ "$strategy" != kde-tarball ]] || continue
         if [[ ! "$value" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ || "/$value/" == */./* || "/$value/" == */../* ]]; then
           log_err "$shown: upstream.project must be names of A-Za-z0-9._- joined by /, none of them . or ..: ${value@Q}"
           ((errors++))
@@ -576,6 +578,19 @@ validate_pkg() {
       registry)
         if [[ ! "$value" =~ ^(@[A-Za-z0-9._~-]+/)?[A-Za-z0-9._~-]+$ ]]; then
           log_err "$shown: upstream.registry must be a package name of A-Za-z0-9._~-, after an @scope/ at most: ${value@Q}"
+          ((errors++))
+        fi
+        ;;
+      # Repology names prefix some projects, as in ruby:rmagick
+      repology)
+        if [[ ! "$value" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+:-]*$ ]]; then
+          log_err "$shown: upstream.repology must be a Repology project name of A-Za-z0-9@._+:-, which starts with neither . nor - nor :: ${value@Q}"
+          ((errors++))
+        fi
+        ;;
+      archpkg)
+        if [[ ! "$value" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]; then
+          log_err "$shown: upstream.archpkg must be an Arch package name of A-Za-z0-9@._+-, which starts with neither . nor -: ${value@Q}"
           ((errors++))
         fi
         ;;

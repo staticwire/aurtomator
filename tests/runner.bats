@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 
 load helpers/setup.sh
+bats_require_minimum_version 1.5.0
 
 SETUP_DOC="$BATS_TEST_DIRNAME/../site/src/content/docs/setup.md"
 RUNNER="$BATS_TEST_DIRNAME/../aurtomator.sh"
@@ -664,6 +665,45 @@ EOF
   [ "$output" = "$copy is a link or belongs to another user; remove it, then run $REPO/aurtomator.sh again" ]
 }
 
+# Accounts that can rename what a directory holds can swap the copy between its check and its run
+@test "runner: runs no copy from a directory that others can write" {
+  local dir="$XDG_CACHE_HOME/aurtomator"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  chmod g+w "$dir"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$dir belongs to another account or lets group or others write it, and they could swap the copy of aurtomator in it before it runs; make it yours with no write access for group and others, or set XDG_CACHE_HOME to another directory" ]
+
+  chmod g-w "$dir"
+  chmod o+w "$XDG_CACHE_HOME"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [[ "$output" == "$XDG_CACHE_HOME belongs to another account or lets group or others write it"* ]]
+
+  # The sticky bit of /tmp keeps others from renaming what they do not own
+  chmod +t "$XDG_CACHE_HOME"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+}
+
+@test "runner: fetches nothing into a directory that others can write" {
+  mkdir -p "$XDG_CACHE_HOME/aurtomator"
+  chmod 0777 "$XDG_CACHE_HOME/aurtomator"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [[ "$output" == "$XDG_CACHE_HOME/aurtomator belongs to another account or lets group or others write it"* ]]
+  [ -z "$(ls -A "$XDG_CACHE_HOME/aurtomator")" ]
+}
+
+@test "runner: makes the cache directories with no access for group and others" {
+  umask 0002
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$XDG_CACHE_HOME" "$XDG_CACHE_HOME/aurtomator")" = $'700\n700' ]
+}
+
 # The XDG Base Directory Specification calls a relative path invalid
 @test "runner: ignores a relative XDG_CACHE_HOME" {
   local planted="$TEST_TMPDIR/cwd/rel-cache/aurtomator/$PINNED/scripts"
@@ -935,13 +975,26 @@ commit_pins() {
   [ "${#lines[@]}" -eq 4 ]
 }
 
-# The pins job of older templates checks out the merge commit alone
-@test "runner: check-pins of a pull request names the missing base and compares nothing" {
+# The pins job of older templates checks out the merge commit alone, and GitHub serves its
+# parents by its SHA
+@test "runner: check-pins fetches the base of a pull request that the checkout lacks" {
+  local shallow="$TEST_TMPDIR/shallow"
+  commit_pins "$TIP" v1.1.0 "$PINNED" v1.0.0
+  git -C "$REPO" config uploadpack.allowReachableSHA1InWant true
+  git clone -q --depth 1 "file://$REPO" "$shallow"
+  [ "$(readlink "$shallow/aurtomator.sh")" = "$RUNNER" ]
+  run git -C "$shallow" rev-parse --verify -q 'HEAD^1'
+  [ "$status" -ne 0 ]
+  GITHUB_EVENT_NAME=pull_request run "$shallow/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/check-updates.yml moves the pin of staticwire/aurtomator from v1.1.0 of the base branch back to v1.0.0; pull requests move pins forward alone" ]
+}
+
+@test "runner: check-pins of a pull request stops when it cannot fetch the base" {
   commit_pins "$PINNED" v1.0.0
   GITHUB_EVENT_NAME=pull_request run "$REPO/aurtomator.sh" check-pins
-  [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "The checkout holds no parent of the merge commit, so no pin is compared with the base branch; fetch-depth: 2 in the job pins adds it" ]
-  [ "${#lines[@]}" -eq 5 ]
+  [ "$status" -eq 1 ]
+  [ "$output" = "The checkout holds no parent of the merge commit, and git could not fetch it, so check-pins cannot compare the pins with the base branch; add fetch-depth: 2 to the checkout of the job pins" ]
 }
 
 # GitHub serves the commits of every fork under the name of the parent

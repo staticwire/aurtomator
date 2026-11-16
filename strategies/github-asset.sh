@@ -26,7 +26,7 @@ if [[ ${#assets[@]} -eq 0 ]]; then
   exit 1
 fi
 
-release=$(github_api "https://api.github.com/repos/${owner_repo}/releases/tags/${tag}") || {
+release=$(github_api "https://api.github.com/repos/${owner_repo}/releases/tags/$(url_path "$tag")") || {
   echo "Failed to fetch release tag '${tag}' for ${owner_repo}" >&2
   exit 1
 }

@@ -162,20 +162,68 @@ $2"
   }
   prepare_without_current 0.5.0 ""
   [ "$status" -eq 1 ]
-  [[ "$output" == *"demo has no current, and 0.5.0 is below 1.0.0 of the AUR"* ]]
+  [[ "$output" == *"demo has 1.0.0 on the AUR, and 0.5.0 is below it"* ]]
   [ ! -e "$TEST_TMPDIR/out/demo" ]
   prepare_without_current 2026111600 ""
   [ "$status" -eq 1 ]
-  [[ "$output" == *"demo has no current, and 1.0.0 of the AUR to 2026111600 is a version jump"* ]]
+  [[ "$output" == *"demo has 1.0.0 on the AUR, and 1.0.0 to 2026111600 is a version jump"* ]]
   prepare_without_current 2.0.0 $'alerts:\n  - when: major\n    hold: true\n    note: Split package'
   [ "$status" -eq 1 ]
-  [[ "$output" == *"demo has no current, and an alert holds 1.0.0 of the AUR to 2.0.0: Split package"* ]]
+  [[ "$output" == *"demo has 1.0.0 on the AUR, and an alert holds 1.0.0 to 2.0.0: Split package"* ]]
   prepare_without_current 0.5.0 "allow_downgrade: true"
   [ "$status" -eq 0 ]
   grep -qx 'pkgver=0.5.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
   prepare_without_current 1.1.0 ""
   [ "$status" -eq 0 ]
   grep -qx 'pkgver=1.1.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
+}
+
+# check-all.sh compares with current, which lags the AUR after a push by hand
+@test "update-pkg --prepare: with current below the AUR, holds a downgrade, a jump and a held alert against the AUR" {
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+  # Runs update-pkg.sh for version $1 of a YAML at current 0.9.0 that ends with $2
+  prepare_behind() {
+    create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '0.9.0'
+$2"
+    rm -rf "$TEST_TMPDIR/out"
+    run "$TEST_TMPDIR/scripts/update-pkg.sh" demo "$1" --prepare "$TEST_TMPDIR/out"
+  }
+  prepare_behind 0.9.5 ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo has 1.0.0 on the AUR, and 0.9.5 is below it"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+  prepare_behind 2026111600 "allow_version_jump: false"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo has 1.0.0 on the AUR, and 1.0.0 to 2026111600 is a version jump"* ]]
+  prepare_behind 2.0.0 $'alerts:\n  - when: major\n    hold: true\n    note: Hand edit'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo has 1.0.0 on the AUR, and an alert holds 1.0.0 to 2.0.0: Hand edit"* ]]
+  prepare_behind 0.9.5 "allow_downgrade: true"
+  [ "$status" -eq 0 ]
+  grep -qx 'pkgver=0.9.5' "$TEST_TMPDIR/out/demo/PKGBUILD"
+  prepare_behind 1.1.0 ""
+  [ "$status" -eq 0 ]
+  grep -qx 'pkgver=1.1.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
+}
+
+@test "update-pkg --prepare: with current, goes on past a .SRCINFO without a readable pkgver" {
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" latest 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"The AUR .SRCINFO of demo holds no pkgver to compare 1.1.0 with, so only current counts"* ]]
 }
 
 @test "update-pkg --prepare: hands over the AUR files when the AUR has the version in quotes" {
@@ -204,6 +252,129 @@ current: '0.9.0'"
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.0.0 --prepare "$TEST_TMPDIR/out"
   [ "$status" -eq 2 ]
   cmp "$OLD" "$TEST_TMPDIR/out/demo/PKGBUILD"
+}
+
+# The update writes pkgver= and pkgrel= lines whole, so the quote this line opens
+# would close nowhere and the text below it would turn into code
+@test "update-pkg --prepare: refuses a pkgver= line with more than one value and a comment" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')
+pkgver=1.0.0 _note='
+echo text of the AUR copy #'"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUR PKGBUILD has lines the update cannot rewrite"* ]]
+  [[ "$output" == *"11: pkgver=1.0.0 _note='"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
+@test "update-pkg --prepare: refuses a pkgrel= line with more than one value and a comment" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')
+pkgrel=1 _note='
+echo text of the AUR copy #'"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"11: pkgrel=1 _note='"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
+# In a here-document a pkgver= line is text, and the new line can end the document early
+@test "update-pkg --prepare: refuses a pkgver= line below a function" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')
+_text() {
+  cat <<'pkgver=1.1.0'
+pkgver=1.0.0
+echo text of the AUR copy
+pkgver=1.1.0
+}"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"13: pkgver=1.0.0"* ]]
+  [[ "$output" == *"15: pkgver=1.1.0"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
+@test "update-pkg --prepare: rewrites a pkgver= line with quotes and a comment" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" "'1.0.0' # stable" '"1"' "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  grep -qx 'pkgver=1.1.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
+  grep -qx 'pkgrel=1' "$TEST_TMPDIR/out/demo/PKGBUILD"
+}
+
+# Helper: an AUR repository of demo at 1.0.0 with SKIP checksums, and the tools of an update
+namcap_case() {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+}
+
+@test "update-pkg --prepare: stops when namcap fails" {
+  namcap_case
+  printf '#!/usr/bin/env bash\necho "PKGBUILD (demo) W: Missing Maintainer tag"\necho "Traceback (most recent call last):" >&2\nexit 1\n' >"$MOCK_DIR/namcap"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"namcap exited with code 1:"* ]]
+  [[ "$output" == *"Traceback (most recent call last):"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
+# namcap 3.6.0 exits 0 on a file it cannot read
+@test "update-pkg --prepare: stops on namcap lines that are no findings" {
+  namcap_case
+  printf '#!/usr/bin/env bash\necho "PKGBUILD (demo) W: Missing Maintainer tag"\necho "Error: Problem reading PKGBUILD"\n' >"$MOCK_DIR/namcap"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"namcap printed lines that are no findings:"* ]]
+  [[ "$output" == *"Error: Problem reading PKGBUILD"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
+@test "update-pkg --prepare: takes the findings of namcap of every package of a split PKGBUILD" {
+  namcap_case
+  printf '#!/usr/bin/env bash\necho "PKGBUILD (demo-a) W: Missing Maintainer tag"\necho "PKGBUILD (demo-b) I: Info"\n' >"$MOCK_DIR/namcap"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PKGBUILD (demo-a) W: Missing Maintainer tag"* ]]
 }
 
 # === update-pkg.sh --arch-out ===
@@ -1757,6 +1928,22 @@ use_source() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"The fetch of tag=v1.1.0 of https://example.com/demo.git passes the budget of 1 GiB of the package"* ]]
   [ -e "$TEST_TMPDIR/git-fetch-args" ]
+}
+
+# Below the budget, the limit of one source bounds the fetch
+@test "_git_source_sum: names the limit of one source for a fetch that passes it" {
+  setup_verify
+  make_upstream
+  head -c 300000 /dev/urandom >"$TEST_TMPDIR/upstream-work/blob"
+  tag_upstream "$TEST_TMPDIR/upstream-work" v1.2.0 2026-01-03T00:00:00Z
+  git -C "$TEST_TMPDIR/upstream-work" push -q "$TEST_TMPDIR/upstream.git" refs/tags/v1.2.0
+  mkdir "$TEST_TMPDIR/downloads"
+  hash -r
+  SOURCE_FILE_MAX=$((100 * 1024)) run _git_source_sum "demo::git+https://example.com/demo.git#tag=v1.2.0" sha256 \
+    "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/downloads"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The fetch of tag=v1.2.0 of https://example.com/demo.git passes the limit of 600 MiB of one source"* ]]
+  [[ "$output" != *"budget"* ]]
 }
 
 # The pack goes into one file under a size limit of the budget left, and a stall ends
@@ -4591,6 +4778,64 @@ make_unpushable_repo() {
   run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Prepared PKGBUILD changes the checksum arrays"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects an AUR pkgver= line with more than one value and a comment" {
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('$H1' '$H2')
+pkgver=1.0.0 _note='
+echo text of the AUR copy #'"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')
+pkgver=1.1.0
+echo text of the AUR copy #'"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUR PKGBUILD has lines the update cannot rewrite"* ]]
+  [[ "$output" == *"11: pkgver=1.0.0 _note='"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects a pkgver= line inside a quote of the AUR copy" {
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('$H1' '$H2')
+_note='
+pkgver=1.0.0
+'"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')
+_note='
+pkgver=1.1.0
+'"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"12: pkgver=1.0.0"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects a command in an AUR pkgver= line and keeps a variable" {
+  # shellcheck disable=SC2016
+  write_pkgbuild "$OLD" '$(printf 1.0.0)' '${_rel}' "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"2: pkgver=\$(printf 1.0.0)"* ]]
+  [[ "$output" != *"3: pkgrel="* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects an asset line below a function" {
+  write_asset_pkgbuild "$OLD" 2.4.6 "$V246_3" 1 "$H1"
+  write_asset_pkgbuild "$NEW" 2.5.0rc1 "$V250" 1 "$H2"
+  sed -i '/^_deb=/d' "$OLD" "$NEW"
+  echo "_deb=$V246_3" >>"$OLD"
+  echo "_deb=$V250" >>"$NEW"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 2.5.0rc1 1 _deb "$V250"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"15: _deb=$V246_3"* ]]
+}
+
+@test "check_prepared_pkgbuild: rejects an arch= line below a function" {
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
+  write_pkgbuild "$NEW" 1.1.0 1 "sha256sums=('$H3' '$H4')"
+  sed -i '/^arch=/d' "$OLD" "$NEW"
+  echo "arch=('x86_64')" | tee -a "$OLD" >>"$NEW"
+  run check_prepared_pkgbuild "$OLD" "$NEW" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"14: arch=('x86_64')"* ]]
 }
 
 @test "check_prepared_pkgbuild: rejects a new checksum array" {

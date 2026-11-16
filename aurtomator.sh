@@ -227,11 +227,15 @@ if [[ "${1:-}" == check-pins ]]; then
   cd "$root"
   use_re='^[0-9]+:[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+([^[:space:]]+)'
   release_re='#[[:space:]]*(v[0-9]+[.][0-9]+[.][0-9]+)'
-  # The merge commit of a pull request has the base branch as its first parent
+  # The merge commit of a pull request has the base branch as its first parent, which a checkout
+  # of one commit leaves out and GitHub serves by the SHA of the merge commit
   base=""
   if [[ "${GITHUB_EVENT_NAME:-}" == pull_request* ]] && ! base=$(git rev-parse --verify -q 'HEAD^1^{commit}' 2>/dev/null); then
-    echo "The checkout holds no parent of the merge commit, so no pin is compared with the base branch; fetch-depth: 2 in the job pins adds it" >&2
-    base=""
+    git fetch -q --no-tags --depth=2 origin "$(git rev-parse HEAD)" 2>/dev/null || true
+    if ! base=$(git rev-parse --verify -q 'HEAD^1^{commit}' 2>/dev/null); then
+      echo "The checkout holds no parent of the merge commit, and git could not fetch it, so check-pins cannot compare the pins with the base branch; add fetch-depth: 2 to the checkout of the job pins" >&2
+      exit 1
+    fi
   fi
   checked=()
   for file in "$workflow" .github/workflows/validate.yml; do
@@ -302,6 +306,29 @@ fi
 cache="${XDG_CACHE_HOME:-}"
 [[ "$cache" == /* ]] || cache="$HOME/.cache"
 copy="$cache/aurtomator/$sha"
+# Succeeds when no other account can rename what directory $1 holds: it belongs to the user and gives
+# group and others no write access; with $2=shared root may own it, and a sticky bit as on /tmp counts
+private_dir() {
+  local owner mode
+  [[ -d "$1" ]] && read -r owner mode < <(stat -L -c '%u %a' -- "$1") || return 1
+  mode=$((8#$mode))
+  if [[ "${2:-}" == shared ]]; then
+    [[ "$owner" == "$(id -u)" || "$owner" == 0 ]] && ((! (mode & 8#022) || mode & 8#1000))
+  else
+    [[ "$owner" == "$(id -u)" ]] && ((! (mode & 8#022)))
+  fi
+}
+# Accounts that can rename what these directories hold could swap the copy between its check and its run
+check_cache_dirs() {
+  local dir kind=shared
+  for dir in "$cache" "${copy%/*}"; do
+    if ! private_dir "$dir" "$kind"; then
+      echo "$dir belongs to another account or lets group or others write it, and they could swap the copy of aurtomator in it before it runs; make it yours with no write access for group and others, or set XDG_CACHE_HOME to another directory" >&2
+      exit 1
+    fi
+    kind=""
+  done
+}
 # Succeeds when the copy is the checkout of the pin as the fetch left it, which only the user can write
 copy_ok() {
   local status
@@ -310,6 +337,7 @@ copy_ok() {
     status=$(GIT_OPTIONAL_LOCKS=0 cache_git -C "$copy" status --porcelain --untracked-files=no 2>/dev/null) &&
     [[ -z "$status" ]]
 }
+[[ ! -e "${copy%/*}" && ! -L "${copy%/*}" ]] || check_cache_dirs
 if [[ -e "$copy" || -L "$copy" ]] && ! copy_ok; then
   if [[ -L "$copy" || ! -O "$copy" ]]; then
     echo "$copy is a link or belongs to another user; remove it, then run $0 again" >&2
@@ -320,7 +348,9 @@ if [[ -e "$copy" || -L "$copy" ]] && ! copy_ok; then
 fi
 if [[ ! -d "$copy" ]]; then
   check_release "$workflow" "${pins[0]}" "$sha"
-  mkdir -p "${copy%/*}"
+  # The XDG Base Directory Specification asks for mode 0700, which a umask of 0002 would not give
+  (umask 077 && mkdir -p "${copy%/*}")
+  check_cache_dirs
   tmp="$(mktemp -d "$copy.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
   cache_git -C "$tmp" init -q

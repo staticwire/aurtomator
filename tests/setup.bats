@@ -292,6 +292,17 @@ EOF
   grep -qx "GIT_AUTHOR_EMAIL='jane@example.com'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
+@test "setup identity: writes nothing through a .aurtomator.conf link to a missing file" {
+  mkdir "$TEST_TMPDIR/outside"
+  ln -s outside/created "$TEST_TMPDIR/.aurtomator.conf"
+  run "$TEST_TMPDIR/scripts/setup.sh" identity \
+    --git-name "Jane Doe" --git-email "jane@example.com" \
+    --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *".aurtomator.conf is a symbolic link"* ]]
+  [ ! -e "$TEST_TMPDIR/outside/created" ]
+}
+
 # ${value@Q} writes $'...' for a letter outside ASCII under the C locale, which load_config refuses
 @test "setup identity: saves a name that load_config reads back under the C locale" {
   LC_ALL=C run "$TEST_TMPDIR/scripts/setup.sh" identity \

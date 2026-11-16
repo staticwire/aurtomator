@@ -271,14 +271,15 @@ run_blocks() {
   [ "$output" = '{"contents":"read"}' ]
 }
 
-@test "ci: the pipeline job calls check-updates for pushes and same-repository pull requests" {
+# The permissions of the job raise the read-only token of a Dependabot run to write
+@test "ci: the pipeline job calls check-updates for pushes and same-repository pull requests not opened by Dependabot" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs.pipeline.uses' "$ci"
   [ "$status" -eq 0 ]
   [ "$output" = "./.github/workflows/check-updates.yml" ]
   run yq '.jobs.pipeline.if' "$ci"
   [ "$status" -eq 0 ]
-  [ "$output" = "github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository" ]
+  [ "$output" = "github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')" ]
   run yq -o=json -I=0 '.jobs.pipeline.permissions' "$ci"
   [ "$status" -eq 0 ]
   [ "$output" = '{"contents":"write","issues":"write"}' ]
@@ -290,10 +291,13 @@ run_blocks() {
   [ "$output" = "null" ]
 }
 
-@test "merge-image: runs only after lint, test, validate, pipeline and ci-ok" {
+# Dependabot pull requests skip pipeline, which ci-ok counts as passed and merge-image would not
+@test "merge-image: runs only after lint, test, validate and ci-ok" {
   run yq '.jobs["merge-image"].needs | sort | join(" ")' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = "ci-ok lint pipeline test validate" ]
+  [ "$output" = "ci-ok lint test validate" ]
+  run yq '.jobs["ci-ok"].needs | contains(["pipeline"])' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$output" = "true" ]
 }
 
 @test "merge-image: off unless the variable is true and Dependabot opened the pull request" {
@@ -1309,6 +1313,20 @@ make_builder_inputs() {
   [ "$output" = "$(printf '%s\n' ./.status ./.status/_arches ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
 }
 
+# PKGBUILD code of the package runs as builder in prepare
+@test "run-as-builder: gives builder only the lines of its package in _arches and _assets" {
+  local work="$BATS_TEST_TMPDIR/work"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  printf 'foo\t2.0-x\nbar\t3.0-x\nfoo2\t4.0-x\n' >"$BATS_TEST_TMPDIR/data/status/_assets"
+  printf 'bar\t3.0\t\t\nfoo\t2.0\taarch64\t\n' >"$BATS_TEST_TMPDIR/data/status/_arches"
+  PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step prepare "Prepare updates"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$work/.status/_assets")" = $'foo\t2.0-x' ]
+  [ "$(cat "$work/.status/_arches")" = $'foo\t2.0\taarch64\t' ]
+  [ "$(stat -c %a "$work/.status/_assets" "$work/.status/_arches")" = $'644\n644' ]
+}
+
 @test "run-as-builder: copies nothing of one package through a link" {
   local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work" input
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
@@ -1467,7 +1485,7 @@ run_add_builder_step() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   [ "$(cat "$CALLS/useradd")" = "-m -u 2000 builder" ]
-  [ "$(cat "$CALLS/find")" = "/__w /__e ( -user builder -o -group builder ) -print -quit" ]
+  [ "$(cat "$CALLS/find")" = "/__w /__e /__t ( -user builder -o -group builder ) -print -quit" ]
 }
 
 @test "check-updates: Add builder fails when the uid of builder is taken" {
@@ -1491,7 +1509,7 @@ run_add_builder_step() {
 @test "check-updates: Add builder fails when find cannot read the mounts" {
   FIND_RC=1 run_add_builder_step
   [ "$status" -ne 0 ]
-  [ "$output" = "::error::find could not search /__w and /__e for the files of builder" ]
+  [ "$output" = "::error::find could not search /__w, /__e and /__t for the files of builder" ]
 }
 
 @test "check-updates: Add builder fails when stat cannot read the owner of the runner temp" {
@@ -3175,6 +3193,15 @@ run_summary_step() {
   [ "$output" = "packages=true" ]
 }
 
+# Writes the step Close files to builder to $BATS_TEST_TMPDIR/step.sh with the mounts of the runner
+# it closes under $BATS_TEST_TMPDIR/mnt, so a run in CI changes no mount of its own job
+close_files_step() {
+  local mnt="$BATS_TEST_TMPDIR/mnt"
+  step_run check "Close files to builder" |
+    sed "s|for dir in /__t /github/home /github/workflow;|for dir in $mnt/t $mnt/home $mnt/workflow;|" >"$BATS_TEST_TMPDIR/step.sh"
+  grep -qF "for dir in $mnt/t $mnt/home $mnt/workflow;" "$BATS_TEST_TMPDIR/step.sh"
+}
+
 # PKGBUILD code of prepare runs as builder, which needs aurtomator/ alone
 @test "check-updates: Close files to builder leaves rights to others on aurtomator/ alone" {
   local ws="$BATS_TEST_TMPDIR/ws" data="$BATS_TEST_TMPDIR/data" outside="$BATS_TEST_TMPDIR/outside"
@@ -3186,7 +3213,7 @@ run_summary_step() {
   ln -s "$outside" "$ws/link"
   chmod 0755 "$ws" "$ws/packages" "$ws/.git" "$ws/aurtomator" "$ws/aurtomator/scripts" "$ws/aurtomator/scripts/check-all.sh"
   chmod 0644 "$ws/packages/foo.yml" "$ws/README.md" "$outside"
-  step_run check "Close files to builder" >"$BATS_TEST_TMPDIR/step.sh"
+  close_files_step
   run env -C "$ws" DATA="$data" sh -e "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
   run stat -c '%n %a' "$ws" "$data" "$ws/packages" "$ws/packages/foo.yml" "$ws/README.md" "$ws/.git" \
@@ -3194,6 +3221,26 @@ run_summary_step() {
   [ "$output" = "$(printf '%s\n' "$ws 711" "$data 700" "$ws/packages 700" "$ws/packages/foo.yml 600" \
     "$ws/README.md 600" "$ws/.git 700" "$ws/aurtomator 755" "$ws/aurtomator/scripts 755" \
     "$ws/aurtomator/scripts/check-all.sh 755" "$outside 644")" ]
+}
+
+# The tool cache, the home of the steps and the event files are mounts of the runner
+@test "check-updates: Close files to builder takes write access of group and others from the runner mounts" {
+  local ws="$BATS_TEST_TMPDIR/ws" mnt="$BATS_TEST_TMPDIR/mnt" outside="$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$ws" "$mnt/t/node/bin" "$mnt/home" "$mnt/workflow"
+  echo tool >"$mnt/t/node/bin/node"
+  echo event >"$mnt/workflow/event.json"
+  echo outside >"$outside"
+  ln -s "$outside" "$mnt/home/link"
+  chmod 0777 "$mnt/t" "$mnt/t/node" "$mnt/home" "$mnt/workflow"
+  chmod 0775 "$mnt/t/node/bin"
+  chmod 0666 "$mnt/t/node/bin/node" "$mnt/workflow/event.json" "$outside"
+  close_files_step
+  run env -C "$ws" DATA="$BATS_TEST_TMPDIR/data" sh -e "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  run stat -c '%n %a' "$mnt/t" "$mnt/t/node" "$mnt/t/node/bin" "$mnt/t/node/bin/node" "$mnt/home" \
+    "$mnt/workflow" "$mnt/workflow/event.json" "$outside"
+  [ "$output" = "$(printf '%s\n' "$mnt/t 755" "$mnt/t/node 755" "$mnt/t/node/bin 755" "$mnt/t/node/bin/node 644" \
+    "$mnt/home 755" "$mnt/workflow 755" "$mnt/workflow/event.json 644" "$outside 666")" ]
 }
 
 @test "check-updates: each job with a checkout closes its files before downloads and builder" {
@@ -3240,7 +3287,7 @@ run_setup_gpg_step() {
   step_run publish "Setup GPG" >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/env"
   run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_CONFIG_HOME -u GIT_CONFIG_GLOBAL PATH="$bin:$PATH" HOME="$home" \
-    GNUPGHOME="$home/gnupg" GITHUB_ENV="$BATS_TEST_TMPDIR/env" GPG_SIGNING_KEY="$1" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    GNUPGHOME="$home/gnupg" GITHUB_ENV="$BATS_TEST_TMPDIR/env" GPG_SIGNING_KEY="$1" sh -e "$BATS_TEST_TMPDIR/step.sh"
   gpgconf --homedir "$home/gnupg" --kill gpg-agent 2>/dev/null || true
 }
 
@@ -3577,7 +3624,7 @@ calling_workflow() {
   run yq '.jobs.validate.needs' "$validate"
   [ "$output" = "pins" ]
   run yq -o=json -I=0 '.jobs.pins | del(.steps[0].uses)' "$check"
-  [ "$output" = '{"runs-on":"ubuntu-latest","timeout-minutes":5,"permissions":{"contents":"read"},"steps":[{"with":{"persist-credentials":false}},{"run":"./aurtomator.sh check-pins"}]}' ]
+  [ "$output" = '{"runs-on":"ubuntu-latest","timeout-minutes":5,"permissions":{"contents":"read"},"steps":[{"with":{"persist-credentials":false,"fetch-depth":2}},{"run":"./aurtomator.sh check-pins"}]}' ]
   [ "$(yq -o=json -I=0 '.jobs.pins' "$validate")" = "$(yq -o=json -I=0 '.jobs.pins' "$check")" ]
   run yq '.jobs.pins.steps[0].uses' "$check"
   [[ "$output" =~ ^actions/checkout@[0-9a-f]{40}$ ]]
@@ -3634,120 +3681,129 @@ calling_workflow() {
   [ "$output" = "vX.Y.Z" ]
 }
 
-PROBE="$GITHUB_DIR/workflows/runner-probe.yml"
+# === check-updates.yml: Check builder ===
 
-@test "runner-probe: runs only by hand, reads the repository only and has time limits" {
-  run yq -o=json -I=0 '.on' "$PROBE"
-  [ "$status" -eq 0 ]
-  [ "$output" = '{"workflow_dispatch":null}' ]
-  run yq -o=json -I=0 '.permissions' "$PROBE"
-  [ "$output" = '{"contents":"read"}' ]
-  run yq -o=json -I=0 '.jobs | keys' "$PROBE"
-  [ "$output" = '["runner","image","container"]' ]
-  run yq '[.jobs[] | .["timeout-minutes"] > 0] | all' "$PROBE"
-  [ "$output" = "true" ]
-}
-
-@test "runner-probe: adds builder and closes the checkout as check-updates does" {
-  local name
-  run yq -o=json -I=0 '[.jobs.container.steps[].name]' "$PROBE"
-  [ "$status" -eq 0 ]
-  [ "$output" = '["Install dependencies","Add builder","Checkout","Close files to builder","The mounts","What builder reaches"]' ]
-  for name in "Add builder" "Close files to builder"; do
-    echo "$name"
-    run yq ".jobs.container.steps[] | select(.name == \"$name\") | .run" "$PROBE"
-    [ "$status" -eq 0 ]
-    [ -n "$output" ]
-    [ "$output" = "$(step_run check "$name")" ]
+@test "check-updates: each job of builder checks what builder reaches right after it closes the files" {
+  local job at
+  for job in check prepare verify publish; do
+    echo "$job"
+    at=$(step_index "$job" "Close files to builder")
+    run yq ".jobs.$job.steps[$((at + 1))].name" "$CHECK_UPDATES"
+    [ "$output" = "Check builder" ]
+    [ "$(step_run "$job" "Check builder")" = "$(step_run check "Check builder")" ]
   done
-  run yq -o=json -I=0 '.jobs.container.steps[] | select(.name == "Close files to builder") | .env' "$PROBE"
-  [ "$output" = '{"DATA":"/data"}' ]
-  run yq '.jobs.container.steps[] | select(.name == "Checkout") | .with["persist-credentials"]' "$PROBE"
-  [ "$output" = "false" ]
 }
 
-# The paths that builder may not write, in the order the probe tests them,
+# The paths that builder may not write, in the order the step tests them,
 # with the file commands under /fc
-PROBE_PATHS=(/fc/set_env /fc/add_path /fc/set_output /fc/step_summary /__w/_temp /__w/repo/repo /__w /__w/_actions /__e)
+BUILDER_PATHS=(/fc/set_env /fc/add_path /fc/set_output /fc/step_summary /__w/_temp /__w/repo/repo
+  /__w/repo/repo/aurtomator /__w /__w/_actions /__e /__t /github/home /github/workflow)
 
-# Runs the step What builder reaches; sudo logs each test it runs as builder to $CALLS/sudo and
-# passes those in $REACH, "<flag>:<path>" separated by spaces
-run_probe_reach_step() {
+# Runs the step Check builder; sudo logs each command it runs as builder to $CALLS/sudo, passes the
+# tests in $REACH, "<flag>:<path>" separated by spaces, and its find prints $WRITABLE and exits $FIND_RC
+run_check_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   CALLS="$BATS_TEST_TMPDIR/calls"
   mkdir -p "$bin" "$CALLS"
+  rm -f "$CALLS/sudo"
   cat >"$bin/sudo" <<'EOF'
 #!/usr/bin/env bash
 [[ "$1 $2" == "-u builder" ]] || exit 97
 shift 2
+echo "$*" >>"$CALLS/sudo"
 case "$1" in
-  test)
-    echo "$*" >>"$CALLS/sudo"
-    [[ " $REACH " == *" $2:$3 "* ]]
+  true) exit "$TRUE_RC" ;;
+  test) [[ " $REACH " == *" $2:$3 "* ]] ;;
+  find)
+    [[ -z "$WRITABLE" ]] || echo "$WRITABLE"
+    exit "$FIND_RC"
     ;;
   env) tr ' ' '\n' <<<"$BUILDER_ENV" | sed 's/$/=x/' ;;
   *) exit 97 ;;
 esac
 EOF
   chmod +x "$bin/sudo"
-  yq '.jobs.container.steps[] | select(.name == "What builder reaches") | .run' "$PROBE" >"$BATS_TEST_TMPDIR/step.sh"
+  step_run check "Check builder" >"$BATS_TEST_TMPDIR/step.sh"
   run env PATH="$bin:$PATH" CALLS="$CALLS" REACH="${REACH:-}" BUILDER_ENV="${BUILDER_ENV:-HOME PATH}" \
+    WRITABLE="${WRITABLE:-}" FIND_RC="${FIND_RC:-0}" TRUE_RC="${TRUE_RC:-0}" \
     GITHUB_ENV=/fc/set_env GITHUB_PATH=/fc/add_path GITHUB_OUTPUT=/fc/set_output \
     GITHUB_STEP_SUMMARY=/fc/step_summary RUNNER_TEMP=/__w/_temp GITHUB_WORKSPACE=/__w/repo/repo \
     sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
-@test "runner-probe: passes when builder reaches nothing of the runner" {
-  local expected=() path
-  run_probe_reach_step
+@test "check-updates: Check builder passes when builder reaches nothing of the runner" {
+  local expected=(true) path
+  run_check_builder_step
   [ "$status" -eq 0 ]
-  [[ "$output" != *"::error::"* ]]
-  [[ "$output" == *"The variables of builder: HOME PATH"* ]]
-  for path in "${PROBE_PATHS[@]}"; do
+  [ -z "$output" ]
+  for path in "${BUILDER_PATHS[@]}"; do
     expected+=("test -w $path")
   done
   expected+=("test -r /var/run/docker.sock" "test -w /var/run/docker.sock")
   expected+=("test -r /__w/repo/repo" "test -r /__w/repo/repo/README.md" "test -r /data")
+  expected+=("find /__w /__e /__t /github ( -writable -print -quit ) -o ( -type d ( ! -readable -o ! -executable ) -prune )")
+  expected+=(env)
   [ "$(cat "$CALLS/sudo")" = "$(printf '%s\n' "${expected[@]}")" ]
 }
 
-@test "runner-probe: fails when builder can write a file of the runner, after every test" {
+# Every test would pass when sudo itself fails
+@test "check-updates: Check builder fails first thing when sudo cannot run a command as builder" {
+  TRUE_RC=1 run_check_builder_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::sudo could not run a command as builder" ]
+  [ "$(cat "$CALLS/sudo")" = true ]
+}
+
+@test "check-updates: Check builder fails when builder can write a file of the runner, after every test" {
   local path
-  for path in "${PROBE_PATHS[@]}"; do
+  for path in "${BUILDER_PATHS[@]}"; do
     echo "$path"
-    REACH="-w:$path" run_probe_reach_step
+    REACH="-w:$path" run_check_builder_step
     [ "$status" -eq 1 ]
-    [[ "$output" == *"::error::builder passes test -w $path"* ]]
-    [ "$(grep -c '^builder: test ' <<<"$output")" -eq 14 ]
+    [ "$output" = "::error::builder passes test -w $path" ]
+    [ "$(wc -l <"$CALLS/sudo")" -eq 21 ]
   done
 }
 
-@test "runner-probe: fails when builder can read the checkout or the artifacts" {
+@test "check-updates: Check builder fails when builder can read the checkout or the artifacts" {
   local path
   for path in /__w/repo/repo /__w/repo/repo/README.md /data; do
     echo "$path"
-    REACH="-r:$path" run_probe_reach_step
+    REACH="-r:$path" run_check_builder_step
     [ "$status" -eq 1 ]
-    [[ "$output" == *"::error::builder passes test -r $path"* ]]
+    [ "$output" = "::error::builder passes test -r $path" ]
   done
 }
 
-@test "runner-probe: fails when builder can use the Docker socket" {
+@test "check-updates: Check builder fails when builder can use the Docker socket" {
   local flag
   for flag in -r -w; do
     echo "$flag"
-    REACH="$flag:/var/run/docker.sock" run_probe_reach_step
+    REACH="$flag:/var/run/docker.sock" run_check_builder_step
     [ "$status" -eq 1 ]
-    [[ "$output" == *"::error::builder passes test $flag /var/run/docker.sock"* ]]
+    [ "$output" = "::error::builder passes test $flag /var/run/docker.sock" ]
   done
 }
 
-@test "runner-probe: fails when sudo passes a variable of the runner to builder" {
+# Such as a directory of the tool cache that no test above names
+@test "check-updates: Check builder fails when builder can write anything in the runner directories" {
+  WRITABLE=/__t/node/22.0.0 run_check_builder_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::builder can write /__t/node/22.0.0" ]
+}
+
+@test "check-updates: Check builder fails when find cannot search the runner directories as builder" {
+  FIND_RC=1 run_check_builder_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::find could not search /__w, /__e, /__t and /github as builder" ]
+}
+
+@test "check-updates: Check builder fails when sudo passes a variable of the runner to builder" {
   local name
   for name in GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN RUNNER_TEMP; do
     echo "$name"
-    BUILDER_ENV="HOME $name PATH" run_probe_reach_step
+    BUILDER_ENV="HOME $name PATH" run_check_builder_step
     [ "$status" -eq 1 ]
-    [[ "$output" == *"::error::sudo passes $name to builder"* ]]
+    [ "$output" = "::error::sudo passes $name to builder" ]
   done
 }
