@@ -166,7 +166,7 @@ validate_source_urls() {
     # The server chooses the headers, and bash evaluates an operand of -ge as arithmetic,
     # where an array subscript runs a command
     local response http_code content_type
-    response=$(curl -sIL -o /dev/null -w '%{http_code} %{content_type}' \
+    response=$(curl --globoff -sIL -o /dev/null -w '%{http_code} %{content_type}' \
       --max-time 10 --max-redirs 5 "$url" 2>/dev/null) || {
       log_warn "Source URL unreachable: $url"
       errors=$((errors + 1))

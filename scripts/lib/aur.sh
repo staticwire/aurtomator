@@ -86,7 +86,8 @@ aur_commit_push() {
     git -C "$dir" -c user.signingkey="$GPG_KEY_ID" \
       -c commit.gpgsign=true \
       commit --amend --no-edit || {
-      log_warn "GPG signing failed, pushing unsigned commit"
+      log_err "GPG signing with key $GPG_KEY_ID failed, nothing pushed"
+      return 1
     }
   fi
 

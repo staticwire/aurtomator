@@ -598,11 +598,31 @@ shape() {
   [ "$(git -C "$XDG_CACHE_HOME/aurtomator/$PINNED" rev-parse HEAD)" = "$PINNED" ]
 }
 
+# Accounts that can write the cache, as with XDG_CACHE_HOME=/tmp, can make the copy during a fetch
+@test "runner: runs no copy that another process made during the fetch" {
+  local bin="$TEST_TMPDIR/race" copy="$XDG_CACHE_HOME/aurtomator/$PINNED"
+  mkdir -p "$bin"
+  cat >"$bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ " \$* " == *" fetch "* ]]; then
+  mkdir -p "$copy/scripts"
+  printf '#!/bin/sh\necho planted\n' >"$copy/scripts/setup.sh"
+  chmod +x "$copy/scripts/setup.sh"
+fi
+exec $(command -v git) "\$@"
+EOF
+  chmod +x "$bin/git"
+  PATH="$bin:$PATH" run "$REPO/aurtomator.sh" setup x
+  [ "$status" -eq 1 ]
+  [[ "$output" != *planted* ]]
+  [[ "$output" == *"$copy appeared during the fetch and is no checkout of $PINNED that only you can write; remove it, then run $REPO/aurtomator.sh again"* ]]
+}
+
 @test "runner: fetches a damaged copy again" {
   local copy="$XDG_CACHE_HOME/aurtomator/$PINNED" arg
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 0 ]
-  # A cleaner that deletes files, a file with CRLF line ends and a regular file in place of the copy
+  # Files deleted by a cleaner, CRLF line ends, and a regular file in place of the copy
   for arg in missing crlf file; do
     case "$arg" in
       missing) rm "$copy/scripts/setup.sh" ;;
@@ -878,6 +898,50 @@ EOF
   run "$REPO/aurtomator.sh" check-pins
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 2 ]
+}
+
+# Commits the workflows of the repository with the pins of $1 and the release $2, as the base
+# branch with $1 and $2, then as the head of a pull request with $3 and $4 when they are given
+commit_pins() {
+  git -C "$REPO" init -q
+  template_workflows "$1" "$2"
+  git -C "$REPO" add -A
+  git -C "$REPO" -c user.name=t -c user.email=t@example.com commit -q -m base
+  [[ -n "${3:-}" ]] || return 0
+  template_workflows "$3" "$4"
+  git -C "$REPO" -c user.name=t -c user.email=t@example.com commit -q -am head
+}
+
+# The merge commit of a pull request has the base branch as its first parent, and pull requests
+# that move a pin back to an older release run the jobs with the secrets on that release
+@test "runner: check-pins refuses a pull request that moves a pin back to an older release" {
+  commit_pins "$TIP" v1.1.0 "$PINNED" v1.0.0
+  GITHUB_EVENT_NAME=pull_request run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = ".github/workflows/check-updates.yml moves the pin of staticwire/aurtomator from v1.1.0 of the base branch back to v1.0.0; pull requests move pins forward alone" ]
+  GITHUB_EVENT_NAME=push run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+}
+
+@test "runner: check-pins passes a pull request that keeps the pins or moves them forward" {
+  commit_pins "$PINNED" v1.0.0 "$TIP" v1.1.0
+  GITHUB_EVENT_NAME=pull_request run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 4 ]
+  commit_pins "$PINNED" v1.0.0
+  git -C "$REPO" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m head
+  GITHUB_EVENT_NAME=pull_request run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 4 ]
+}
+
+# The pins job of older templates checks out the merge commit alone
+@test "runner: check-pins of a pull request names the missing base and compares nothing" {
+  commit_pins "$PINNED" v1.0.0
+  GITHUB_EVENT_NAME=pull_request run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "The checkout holds no parent of the merge commit, so no pin is compared with the base branch; fetch-depth: 2 in the job pins adds it" ]
+  [ "${#lines[@]}" -eq 5 ]
 }
 
 # GitHub serves the commits of every fork under the name of the parent

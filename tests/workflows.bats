@@ -571,11 +571,11 @@ id_of() {
     $job + " " + .with.path + " " + (.with["artifact-ids"] // ("pattern " + .with.pattern + " " + (.with["merge-multiple"] | tostring))) + " " + (.with | has("name") | tostring)' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 7 ]
-  [ "${lines[0]}" = "prepare .status $(id_of check checked) false" ]
-  [ "${lines[1]}" = "verify .status $(id_of check checked) false" ]
-  [ "${lines[2]}" = "verify handoffs pattern handoff-* true false" ]
-  [ "${lines[3]}" = "publish .status $(id_of check checked) false" ]
-  [ "${lines[4]}" = "publish handoff $(id_of verify verified) false" ]
+  [ "${lines[0]}" = "prepare /data/status $(id_of check checked) false" ]
+  [ "${lines[1]}" = "verify /data/status $(id_of check checked) false" ]
+  [ "${lines[2]}" = "verify /data/handoffs pattern handoff-* true false" ]
+  [ "${lines[3]}" = "publish /data/status $(id_of check checked) false" ]
+  [ "${lines[4]}" = "publish /data/handoff $(id_of verify verified) false" ]
   [ "${lines[5]}" = "issues .status $(id_of check checked) false" ]
   [ "${lines[6]}" = "issues .status $(id_of publish published) false" ]
 }
@@ -587,14 +587,15 @@ id_of() {
   [ "$(step_index verify "Download statuses")" -lt "$(step_index verify "Verify checksums")" ]
 }
 
-# Runs the Decide step with the name=status pairs as statuses/ and prints the step outputs;
+# Runs the Decide step with the name=status pairs in $DATA/statuses/ and prints the step outputs;
 # $README_CHANGED and $NO_README_COPY change or drop the README copy in $RESULTS
 run_decide_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" results="$BATS_TEST_TMPDIR/results" pair
-  mkdir -p "$ws/statuses" "$bin" "$results"
+  local data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$ws" "$data/statuses" "$bin" "$results"
   ln -sfn "${AURTOMATOR_TREE:-$BATS_TEST_DIRNAME/..}" "$ws/aurtomator"
   for pair in "$@"; do
-    printf '%s\n' "${pair#*=}" >"$ws/statuses/${pair%%=*}"
+    printf '%s\n' "${pair#*=}" >"$data/statuses/${pair%%=*}"
     # Outdated packages have their YAML, except those named in $NO_YAML
     if [[ "${pair#*=}" =~ ^(new_version|available_downgrade|new_build|arch_back): && " ${NO_YAML:-} " != *" ${pair%%=*} "* ]]; then
       mkdir -p "$ws/packages"
@@ -610,7 +611,7 @@ run_decide_step() {
   chmod +x "$bin/sudo" "$bin/git"
   step_run check Decide >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
-  (cd "$ws" && PATH="$bin:$PATH" RESULTS="$results" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
+  (cd "$ws" && PATH="$bin:$PATH" DATA="$data" RESULTS="$results" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
     GITHUB_REPOSITORY=owner/aur-packages AURTOMATOR_STATS_DATE=2026-11-10 timeout 60 sh -e "$BATS_TEST_TMPDIR/step.sh") \
     >"$BATS_TEST_TMPDIR/decide.out" 2>"$BATS_TEST_TMPDIR/decide.log"
   cat "$BATS_TEST_TMPDIR/output"
@@ -699,7 +700,7 @@ run_decide_step() {
     d=up_to_date e="pending: 2.0.0" f="check_failed: down" _assets=$'c\t1.0.0-b'
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a","b","c"]' ]
-  [ ! -e "$BATS_TEST_TMPDIR/ws/statuses/_deferred" ]
+  [ ! -e "$BATS_TEST_TMPDIR/data/statuses/_deferred" ]
 }
 
 @test "check-updates: Decide lists no name that Hand over would not take" {
@@ -728,7 +729,7 @@ run_decide_step() {
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "prepare=true" ]
   [ "${lines[3]}" = "to-prepare=[${expected%,}]" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/ws/statuses/_deferred")" = $'p257\np258' ]
+  [ "$(cat "$BATS_TEST_TMPDIR/data/statuses/_deferred")" = $'p257\np258' ]
   grep -qxF '::warning::2 outdated packages wait for the next run, which prepares at most 256' "$BATS_TEST_TMPDIR/decide.out"
 }
 
@@ -736,8 +737,8 @@ run_decide_step() {
   run run_decide_step pkg="new_version: 2.0.0" _without="" _deferred=other
   [ "$status" -eq 0 ]
   [ "${lines[3]}" = 'to-prepare=["pkg"]' ]
-  [ ! -e "$BATS_TEST_TMPDIR/ws/statuses/_without" ]
-  [ ! -e "$BATS_TEST_TMPDIR/ws/statuses/_deferred" ]
+  [ ! -e "$BATS_TEST_TMPDIR/data/statuses/_without" ]
+  [ ! -e "$BATS_TEST_TMPDIR/data/statuses/_deferred" ]
 }
 
 # Puts package a, its journal and the card of day $1 into the workspace of
@@ -845,7 +846,7 @@ decide_stats() {
 # the attempt before
 @test "check-updates: each job of prepare uploads the handoff of its package and attempt" {
   run yq -o=json -I=0 '[.jobs.prepare.steps[] | select(.uses | test("^actions/upload-artifact@")) | [.id, .with.name, .with.path, .with["if-no-files-found"]]]' "$CHECK_UPDATES"
-  [ "$output" = '[[null,"handoff-${{ matrix.package }}-${{ github.run_attempt }}","handoff-out/","error"]]' ]
+  [ "$output" = '[[null,"handoff-${{ matrix.package }}-${{ github.run_attempt }}","/data/handoff-out/","error"]]' ]
   run yq '.jobs.prepare.steps[] | select(.name == "Name the attempt") | .env.ATTEMPT' "$CHECK_UPDATES"
   [ "$output" = '${{ github.run_attempt }}' ]
   [ "$(step_index prepare "Name the attempt")" -eq $(($(step_index prepare "Hand over") + 1)) ]
@@ -857,7 +858,7 @@ decide_stats() {
   mkdir -p "$ws/upload/prepared/foo"
   echo pkgbuild >"$ws/upload/prepared/foo/PKGBUILD"
   step_run prepare "Name the attempt" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" ATTEMPT=3 sh -e "$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" ATTEMPT=3 DATA="$ws" sh -e "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$ws/handoff-out/3/prepared/foo/PKGBUILD")" = "pkgbuild" ]
   [ ! -e "$ws/upload" ]
@@ -879,7 +880,7 @@ run_take_step() {
   local ws="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$ws"
   step_run verify "Take the newest handoffs" >"$BATS_TEST_TMPDIR/step.sh"
-  (cd "$ws" && sh -e "$BATS_TEST_TMPDIR/step.sh") || return
+  (cd "$ws" && DATA="$ws" sh -e "$BATS_TEST_TMPDIR/step.sh") || return
   (cd "$ws/handoff" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(cat "$f")"; done)
 }
 
@@ -1098,17 +1099,22 @@ builder_steps() {
 @test "run-as-builder: takes its inputs through the environment" {
   run yq -o=json -I=0 '.runs.steps[0].env' "$BUILDER_ACTION"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"ARGS":"${{ inputs.args }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","WORK":"/work"}' ]
+  [ "$output" = '{"ARGS":"${{ inputs.args }}","HANDOFF":"${{ inputs.handoff }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","STATUSES":"${{ inputs.statuses }}","WORK":"/work"}' ]
   run yq '.inputs.readme.default' "$BUILDER_ACTION"
   [ "$output" = "false" ]
-  run yq '.inputs.package.default' "$BUILDER_ACTION"
-  [ "$output" = "" ]
+  local input
+  for input in package statuses handoff; do
+    run yq ".inputs.$input.default" "$BUILDER_ACTION"
+    [ "$output" = "" ]
+  done
 }
 
 # Runs the run-as-builder action with the inputs of step $2 of job $1 in $BATS_TEST_TMPDIR/ws,
-# with mocks of sudo, chown and git that log their calls
+# with /data of the inputs in $BATS_TEST_TMPDIR/data and mocks of sudo, chown and git that log
+# their calls
 run_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep readme package
+  local statuses handoff
   local action_dir="$BATS_TEST_TMPDIR/ws/aurtomator/.github/actions/run-as-builder"
   mkdir -p "$bin" "$action_dir"
   printf '#!/bin/sh\necho "$*" >>"$CALL_LOGS/chown.log"\n' >"$bin/chown"
@@ -1139,11 +1145,15 @@ EOF
   # shellcheck disable=SC2016
   package=${package//'${{ matrix.package }}'/${MATRIX_PACKAGE-foo}}
   package=${PACKAGE_INPUT-$package}
+  statuses=$(yq "$step | .with.statuses // \"\"" "$CHECK_UPDATES")
+  handoff=$(yq "$step | .with.handoff // \"\"" "$CHECK_UPDATES")
+  statuses=${statuses/#\/data\//$BATS_TEST_TMPDIR/data/}
+  handoff=${handoff/#\/data\//$BATS_TEST_TMPDIR/data/}
   rm -f "$SUDO_LOG"
   run env -C "$ws" PATH="$bin:$PATH" GITHUB_WORKSPACE="$ws" CALL_LOGS="$BATS_TEST_TMPDIR" \
     GITHUB_ACTION_PATH="${ACTION_PATH:-$action_dir}" SUDO_LOG="$SUDO_LOG" TEST_X_RC="${TEST_X_RC:-0}" \
     ARGS="$args" KEEP_ENV="$keep" PACKAGE="$package" README_TOO="$readme" WORK="$BATS_TEST_TMPDIR/work" \
-    bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+    STATUSES="$statuses" HANDOFF="$handoff" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Prints the command lines that sudo recorded, without the environments
@@ -1191,12 +1201,12 @@ sudo_commands() {
   [ ! -e "$BATS_TEST_TMPDIR/git.log" ]
 }
 
-# Writes the inputs that a job hands to builder into the workspace, with
-# files of other names and links beside them
+# Writes the inputs that a job hands to builder into the workspace and into
+# $BATS_TEST_TMPDIR/data, with files of other names and links beside them
 make_builder_inputs() {
-  local ws="$BATS_TEST_TMPDIR/ws"
+  local ws="$BATS_TEST_TMPDIR/ws" st="$BATS_TEST_TMPDIR/data/status" ho="$BATS_TEST_TMPDIR/data/handoff"
   echo secret >"$BATS_TEST_TMPDIR/secret"
-  mkdir -p "$ws/packages/sub" "$ws/.status" "$ws/handoff/prepared/foo" "$ws/handoff/status"
+  mkdir -p "$ws/packages/sub" "$st" "$ho/prepared/foo" "$ho/status"
   echo "name: foo" >"$ws/packages/foo.yml"
   echo "name: _x" >"$ws/packages/_x.yml"
   echo "notes" >"$ws/packages/notes.txt"
@@ -1205,29 +1215,29 @@ make_builder_inputs() {
   ln -s "$BATS_TEST_TMPDIR/secret" "$ws/packages/link.yml"
   echo "readme" >"$ws/README.md"
   echo "other" >"$ws/other.md"
-  echo "new_version: 2.0" >"$ws/.status/foo"
-  echo "newer: 0.9.0" >"$ws/.status/_upstream"
-  echo "x" >"$ws/.status/.hidden"
-  echo "x" >"$ws/.status/-dash"
-  ln -s "$BATS_TEST_TMPDIR/secret" "$ws/.status/link"
-  echo pkgbuild >"$ws/handoff/prepared/foo/PKGBUILD"
-  echo srcinfo >"$ws/handoff/prepared/foo/.SRCINFO"
-  echo base >"$ws/handoff/prepared/foo/base"
-  echo notes >"$ws/handoff/prepared/foo/notes.txt"
-  ln -s "$BATS_TEST_TMPDIR/secret" "$ws/handoff/prepared/foo/link"
-  echo "update_failed: boom" >"$ws/handoff/status/foo"
-  mkdir -p "$ws/handoff/status/sub" "$ws/handoff/prepared/foo/status" "$ws/handoff/prepared/xstatus"
-  echo x >"$ws/handoff/status/sub/x"
-  echo x >"$ws/handoff/prepared/foo/status/x"
-  echo x >"$ws/handoff/prepared/xstatus/x"
-  echo other >"$ws/handoff/other"
+  echo "new_version: 2.0" >"$st/foo"
+  echo "newer: 0.9.0" >"$st/_upstream"
+  echo "x" >"$st/.hidden"
+  echo "x" >"$st/-dash"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$st/link"
+  echo pkgbuild >"$ho/prepared/foo/PKGBUILD"
+  echo srcinfo >"$ho/prepared/foo/.SRCINFO"
+  echo base >"$ho/prepared/foo/base"
+  echo notes >"$ho/prepared/foo/notes.txt"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$ho/prepared/foo/link"
+  echo "update_failed: boom" >"$ho/status/foo"
+  mkdir -p "$ho/status/sub" "$ho/prepared/foo/status" "$ho/prepared/xstatus"
+  echo x >"$ho/status/sub/x"
+  echo x >"$ho/prepared/foo/status/x"
+  echo x >"$ho/prepared/xstatus/x"
+  echo other >"$ho/other"
 }
 
 @test "run-as-builder: copies the regular files of the expected names into the directory of builder" {
   local work="$BATS_TEST_TMPDIR/work"
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   make_builder_inputs
-  SUDO_OUT=ok run_builder_step check "Check updates"
+  SUDO_OUT=ok run_builder_step verify "Verify checksums"
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
   [ "$output" = "$(printf '%s\n' ./.status ./.status/_upstream ./.status/foo ./README.md ./handoff ./handoff/prepared \
@@ -1243,7 +1253,7 @@ make_builder_inputs() {
   local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work"
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   make_builder_inputs
-  rm -r "$ws/handoff/status"
+  rm -r "$BATS_TEST_TMPDIR/data/handoff/status"
   SUDO_OUT=ok run_builder_step verify "Verify checksums"
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1/handoff" && find . -type f | LC_ALL=C sort' _ "$work"
@@ -1254,14 +1264,34 @@ make_builder_inputs() {
   local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work" input
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   make_builder_inputs
-  for input in packages .status handoff README.md; do
-    mv "$ws/$input" "$BATS_TEST_TMPDIR/real-$input"
-    ln -s "$BATS_TEST_TMPDIR/real-$input" "$ws/$input"
+  for input in ws/packages data/status data/handoff ws/README.md; do
+    mv "$BATS_TEST_TMPDIR/$input" "$BATS_TEST_TMPDIR/real-${input##*/}"
+    ln -s "$BATS_TEST_TMPDIR/real-${input##*/}" "$BATS_TEST_TMPDIR/$input"
   done
-  SUDO_OUT=ok run_builder_step check "Check updates"
+  SUDO_OUT=ok run_builder_step verify "Verify checksums"
   [ "$status" -eq 0 ]
   [ -d "$work" ]
   [ -z "$(ls -A "$work")" ]
+}
+
+# Pull requests can commit .status/ and handoff/, which the jobs never read
+@test "run-as-builder: takes no status and no handoff from the checkout" {
+  local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work" entry
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  rm -rf "$BATS_TEST_TMPDIR/data"
+  mkdir -p "$ws/.status" "$ws/handoff/prepared/foo" "$BATS_TEST_TMPDIR/data/status" "$BATS_TEST_TMPDIR/data/handoff"
+  printf 'foo\n' >"$ws/.status/_deferred"
+  echo "new_version: 2.0" >"$ws/.status/foo"
+  echo pkgbuild >"$ws/handoff/prepared/foo/PKGBUILD"
+  for entry in "check:Check updates" "prepare:Prepare updates" "verify:Verify checksums" "publish:Publish updates"; do
+    echo "$entry"
+    rm -rf "$work"
+    SUDO_OUT=ok run_builder_step "${entry%%:*}" "${entry#*:}"
+    [ "$status" -eq 0 ]
+    [ ! -e "$work/.status" ]
+    [ ! -e "$work/handoff" ]
+  done
 }
 
 @test "run-as-builder: gives builder the files of one package when the input names it" {
@@ -1269,11 +1299,11 @@ make_builder_inputs() {
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   make_builder_inputs
   echo "name: bar" >"$ws/packages/bar.yml"
-  echo "new_version: 3.0" >"$ws/.status/bar"
-  printf 'foo\t2.0-x\nbar\t3.0-x\n' >"$ws/.status/_assets"
-  printf 'foo\t2.0\taarch64\t\nbar\t3.0\t\t\n' >"$ws/.status/_arches"
-  printf 'bar\tnotice\tNote\n' >"$ws/.status/_alerts"
-  PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step check "Check updates"
+  echo "new_version: 3.0" >"$BATS_TEST_TMPDIR/data/status/bar"
+  printf 'foo\t2.0-x\nbar\t3.0-x\n' >"$BATS_TEST_TMPDIR/data/status/_assets"
+  printf 'foo\t2.0\taarch64\t\nbar\t3.0\t\t\n' >"$BATS_TEST_TMPDIR/data/status/_arches"
+  printf 'bar\tnotice\tNote\n' >"$BATS_TEST_TMPDIR/data/status/_alerts"
+  PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step prepare "Prepare updates"
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
   [ "$output" = "$(printf '%s\n' ./.status ./.status/_arches ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
@@ -1283,11 +1313,11 @@ make_builder_inputs() {
   local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work" input
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   make_builder_inputs
-  for input in packages .status; do
-    mv "$ws/$input" "$BATS_TEST_TMPDIR/real-$input"
-    ln -s "$BATS_TEST_TMPDIR/real-$input" "$ws/$input"
+  for input in ws/packages data/status; do
+    mv "$BATS_TEST_TMPDIR/$input" "$BATS_TEST_TMPDIR/real-${input##*/}"
+    ln -s "$BATS_TEST_TMPDIR/real-${input##*/}" "$BATS_TEST_TMPDIR/$input"
   done
-  PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step check "Check updates"
+  PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step prepare "Prepare updates"
   [ "$status" -eq 0 ]
   [ -z "$(ls -A "$work")" ]
 }
@@ -1564,11 +1594,12 @@ EOF
   [[ "$output" == *"::error::"* ]]
 }
 
-# Runs the Hand over step of prepare in $BATS_TEST_TMPDIR/ws, with work/ of builder and results/
-# of root beside it; sudo runs the command of -u builder as the test user
+# Runs the Hand over step of prepare in $BATS_TEST_TMPDIR/ws, with work/ of builder, results/
+# of root and a new data/ beside it; sudo runs the command of -u builder as the test user
 run_hand_over_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
-  mkdir -p "$BATS_TEST_TMPDIR/ws" "$bin"
+  rm -rf "$BATS_TEST_TMPDIR/data"
+  mkdir -p "$BATS_TEST_TMPDIR/ws" "$BATS_TEST_TMPDIR/data" "$bin"
   cat >"$bin/sudo" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$SUDO_LOG"
@@ -1582,7 +1613,8 @@ EOF
   step_run prepare "Hand over" >"$BATS_TEST_TMPDIR/step.sh"
   # shellcheck disable=SC2086
   run env -C "$BATS_TEST_TMPDIR/ws" PATH="$bin:$PATH" SUDO_LOG="$SUDO_LOG" WORK="$BATS_TEST_TMPDIR/work" \
-    RESULTS="$BATS_TEST_TMPDIR/results" PACKAGE="${HAND_OVER_PACKAGE:-}" sh ${HAND_OVER_SHELL:--e} "$BATS_TEST_TMPDIR/step.sh"
+    DATA="$BATS_TEST_TMPDIR/data" RESULTS="$BATS_TEST_TMPDIR/results" PACKAGE="${HAND_OVER_PACKAGE:-}" \
+    sh ${HAND_OVER_SHELL:--e} "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Writes the files that prepare hands over for the package foo into the
@@ -1609,10 +1641,10 @@ make_handoff() {
   echo other >"$work/handoff/other"
   run_hand_over_step
   [ "$status" -eq 0 ]
-  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
+  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$BATS_TEST_TMPDIR/data"
   [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/foo' ]
-  [ "$(stat -c %a "$ws/upload/prepared/foo/PKGBUILD")" = "644" ]
-  [ "$(cat "$ws/upload/status/foo")" = "updated: 2.0" ]
+  [ "$(stat -c %a "$BATS_TEST_TMPDIR/data/upload/prepared/foo/PKGBUILD")" = "644" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/data/upload/status/foo")" = "updated: 2.0" ]
 }
 
 @test "check-updates: Hand over takes only the package of its job" {
@@ -1623,12 +1655,12 @@ make_handoff() {
   echo "update_failed: forged" >"$work/handoff/status/bar"
   HAND_OVER_PACKAGE=foo run_hand_over_step
   [ "$status" -eq 0 ]
-  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
+  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$BATS_TEST_TMPDIR/data"
   [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/foo' ]
   rm -rf "$ws"
   run_hand_over_step
   [ "$status" -eq 0 ]
-  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
+  run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$BATS_TEST_TMPDIR/data"
   [ "$output" = $'./prepared/bar/PKGBUILD\n./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/bar\n./status/foo' ]
 }
 
@@ -1650,8 +1682,8 @@ make_handoff() {
     fi
     run_hand_over_step
     [ "$status" -eq 0 ]
-    [ ! -e "$ws/upload/prepared/foo/PKGBUILD" ]
-    [ -f "$ws/upload/prepared/foo/base" ]
+    [ ! -e "$BATS_TEST_TMPDIR/data/upload/prepared/foo/PKGBUILD" ]
+    [ -f "$BATS_TEST_TMPDIR/data/upload/prepared/foo/base" ]
   done
 }
 
@@ -1673,7 +1705,7 @@ make_handoff() {
     fi
     run_hand_over_step
     [ "$status" -eq 0 ]
-    run find "$ws/upload" "$ws/statuses" "$BATS_TEST_TMPDIR/results/packages" -type f
+    run find "$BATS_TEST_TMPDIR/data/upload" "$BATS_TEST_TMPDIR/data/statuses" "$BATS_TEST_TMPDIR/results/packages" -type f
     [ "$status" -eq 0 ]
     case "$dir" in
       handoff) [[ "$output" != *"/upload/"* && "$output" == *"/statuses/foo"* ]] ;;
@@ -1702,9 +1734,9 @@ make_handoff() {
   ln -s "$BATS_TEST_TMPDIR/secret" "$work/packages/link.yml"
   run_hand_over_step
   [ "$status" -eq 0 ]
-  run env LC_ALL=C ls -A "$ws/statuses"
+  run env LC_ALL=C ls -A "$BATS_TEST_TMPDIR/data/statuses"
   [ "$output" = $'_alerts\n_upstream\nfoo' ]
-  [ "$(<"$ws/statuses/foo")" = "updated: 2.0" ]
+  [ "$(<"$BATS_TEST_TMPDIR/data/statuses/foo")" = "updated: 2.0" ]
   [ "$(<"$results/README.md")" = "new table" ]
   run env LC_ALL=C ls -A "$results/packages"
   [ "$output" = "foo.yml" ]
@@ -1738,7 +1770,7 @@ make_handoff() {
     rm -r "$BATS_TEST_TMPDIR/work/handoff/status"
     HAND_OVER_SHELL="$shell" run_hand_over_step
     [ "$status" -eq 0 ]
-    run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$ws"
+    run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$BATS_TEST_TMPDIR/data"
     [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base' ]
   done
 }
@@ -1747,22 +1779,23 @@ make_handoff() {
   local ws="$BATS_TEST_TMPDIR/ws"
   run_hand_over_step
   [ "$status" -eq 0 ]
-  [ -d "$ws/upload" ]
-  [ -d "$ws/statuses" ]
-  [ -z "$(ls -A "$ws/upload")" ]
-  [ -z "$(ls -A "$ws/statuses")" ]
+  [ -d "$BATS_TEST_TMPDIR/data/upload" ]
+  [ -d "$BATS_TEST_TMPDIR/data/statuses" ]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/data/upload")" ]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/data/statuses")" ]
+  [ -z "$(ls -A "$ws")" ]
   [ ! -s "$SUDO_LOG" ]
 }
 
 # Workspace with aurtomator linked in, package a at 1.0 before the run and
-# at $1 after it, its status $2, and a journal of one run before
+# at $1 after it, its status $2 in data/statuses/, and a journal of one run before
 make_stats_ws() {
   local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results"
-  mkdir -p "$ws/packages" "$ws/statuses" "$ws/stats" "$results/packages"
+  mkdir -p "$ws/packages" "$BATS_TEST_TMPDIR/data/statuses" "$ws/stats" "$results/packages"
   ln -sfn "$BATS_TEST_DIRNAME/.." "$ws/aurtomator"
   printf 'name: a\nstrategy: github-release\nupstream:\n  project: o/a\ncurrent: 1.0\n' >"$ws/packages/a.yml"
   sed "s/^current: .*/current: $1/" "$ws/packages/a.yml" >"$results/packages/a.yml"
-  printf '%s\n' "$2" >"$ws/statuses/a"
+  printf '%s\n' "$2" >"$BATS_TEST_TMPDIR/data/statuses/a"
   printf '%s\n' 'time,package,event,version,previous,run' '2026-11-08T05:17:41Z,a,tracked,1.0,,6' >"$ws/stats/events.csv"
 }
 
@@ -1770,7 +1803,7 @@ make_stats_ws() {
 # default owner/aur-packages, at a fixed time and run
 run_stats_step() {
   step_run publish "Record statistics" >"$BATS_TEST_TMPDIR/stats-step.sh"
-  (cd "$BATS_TEST_TMPDIR/ws" && RESULTS="$BATS_TEST_TMPDIR/results" GITHUB_REPOSITORY="${REPO-owner/aur-packages}" \
+  (cd "$BATS_TEST_TMPDIR/ws" && DATA="$BATS_TEST_TMPDIR/data" RESULTS="$BATS_TEST_TMPDIR/results" GITHUB_REPOSITORY="${REPO-owner/aur-packages}" \
     GITHUB_RUN_ID=7 AURTOMATOR_STATS_TIME=2026-11-10T05:17:22Z AURTOMATOR_STATS_DATE=2026-11-10 \
     timeout 60 sh -e "$BATS_TEST_TMPDIR/stats-step.sh")
 }
@@ -2295,7 +2328,7 @@ done
 # gh answers with the JSON of the API and applies --jq to it. Recursive
 # trees also list each directory, as an entry of type tree.
 case "$endpoint" in
-  repos/owner/fork/git/ref/heads/main) json="{\"object\": {\"sha\": \"$GH_HEAD\", \"type\": \"commit\"}}" ;;
+  "repos/owner/fork/git/ref/heads/${GH_REF:-main}") json="{\"object\": {\"sha\": \"$GH_HEAD\", \"type\": \"commit\"}}" ;;
   repos/owner/fork/git/commits/*) json='{"tree": {"sha": "tree-of-head"}}' ;;
   "repos/owner/fork/git/trees/tree-of-head?recursive=1")
     [[ -z "${GH_TREE_FAIL:-}" ]] || exit 1
@@ -2312,7 +2345,7 @@ case "$endpoint" in
     json='{"sha": "tree"}'
     ;;
   repos/owner/fork/git/commits) json='{"sha": "commit"}' ;;
-  repos/owner/fork/git/refs/heads/main) json='{}' ;;
+  "repos/owner/fork/git/refs/heads/${GH_REF:-main}") json='{}' ;;
   *) exit 1 ;;
 esac
 if [[ -n "$filter" ]]; then
@@ -2328,7 +2361,7 @@ EOF
   : >"$GH_LOG.blobs"
   : >"$SUDO_LOG"
   step_run publish "Commit changes via API" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" SUDO_LOG="$SUDO_LOG" REPO=owner/fork BRANCH=main \
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" SUDO_LOG="$SUDO_LOG" REPO=owner/fork BRANCH="${COMMIT_BRANCH:-main}" GH_REF="${GH_REF:-main}" \
     GH_HEAD="${GH_HEAD:-$(git -C "$ws" rev-parse HEAD)}" GH_TREE_FAIL="${GH_TREE_FAIL:-}" \
     GH_TREE="${GH_TREE:-$(git -C "$ws" ls-tree -r HEAD | awk '{ print $4 " " $3 }')}" \
     RESULTS="$BATS_TEST_TMPDIR/results" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -2719,11 +2752,11 @@ make_runner_repo() {
   run yq -o=json -I=0 '[.jobs.issues.steps[] | select(.uses | test("^actions/download-artifact@")) | [.with["artifact-ids"], .with.path, .if]]' "$CHECK_UPDATES"
   [ "$output" = "[[\"$(id_of check checked)\",\".status\",\"needs.publish.result == 'skipped' && needs.check.outputs.checked-id != ''\"],[\"$(id_of publish published)\",\".status\",\"needs.publish.result != 'skipped'\"]]" ]
   run yq -o=json -I=0 '.jobs.publish.steps[] | select(.with.name == "published") | [.with.path, .if, .with["if-no-files-found"]]' "$CHECK_UPDATES"
-  [ "$output" = '["statuses/","always()","error"]' ]
+  [ "$output" = '["/data/statuses/","always()","error"]' ]
   run yq '.jobs.publish.steps[] | select(.name == "Hand over") | .if' "$CHECK_UPDATES"
   [ "$output" = "always() && steps.stop.outcome == 'success'" ]
   run yq -o=json -I=0 '.jobs.check.steps[] | select(.name == "Upload statuses") | [.with.name, .with.path, .with["if-no-files-found"]]' "$CHECK_UPDATES"
-  [ "$output" = "[\"checked\",\"statuses/\",\"$upload\"]" ]
+  [ "$output" = "[\"checked\",\"/data/statuses/\",\"$upload\"]" ]
 }
 
 # Runs step $1 of the issues job in a workspace without .status/, as after a
@@ -3017,7 +3050,7 @@ run_bare_issues_step() {
   run yq '[.jobs.prepare.steps[].name] | join(",")' "$CHECK_UPDATES"
   [[ "$output" == *"Prepare updates,Stop builder,Hand over,Name the attempt,Upload handoff"* ]]
   run yq '.jobs.verify.steps[] | select(.name == "Upload verified handoff") | .with.path' "$CHECK_UPDATES"
-  [ "$output" = "upload/" ]
+  [ "$output" = "/data/upload/" ]
 }
 
 @test "check-updates: the publish step gets no GitHub token" {
@@ -3038,7 +3071,7 @@ run_bare_issues_step() {
 
 @test "check-updates: publish takes the statuses from the check job" {
   run yq '.jobs.publish.steps[] | select(.name == "Download statuses") | .with["artifact-ids"] + " " + .with.path' "$CHECK_UPDATES"
-  [ "$output" = "$(id_of check checked) .status" ]
+  [ "$output" = "$(id_of check checked) /data/status" ]
   run yq '.jobs.publish.steps[] | select(.name == "Download verified handoff") | .if' "$CHECK_UPDATES"
   [ "$output" = "needs.verify.result == 'success'" ]
 }
@@ -3078,10 +3111,10 @@ run_bare_issues_step() {
 
 # Runs Find packages to push in $BATS_TEST_TMPDIR/ws and prints its outputs
 run_find_packages_step() {
-  mkdir -p "$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$BATS_TEST_TMPDIR/ws" "$BATS_TEST_TMPDIR/data"
   step_run publish "Find packages to push" >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/output"
-  (cd "$BATS_TEST_TMPDIR/ws" && GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" sh -e "$BATS_TEST_TMPDIR/step.sh")
+  (cd "$BATS_TEST_TMPDIR/ws" && DATA="$BATS_TEST_TMPDIR/data" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" sh -e "$BATS_TEST_TMPDIR/step.sh")
   cat "$BATS_TEST_TMPDIR/output"
 }
 
@@ -3122,7 +3155,10 @@ run_summary_step() {
 }
 
 @test "check-updates: Find packages to push counts a prepared package only" {
-  local dir="$BATS_TEST_TMPDIR/ws/handoff"
+  local dir="$BATS_TEST_TMPDIR/data/handoff"
+  # Pull requests can commit handoff/, which publish never reads
+  mkdir -p "$BATS_TEST_TMPDIR/ws/handoff/prepared/foo"
+  echo pkgbuild >"$BATS_TEST_TMPDIR/ws/handoff/prepared/foo/PKGBUILD"
   run run_find_packages_step
   [ "$status" -eq 0 ]
   [ "$output" = "packages=false" ]
@@ -3137,6 +3173,128 @@ run_summary_step() {
   run run_find_packages_step
   [ "$status" -eq 0 ]
   [ "$output" = "packages=true" ]
+}
+
+# PKGBUILD code of prepare runs as builder, which needs aurtomator/ alone
+@test "check-updates: Close files to builder leaves rights to others on aurtomator/ alone" {
+  local ws="$BATS_TEST_TMPDIR/ws" data="$BATS_TEST_TMPDIR/data" outside="$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$ws/packages" "$ws/.git" "$ws/aurtomator/scripts"
+  echo "name: foo" >"$ws/packages/foo.yml"
+  echo readme >"$ws/README.md"
+  echo code >"$ws/aurtomator/scripts/check-all.sh"
+  echo outside >"$outside"
+  ln -s "$outside" "$ws/link"
+  chmod 0755 "$ws" "$ws/packages" "$ws/.git" "$ws/aurtomator" "$ws/aurtomator/scripts" "$ws/aurtomator/scripts/check-all.sh"
+  chmod 0644 "$ws/packages/foo.yml" "$ws/README.md" "$outside"
+  step_run check "Close files to builder" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" DATA="$data" sh -e "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  run stat -c '%n %a' "$ws" "$data" "$ws/packages" "$ws/packages/foo.yml" "$ws/README.md" "$ws/.git" \
+    "$ws/aurtomator" "$ws/aurtomator/scripts" "$ws/aurtomator/scripts/check-all.sh" "$outside"
+  [ "$output" = "$(printf '%s\n' "$ws 711" "$data 700" "$ws/packages 700" "$ws/packages/foo.yml 600" \
+    "$ws/README.md 600" "$ws/.git 700" "$ws/aurtomator 755" "$ws/aurtomator/scripts 755" \
+    "$ws/aurtomator/scripts/check-all.sh 755" "$outside 644")" ]
+}
+
+@test "check-updates: each job with a checkout closes its files before downloads and builder" {
+  local job at key
+  for job in check prepare verify publish; do
+    echo "$job"
+    at=$(step_index "$job" "Close files to builder")
+    [ "$at" -eq $(($(step_index "$job" "Checkout aurtomator") + 1)) ]
+    [ "$(step_run "$job" "Close files to builder")" = "$(step_run check "Close files to builder")" ]
+    run yq ".jobs.$job.steps | to_entries[] | select(.value.uses // \"\" | test(\"^actions/download-artifact@|run-as-builder\$\")) | .key" "$CHECK_UPDATES"
+    [ "${#lines[@]}" -gt 0 ]
+    for key in "${lines[@]}"; do
+      [ "$key" -gt "$at" ]
+    done
+  done
+  run yq '[.jobs.issues.steps[] | select(.name == "Close files to builder")] | length' "$CHECK_UPDATES"
+  [ "$output" = "0" ]
+}
+
+# Pull requests can commit any directory into the checkout, and the jobs that check it out
+# read and write the files of the run under /data alone
+@test "check-updates: the jobs with a checkout keep the files of the run in /data" {
+  run yq '[(.jobs.check, .jobs.prepare, .jobs.verify, .jobs.publish) | .steps[] |
+    select(.uses // "" | test("^actions/(up|down)load-artifact@")) | .with.path] |
+    (length | tostring) + " " + (map(test("^/data/[a-z-]+/?$")) | all | tostring)' "$CHECK_UPDATES"
+  [ "$output" = "9 true" ]
+  run yq '[.jobs[].steps[] | select(.uses // "" | test("run-as-builder$")) | .with | (.statuses, .handoff) | select(.)] |
+    sort | unique | join(",")' "$CHECK_UPDATES"
+  [ "$output" = "/data/handoff,/data/status" ]
+  run yq '[.jobs[].steps[] | select(.env.DATA) | .env.DATA] | unique | join(",")' "$CHECK_UPDATES"
+  [ "$output" = "/data" ]
+}
+
+# Runs Setup GPG with GPG_SIGNING_KEY=$1 in a new keyring; sudo runs the command of
+# -u builder as the test user, and the agent has no pinentry
+run_setup_gpg_step() {
+  local bin="$BATS_TEST_TMPDIR/bin" home="$BATS_TEST_TMPDIR/home"
+  rm -rf "$home"
+  mkdir -p "$bin" "$home/gnupg"
+  chmod 0700 "$home/gnupg"
+  echo "pinentry-program /usr/bin/false" >"$home/gnupg/gpg-agent.conf"
+  printf '#!/usr/bin/env bash\n[[ "$1 $2" == "-u builder" ]] || exit 97\nshift 2\nexec "$@"\n' >"$bin/sudo"
+  chmod +x "$bin/sudo"
+  step_run publish "Setup GPG" >"$BATS_TEST_TMPDIR/step.sh"
+  : >"$BATS_TEST_TMPDIR/env"
+  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_CONFIG_HOME -u GIT_CONFIG_GLOBAL PATH="$bin:$PATH" HOME="$home" \
+    GNUPGHOME="$home/gnupg" GITHUB_ENV="$BATS_TEST_TMPDIR/env" GPG_SIGNING_KEY="$1" bash -e "$BATS_TEST_TMPDIR/step.sh"
+  gpgconf --homedir "$home/gnupg" --kill gpg-agent 2>/dev/null || true
+}
+
+# Prints the armored key $2 of a new key: secret, public or protected
+make_gpg_key() {
+  local dir="$BATS_TEST_TMPDIR/keys-$1" pass=() rc=0
+  mkdir -m 0700 "$dir"
+  [[ "$1" != protected ]] || pass=(--passphrase secret)
+  GNUPGHOME="$dir" gpg --batch --pinentry-mode loopback --passphrase "${pass[1]:-}" \
+    --quick-gen-key "Lab <lab@example.invalid>" ed25519 sign never >/dev/null 2>&1 || rc=$?
+  if [[ "$1" == public ]]; then
+    GNUPGHOME="$dir" gpg --batch --armor --export || rc=$?
+  else
+    GNUPGHOME="$dir" gpg --batch --pinentry-mode loopback --passphrase "${pass[1]:-}" --armor --export-secret-keys || rc=$?
+  fi
+  gpgconf --homedir "$dir" --kill gpg-agent 2>/dev/null || true
+  return "$rc"
+}
+
+@test "check-updates: Setup GPG takes the ID of a secret key that signs" {
+  local key
+  key=$(make_gpg_key secret)
+  run_setup_gpg_step "$key"
+  [ "$status" -eq 0 ]
+  [[ "$(<"$BATS_TEST_TMPDIR/env")" =~ ^GPG_KEY_ID=[0-9A-F]{16}$ ]]
+  [ "$(env -u XDG_CONFIG_HOME -u GIT_CONFIG_GLOBAL HOME="$BATS_TEST_TMPDIR/home" git config --global user.signingkey)" = \
+    "$(cut -d= -f2 "$BATS_TEST_TMPDIR/env")" ]
+}
+
+# Public key blocks import with no secret key, and git would then sign nothing
+@test "check-updates: Setup GPG fails on a secret with no key that can sign" {
+  local kind key
+  for kind in public protected junk; do
+    echo "$kind"
+    key=junk
+    [[ "$kind" == junk ]] || key=$(make_gpg_key "$kind")
+    run_setup_gpg_step "$key"
+    [ "$status" -eq 1 ]
+    if [[ "$kind" == junk ]]; then
+      [[ "$output" == *"::error::gpg could not import GPG_SIGNING_KEY"* ]]
+    else
+      [[ "$output" == *"::error::GPG_SIGNING_KEY holds no secret key that can sign"* ]]
+    fi
+    [ ! -s "$BATS_TEST_TMPDIR/env" ]
+  done
+}
+
+# Branch names can hold # and %, which a URL path reads as a fragment and an escape
+@test "check-updates: the commit step escapes the branch in the paths of the API" {
+  make_commit_repo README.md="new table"
+  COMMIT_BRANCH='fix/a#b%cü' GH_REF='fix/a%23b%25c%C3%BC' run_commit_step
+  [ "$status" -eq 0 ]
+  grep -qxF "api repos/owner/fork/git/ref/heads/fix/a%23b%25c%C3%BC --jq .object.sha" "$GH_LOG"
+  grep -qxF "api repos/owner/fork/git/refs/heads/fix/a%23b%25c%C3%BC -f sha=commit -F force=false --method PATCH" "$GH_LOG"
 }
 
 NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
@@ -3490,14 +3648,22 @@ PROBE="$GITHUB_DIR/workflows/runner-probe.yml"
   [ "$output" = "true" ]
 }
 
-@test "runner-probe: adds builder as check-updates does" {
+@test "runner-probe: adds builder and closes the checkout as check-updates does" {
+  local name
   run yq -o=json -I=0 '[.jobs.container.steps[].name]' "$PROBE"
   [ "$status" -eq 0 ]
-  [ "$output" = '["Install dependencies","Add builder","The mounts","What builder reaches"]' ]
-  run yq '.jobs.container.steps[] | select(.name == "Add builder") | .run' "$PROBE"
-  [ "$status" -eq 0 ]
-  [ -n "$output" ]
-  [ "$output" = "$(step_run check "Add builder")" ]
+  [ "$output" = '["Install dependencies","Add builder","Checkout","Close files to builder","The mounts","What builder reaches"]' ]
+  for name in "Add builder" "Close files to builder"; do
+    echo "$name"
+    run yq ".jobs.container.steps[] | select(.name == \"$name\") | .run" "$PROBE"
+    [ "$status" -eq 0 ]
+    [ -n "$output" ]
+    [ "$output" = "$(step_run check "$name")" ]
+  done
+  run yq -o=json -I=0 '.jobs.container.steps[] | select(.name == "Close files to builder") | .env' "$PROBE"
+  [ "$output" = '{"DATA":"/data"}' ]
+  run yq '.jobs.container.steps[] | select(.name == "Checkout") | .with["persist-credentials"]' "$PROBE"
+  [ "$output" = "false" ]
 }
 
 # The paths that builder may not write, in the order the probe tests them,
@@ -3541,6 +3707,7 @@ EOF
     expected+=("test -w $path")
   done
   expected+=("test -r /var/run/docker.sock" "test -w /var/run/docker.sock")
+  expected+=("test -r /__w/repo/repo" "test -r /__w/repo/repo/README.md" "test -r /data")
   [ "$(cat "$CALLS/sudo")" = "$(printf '%s\n' "${expected[@]}")" ]
 }
 
@@ -3551,7 +3718,17 @@ EOF
     REACH="-w:$path" run_probe_reach_step
     [ "$status" -eq 1 ]
     [[ "$output" == *"::error::builder passes test -w $path"* ]]
-    [ "$(grep -c '^builder: test ' <<<"$output")" -eq 11 ]
+    [ "$(grep -c '^builder: test ' <<<"$output")" -eq 14 ]
+  done
+}
+
+@test "runner-probe: fails when builder can read the checkout or the artifacts" {
+  local path
+  for path in /__w/repo/repo /__w/repo/repo/README.md /data; do
+    echo "$path"
+    REACH="-r:$path" run_probe_reach_step
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::builder passes test -r $path"* ]]
   done
 }
 

@@ -83,7 +83,7 @@ request_done() {
   host_memory || return 0
   if [[ "$1" == 124 || "$1" == 137 ]] && { read -r url && read -r check; } <"$AURTOMATOR_HOSTS_DIR/request"; then
     printf '%s\n' "$url"
-    code=$(curl -sI -o /dev/null --max-time 10 --proto '=https' -A "$USER_AGENT" -w '%{http_code}' "$check" 2>/dev/null) || rc=$?
+    code=$(curl --globoff -sI -o /dev/null --max-time 10 --proto '=https' -A "$USER_AGENT" -w '%{http_code}' "$check" 2>/dev/null) || rc=$?
     if ((rc == 28)) && [[ "$code" == 000 ]]; then
       remember_host "$url"
     fi
@@ -278,6 +278,7 @@ handed_failure() {
 }
 
 updated=0
+dry_runs=0
 checked=0
 
 # Prints the version the check run found, as check-update.sh prints it; it prints
@@ -538,6 +539,8 @@ run_package() {
     fi
     return
   fi
+  # CI shows the output of this script alone, so the warnings of a check that passed go there
+  cat -- "$err_file" >&2
   rm -f "$err_file"
 
   # Up-to-date packages with asset_regex get a rebuild when the asset value of
@@ -694,6 +697,7 @@ run_package() {
   update_rc=0
   bounded "$UPDATE_TIMEOUT" "${cmd[@]}" 2>"$err_file" || update_rc=$?
   update_err=$(script_error "$update_rc" "$err_file" "$UPDATE_TIMEOUT")
+  cat -- "$err_file" >&2
   rm -f "$err_file"
 
   case "$MODE:$update_rc" in
@@ -702,8 +706,14 @@ run_package() {
       echo "$available" >"${STATUS_DIR}/${pkg_name}"
       ;;
     *:0)
-      echo "$pushed" >"${STATUS_DIR}/${pkg_name}"
-      ((updated++)) || true
+      if [[ -n "$DRY_RUN" ]]; then
+        # Dry runs push nothing, so the version stays one to push
+        echo "$available" >"${STATUS_DIR}/${pkg_name}"
+        ((dry_runs++)) || true
+      else
+        echo "$pushed" >"${STATUS_DIR}/${pkg_name}"
+        ((updated++)) || true
+      fi
       ;;
     *:2)
       # AUR already at this version, YAML synced by update-pkg.sh or publish-pkg.sh
@@ -789,7 +799,9 @@ for status_file in "$STATUS_DIR"/*; do
 done
 
 echo ""
-log_info "Checked: $checked, Updated: $updated, Errors: $errors"
+summary="Checked: $checked, Updated: $updated"
+[[ -z "$DRY_RUN" ]] || summary+=", Dry runs: $dry_runs"
+log_info "$summary, Errors: $errors"
 
 # Hand the statuses to the publish run
 if [[ "$MODE" == "prepare" ]]; then

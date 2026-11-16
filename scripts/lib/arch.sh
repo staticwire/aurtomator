@@ -365,7 +365,7 @@ arch_urls() {
 probe_url() {
   local response code type
   request_begin "$1" || return 2
-  response=$(curl -sIL -o /dev/null -w '%{http_code} %{content_type}' \
+  response=$(curl --globoff -sIL -o /dev/null -w '%{http_code} %{content_type}' \
     --max-time 10 --max-redirs 5 "$1" 2>/dev/null) || {
     request_end
     return 2

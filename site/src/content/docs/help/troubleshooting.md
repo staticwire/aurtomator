@@ -22,13 +22,14 @@ title: Troubleshooting
 
 ## GPG: No secret key / unusable secret key
 
-**Symptom:** `gpg --sign` fails with "No secret key" or "Unusable secret key".
+**Symptom:** `gpg --sign` fails with "No secret key" or "Unusable secret key". In CI, the step `Setup GPG` fails with `GPG_SIGNING_KEY holds no secret key that can sign`, or a package gets `update_failed` with `GPG signing with key <id> failed, nothing pushed`.
 
 **Causes:**
 
 1. The key ID is wrong. `gpg --list-secret-keys --keyid-format long` lists your keys.
 2. The subkey expired. `gpg --quick-set-expire <master-key-fingerprint> 1y <subkey-fingerprint>` extends it, and `./aurtomator.sh setup gpg secrets` sets the secret again, since CI holds the earlier copy.
 3. The key is in another keyring, such as one of another `GNUPGHOME`.
+4. The secret `GPG_SIGNING_KEY` holds the public key block, or a key with a passphrase. `./aurtomator.sh setup gpg secrets` sets a copy without the passphrase, see [GPG signing](/gpg-signing/).
 
 ## gh: not logged in / authentication failed
 

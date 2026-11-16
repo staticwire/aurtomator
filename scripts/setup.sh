@@ -177,10 +177,14 @@ check_ssh_key() {
     return 1
   fi
 
-  # ssh-keygen -y prints the public key only for a private key it opens without a passphrase
-  local key_check
-  key_check=$(ssh-keygen -y -f "$AUR_SSH_KEY" -P "" 2>&1) || true
-  if [[ "$key_check" == ssh-* ]]; then
+  # ssh-keygen -y prints the public key only for a private key it opens without a passphrase.
+  # Keys of the sk- types sign only with their security key, which CI does not have.
+  local key_check key_rc=0
+  key_check=$(ssh-keygen -y -f "$AUR_SSH_KEY" -P "" 2>&1) || key_rc=$?
+  if ((key_rc == 0)) && [[ "$key_check" == sk-* ]]; then
+    fail "SSH key needs a security key, which CI does not have: $AUR_SSH_KEY"
+    return 1
+  elif ((key_rc == 0)); then
     return 0
   elif echo "$key_check" | grep -qi "incorrect passphrase"; then
     fail "SSH key has a passphrase: $AUR_SSH_KEY"
@@ -424,11 +428,13 @@ setup_secrets() {
     printf "\n  Setting secrets on %s:\n" "$gh_repo"
 
     # gh prints a line for each secret on stdout and its errors on stderr
+    local failed=false
     if [[ -n "$GIT_AUTHOR_NAME" ]]; then
       if echo "$GIT_AUTHOR_NAME" | gh secret set AUR_GIT_NAME -R "$gh_repo" >/dev/null; then
         ok "AUR_GIT_NAME"
       else
         fail "AUR_GIT_NAME"
+        failed=true
       fi
     fi
 
@@ -437,6 +443,7 @@ setup_secrets() {
         ok "AUR_GIT_EMAIL"
       else
         fail "AUR_GIT_EMAIL"
+        failed=true
       fi
     fi
 
@@ -444,6 +451,7 @@ setup_secrets() {
       ok "AUR_SSH_KEY"
     else
       fail "AUR_SSH_KEY"
+      failed=true
     fi
 
     if [[ "$gpg_source" == "copy" ]]; then
@@ -451,6 +459,7 @@ setup_secrets() {
         ok "GPG_SIGNING_KEY (passphrase-free copy)"
       else
         fail "GPG_SIGNING_KEY"
+        failed=true
       fi
     elif [[ "$gpg_source" == "key" ]]; then
       # "!" exports this subkey alone, without the other secret subkeys
@@ -460,8 +469,10 @@ setup_secrets() {
         ok "GPG_SIGNING_KEY"
       else
         fail "GPG_SIGNING_KEY"
+        failed=true
       fi
     fi
+    [[ "$failed" == false ]] || return 1
   else
     printf "\n  Set these secrets in GitHub → Settings → Secrets and variables → Actions:\n\n"
 

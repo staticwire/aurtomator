@@ -238,6 +238,53 @@ current: '$current'"
   [ "$status" -eq 0 ]
 }
 
+# Strategies put these fields into URL paths, where curl reads {} and [] as globs
+@test "validate: upstream.project, registry, tag and nightly_tag take no glob, query or dot segment" {
+  local entry strategy field value fields
+  for entry in 'github-release|project|lab/demo{1,2}' 'github-release|project|lab/demo[1-2]' \
+    'github-release|project|lab/../other' 'gitea-tag|project|./x' 'github-release|project|o/r?x=1' \
+    'github-release|project|o/r#x' 'pypi|registry|pkg{a,b}' 'npm|registry|a/b/c' 'crates|registry|x[1]' \
+    'github-asset|tag|v[1-9]' 'github-asset|tag|a b' 'github-asset|tag|v1..2' 'github-asset|tag|x@{1}' \
+    'github-nightly|nightly_tag|n?x'; do
+    IFS='|' read -r strategy field value <<<"$entry"
+    case "$strategy" in
+      gitea-tag) fields="  host: codeberg.org" ;;
+      github-asset) fields=$'  project: owner/repo\n  assets:\n    - x.tar.gz' ;;
+      github-nightly) fields="  project: owner/repo" ;;
+      *) fields="" ;;
+    esac
+    create_test_package "mypkg" "$strategy" "upstream:
+  $field: '$value'${fields:+$'\n'$fields}"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"upstream.$field must be "*": '$value'"* ]] || {
+      echo "taken: $entry"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+@test "validate: upstream.project, registry and tag of real names pass" {
+  local entry strategy field value fields
+  for entry in 'github-release|project|owner/.github' 'gitlab-tag|project|group/sub/project_x-1.2' \
+    'npm|registry|@scope/pkg.js' 'pypi|registry|zope.interface' 'github-asset|tag|release/1.2+b{1}'; do
+    IFS='|' read -r strategy field value <<<"$entry"
+    case "$strategy" in
+      gitlab-tag) fields="  host: gitlab.com" ;;
+      github-asset) fields=$'  project: owner/repo\n  assets:\n    - x.tar.gz' ;;
+      *) fields="" ;;
+    esac
+    create_test_package "mypkg" "$strategy" "upstream:
+  $field: '$value'${fields:+$'\n'$fields}"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $entry"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
 @test "validate: git-latest gitlab type checks upstream.host as a host name" {
   create_test_package "mypkg" "git-latest" "upstream:
   type: gitlab
@@ -388,7 +435,7 @@ alerts:
       return 1
     }
   done
-  # A combining mark after a letter, and the emoji form after a symbol, stay
+  # Combining marks after letters, and the emoji form after symbols, stay
   for note in "cafe$(esc u 0301) au lait" "$(esc u 26a0)$(esc u fe0f) Qt 7"; do
     create_test_package "mypkg" "github-tag" "upstream:
   project: owner/repo
@@ -547,7 +594,7 @@ alerts:
       return 1
     }
   done
-  # A bracket expression ends at the ] after a class and not at a ] first in it
+  # Bracket expressions end at neither a ] first in them nor the ] of a class
   for regex in 'v(a{064})' "v([${long}]x)" 'v([]{999}])' 'v([[:alpha:]{999}])'; do
     create_test_package "mypkg" "webpage-scrape" "upstream:
   url: https://example.com/download
@@ -847,7 +894,7 @@ EOF
     }
     rm "$TEST_TMPDIR/packages/$file"
   done
-  # A terminal takes a control character in a file name as a command
+  # Terminals take control characters in file names as commands
   : >"$TEST_TMPDIR/packages/bad"$'\e'"name"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
   [ "$status" -eq 1 ]

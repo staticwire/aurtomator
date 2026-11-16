@@ -283,16 +283,16 @@ stage_aur_update() {
   git -C "$TEST_TMPDIR/aur-remote.git" verify-commit HEAD
 }
 
-@test "aur_commit_push: pushes the commit unsigned when signing fails" {
+# gpg-signing.md promises a signature on every commit while a key is set
+@test "aur_commit_push: pushes nothing when signing fails" {
+  local before
   source "$TEST_TMPDIR/scripts/lib.sh"
   stage_aur_update
+  before=$(git -C "$TEST_TMPDIR/aur-remote.git" rev-parse HEAD)
   GPG_KEY_ID=0000000000000000 run aur_commit_push "$AUR_DIR" 2.0.0 test
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"GPG signing failed, pushing unsigned commit"* ]]
-  [ "$(git -C "$TEST_TMPDIR/aur-remote.git" log -1 --format=%s)" = "2.0.0 release from test" ]
-  run git -C "$TEST_TMPDIR/aur-remote.git" cat-file commit HEAD
-  [ "$status" -eq 0 ]
-  [[ $'\n'"$output" != *$'\ngpgsig '* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GPG signing with key 0000000000000000 failed, nothing pushed"* ]]
+  [ "$(git -C "$TEST_TMPDIR/aur-remote.git" rev-parse HEAD)" = "$before" ]
 }
 
 # === setup.sh GPG step with real keys ===

@@ -152,6 +152,10 @@ case "$1" in
   secret)
     if [[ "$2" == "set" ]]; then
       cat > /dev/null 2>&1 || true  # drain stdin (piped secrets)
+      if [[ " ${GH_SET_FAIL:-} " == *" $3 "* ]]; then
+        echo "HTTP 403: Resource not accessible by integration" >&2
+        exit 1
+      fi
       echo "✓ Set Actions secret $3 for test/repo"
       exit 0
     fi
@@ -399,6 +403,37 @@ EOF
     --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"SSH key:"* ]]
+}
+
+@test "setup ssh: accepts a key of each type that ssh-keygen makes without a security key" {
+  local type
+  for type in ed25519 ecdsa rsa; do
+    echo "$type"
+    ssh-keygen -t "$type" -f "$TEST_TMPDIR/ssh/$type" -N "" -q
+    run "$TEST_TMPDIR/scripts/setup.sh" ssh --ssh-key "$TEST_TMPDIR/ssh/$type" --non-interactive
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SSH key: $TEST_TMPDIR/ssh/$type"* ]]
+  done
+}
+
+# CI signs with no security key at hand
+@test "setup ssh: refuses a key that needs a security key" {
+  printf '#!/usr/bin/env bash\necho "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29t aur"\n' >"$MOCK_DIR/ssh-keygen"
+  chmod +x "$MOCK_DIR/ssh-keygen"
+  run "$TEST_TMPDIR/scripts/setup.sh" ssh --ssh-key "$TEST_TMPDIR/ssh/aur.pem" --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SSH key needs a security key, which CI does not have: $TEST_TMPDIR/ssh/aur.pem"* ]]
+}
+
+# Scripts that run the setup read its exit code
+@test "setup secrets: exits 1 when gh sets a secret but not all" {
+  write_full_config
+  GH_SET_FAIL=AUR_SSH_KEY run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUR_GIT_NAME"* ]]
+  [[ "$output" == *"AUR_SSH_KEY"* ]]
+  run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 0 ]
 }
 
 @test "setup ssh: expands tilde in path" {
@@ -736,7 +771,7 @@ EOF
   chmod +x "$TEST_TMPDIR/mock-bin/gh"
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *'failed to set secret "AUR_SSH_KEY": HTTP 403'* ]]
   [[ "$output" == *"✗ AUR_SSH_KEY"* ]]
 }
@@ -931,7 +966,7 @@ EOF
   chmod +x "$TEST_TMPDIR/mock-bin/gh"
 
   run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<$'y\ny'
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"✗ GPG_SIGNING_KEY"* ]]
   [[ "$output" != *"✓ GPG_SIGNING_KEY"* ]]
 }

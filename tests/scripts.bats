@@ -822,6 +822,17 @@ current: '1.0.0'"
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
+# curl reads {} and [] of a URL as globs and sends one request for each match
+@test "scripts: every curl call turns globs off" {
+  local root="$BATS_TEST_DIRNAME/.."
+  run grep -rnE '(^|[^A-Za-z_./-])curl +-' "$root/scripts" "$root/strategies" "$root/aurtomator.sh"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -ge 5 ]
+  run grep -rnE '(^|[^A-Za-z_./-])curl +-' "$root/scripts" "$root/strategies" "$root/aurtomator.sh"
+  run grep -vE 'curl (--globoff|-q?g[A-Za-z]*) ' <<<"$output"
+  [ -z "$output" ]
+}
+
 # === validate_source_urls ===
 
 @test "lib.sh: validate_source_urls checks every source_<arch> array" {
@@ -1174,7 +1185,7 @@ MOCKCURL
     }
   done
   [ ! -e "$TEST_TMPDIR/pwned" ]
-  [ "$(head -1 "$TEST_TMPDIR/curl.args")" = "-sIL -o /dev/null -w %{http_code} %{content_type} --max-time 10 --max-redirs 5 https://example.com/demo-aarch64.tar.gz" ]
+  [ "$(head -1 "$TEST_TMPDIR/curl.args")" = "--globoff -sIL -o /dev/null -w %{http_code} %{content_type} --max-time 10 --max-redirs 5 https://example.com/demo-aarch64.tar.gz" ]
 }
 
 @test "arch.sh: probe_url names its request while curl runs" {
@@ -1207,7 +1218,7 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = '-sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
+  [ "$output" = '--globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
 }
 
 # Helper: a curl that writes $CURL_STDERR to stderr, as its -w does on a
@@ -3319,7 +3330,7 @@ MOCKGIT
   # Mock curl to return HTML content-type for HEAD requests
   cat >"$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
-if [[ "$1" == "-sIL" ]]; then
+if [[ " $* " == *" -sIL "* ]]; then
   printf '200 text/html; charset=utf-8'
   exit 0
 fi
@@ -3383,7 +3394,7 @@ MOCKGIT
   # Mock curl for source URL validation
   cat >"$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
-if [[ "$1" == "-sIL" ]]; then
+if [[ " $* " == *" -sIL "* ]]; then
   printf '200 application/octet-stream'
   exit 0
 fi
@@ -3452,7 +3463,7 @@ MOCKGIT
 
   cat >"$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
-if [[ "$1" == "-sIL" ]]; then
+if [[ " $* " == *" -sIL "* ]]; then
   printf '200 application/octet-stream'
   exit 0
 fi
@@ -3530,7 +3541,7 @@ MOCKGIT
 
   cat >"$MOCK_DIR/curl" <<'MOCKCURL'
 #!/usr/bin/env bash
-if [[ "$1" == "-sIL" ]]; then
+if [[ " $* " == *" -sIL "* ]]; then
   printf '200 application/octet-stream'
   exit 0
 fi
@@ -4283,6 +4294,56 @@ EOF
   [ "$(cat "$TEST_TMPDIR/update-pkg.args")" = "pkg-up 2.0.0 --dry-run" ]
 }
 
+@test "check-all: --dry-run counts no update and keeps the version to push" {
+  create_test_package "pkg-up" "github-release" "upstream:
+  type: github
+  project: owner/repo
+current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TMPDIR/scripts/update-pkg.sh"
+  chmod +x "$TEST_TMPDIR/scripts/update-pkg.sh"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Checked: 1, Updated: 0, Dry runs: 1, Errors: 0"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-up")" = "new_version: 2.0.0" ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [[ "$output" == *"Checked: 1, Updated: 1, Errors: 0"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-up")" = "updated: 2.0.0" ]
+}
+
+# CI shows only the output of check-all.sh, where the warnings of a pushed update
+# such as those of namcap would otherwise be lost
+@test "check-all --update: prints the warnings of an update that succeeds" {
+  create_test_package "pkg-up" "github-release" "upstream:
+  type: github
+  project: owner/repo
+current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
+  printf '#!/usr/bin/env bash\necho "! namcap warnings: pkg-up W: Missing Maintainer" >&2\n' >"$TEST_TMPDIR/scripts/update-pkg.sh"
+  chmod +x "$TEST_TMPDIR/scripts/update-pkg.sh"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"! namcap warnings: pkg-up W: Missing Maintainer"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-up")" = "updated: 2.0.0" ]
+}
+
+@test "check-all: prints the warnings of a check that succeeds" {
+  create_test_package "pkg-up" "github-release" "upstream:
+  type: github
+  project: owner/repo
+current: '2.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/check-update.sh"
+  printf '#!/usr/bin/env bash\necho "! upstream lists no release notes" >&2\n' >"$TEST_TMPDIR/scripts/check-update.sh"
+  chmod +x "$TEST_TMPDIR/scripts/check-update.sh"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"! upstream lists no release notes"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-up")" = "up_to_date" ]
+}
+
 @test "check-all: writes 'up_to_date' when --update finds the version on the AUR" {
   create_test_package "pkg-up" "github-release" "upstream:
   type: github
@@ -4657,7 +4718,7 @@ arch_wait:
   done
 }
 
-# A commented-out line is no assignment of the source, so the arch is dropped as well
+# Commented-out lines assign no source, so the arch is dropped as well
 @test "check-arch: an arch of arch_out whose source line the AUR PKGBUILD comments out stays out" {
   local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
   temurin_package "current: 28+23"

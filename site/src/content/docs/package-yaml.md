@@ -9,7 +9,7 @@ Each package lives in `packages/<name>.yml`. `name` equals the file name and AUR
 | `name` | yes | AUR `pkgbase`, file name without `.yml` |
 | `strategy` | yes | version detection strategy, a script of `strategies/` without `.sh`, see [Strategies](/strategies/) |
 | `upstream` | by strategy | strategy settings. `archpkg`, `repology` and `kde-tarball` need none |
-| `current` | no | AUR version, written after every push |
+| `current` | no | AUR version, written after every push. Without it, an update compares the new version with `pkgver` of the AUR `.SRCINFO` for the rules of downgrades, version jumps and alerts with `hold: true`, and fails where one of them would hold the version |
 | `last_updated` | no | date of the last push, `YYYY-MM-DD`, written after every push, see [Cooldown](/features/cooldown/) |
 | `current_asset` | no | value from release asset names that the AUR has, written after every push, see [Values from release asset names](/features/asset-values/) |
 | `allow_downgrade` | no | `true` publishes versions below `current`. Default `false`, see [Downgrades and version jumps](/features/downgrades/) |

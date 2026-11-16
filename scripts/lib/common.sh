@@ -213,7 +213,7 @@ remember_host() {
 
 # Args: $1=URL, the rest: curl options, which come after these and win
 _curl_get() {
-  curl -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
+  curl --globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
     --proto '=https' --proto-redir '=https' --max-filesize "${MAX_ANSWER_MB:-50}M" \
     -A "$USER_AGENT" -w "$HTTP_FAILURE" "${@:2}" "$1"
 }
