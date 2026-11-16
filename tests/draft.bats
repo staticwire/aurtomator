@@ -293,7 +293,7 @@ stub_git_latest() {
 
 @test "draft: takes one argument that is a package name" {
   local name
-  for name in "" ../demo -demo .demo "de mo" de/mo 'de$mo'; do
+  for name in "" ../demo -demo .demo "de mo" de/mo 'de$mo' _demo @demo Demo; do
     run "$TEST_TMPDIR/scripts/draft.sh" "$name"
     [ "$status" -eq 1 ]
     [ "$output" = "Usage: $TEST_TMPDIR/scripts/draft.sh <pkgbase>" ]

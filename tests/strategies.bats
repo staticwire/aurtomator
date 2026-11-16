@@ -18,7 +18,7 @@ teardown() {
 # [A-Za-z] takes letters such as é in en_US.UTF-8, and the runs of CI use C.UTF-8
 @test "newest_version: reads the letters of the C locale in any locale" {
   local tags c_out
-  locale -a 2>/dev/null | command grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  locale -a 2>/dev/null | command grep -qix 'en_US.utf8' || locale_needed "no en_US.UTF-8 locale"
   source "$TEST_TMPDIR/scripts/lib/common.sh"
   tags=$(printf '1.0-_1\n1.0-\xc3\xa91\n')
   c_out=$(LC_ALL=C.UTF-8 newest_version <<<"$tags")

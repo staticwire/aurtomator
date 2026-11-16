@@ -54,14 +54,17 @@ lib() {
     '2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,' \
     '2026-11-08T05:17:41Z,_pkg,updated,1.0+1_a,0.9_b+1,42' \
     '2026-11-08T05:17:41Z,+pkg,tracked,1.0,,42' \
-    '2026-11-08T05:17:41Z,a@b,tracked,1.0,,42' >"$J"
+    '2026-11-08T05:17:41Z,a@b,tracked,1.0,,42' \
+    '2026-11-08T05:17:41Z,Pkg,tracked,1.0,,42' \
+    '2026-11-08T05:17:41Z,a_b+c.d-e,tracked,,,' \
+    '2026-11-08T05:17:41Z,0pkg,updated,1.0+1_a,0.9_b+1,42' >"$J"
   run --separate-stderr lib stats_rows "$J"
   [ "$status" -eq 0 ]
-  [ "$output" = $'2026-11-08T05:17:41Z,a,tracked,1.0,,42\n2026-11-08T05:17:41Z,@a_b+c.d-e,tracked,,,\n2026-11-08T05:17:41Z,_pkg,updated,1.0+1_a,0.9_b+1,42\n2026-11-08T05:17:41Z,+pkg,tracked,1.0,,42\n2026-11-08T05:17:41Z,a@b,tracked,1.0,,42' ]
-  for n in 3 4 5 6 7 8 9 10; do
+  [ "$output" = $'2026-11-08T05:17:41Z,a,tracked,1.0,,42\n2026-11-08T05:17:41Z,a_b+c.d-e,tracked,,,\n2026-11-08T05:17:41Z,0pkg,updated,1.0+1_a,0.9_b+1,42' ]
+  for n in 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     [[ "$stderr" == *"line $n of $J is not a journal row"* ]]
   done
-  for n in 1 2 11 12 13 14; do
+  for n in 1 2 16 17; do
     [[ "$stderr" != *"line $n of"* ]]
   done
 }
@@ -255,15 +258,17 @@ added_rows() {
   [ ! -e "$J" ]
 }
 
-# bash reads a subscript of @ from a variable as a key like any other
-@test "record-events: the names @, + and _ are names like any other" {
+# The AUR takes no name with @ or a capital letter, and none that starts with + or _
+@test "record-events: the names @, +, _ and Demo are no packages" {
   printf "name: '@'\nstrategy: github-release\nupstream:\n  project: o/at\ncurrent: 1.0\n" >"$TEST_TMPDIR/packages/@.yml"
   pkg + 2.0
   pkg _ 3.0
+  pkg Demo 4.0
+  pkg a 1.0
   st @ "check_failed: x"
   record
   [ "$status" -eq 0 ]
-  [ "$(cat "$TEST_TMPDIR/out.csv")" = $'time,package,event,version,previous,run\n2026-11-10T05:17:22Z,+,tracked,2.0,,44\n2026-11-10T05:17:22Z,@,tracked,1.0,,44\n2026-11-10T05:17:22Z,@,check_failed,1.0,,44\n2026-11-10T05:17:22Z,_,tracked,3.0,,44' ]
+  [ "$(cat "$TEST_TMPDIR/out.csv")" = $'time,package,event,version,previous,run\n2026-11-10T05:17:22Z,a,tracked,1.0,,44' ]
 }
 
 @test "record-events: a push is written with the version before it" {
@@ -765,7 +770,7 @@ pushes() {
 
 @test "stats-card: the header counts the packages and those failing now" {
   touch "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/b.yml" "$TEST_TMPDIR/packages/notes.txt" \
-    "$TEST_TMPDIR/packages/.x.yml" "$TEST_TMPDIR/packages/-x.yml"
+    "$TEST_TMPDIR/packages/.x.yml" "$TEST_TMPDIR/packages/-x.yml" "$TEST_TMPDIR/packages/_x.yml" "$TEST_TMPDIR/packages/X.yml"
   journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1' '2026-11-01T10:00:00Z,b,tracked,1.0,,1'
   card 2026-11-08
   [ "$status" -eq 0 ]

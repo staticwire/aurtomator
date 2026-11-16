@@ -1858,7 +1858,7 @@ use_source() {
 
 # Under en_US.UTF-8 the range [0-9a-fA-F] of bash takes letters such as à
 @test "verify-pkg: refuses a commit id outside ASCII under any locale" {
-  locale -a | grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  locale -a | grep -qix 'en_US.utf8' || locale_needed "no en_US.UTF-8 locale"
   setup_verify
   make_upstream
   use_source "git+https://example.com/demo.git#commit=à$(printf 'a%.0s' {1..39})"
@@ -2051,7 +2051,7 @@ use_source() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"tag or commit"* ]]
-  [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
+  [ ! -e "$TEST_TMPDIR/git-fetches" ]
 }
 
 @test "verify-pkg: refuses a git source over a protocol other than https" {
@@ -2061,7 +2061,7 @@ use_source() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"git sources are cloned over https only"* ]]
-  [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
+  [ ! -e "$TEST_TMPDIR/git-fetches" ]
 }
 
 @test "verify-pkg: refuses a git source over http" {
@@ -2071,7 +2071,7 @@ use_source() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Cannot check the checksum of demo::git+http://example.com/demo.git#tag=v1.1.0: git sources are cloned over https only"* ]]
-  [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
+  [ ! -e "$TEST_TMPDIR/git-fetches" ]
 }
 
 @test "verify-pkg: refuses a git tag that git would read as an option" {
@@ -2081,7 +2081,7 @@ use_source() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"tag=-v1.1.0: makepkg hashes a git source only at a tag or commit"* ]]
-  [ ! -e "$TEST_TMPDIR/git-clone-urls" ]
+  [ ! -e "$TEST_TMPDIR/git-fetches" ]
 }
 
 @test "verify-pkg: refuses a git source whose name a file in the AUR repo takes" {
@@ -2297,7 +2297,7 @@ EOF
 @test "publish-pkg: writes no arch_out on a sync without the arch_wait of the version" {
   local yml="$TEST_TMPDIR/packages/jdk-temurin-ea-bin.yml"
   setup_arch_prepare
-  yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z"}' "$yml"
+  COMMIT="$AUR_BASE" yq -i '.arch_wait = {"version": "28+23", "since": "2026-11-10T09:00:00Z", "commit": strenv(COMMIT), "arches": "aarch64"}' "$yml"
   cp "$yml" "$TEST_TMPDIR/yml.before"
   archive_missing aarch64 28+23
   prepare_arch 28+23 aarch64
@@ -3559,9 +3559,38 @@ EOF
   [ ! -e "$TEST_TMPDIR/pwned" ]
 }
 
+# Helper: a date whose first reading of epoch seconds gives 1000000 and every later one $1 seconds more
+# Usage: clock_after <seconds>
+clock_after() {
+  rm -f "$TEST_TMPDIR/clock-read"
+  cat >"$MOCK_DIR/date" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == "-u +%s" ]]; then
+  [[ -e "$TEST_TMPDIR/clock-read" ]] && echo $((1000000 + $1)) && exit 0
+  : >"$TEST_TMPDIR/clock-read"
+  echo 1000000
+  exit 0
+fi
+exec /usr/bin/date "\$@"
+EOF
+  chmod +x "$MOCK_DIR/date"
+}
+
 @test "check-all: gives the check loop 20 minutes by default" {
-  run grep -cx 'CHECK_BUDGET="${AURTOMATOR_CHECK_BUDGET:-1200}"' "$PROJECT_DIR/scripts/check-all.sh"
-  [ "$output" = "1" ]
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  rm -f "$TEST_TMPDIR/scripts/check-update.sh"
+  printf '#!/usr/bin/env bash\necho 2.0.0\n' >"$TEST_TMPDIR/scripts/check-update.sh"
+  chmod +x "$TEST_TMPDIR/scripts/check-update.sh"
+  clock_after 1199
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+  clock_after 1200
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
 }
 
 @test "check-all: checks a package that ran out of its budget once" {
@@ -3811,12 +3840,16 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: verify ran out of its 0 minutes in this run" ]
 }
 
+# bash takes SECONDS from the environment, as the time the shell has run
 @test "check-all --verify: gives the loop 20 minutes by default" {
-  run grep -cx 'VERIFY_BUDGET="${AURTOMATOR_VERIFY_BUDGET:-1200}"' "$PROJECT_DIR/scripts/check-all.sh"
-  [ "$output" = "1" ]
   setup_check_verify
   stub_script verify-pkg.sh 0
-  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  run env SECONDS=1200 "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: verify ran out of its 20 minutes in this run" ]
+  setup_check_verify
+  run env SECONDS=1100 "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   grep -qx "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/verify-pkg.sh.args"
 }
@@ -4387,7 +4420,7 @@ EOF
 }
 
 @test "clean_statuses: keeps the lines of _without that name a package, a version and arches" {
-  make_statuses _without=$'foo\t28+23\taarch64 riscv64\nbar baz\t1.0\taarch64\nqux\t1.0 x\taarch64\nquux\t1.0\tAArch64\ncorge\t1.0\t\ngrault\t1.0\taarch64\textra\nfoo-2\t2.0\triscv64'
+  make_statuses _without=$'foo\t28+23\taarch64 riscv64\nbar baz\t1.0\taarch64\nqux\t1.0 x\taarch64\nquux\t1.0\tAArch64\ncorge\t1.0\t\ngrault\t1.0\taarch64\textra\nfoo-2\t2.0\triscv64\nFoo\t1.0\taarch64\n_x\t1.0\taarch64'
   run clean_statuses "$TEST_TMPDIR/st"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/st/_without")" = $'foo\t28+23\taarch64 riscv64\nfoo-2\t2.0\triscv64' ]
@@ -6278,6 +6311,31 @@ write_srcinfo_arch() {
   [[ "$output" == *"Prepared PKGBUILD changes lines outside pkgver, pkgrel and checksums"* ]]
 }
 
+# Under a UTF-8 locale . in a regex takes no byte that is no UTF-8, so the comment would stay in pkgver
+@test "check_handed_aur_files: reads pkgver before a comment with a byte that is no UTF-8" {
+  mkdir "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared"
+  write_pkgbuild "$TEST_TMPDIR/aur/PKGBUILD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
+  sed -i "s/^pkgver=1.0.0\$/pkgver=1.0.0 # $(printf '\xff')/" "$TEST_TMPDIR/aur/PKGBUILD"
+  write_srcinfo "$TEST_TMPDIR/aur/.SRCINFO" 1.0.0 1 "$H1" "$H2"
+  cp "$TEST_TMPDIR/aur/PKGBUILD" "$TEST_TMPDIR/aur/.SRCINFO" "$TEST_TMPDIR/prepared/"
+  LC_ALL=C.UTF-8 run check_handed_aur_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 1.0.0
+  [ "$status" -eq 0 ]
+}
+
+# GNU grep under a UTF-8 locale leaves out the comment, and the check of comments would find none
+@test "check_prepared_files: refuses a comment with a byte that is no UTF-8 in a checksum array" {
+  local p="$TEST_TMPDIR/prepared/PKGBUILD"
+  mkdir "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared"
+  write_pkgbuild "$TEST_TMPDIR/aur/PKGBUILD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
+  write_srcinfo "$TEST_TMPDIR/aur/.SRCINFO" 1.0.0 1 "$H1" "$H2"
+  write_pkgbuild "$p" 1.1.0 1 "sha256sums=('$H3' # $(printf '\xff')
+            '$H4')"
+  write_srcinfo "$TEST_TMPDIR/prepared/.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  LC_ALL=C.UTF-8 run check_prepared_files "$TEST_TMPDIR/aur" "$TEST_TMPDIR/prepared" 1.1.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Prepared PKGBUILD adds comments or empty lines to the checksum arrays:"* ]]
+}
+
 @test "pkgbuild_arch_words: refuses a second arch line with a byte that is no UTF-8" {
   printf '%s\n' "pkgname=demo" "arch=('x86_64')" $'arch+=(\'aarch64\') # \xff' >"$TEST_TMPDIR/PKGBUILD"
   LC_ALL=C.UTF-8 run pkgbuild_arch_words "$TEST_TMPDIR/PKGBUILD"
@@ -7063,6 +7121,8 @@ current: '1.0.0'"
     mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
     run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
     [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "check_failed: invalid status from the check run" ]
+    # --prepare rewrote the status of the check run, which --verify reads
+    checked_status pkg "$found"
     run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
     [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: no new version from the check run" ]
     checked_status pkg "$found"

@@ -58,7 +58,7 @@ runs:
           echo "::error::builder cannot run $code/scripts/check-all.sh"
           exit 1
         fi
-        name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
+        name_re='[a-z0-9][a-z0-9.+_-]*'
         if [[ -n "$PACKAGE" && ! "$PACKAGE" =~ ^${name_re}$ ]]; then
           echo "::error::Not a package name: $PACKAGE"
           exit 1
@@ -99,7 +99,8 @@ runs:
           fi
           if dir_ok "$STATUSES"; then
             for f in "$STATUSES"/*; do
-              [[ "${f##*/}" =~ ^${name_re}$ ]] || continue
+              # The records of the run, such as _upstream, start with _
+              [[ "${f##*/}" =~ ^(${name_re}|_[a-z]+)$ ]] || continue
               take "$f" ".status/${f##*/}"
             done
           fi

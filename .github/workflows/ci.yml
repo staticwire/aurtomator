@@ -88,6 +88,15 @@ jobs:
           gem install --no-document --ignore-dependencies bashcov:4.0.0 simplecov-cobertura:4.0.0 simplecov:1.3.2 rexml:3.4.4
           echo "$(ruby -e 'puts Gem.user_dir')/bin" >> "$GITHUB_PATH"
 
+      # The Arch image builds no locale and leaves out the locale sources but en_US, and the
+      # tests of locales fail in CI without en_US.UTF-8 and the source of tr_TR
+      - name: Build the locales of the tests
+        run: |
+          localedef -i en_US -f UTF-8 en_US.UTF-8
+          pacman -Sw --noconfirm glibc
+          pkg=$(pacman -Sp glibc)
+          bsdtar -xf "/var/cache/pacman/pkg/${pkg##*/}" -C / usr/share/i18n/locales/tr_TR
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

@@ -29,7 +29,7 @@ case "$url" in
   # page that answers 200
   *codeberg.org/api/v1/repos/gated-owner/gated-repo/tags* | \
     *codeberg.org/api/v1/repos/gated-owner/gated-repo/releases* | \
-    *gitlab.com/api/v4/projects/gated-group%2Fgated-project/repository/tags*)
+    *gitlab.com/api/v4/projects/gated-group%2Fgated-project/repository/tags"?per_page=100")
     effective_url="${url%%/api/*}/402.html"
     echo '<!DOCTYPE html><html><body><h1>Are you Human?</h1></body></html>'
     ;;
@@ -48,11 +48,11 @@ case "$url" in
     echo '{"message": "Not Found"}'
     ;;
   # GitLab Tags: empty array
-  *gitlab.com/api/v4/projects/empty-group%2Fempty-project/repository/tags*)
+  *gitlab.com/api/v4/projects/empty-group%2Fempty-project/repository/tags"?per_page=100")
     echo '[]'
     ;;
   # Gitea Tags: empty array
-  *codeberg.org/api/v1/repos/empty-owner/empty-repo/tags*)
+  *codeberg.org/api/v1/repos/empty-owner/empty-repo/tags"?limit=50")
     echo '[]'
     ;;
   # PyPI: null version
@@ -322,16 +322,10 @@ case "$url" in
   # --- tag_version_regex test patterns (must be before wildcards) ---
 
   # Custom prefix tag format
-  *api.github.com/repos/custom-prefix/repo/releases/latest)
-    echo '{"tag_name": "MeshLab-2025.07"}'
-    ;;
   *"api.github.com/repos/custom-prefix/repo/releases?per_page=100&page=1")
     echo '[{"tag_name": "MeshLab-2025.07", "published_at": "2025-07-01T00:00:00Z", "prerelease": false}]'
     ;;
   # Custom suffix tag format
-  *api.github.com/repos/custom-suffix/repo/releases/latest)
-    echo '{"tag_name": "0.1.8-stable"}'
-    ;;
   *"api.github.com/repos/custom-suffix/repo/releases?per_page=100&page=1")
     echo '[{"tag_name": "0.1.8-stable", "published_at": "2025-10-27T17:18:07Z", "prerelease": false}]'
     ;;
@@ -376,21 +370,21 @@ case "$url" in
     echo '[{"tag_name": "v2.0.0", "published_at": "2026-10-01T00:00:00Z", "prerelease": false}]'
     ;;
   *gitlab.com/api/v4/projects/dated-group%2Fdated-project/repository/tags* | \
-    *codeberg.org/api/v1/repos/dated-owner/dated-repo/tags*)
+    *codeberg.org/api/v1/repos/dated-owner/dated-repo/tags"?limit=50")
     echo '[{"name": "2025-12-27"}, {"name": "v2025-02-10"}, {"name": "2026-09-10"}]'
     ;;
   # Tags with a prefix, as mesa names its releases
   *gitlab.com/api/v4/projects/prefix-group%2Fprefix-project/repository/tags* | \
-    *codeberg.org/api/v1/repos/prefix-owner/prefix-repo/tags*)
+    *codeberg.org/api/v1/repos/prefix-owner/prefix-repo/tags"?limit=50")
     echo '[{"name": "mesa-26.2.5"}, {"name": "mesa-26.3.0-rc1"}, {"name": "mesa-26.1.0"}]'
     ;;
   # Tags of which some are not releases, and tags of which none is
   *gitlab.com/api/v4/projects/mixed-group%2Fmixed-project/repository/tags* | \
-    *codeberg.org/api/v1/repos/mixed-owner/mixed-repo/tags*)
+    *codeberg.org/api/v1/repos/mixed-owner/mixed-repo/tags"?limit=50")
     echo '[{"name": "latest"}, {"name": "v2.1.0-rc1"}, {"name": "v2.1.0rc2"}, {"name": "v2.0.0"}, {"name": "v1.9.0"}]'
     ;;
   *gitlab.com/api/v4/projects/named-group%2Fnamed-project/repository/tags* | \
-    *codeberg.org/api/v1/repos/named-owner/named-repo/tags*)
+    *codeberg.org/api/v1/repos/named-owner/named-repo/tags"?limit=50")
     echo '[{"name": "latest"}, {"name": "nightly"}]'
     ;;
 
@@ -473,11 +467,11 @@ case "$url" in
     echo '{"tag_name": "v2.0.0"}'
     ;;
   # GitLab Tags API
-  *gitlab.com/api/v4/projects/*/repository/tags*)
+  *gitlab.com/api/v4/projects/*/repository/tags"?per_page=100")
     echo '[{"name": "v3.1.0"}, {"name": "v3.0.0"}, {"name": "v2.0.0"}]'
     ;;
   # Gitea Tags API
-  *codeberg.org/api/v1/repos/*/tags*)
+  *codeberg.org/api/v1/repos/*/tags"?limit=50")
     echo '[{"name": "v1.5.0"}, {"name": "v1.4.0"}]'
     ;;
   # Gitea Releases API

@@ -71,7 +71,7 @@ clean_statuses() {
 # Keep the lines of _without file $1 that name a package, a version and arches,
 # split by tabs, as check-all.sh --publish writes them
 _clean_without() {
-  local line kept="" version arches re=$'^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*\t([^\t]+)\t([^\t]+)$'
+  local line kept="" version arches re=$'^[a-z0-9][a-z0-9.+_-]*\t([^\t]+)\t([^\t]+)$'
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ $re ]] || continue
     version=${BASH_REMATCH[1]}

@@ -15,7 +15,7 @@ cd aurtomator
 bats tests/ --recursive
 ```
 
-`namcap` is optional: two tests skip without it, unless `CI` is set.
+`namcap` is optional: two tests skip without it, unless `CI` is set. Five tests of locales skip without the `en_US.UTF-8` locale or the source of `tr_TR` in `/usr/share/i18n/locales/`, unless `CI` is set.
 
 ## Conventions
 

@@ -6,7 +6,7 @@
 
 # The first line of the journal, and the pattern of every line after it
 STATS_HEADER='time,package,event,version,previous,run'
-STATS_ROW_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z,[A-Za-z0-9@_+][A-Za-z0-9@._+-]*,(tracked|added|removed|updated|downgrade|rebuilt|arch_added|held|jump_skipped|downgrade_skipped|pending|check_failed|update_failed|up_to_date)'",[A-Za-z0-9._+]{0,$PKGVER_MAX},[A-Za-z0-9._+]{0,$PKGVER_MAX},[0-9]*\$"
+STATS_ROW_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z,[a-z0-9][a-z0-9.+_-]*,(tracked|added|removed|updated|downgrade|rebuilt|arch_added|held|jump_skipped|downgrade_skipped|pending|check_failed|update_failed|up_to_date)'",[A-Za-z0-9._+]{0,$PKGVER_MAX},[A-Za-z0-9._+]{0,$PKGVER_MAX},[0-9]*\$"
 
 # Fails, with the reason on stderr, when journal $1 or its directory is a
 # link, or the journal is there and no regular file

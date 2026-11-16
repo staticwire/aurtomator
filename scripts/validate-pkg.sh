@@ -209,8 +209,8 @@ validate_pkg() {
   if [[ -z "$name" || "$name" == "null" ]]; then
     log_err "$shown: missing required field 'name'"
     ((errors++))
-  elif [[ ! "$name" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]; then
-    log_err "$shown: name ${name@Q} holds a character outside [A-Za-z0-9@._+-], or starts with . or -"
+  elif [[ ! "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]; then
+    log_err "$shown: name ${name@Q} must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"
     ((errors++))
   elif [[ "$name" != "$stem" ]]; then
     log_err "$shown: name '$name' must equal the file name '$stem'"

@@ -688,6 +688,31 @@ EOF
   [ "$output" = "name: pinned" ]
 }
 
+# The owner of a link in a directory with the sticky bit can point it elsewhere after the check
+@test "runner: runs no copy through a link at the aurtomator directory of the cache" {
+  local real="$TEST_TMPDIR/real"
+  mkdir -p "$XDG_CACHE_HOME" "$real"
+  chmod 0700 "$real"
+  chmod 1777 "$XDG_CACHE_HOME"
+  ln -s "$real" "$XDG_CACHE_HOME/aurtomator"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$XDG_CACHE_HOME/aurtomator is a link, which its owner could point elsewhere before the copy of aurtomator in it runs; make it a directory, or set XDG_CACHE_HOME to another directory" ]
+  [ -z "$(ls -A "$real")" ]
+}
+
+# Links in the path of the cache count at their target, which the run reads once
+@test "runner: takes a cache whose path is a link to a directory of the user" {
+  local real="$TEST_TMPDIR/real-cache"
+  mkdir -p "$real"
+  chmod 0700 "$real"
+  ln -s "$real" "$TEST_TMPDIR/link-cache"
+  XDG_CACHE_HOME="$TEST_TMPDIR/link-cache" run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+  [ -d "$real/aurtomator/$PINNED" ]
+}
+
 @test "runner: fetches nothing into a directory that others can write" {
   mkdir -p "$XDG_CACHE_HOME/aurtomator"
   chmod 0777 "$XDG_CACHE_HOME/aurtomator"
@@ -1182,12 +1207,12 @@ commit_pins() {
 
 # Case folding of tr_TR turns I into a dotless i, so the names are folded in the C locale
 @test "runner: check-pins folds the case of names in the C locale under tr_TR.UTF-8" {
-  command -v localedef >/dev/null || skip "no localedef"
-  [[ -e /usr/share/i18n/locales/tr_TR ]] || skip "no source of the tr_TR locale"
+  command -v localedef >/dev/null || locale_needed "no localedef"
+  [[ -e /usr/share/i18n/locales/tr_TR ]] || locale_needed "no source of the tr_TR locale"
   mkdir "$TEST_TMPDIR/locale"
-  localedef -i tr_TR -f UTF-8 "$TEST_TMPDIR/locale/tr_TR.UTF-8" 2>/dev/null || skip "localedef cannot build tr_TR.UTF-8"
+  localedef -i tr_TR -f UTF-8 "$TEST_TMPDIR/locale/tr_TR.UTF-8" 2>/dev/null || locale_needed "localedef cannot build tr_TR.UTF-8"
   export LOCPATH="$TEST_TMPDIR/locale"
-  [ "$(LC_ALL=tr_TR.UTF-8 bash -c 'x=I; printf %s "${x,,}"')" != i ] || skip "tr_TR.UTF-8 folds I to i"
+  [ "$(LC_ALL=tr_TR.UTF-8 bash -c 'x=I; printf %s "${x,,}"')" != i ] || locale_needed "tr_TR.UTF-8 folds I to i"
 
   template_workflows "$PINNED" v1.0.0
   printf 'jobs:\n  pins:\n    steps:\n      - uses: %s\n' evil/repo/.GITHUB/workflows/w.yml@main >"$REPO/.github/workflows/validate.yml"
