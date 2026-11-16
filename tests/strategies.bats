@@ -1574,6 +1574,44 @@ nightly_pages() {
   [ "$output" = "20261021" ]
 }
 
+@test "github-nightly: tag_version_replace fills \\p with the published_at of the release" {
+  create_test_package "test-nightly-dev" "github-nightly" "upstream:
+  project: dev-owner/dev-repo
+  nightly_tag_regex: '^v[0-9.]+-dev\\.[0-9a-f]{12}$'
+  tag_version_regex: '^v([0-9.]+)-dev\\.([0-9a-f]{12})$'
+  tag_version_replace: '\\1dev\\p+\\2'
+  date_format: '%Y%m%d%H%M%S'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-dev"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.1.0dev20261116094825+0f9e8d7c6b5a" ]
+}
+
+# Published at 2026-10-22T00:25:00Z, which is still 2026-10-21 at UTC-10
+@test "github-nightly: \\p takes the default date_format in UTC" {
+  create_test_package "test-nightly-dev" "github-nightly" "upstream:
+  project: dated-owner/dated-repo
+  nightly_tag: latest
+  tag_version_regex: '^([0-9]{4})-([0-9]{2})-([0-9]{2})$'
+  tag_version_replace: '\\1\\2\\3.\\p'"
+
+  run env TZ=XXX10 "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-dev"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20261021.2026.10.22" ]
+}
+
+@test "github-nightly: \\p fails for a release without published_at" {
+  create_test_package "test-nightly-dev" "github-nightly" "upstream:
+  project: owner/repo
+  nightly_tag: latest
+  tag_version_regex: '^v([0-9.]+)$'
+  tag_version_replace: '\\1.\\p'"
+
+  run "$TEST_TMPDIR/strategies/github-nightly.sh" "test-nightly-dev"
+  [ "$status" -eq 1 ]
+  [ "$output" = 'Release v2.0.0 of owner/repo has no published_at for \p of tag_version_replace' ]
+}
+
 @test "github-nightly: date_format with tag_date" {
   create_test_package "test-nightly-format" "github-nightly" "upstream:
   project: owner/dated-repo

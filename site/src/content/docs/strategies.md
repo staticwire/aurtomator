@@ -114,7 +114,7 @@ upstream:
   tag_version_replace: '\1.\2.\3'
 ```
 
-`validate-pkg.sh` refuses `tag_version_replace` without `tag_version_regex`, with characters other than `A-Za-z0-9._+` outside `\1` to `\9`, or with groups the regex does not have. Both fields work with `github-tag`, `github-nightly`, `gitlab-tag`, `gitea-tag`, `gitea-release` and `git-tag` too, and with no other strategy.
+`validate-pkg.sh` refuses `tag_version_replace` without `tag_version_regex`, with characters other than `A-Za-z0-9._+` outside `\1` to `\9` and `\p`, with `\p` outside [github-nightly](#github-nightly), or with groups the regex does not have. Both fields work with `github-tag`, `github-nightly`, `gitlab-tag`, `gitea-tag`, `gitea-release` and `git-tag` too, and with no other strategy.
 
 ### github-tag
 
@@ -215,8 +215,8 @@ upstream:
 | `upstream.version_source` | no | `tag` (default), `release_body`, `tag_date` or `published_date` |
 | `upstream.version_pattern` | for `release_body` | Perl regex for the version in the release body. Dashes in the match become `+` |
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, for `version_source: tag` |
-| `upstream.tag_version_replace` | no | version built from the groups of `tag_version_regex`, see [github-release](#github-release) |
-| `upstream.date_format` | no | `date` format for `tag_date` and `published_date`, `%Y.%m.%d` by default |
+| `upstream.tag_version_replace` | no | version built from the groups of `tag_version_regex`, see [github-release](#github-release), and from `\p`, see below |
+| `upstream.date_format` | no | `date` format for `tag_date`, `published_date` and `\p`, `%Y.%m.%d` by default |
 | `upstream.channel` | for pattern D | text that the release name contains |
 
 `tag_date` takes the `YYYY-MM-DD` date in the tag and `published_date` the UTC date of `published_at`, and the two can differ: the servo release `2026-10-21` was published at `2026-10-22T00:25:00Z`. Packages whose `pkgver` has the form `20251213` need `date_format: '%Y%m%d'`, because `vercmp` ranks `20251213` above `2026.10.21`:
@@ -231,7 +231,29 @@ upstream:
   date_format: '%Y%m%d'
 ```
 
-`validate-pkg.sh` refuses fields that the chosen pattern and `version_source` do not read: `date_format` without a date source, `version_pattern` without `release_body`, `tag_version_regex` and `tag_version_replace` without `tag`, `nightly_tag_regex` beside `nightly_tag` or `channel`, and `nightly_tag` beside `channel`. It also refuses `release_body` without `version_pattern`, `tag_date` with the fixed tag of pattern A, which holds no date, `date_format` values whose output is no valid version, such as `%Y-%m-%d`, and regexes that do not compile.
+`\p` in `tag_version_replace` stands for the UTC time of `published_at` in `date_format`, the value that `published_date` gives. It is for projects that publish one pre-release per commit with the commit hash in the tag: the source URL needs the hash, and hashes do not sort by time. `vercmp` ranks the form `<version>dev<time>+<hash>` by the upstream version first and by the time second, and ranks the stable release `0.1.0` above every `0.1.0dev` build. With a dot before `dev`, the dev builds rank above the stable release. The default `date_format` holds the day alone, so builds of one day fall back to the order of their hashes. The tag `v0.1.0-dev.6600c5cfe9c9`, published at `2026-11-16T09:48:25Z`, gives `0.1.0dev20261116094825+6600c5cfe9c9` here:
+
+```yaml
+name: nvx-bin
+strategy: github-nightly
+upstream:
+  project: microsoft/nvx
+  nightly_tag_regex: '^v[0-9.]+-dev\.[0-9a-f]{12}$'
+  tag_version_regex: '^v([0-9.]+)-dev\.([0-9a-f]{12})$'
+  tag_version_replace: '\1dev\p+\2'
+  date_format: '%Y%m%d%H%M%S'
+cooldown_days: 7
+```
+
+The PKGBUILD takes the upstream version and the hash back out of `pkgver`:
+
+```bash
+source=("nvx-${pkgver}-linux-kvm.tar.gz::${url}/releases/download/v${pkgver%%dev*}-dev.${pkgver##*+}/nvx-${pkgver%%dev*}-linux-kvm.tar.gz")
+```
+
+With `cooldown_days: 7`, the AUR gets at most one of these builds in 7 days, see [Cooldown](/features/cooldown/).
+
+`validate-pkg.sh` refuses fields that the chosen pattern and `version_source` do not read: `date_format` without a date source or `\p`, `version_pattern` without `release_body`, `tag_version_regex` and `tag_version_replace` without `tag`, `nightly_tag_regex` beside `nightly_tag` or `channel`, and `nightly_tag` beside `channel`. It also refuses `release_body` without `version_pattern`, `tag_date` with the fixed tag of pattern A, which holds no date, `date_format` values whose output is no valid version, such as `%Y-%m-%d`, and regexes that do not compile.
 
 **Authentication:** as `github-release`.
 

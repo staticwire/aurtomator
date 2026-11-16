@@ -2036,6 +2036,20 @@ EOF
   [ "$output" = 'r1.2010\0' ]
 }
 
+@test "lib.sh: tag_versions fills \\p with the time it gets" {
+  run bash -c 'source "$0/scripts/lib.sh"; tag_versions "$1" "$2" "$3" <<<"$4"' "$TEST_TMPDIR" \
+    '^v([0-9.]+)-dev\.([0-9a-f]+)$' '\1dev\p+\2' '20261116094825' 'v0.1.0-dev.0f9e8d7c6b5a'
+  [ "$status" -eq 0 ]
+  [ "$output" = '0.1.0dev20261116094825+0f9e8d7c6b5a' ]
+}
+
+@test "lib.sh: tag_versions fails on \\p without a time" {
+  run bash -c 'source "$0/scripts/lib.sh"; tag_versions "$1" "$2" <<<"$3"' "$TEST_TMPDIR" \
+    '^v([0-9.]+)$' '\1.\p' 'v1.2'
+  [ "$status" -eq 1 ]
+  [ "$output" = 'tag_version_replace holds \p, which only github-nightly fills' ]
+}
+
 @test "check-update: rejects an injected version from the strategy" {
   cat >"$TEST_TMPDIR/strategies/injected.sh" <<'EOF'
 #!/usr/bin/env bash

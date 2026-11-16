@@ -2386,7 +2386,7 @@ pkgver_dash: _"
   tag_version_replace: '\\1-\\2'"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -ne 0 ]
-  [[ "$output" == *'upstream.tag_version_replace may hold only A-Za-z0-9 . _ + and \1 to \9'* ]]
+  [[ "$output" == *'upstream.tag_version_replace may hold only A-Za-z0-9 . _ +, \1 to \9 and \p'* ]]
 }
 
 @test "validate: tag_version_replace naming a group the regex lacks rejected" {
@@ -2397,6 +2397,32 @@ pkgver_dash: _"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -ne 0 ]
   [[ "$output" == *"upstream.tag_version_replace names a group tag_version_regex does not have"* ]]
+}
+
+# Without version_source the strategy reads the tag
+@test "validate: tag_version_replace with \\p and date_format passes for github-nightly" {
+  local source
+  for source in 'version_source: tag' ''; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  nightly_tag_regex: '^v[0-9.]+-dev\\.[0-9a-f]{12}$'
+  $source
+  tag_version_regex: '^v([0-9.]+)-dev\\.([0-9a-f]{12})$'
+  tag_version_replace: '\\1dev\\p+\\2'
+  date_format: '%Y%m%d%H%M%S'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "validate: tag_version_replace with \\p rejected for another strategy" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+  tag_version_regex: '^v([0-9.]+)$'
+  tag_version_replace: '\\1.\\p'"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'upstream.tag_version_replace holds \p, which only github-nightly fills'* ]]
 }
 
 # === nightly_tag_regex validation ===
@@ -2467,7 +2493,7 @@ pkgver_dash: _"
   date_format: '%Y%m%d'"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"upstream.date_format applies to version_source tag_date and published_date only"* ]]
+    [[ "$output" == *'upstream.date_format applies to version_source tag_date and published_date and to \p in tag_version_replace'* ]]
   done
 }
 

@@ -503,10 +503,10 @@ release_tags() {
   grep -E '^v?[0-9]+(\.[0-9]+)*$' <<<"$1" || true
 }
 
-# Print tag_version_replace $1 with \1 to \9 filled from the groups in BASH_REMATCH.
-# Fails when it names a group the regex does not have.
+# Print tag_version_replace $1 with \1 to \9 filled from the groups in BASH_REMATCH and
+# \p with time $2. Fails when it names a group the regex does not have, or \p without $2.
 tag_version_fill() {
-  local template="$1" version="" i n
+  local template="$1" time="${2:-}" version="" i n
   for ((i = 0; i < ${#template}; i++)); do
     n=${template:i+1:1}
     if [[ "${template:i:1}" == "\\" && "$n" == [1-9] ]]; then
@@ -515,6 +515,13 @@ tag_version_fill() {
         return 1
       fi
       version+=${BASH_REMATCH[n]}
+      i=$((i + 1))
+    elif [[ "${template:i:1}" == "\\" && "$n" == p ]]; then
+      if [[ -z "$time" ]]; then
+        echo "tag_version_replace holds \\p, which only github-nightly fills" >&2
+        return 1
+      fi
+      version+=$time
       i=$((i + 1))
     else
       version+=${template:i:1}
@@ -525,14 +532,14 @@ tag_version_fill() {
 
 # The version in each tag on stdin, one per line: tag_version_replace filled from
 # the groups of tag_version_regex, or with no regex the tag minus a leading v
-# Args: $1=tag_version_regex or empty, $2=tag_version_replace (default \1)
+# Args: $1=tag_version_regex or empty, $2=tag_version_replace (default \1), $3=time for \p
 tag_versions() {
-  local regex="$1" replace="${2:-\\1}" tag
+  local regex="$1" replace="${2:-\\1}" time="${3:-}" tag
   while IFS= read -r tag; do
     if [[ -z "$regex" ]]; then
       printf '%s\n' "${tag#v}"
     elif [[ "$tag" =~ $regex ]]; then
-      tag_version_fill "$replace" || return 1
+      tag_version_fill "$replace" "$time" || return 1
     fi
   done
 }
