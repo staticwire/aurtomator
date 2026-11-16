@@ -59,7 +59,7 @@ fi
 pkg_count=0
 for file in "${ARG[packages]}"/*.yml; do
   name="${file##*/}"
-  [[ -f "$file" && "${name%.yml}" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]] || continue
+  [[ -f "$file" && "${name%.yml}" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]] || continue
   ((++pkg_count))
 done
 numbers=$(stats_numbers "${ARG[journal]}" "$DATE") || exit 1

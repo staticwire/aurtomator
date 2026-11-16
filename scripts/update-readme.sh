@@ -120,9 +120,11 @@ table_row() {
   printf '\n<tr><td>%s</td><td>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td></tr>' "$@"
 }
 
-# Print value $1 as HTML text, for YAML that reached the branch without the validator
+# Print value $1 as HTML text on one line, for YAML that reached the branch without the
+# validator: a blank line would end the HTML block of the table
 html_text() {
-  local text="$1"
+  local text
+  text=$(printf '%s' "$1" | LC_ALL=C tr '\001-\037\177' ' ')
   text=${text//'&'/'&amp;'}
   text=${text//'<'/'&lt;'}
   text=${text//'>'/'&gt;'}

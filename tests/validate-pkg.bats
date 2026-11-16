@@ -302,7 +302,7 @@ current: '$current'"
 
 # Under en_US.UTF-8 a bracket range of bash takes the letters that sort between its ends
 @test "validate: refuses a host outside ASCII under any locale" {
-  locale -a | grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  locale -a | grep -qix 'en_US.utf8' || locale_needed "no en_US.UTF-8 locale"
   create_test_package "mypkg" "gitlab-tag" "upstream:
   host: gıtlab.com
   project: owner/repo"
@@ -848,7 +848,7 @@ EOF
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
   [ "$status" -eq 1 ]
   [[ "$output" == *"packages/fée.yml: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]]
-  for name in "space name" -dash 'quo"te'; do
+  for name in "space name" -dash 'quo"te' _assets @demo +demo Demo de@mo; do
     rm -f "$TEST_TMPDIR"/packages/*.yml
     printf 'name: %s\nstrategy: github-release\nupstream:\n  project: owner/repo\n' "'$name'" >"$TEST_TMPDIR/packages/$name.yml"
     # validate-pkg.sh quotes the name in the C locale
@@ -858,17 +858,17 @@ EOF
     )
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
     [ "$status" -eq 1 ]
-    [[ "$output" == *"packages/$name.yml: name $shown holds a character outside [A-Za-z0-9@._+-], or starts with . or -"* ]] || {
+    [[ "$output" == *"packages/$name.yml: name $shown must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"* ]] || {
       echo "taken: $name"
       return 1
     }
   done
 }
 
-# makepkg takes @, _ and + as the first character of a name, and neither . nor -
-@test "validate: takes a name that starts with @, _ or +, and refuses one that starts with ." {
+# The AUR takes repository names of a-z, 0-9 and . _ + -, which start with a-z or 0-9
+@test "validate: takes the names that the AUR takes, and refuses one that starts with ." {
   local name
-  for name in @demo _demo +demo; do
+  for name in 0ad g++ lib32-foo_bar.baz; do
     rm -f "$TEST_TMPDIR"/packages/*.yml
     printf 'name: %s\nstrategy: github-release\nupstream:\n  project: owner/repo\n' "'$name'" >"$TEST_TMPDIR/packages/$name.yml"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
@@ -881,7 +881,7 @@ EOF
   printf 'name: .demo\nstrategy: github-release\nupstream:\n  project: owner/repo\n' >"$TEST_TMPDIR/packages/.demo.yml"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" .demo
   [ "$status" -eq 1 ]
-  [[ "$output" == *"name '.demo' holds a character outside [A-Za-z0-9@._+-], or starts with . or -"* ]]
+  [[ "$output" == *"name '.demo' must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"* ]]
 }
 
 # The runs read packages/<name>.yml alone

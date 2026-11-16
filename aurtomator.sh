@@ -305,12 +305,16 @@ fi
 # The XDG Base Directory Specification calls a relative path invalid, to be ignored
 cache="${XDG_CACHE_HOME:-}"
 [[ "$cache" == /* ]] || cache="$HOME/.cache"
+# Links in the path could change between the checks and the run, so the run takes their target once
+if [[ -d "$cache" ]]; then
+  cache=$(cd -P -- "$cache" && pwd -P) || exit 1
+fi
 copy="$cache/aurtomator/$sha"
-# Succeeds when no other account can rename what directory $1 holds: it belongs to the user and gives
-# group and others no write access; with $2=shared root may own it, and a sticky bit as on /tmp counts
+# Succeeds when no other account can rename what directory $1 holds: it is no link, belongs to the user and
+# gives group and others no write access; with $2=shared root may own it, and a sticky bit as on /tmp counts
 private_dir() {
   local owner mode
-  [[ -d "$1" ]] && read -r owner mode < <(stat -L -c '%u %a' -- "$1") || return 1
+  [[ -d "$1" && ! -L "$1" ]] && read -r owner mode < <(stat -c '%u %a' -- "$1") || return 1
   mode=$((8#$mode))
   if [[ "${2:-}" == shared ]]; then
     [[ "$owner" == "$(id -u)" || "$owner" == 0 ]] && ((! (mode & 8#022) || mode & 8#1000))
@@ -322,6 +326,10 @@ private_dir() {
 check_cache_dirs() {
   local dir kind=shared
   for dir in "$cache" "${copy%/*}"; do
+    if [[ -L "$dir" ]]; then
+      echo "$dir is a link, which its owner could point elsewhere before the copy of aurtomator in it runs; make it a directory, or set XDG_CACHE_HOME to another directory" >&2
+      exit 1
+    fi
     if ! private_dir "$dir" "$kind"; then
       echo "$dir belongs to another account or lets group or others write it, and they could swap the copy of aurtomator in it before it runs; make it yours with no write access for group and others, or set XDG_CACHE_HOME to another directory" >&2
       exit 1

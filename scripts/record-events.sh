@@ -79,7 +79,7 @@ for file in "${ARG[before]}"/*.yml; do
   [[ -f "$file" ]] || continue
   name="${file##*/}"
   name="${name%.yml}"
-  [[ "$name" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]] || continue
+  [[ "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]] || continue
   YAML[$name]="$file"
 done
 

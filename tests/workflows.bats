@@ -708,7 +708,8 @@ run_decide_step() {
 }
 
 @test "check-updates: Decide lists no name that Hand over would not take" {
-  run run_decide_step "bad name=new_version: 2.0.0" "-x=new_version: 2.0.0" pkg="new_version: 2.0.0"
+  run run_decide_step "bad name=new_version: 2.0.0" "-x=new_version: 2.0.0" "Demo=new_version: 2.0.0" \
+    "_x=new_version: 2.0.0" pkg="new_version: 2.0.0"
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
 }
@@ -914,6 +915,8 @@ run_take_step() {
   ln -sf "$BATS_TEST_TMPDIR/secret" "$ws/handoffs/1/prepared/foo/base"
   add_attempt 01 bar padded
   add_attempt x baz word
+  add_attempt 1 Demo upper
+  add_attempt 1 _x under
   mkdir -p "$ws/handoffs/1/status" "$BATS_TEST_TMPDIR/elsewhere/prepared/foo"
   echo x >"$ws/handoffs/1/status/-x"
   echo linked >"$BATS_TEST_TMPDIR/elsewhere/prepared/foo/PKGBUILD"
@@ -1246,7 +1249,7 @@ make_builder_inputs() {
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
   [ "$output" = "$(printf '%s\n' ./.status ./.status/_upstream ./.status/foo ./README.md ./handoff ./handoff/prepared \
     ./handoff/prepared/foo ./handoff/prepared/foo/.SRCINFO ./handoff/prepared/foo/PKGBUILD ./handoff/prepared/foo/base \
-    ./handoff/status ./handoff/status/foo ./packages ./packages/_x.yml ./packages/foo.yml)" ]
+    ./handoff/status ./handoff/status/foo ./packages ./packages/foo.yml)" ]
   [ "$(cat "$work/packages/foo.yml")" = "name: foo" ]
   [ "$(cat "$work/handoff/status/foo")" = "update_failed: boom" ]
   [ "$(stat -c %a "$work/handoff/prepared/foo/PKGBUILD")" = "644" ]
@@ -1743,12 +1746,15 @@ make_handoff() {
   printf '%s\n' "newer: 0.9.0" >"$work/.status/_upstream"
   echo x >"$work/.status/.hidden"
   echo x >"$work/.status/-dash"
+  printf '%s\n' "updated: 2.0" >"$work/.status/Demo"
   ln -s "$BATS_TEST_TMPDIR/secret" "$work/.status/link"
   echo "new table" >"$work/README.md"
   echo "current: 2.0" >"$work/packages/foo.yml"
   echo notes >"$work/packages/notes.txt"
   echo "current: 1.0" >"$work/packages/sub/x.yml"
   echo "current: 1.0" >"$work/packages/bad name.yml"
+  echo "current: 1.0" >"$work/packages/Demo.yml"
+  echo "current: 1.0" >"$work/packages/_x.yml"
   ln -s "$BATS_TEST_TMPDIR/secret" "$work/packages/link.yml"
   run_hand_over_step
   [ "$status" -eq 0 ]
@@ -2819,19 +2825,20 @@ run_bare_issues_step() {
   [ "$output" = "0" ]
 }
 
-# The names of the AUR, and titles that only look like those a run writes
+# The names of the AUR, and titles that only look like those a run writes, names
+# the AUR refuses included
 @test "check-updates: the close step reads the package of each title exactly" {
   GH_OPEN=$'1 ❌ foo.bar: check failed\n2 ❌ x: update failed\n3 ❌ Foo-Bin: check failed\n4 ✋ c++: update held\n5 ⚠️ a@b_c: 1.0 without aarch64\n6 ❌ foo: check failed\n7 ❌ foo bar: check failed\n8 ❌ gone: check failed again\n9 Re: ❌ gone: check failed\n10 ✋ gone: update held twice\n11 ⚠️ gone: 1.0 without' \
     run_close_step "_packages="$'fooxbar\nfoo-bin'
   [ "$status" -eq 0 ]
   local n
-  for n in 1 2 3 4 5 6; do
+  for n in 1 2 4 6; do
     grep -q "^issue close $n " "$GH_LOG" || {
       echo "kept $n"
       return 1
     }
   done
-  run grep -c -E '^issue close (7|8|9|10|11) ' "$GH_LOG"
+  run grep -c -E '^issue close (3|5|7|8|9|10|11) ' "$GH_LOG"
   [ "$output" = "0" ]
 }
 
@@ -3039,7 +3046,8 @@ run_bare_issues_step() {
 }
 
 @test "check-updates: closes no arch issue whose title names no package" {
-  GH_OPEN=$'12 ⚠️ foo bar: 1.0 without aarch64\n13 ⚠️ `x`: 1.0 without aarch64\n14 ⚠️ no colon' run_close_step _without=
+  GH_OPEN=$'12 ⚠️ foo bar: 1.0 without aarch64\n13 ⚠️ `x`: 1.0 without aarch64\n14 ⚠️ no colon\n15 ⚠️ Foo: 1.0 without aarch64\n16 ⚠️ _x: 1.0 without aarch64' \
+    run_close_step _without=
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
@@ -3741,7 +3749,7 @@ EOF
   done
   expected+=("test -r /var/run/docker.sock" "test -w /var/run/docker.sock")
   expected+=("test -r /__w/repo/repo" "test -r /__w/repo/repo/README.md" "test -r /data")
-  expected+=("find /__w /__e /__t /github ( -writable -print -quit ) -o ( -type d ( ! -readable -o ! -executable ) -prune )")
+  expected+=("find /__w /__e /__t /github /__w/repo/repo/aurtomator ( -writable -print -quit ) -o ( -type d ( ! -readable -o ! -executable ) -prune )")
   expected+=(env)
   [ "$(cat "$CALLS/sudo")" = "$(printf '%s\n' "${expected[@]}")" ]
 }
@@ -3795,7 +3803,7 @@ EOF
 @test "check-updates: Check builder fails when find cannot search the runner directories as builder" {
   FIND_RC=1 run_check_builder_step
   [ "$status" -eq 1 ]
-  [ "$output" = "::error::find could not search /__w, /__e, /__t and /github as builder" ]
+  [ "$output" = "::error::find could not search /__w, /__e, /__t, /github and /__w/repo/repo/aurtomator as builder" ]
 }
 
 @test "check-updates: Check builder fails when sudo passes a variable of the runner to builder" {

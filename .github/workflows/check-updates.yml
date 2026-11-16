@@ -159,10 +159,11 @@ jobs:
           for path in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/README.md" /data; do
             check -r "$path"
           done
-          # find skips the directories builder cannot list or enter, as the workspace after Close files
-          if ! writable=$(sudo -u builder find /__w /__e /__t /github \( -writable -print -quit \) \
-            -o \( -type d \( ! -readable -o ! -executable \) -prune \)); then
-            echo "::error::find could not search /__w, /__e, /__t and /github as builder"
+          # find skips the directories builder cannot list or enter, as the workspace after Close files,
+          # so aurtomator/ in it, which builder reaches by its name, takes a search of its own
+          if ! writable=$(sudo -u builder find /__w /__e /__t /github "$GITHUB_WORKSPACE/aurtomator" \
+            \( -writable -print -quit \) -o \( -type d \( ! -readable -o ! -executable \) -prune \)); then
+            echo "::error::find could not search /__w, /__e, /__t, /github and $GITHUB_WORKSPACE/aurtomator as builder"
             fail=1
           elif [ -n "$writable" ]; then
             echo "::error::builder can write $writable"
@@ -238,7 +239,7 @@ jobs:
             sudo -u builder cat -- "$WORK/$1" >"$2"
           }
           # Package names never start with a dot, so . and .. do not match
-          name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
+          name_re='[a-z0-9][a-z0-9.+_-]*'
           if [[ -d "$WORK/handoff" && ! -L "$WORK/handoff" ]]; then
             # find follows no link. It fails on a missing prepared/ or status/, and the step goes on.
             (cd "$WORK/handoff" && find prepared status -type f -print0 2>/dev/null || true) |
@@ -254,7 +255,8 @@ jobs:
           if [[ -d "$WORK/.status" && ! -L "$WORK/.status" ]]; then
             for f in "$WORK"/.status/*; do
               name=${f##*/}
-              [[ "$name" =~ ^${name_re}$ ]] || continue
+              # The records of the run, such as _upstream, start with _
+              [[ "$name" =~ ^(${name_re}|_[a-z]+)$ ]] || continue
               take ".status/$name" "$DATA/statuses/$name"
             done
           fi
@@ -274,7 +276,7 @@ jobs:
           RESULTS: /results
         run: |
           # Matrices run at most 256 jobs, so prepare takes the first 256 outdated packages
-          name_re='^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$'
+          name_re='^[a-z0-9][a-z0-9.+_-]*$'
           # Only --publish writes _without and only this step writes _deferred, so the step
           # deletes any copy of them that builder wrote
           rm -f "$DATA/statuses/_without" "$DATA/statuses/_deferred"
@@ -496,7 +498,7 @@ jobs:
         env:
           DATA: /data
         run: |
-          name_re='^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$'
+          name_re='^[a-z0-9][a-z0-9.+_-]*$'
           mkdir "$DATA/handoff"
           cd "$DATA"
           [[ -d handoffs && ! -L handoffs ]] || exit 0
@@ -956,7 +958,7 @@ jobs:
           # run without the list of packages closes none
           if [[ -f "$STATUS_DIR/_packages" ]]; then
             arched=$(gh issue list --label "arch-missing" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
-            name_re='[A-Za-z0-9@_+][A-Za-z0-9@._+-]*'
+            name_re='[a-z0-9][a-z0-9.+_-]*'
             failed_re="^❌ (${name_re}): (check|update) failed\$"
             held_re="^✋ (${name_re}): update held\$"
             arch_re="^⚠️ (${name_re}): .+ without .+\$"
@@ -984,7 +986,7 @@ jobs:
           # _without, so runs without publish close none.
           if [[ -f "$STATUS_DIR/_without" ]]; then
             arched=$(gh issue list --label "arch-missing" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
-            title_re='^⚠️ ([A-Za-z0-9@_+][A-Za-z0-9@._+-]*): '
+            title_re='^⚠️ ([a-z0-9][a-z0-9.+_-]*): '
             while read -r number title; do
               [[ -n "$number" && "$title" =~ $title_re ]] || continue
               pkg_name=${BASH_REMATCH[1]}

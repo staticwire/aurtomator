@@ -76,6 +76,12 @@ script_error() {
   esac
 }
 
+# Prints status $1 with a space for each tab and control character but newlines, since
+# the records of a run split their lines at tabs
+status_text() {
+  printf '%s\n' "$1" | LC_ALL=C tr '\001-\011\013-\037\177' ' '
+}
+
 # Clears the request in flight of a check that exited with $1. After a timeout it
 # prints the URL, and remembers the host when a HEAD request of 10 s gets no status
 request_done() {
@@ -163,9 +169,9 @@ package_name() {
     log_err "packages/${stem}.yml: name ${name@Q} must equal the file name"
     return 1
   fi
-  # _packages and the statuses keep a name of these characters alone, one a line
-  if ! (LC_ALL=C && [[ "$name" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
-    log_err "packages/${stem@Q}.yml: the name holds a character outside [A-Za-z0-9@._+-], or starts with . or -"
+  # Names of the AUR form, one a line in _packages, start with no _ as the records in .status do
+  if ! (LC_ALL=C && [[ "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
+    log_err "packages/${stem@Q}.yml: the name must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"
     return 1
   fi
   printf '%s\n' "$name"
@@ -233,7 +239,7 @@ if [[ "$MODE" == "verify" ]]; then
         rm -rf "$prepared"
         mkdir -p "${WORK_DIR}/status"
         rm -f "${WORK_DIR}/status/${pkg_name}"
-        echo "update_failed: ${verify_err}" >"${WORK_DIR}/status/${pkg_name}"
+        status_text "update_failed: ${verify_err}" >"${WORK_DIR}/status/${pkg_name}"
         ;;
     esac
   done
@@ -348,7 +354,7 @@ find_asset() {
     fi
     if ((rc != 0)); then
       log_err "Failed to check $2: $err"
-      echo "check_failed: ${err}" >"${STATUS_DIR}/$2"
+      status_text "check_failed: ${err}" >"${STATUS_DIR}/$2"
       if (($4 == 1)) && second_pass "$rc" "$err"; then
         RECHECK+=("$1")
       fi
@@ -428,7 +434,7 @@ find_arches() {
   fi
   ((rc != 0 && rc != 3)) || err="check-arch.sh printed ${text@Q}"
   log_err "Failed to check $2: $err"
-  echo "check_failed: ${err}" >"${STATUS_DIR}/$2"
+  status_text "check_failed: ${err}" >"${STATUS_DIR}/$2"
   if (($4 == 1)) && second_pass "$rc" "$err"; then
     RECHECK+=("$1")
   fi
@@ -448,7 +454,7 @@ run_package() {
     stem="${pkg_file##*/}"
     stem="${stem%.yml}"
     log_err "packages/${stem@Q}.yml is a link, and the runs read regular files alone"
-    if [[ "$MODE" == check ]] && (LC_ALL=C && [[ "$stem" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
+    if [[ "$MODE" == check ]] && (LC_ALL=C && [[ "$stem" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
       echo "check_failed: packages/${stem}.yml is a link, and the runs read regular files alone" >"${STATUS_DIR}/${stem}"
     fi
     return 0
@@ -457,7 +463,7 @@ run_package() {
     # Its status keeps the issues of the file name open, since its YAML is still there
     stem="${pkg_file##*/}"
     stem="${stem%.yml}"
-    if [[ "$MODE" == check ]] && (LC_ALL=C && [[ "$stem" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
+    if [[ "$MODE" == check ]] && (LC_ALL=C && [[ "$stem" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
       yaml_name=$(pkg_get "$pkg_file" .name 2>/dev/null) || yaml_name=""
       echo "check_failed: packages/${stem}.yml: name ${yaml_name@Q} must equal the file name" >"${STATUS_DIR}/${stem}"
     fi
@@ -533,7 +539,7 @@ run_package() {
     check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT" "$in_flight")
     rm -f "$err_file"
     log_err "Failed to check $pkg_name: $check_err"
-    echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
+    status_text "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded ]] && second_pass "$check_rc" "$check_err"; then
       RECHECK+=("$pkg_file")
     fi
@@ -610,7 +616,7 @@ run_package() {
   rm -f "$err_file"
   if ((check_rc != 0)); then
     log_err "Failed to check $pkg_name: $check_err"
-    echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
+    status_text "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
   record_alerts "$pkg_name" "$alerts"
@@ -639,7 +645,7 @@ run_package() {
   rm -f "$err_file"
   if ((check_rc != 0)); then
     log_err "Failed to check $pkg_name: $check_err"
-    echo "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
+    status_text "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
   # Arches that come back give no new version, so they do not wait
@@ -725,7 +731,7 @@ run_package() {
       ;;
     *)
       log_err "Failed to update $pkg_name to $latest"
-      echo "update_failed: ${update_err}" >"${STATUS_DIR}/${pkg_name}"
+      status_text "update_failed: ${update_err}" >"${STATUS_DIR}/${pkg_name}"
       ;;
   esac
 }
@@ -774,7 +780,7 @@ fi
 for pkg_file in "${check_files[@]}"; do
   stem="${pkg_file##*/}"
   stem="${stem%.yml}"
-  if (LC_ALL=C && [[ "$stem" =~ ^[A-Za-z0-9@_+][A-Za-z0-9@._+-]*$ ]]); then
+  if (LC_ALL=C && [[ "$stem" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
     printf '%s\n' "$stem"
   fi
 done >"${STATUS_DIR}/_packages"

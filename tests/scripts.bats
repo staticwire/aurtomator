@@ -1400,10 +1400,11 @@ MOCKCURL
   [ "$(cat "$TEST_TMPDIR/.status/mypkg")" = "check_failed: packages/mypkg.yml: name '../escape' must equal the file name" ]
 }
 
-# _packages and the status files carry one name a line, of the characters of an AUR name
+# _packages and the status files carry one name a line, of the characters of an AUR name, and
+# the records of a run take the names that start with _
 @test "check-all: checks and lists a file only under a stem of an AUR package name" {
   local stem
-  local -a stems=($'a\nb' .hidden -x)
+  local -a stems=($'a\nb' -x _assets Demo @x +x x@y)
   ! locale -a 2>/dev/null | grep -qix 'en_US.utf8' || stems+=(fée)
   stand_in_strategy step 2.0.0
   create_test_package "pkg" "step" "current: '1.0.0'"
@@ -1412,8 +1413,21 @@ MOCKCURL
   done
   LC_ALL=en_US.UTF-8 run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"packages/'_assets'.yml: the name must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/_packages")" = pkg ]
+  [ ! -e "$TEST_TMPDIR/.status/_assets" ]
   [ "$(find "$TEST_TMPDIR/.status" -mindepth 1 -maxdepth 1 ! -name '_*' -printf '%f\n')" = pkg ]
+}
+
+# The records of a run split their lines at tabs, and git prints the error text of a server with tabs
+@test "check-all: writes the error of a failed check with a space for each tab and control character" {
+  printf '#!/usr/bin/env bash\nprintf "remote error\\n\\tliq\\t2.5.0\\033[1m\\n" >&2\nexit 1\n' >"$TEST_TMPDIR/strategies/fail.sh"
+  chmod +x "$TEST_TMPDIR/strategies/fail.sh"
+  create_test_package "pkg" "fail" "current: '1.0.0'"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TEST_TMPDIR/.status/pkg")" == "check_failed: "*$'remote error\n liq 2.5.0 [1m\n'* ]]
+  ! grep -q $'[\t\033]' "$TEST_TMPDIR/.status/pkg"
 }
 
 # --prepare and --publish read the statuses of the check run, and a YAML that YAML cannot read
@@ -1454,7 +1468,7 @@ arch_out:
 
 # Under a UTF-8 locale other than C.UTF-8, [a-z] in [[ =~ ]] takes letters such as é
 @test "lib.sh: the name checks take ASCII alone under a UTF-8 locale" {
-  locale -a 2>/dev/null | command grep -qix 'en_US.utf8' || skip "no en_US.UTF-8 locale"
+  locale -a 2>/dev/null | command grep -qix 'en_US.utf8' || locale_needed "no en_US.UTF-8 locale"
   source "$TEST_TMPDIR/scripts/lib.sh"
   LC_ALL=en_US.UTF-8 run url_host 'https://é.example/x'
   [ "$status" -eq 1 ]
@@ -1477,14 +1491,13 @@ arch_out:
   [[ "$output" == *"Usage"* ]]
 }
 
-@test "lib.sh: a request with a user name in its URL remembers no host" {
+@test "lib.sh: a URL with a user name in it remembers no host" {
   keep_host_memory
-  timeout_curl
-  echo 'api.github.com@silent.example' >"$TEST_TMPDIR/silent-hosts"
   source "$TEST_TMPDIR/scripts/lib.sh"
-  run http_get 'https://api.github.com@silent.example/a'
-  [ "$status" -eq 28 ]
+  remember_host 'https://api.github.com@silent.example/a'
   [ ! -s "$AURTOMATOR_HOSTS_DIR/silent" ]
+  remember_host 'https://silent.example/a'
+  [ "$(cat "$AURTOMATOR_HOSTS_DIR/silent")" = silent.example ]
 }
 
 @test "lib.sh: a silent api.github.com leaves github.com alone" {
@@ -2015,6 +2028,18 @@ EOF
   [ "$output" = 0 ]
 }
 
+# Blank lines end the HTML block of the table, and GitHub reads the text after them as Markdown
+@test "update-readme: writes a space for each newline and control character of a value" {
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo\ncurrent: "1.0\\n\\n[Sign in](https://evil.example/login)\\t\\e\\n"'
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '<td>1.0  [Sign in](https://evil.example/login)  </td>' "$TEST_TMPDIR/README.md"
+  run sed -n '/^<table>$/,/^<\/table>$/{/^$/p}' "$TEST_TMPDIR/README.md"
+  [ -z "$output" ]
+}
+
 @test "update-readme: refuses a README.md that is a link" {
   create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   mkdir "$TEST_TMPDIR/outside"
@@ -2371,7 +2396,7 @@ EOF
 
   git -C "$TEST_TMPDIR" init -q
   "$TEST_TMPDIR/scripts/update-readme.sh" 2>/dev/null
-  grep -q "failed" "$TEST_TMPDIR/README.md"
+  grep -qF '<td nowrap>❌ failed</td></tr>' "$TEST_TMPDIR/README.md"
 }
 
 @test "update-readme: writes the README of AURTOMATOR_DATA_DIR from its packages and origin" {
@@ -3954,12 +3979,11 @@ MOCKCURL
   project: owner/repo
 current: '3.0.0'"
 
-  run "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
   [ "$status" -eq 0 ]
-  # stderr (captured into $output by `run`) carries the DOWNGRADE log line.
-  [[ "$output" == *"DOWNGRADE 3.0.0"*"2.0.0"* ]]
-  # The version is still printed to stdout; check-all.sh decides on it.
-  [[ "$output" == *"2.0.0"* ]]
+  [[ "$stderr" == *"DOWNGRADE 3.0.0"*"2.0.0"* ]]
+  # The version goes to stdout alone, and check-all.sh decides on it
+  [ "$output" = "2.0.0" ]
 }
 
 @test "check-update: normal upgrade path does not log DOWNGRADE (regression)" {
@@ -3969,11 +3993,11 @@ current: '3.0.0'"
   project: owner/repo
 current: '1.0.0'"
 
-  run "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
+  run --separate-stderr "$TEST_TMPDIR/scripts/check-update.sh" "mypkg"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"update available 1.0.0"*"2.0.0"* ]]
-  [[ "$output" != *"DOWNGRADE"* ]]
-  [[ "$output" == *"2.0.0"* ]]
+  [[ "$stderr" == *"update available 1.0.0"*"2.0.0"* ]]
+  [[ "$stderr" != *"DOWNGRADE"* ]]
+  [ "$output" = "2.0.0" ]
 }
 
 @test "check-all: writes 'available_downgrade:' for a package that allows downgrades" {
@@ -4278,10 +4302,13 @@ alerts:
   create_test_package "pkg-link" "step" "current: 1.0"
   mv "$TEST_TMPDIR/packages/pkg-link.yml" "$TEST_TMPDIR/outside.yml"
   ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/pkg-link.yml"
+  # A record of the run keeps its name
+  ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/_alerts.yml"
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-link")" = "check_failed: packages/pkg-link.yml is a link, and the runs read regular files alone" ]
   grep -qx pkg-link "$TEST_TMPDIR/.status/_packages"
+  [ ! -e "$TEST_TMPDIR/.status/_alerts" ]
 }
 
 @test "check-all: fails the check of a package whose alerts run past the check timeout" {
@@ -4580,7 +4607,8 @@ pkgver_dash: ''"
   liquidsoap_package
   MOCK_RELEASE_STATUS=500 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc1
   [ "$status" -eq 1 ]
-  [[ "$output" == *"The requested URL returned error: 500"* ]]
+  # http_get names the URL before the error that curl gives
+  [ "${lines[0]}" = "https://api.github.com/repos/asset-owner/asset-repo/releases/tags/v2.5.0-rc1: The requested URL returned error: 500" ]
   [[ "$output" == *"Failed to read the release of tag v2.5.0-rc1 of asset-owner/asset-repo"* ]]
 }
 

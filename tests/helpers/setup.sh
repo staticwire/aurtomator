@@ -92,6 +92,7 @@ make_aur_remote() {
   cat >"$MOCK_DIR/git" <<EOF
 #!/usr/bin/env bash
 [[ -z "\${GIT_ALLOC_LIMIT:-}" ]] || echo "\$GIT_ALLOC_LIMIT \$*" >>"$TEST_TMPDIR/git-alloc"
+[[ " \$* " != *" fetch "* ]] || echo "\$*" >>"$TEST_TMPDIR/git-fetches"
 if [[ " \$* " == *" fetch "* && "\${@: -2:1}" == https://* ]]; then
   echo "\${@: -2:1}" >>"$TEST_TMPDIR/git-clone-urls"
   echo "\${GIT_ALLOW_PROTOCOL:-unset}" >>"$TEST_TMPDIR/git-allow"
@@ -237,4 +238,14 @@ keep_host_memory() {
   if (($#)); then
     printf '%s\n' "$@" >"$AURTOMATOR_HOSTS_DIR/silent"
   fi
+}
+
+# Skips a test for the locale this machine lacks, reason $1, and fails it in CI, whose
+# test job builds the locales of the tests
+locale_needed() {
+  if [[ -n "${CI:-}" ]]; then
+    echo "$1, and the test job of CI builds it" >&2
+    return 1
+  fi
+  skip "$1"
 }
