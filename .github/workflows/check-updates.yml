@@ -168,9 +168,9 @@ jobs:
             echo "::error::builder can write $writable"
             fail=1
           fi
-          leaked=$(sudo -u builder env | cut -d= -f1 | grep -E '^(GITHUB|ACTIONS|RUNNER)_' | paste -sd ' ' -)
-          if [ -n "$leaked" ]; then
-            echo "::error::sudo passes $leaked to builder"
+          names=$(sudo -u builder env | cut -d= -f1)
+          if leaked=$(printf '%s\n' "$names" | grep -E '^(GITHUB|ACTIONS|RUNNER)_'); then
+            echo "::error::sudo passes $(printf '%s\n' "$leaked" | paste -sd ' ' -) to builder"
             fail=1
           fi
           exit "$fail"
