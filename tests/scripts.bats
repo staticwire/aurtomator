@@ -18,6 +18,12 @@ teardown() {
   [ "$(git config -f "$TEST_TMPDIR/gitconfig" aurtomator.probe)" = 1 ]
 }
 
+@test "setup.sh: tests run without the GITHUB_EVENT_NAME of CI" {
+  GITHUB_EVENT_NAME=pull_request run bash -c 'source "$1"; echo "${GITHUB_EVENT_NAME-unset}"' _ "$TESTS_DIR/helpers/setup.sh"
+  [ "$status" -eq 0 ]
+  [ "$output" = unset ]
+}
+
 # === lib.sh ===
 
 @test "lib.sh: pkg_file resolves existing package" {
