@@ -85,7 +85,15 @@ case "$version_source" in
   tag)
     version=$(echo "$release" | yq -r '.tag_name')
     if [[ -n "$tag_version_regex" ]]; then
-      extracted=$(tag_versions "$tag_version_regex" "$tag_version_replace" <<<"$version")
+      published=""
+      if [[ "$tag_version_replace" == *'\p'* ]]; then
+        published=$(format_date "$(echo "$release" | yq -r '.published_at')")
+        if [[ -z "$published" ]]; then
+          echo "Release ${version} of ${owner_repo} has no published_at for \\p of tag_version_replace" >&2
+          exit 1
+        fi
+      fi
+      extracted=$(tag_versions "$tag_version_regex" "$tag_version_replace" "$published" <<<"$version")
       if [[ -z "$extracted" ]]; then
         echo "tag_version_regex '${tag_version_regex}' did not match tag '${version}'" >&2
         exit 1

@@ -504,13 +504,16 @@ validate_pkg() {
     elif [[ -z "$tag_version_regex" ]]; then
       log_err "$shown: upstream.tag_version_replace needs upstream.tag_version_regex"
       ((errors++))
-    elif [[ ! "$tag_version_replace" =~ ^([A-Za-z0-9._+]|\\[1-9])+$ ]]; then
-      log_err "$shown: upstream.tag_version_replace may hold only A-Za-z0-9 . _ + and \\1 to \\9: $tag_version_replace"
+    elif [[ ! "$tag_version_replace" =~ ^([A-Za-z0-9._+]|\\[1-9p])+$ ]]; then
+      log_err "$shown: upstream.tag_version_replace may hold only A-Za-z0-9 . _ +, \\1 to \\9 and \\p: $tag_version_replace"
       ((errors++))
-    # $regex|^ matches the empty string and fills BASH_REMATCH with every group, so
-    # tag_version_fill finds a missing group as it does at run time
+    elif [[ "$strategy" != "github-nightly" && "$tag_version_replace" == *'\p'* ]]; then
+      log_err "$shown: upstream.tag_version_replace holds \\p, which only github-nightly fills"
+      ((errors++))
+    # $regex|^ fills BASH_REMATCH with every group from the empty string and 0 stands for
+    # the time of \p, so tag_version_fill finds a missing group as it does at run time
     elif ere_valid "$tag_version_regex" &&
-      ! { [[ "" =~ $tag_version_regex|^ ]] && tag_version_fill "$tag_version_replace" >/dev/null 2>&1; }; then
+      ! { [[ "" =~ $tag_version_regex|^ ]] && tag_version_fill "$tag_version_replace" 0 >/dev/null 2>&1; }; then
       log_err "$shown: upstream.tag_version_replace names a group tag_version_regex does not have: $tag_version_replace"
       ((errors++))
     fi
@@ -551,8 +554,9 @@ validate_pkg() {
   if [[ "$date_format" != "null" ]]; then
     version_source=$(pkg_get "$file" '.upstream.version_source // "tag"')
     sample=$(date -u -d 2026-01-02 +"$date_format")
-    if [[ "$version_source" != "tag_date" && "$version_source" != "published_date" ]]; then
-      log_err "$shown: upstream.date_format applies to version_source tag_date and published_date only"
+    if [[ "$version_source" != "tag_date" && "$version_source" != "published_date" &&
+      ! ("$version_source" == "tag" && "$tag_version_replace" == *'\p'*) ]]; then
+      log_err "$shown: upstream.date_format applies to version_source tag_date and published_date and to \\p in tag_version_replace"
       ((errors++))
     elif ! validate_pkgver "$sample" 2>/dev/null; then
       log_err "$shown: upstream.date_format must give a valid version, it gives ${sample@Q}"

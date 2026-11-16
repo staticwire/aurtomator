@@ -343,6 +343,11 @@ case "$url" in
   *"api.github.com/repos/dated-owner/dated-repo/releases?per_page=100&page=1")
     echo '[{"tag_name": "2026-10-21", "published_at": "2026-10-22T00:25:00Z", "prerelease": false}]'
     ;;
+  # Dev builds as microsoft/nvx publishes them, one pre-release per commit: the tags
+  # hold a commit hash, so only published_at orders them
+  *"api.github.com/repos/dev-owner/dev-repo/releases?per_page=100&page=1")
+    echo '[{"tag_name": "v0.1.0-dev.1a2b3c4d5e6f", "published_at": "2026-11-16T06:05:53Z", "prerelease": true}, {"tag_name": "v0.1.0-dev.0f9e8d7c6b5a", "published_at": "2026-11-16T09:48:25Z", "prerelease": true}, {"tag_name": "v0.1.0-dev.9c8b7a6f5e4d", "published_at": "2026-11-16T03:34:04Z", "prerelease": true}]'
+    ;;
   # Several products in one repository, as tutao/tutanota: an older match
   # first in the API order, a newer pre-release and a draft of the product
   *"api.github.com/repos/multi-product/repo/releases?per_page=100&page=1")
