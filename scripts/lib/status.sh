@@ -51,6 +51,10 @@ clean_statuses() {
         _clean_without "$file"
         continue
         ;;
+      _hosts)
+        _clean_hosts "$file"
+        continue
+        ;;
       _*) continue ;;
     esac
     case "$status" in
@@ -79,6 +83,16 @@ _clean_without() {
     if arch_list_ok "$arches" && validate_pkgver "$version" 2>/dev/null; then
       kept+="$line"$'\n'
     fi
+  done <"$1"
+  printf '%s' "$kept" >"$1"
+}
+
+# Keep the lines of _hosts file $1 that name a package and a host, split by a tab, as
+# check-all.sh writes them
+_clean_hosts() {
+  local line kept="" LC_ALL=C re=$'^[a-z0-9][a-z0-9.+_-]*\t[a-z0-9.-]+$'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ ! "$line" =~ $re ]] || kept+="$line"$'\n'
   done <"$1"
   printf '%s' "$kept" >"$1"
 }

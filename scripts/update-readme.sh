@@ -74,6 +74,12 @@ has_badges=false
 if grep -qxF -- "$BADGES_START" "$README"; then
   check_markers "$BADGES_START" "$BADGES_END" || exit 1
   has_badges=true
+  # The badge rewrite drops the lines between its markers, so a marker of the table there would go
+  line_of() { grep -nxF -- "$1" "$README" | cut -d: -f1; }
+  if (($(line_of "$BADGES_END") > $(line_of "$PKG_START") && $(line_of "$PKG_END") > $(line_of "$BADGES_START"))); then
+    log_err "README.md has a marker of one pair between $BADGES_START and $BADGES_END or between $PKG_START and $PKG_END; keep the two pairs apart"
+    exit 1
+  fi
 fi
 
 # CI names the repo in GITHUB_REPOSITORY, and the data directory there has

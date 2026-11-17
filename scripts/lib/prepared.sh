@@ -500,7 +500,6 @@ _bump_version() {
     olds+=("${old%.*}")
     news+=("${new%.*}")
   fi
-  # Empty forms would match at every position and never move on
   if [[ -n "${4:-}" && -n "${5:-}" ]]; then
     olds+=("$4")
     news+=("$5")
@@ -511,7 +510,8 @@ _bump_version() {
   while [[ -n "$rest" ]]; do
     matched=false
     for i in "${!olds[@]}"; do
-      if [[ "${lead:${#1}-${#rest}:1}" != [0-9.] && "$rest" == "${olds[$i]}"* && "${rest:${#olds[$i]}:1}" != [0-9] ]]; then
+      # Empty forms, as before the + of +1, would match at every position and never move on
+      if [[ -n "${olds[$i]}" && "${lead:${#1}-${#rest}:1}" != [0-9.] && "$rest" == "${olds[$i]}"* && "${rest:${#olds[$i]}:1}" != [0-9] ]]; then
         out+="${news[$i]}"
         rest="${rest:${#olds[$i]}}"
         matched=true
@@ -700,6 +700,7 @@ check_prepared_srcinfo() {
 
   local old_ver old_rel old_up="" new_up="" expands=no rel_re='[$]([{]pkgrel[^A-Za-z0-9_]|pkgrel([^A-Za-z0-9_]|$))'
   old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
+  aur_pkgver_ok "$old_ver" || return 1
   old_rel=$(awk -F' = ' '$1 ~ /^[ \t]*pkgrel$/ { print $2; exit }' "$1")
   if [[ -n "$old_rel" && ! "$old_rel" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     log_err "The AUR .SRCINFO has pkgrel = $(_shown_line "$old_rel"), which makepkg does not write"

@@ -49,7 +49,7 @@ if [[ -n "$branch" ]]; then
 fi
 git_request_begin "$repo_url" || exit 1
 GIT_ALLOW_PROTOCOL=https git clone "${clone_args[@]}" "$repo_url" "$tmp_dir/repo" || {
-  request_end
+  request_end 1
   echo "Failed to clone $repo_url" >&2
   exit 1
 }

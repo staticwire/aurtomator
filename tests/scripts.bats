@@ -953,6 +953,28 @@ MOCKCURL
   [ "$status" -eq 1 ]
 }
 
+# curl follows redirects to ftp too unless told otherwise
+@test "lib.sh: validate_source_urls asks over http and https alone, redirects included" {
+  cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
+pkgname=test-proto
+pkgver=1.0.0
+pkgrel=1
+arch=('x86_64')
+source=("https://example.com/test-1.0.0.tar.gz" "http://example.com/test-1.0.0.patch")
+sha256sums=('abc123' 'abc123')
+EOF
+  cat >"$MOCK_DIR/curl" <<MOCKCURL
+#!/usr/bin/env bash
+echo "\$*" >>"$TEST_TMPDIR/curl-args.log"
+printf '200 application/octet-stream'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+  run bash -c 'source "$0/scripts/lib.sh"; validate_source_urls "$1"' "$TEST_TMPDIR" "$TEST_TMPDIR/PKGBUILD"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c . "$TEST_TMPDIR/curl-args.log")" -eq 2 ]
+  [ "$(grep -c -v -e ' --proto =http,https --proto-redir =http,https ' "$TEST_TMPDIR/curl-args.log")" -eq 0 ]
+}
+
 @test "lib.sh: validate_source_urls takes the status and type of the last response" {
   cat >"$TEST_TMPDIR/PKGBUILD" <<'EOF'
 pkgname=test-status
@@ -1191,7 +1213,7 @@ MOCKCURL
     }
   done
   [ ! -e "$TEST_TMPDIR/pwned" ]
-  [ "$(head -1 "$TEST_TMPDIR/curl.args")" = "--globoff -sIL -o /dev/null -w %{http_code} %{content_type} --max-time 10 --max-redirs 5 https://example.com/demo-aarch64.tar.gz" ]
+  [ "$(head -1 "$TEST_TMPDIR/curl.args")" = "--globoff -sIL -o /dev/null -w %{http_code} %{content_type} --max-time 10 --max-redirs 5 --proto =https --proto-redir =https https://example.com/demo-aarch64.tar.gz" ]
 }
 
 @test "arch.sh: probe_url names its request while curl runs" {
@@ -2995,6 +3017,26 @@ EOF
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
 
+# The badge rewrite drops the lines between the badge markers, a marker of the table among them
+@test "update-readme: fails and keeps the README whose two pairs of markers cross or nest" {
+  local order
+  create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
+  git -C "$TEST_TMPDIR" init -q
+  for order in 'BADGES:START PACKAGES:START BADGES:END PACKAGES:END' 'PACKAGES:START BADGES:START PACKAGES:END BADGES:END' \
+    'BADGES:START PACKAGES:START PACKAGES:END BADGES:END' 'PACKAGES:START BADGES:START BADGES:END PACKAGES:END'; do
+    printf '# test\n' >"$TEST_TMPDIR/README.md"
+    printf '<!-- %s -->\ntext\n' $order >>"$TEST_TMPDIR/README.md"
+    cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
+    run "$TEST_TMPDIR/scripts/update-readme.sh"
+    [ "$status" -eq 1 ] || {
+      echo "taken: $order"
+      return 1
+    }
+    [[ "$output" == *"README.md has a marker of one pair between <!-- BADGES:START --> and <!-- BADGES:END --> or between <!-- PACKAGES:START --> and <!-- PACKAGES:END -->; keep the two pairs apart"* ]]
+    cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
+  done
+}
+
 @test "update-readme: leaves a line that quotes the markers in its text" {
   create_test_package "pkg-a" "github-release" "upstream:
   project: owner/repo
@@ -4683,6 +4725,62 @@ about_now() {
   ((${at} - $(date -u +%s) < 120 && $(date -u +%s) - ${at} < 120))
 }
 
+# Co-maintainers write the AUR .SRCINFO, and its URLs reach the terminal in the messages
+@test "check-arch: refuses a source URL of the AUR that holds a control character" {
+  local esc
+  esc=$(printf '\033')
+  create_test_package jdk-temurin-ea-bin webpage-scrape "upstream:
+  url: https://api.adoptium.net/v3/info/release_names
+  pattern: 'jdk-([0-9]+)'
+current: 28+22"
+  arch_pkgbuild "$TEST_TMPDIR/PKGBUILD"
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  sed -i "/^\tsource_aarch64 = /s|\$|${esc}[2K${esc}[1;32mOK|" "$TEST_TMPDIR/.SRCINFO"
+  make_aur_remote jdk-temurin-ea-bin "$TEST_TMPDIR/PKGBUILD" "$TEST_TMPDIR/.SRCINFO"
+  mock_heads
+  run "$TEST_TMPDIR/scripts/check-arch.sh" jdk-temurin-ea-bin 28+23
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"jdk-temurin-ea-bin 28+23: the AUR .SRCINFO has a source_aarch64 URL with a control character: "* ]]
+  [[ "$output" != *"$esc"* ]]
+}
+
+@test "check-arch: refuses an AUR pkgver that starts with +" {
+  create_test_package jdk-temurin-ea-bin webpage-scrape "upstream:
+  url: https://api.adoptium.net/v3/info/release_names
+  pattern: 'jdk-([0-9]+)'
+current: 28+22"
+  arch_pkgbuild "$TEST_TMPDIR/PKGBUILD"
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  sed -i $'s/^\tpkgver = .*/\tpkgver = +1/' "$TEST_TMPDIR/.SRCINFO"
+  make_aur_remote jdk-temurin-ea-bin "$TEST_TMPDIR/PKGBUILD" "$TEST_TMPDIR/.SRCINFO"
+  mock_heads
+  run timeout 20 "$TEST_TMPDIR/scripts/check-arch.sh" jdk-temurin-ea-bin 28+23
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR .SRCINFO has pkgver = +1, which aurtomator does not take"* ]]
+}
+
+# Redirects to http or ftp would decide whether an arch counts as missing
+@test "check-arch: asks for the archives over https alone, redirects included" {
+  temurin_package "current: 28+22"
+  cat >"$MOCK_DIR/curl" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$TEST_TMPDIR/head-args.log"
+printf '200 application/octet-stream'
+EOF
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [ "$(grep -c . "$TEST_TMPDIR/head-args.log")" -eq "${#ARCH_ALL[@]}" ]
+  [ "$(grep -c -v -e ' --proto =https --proto-redir =https ' "$TEST_TMPDIR/head-args.log")" -eq 0 ]
+}
+
+# Lines of git would enter the error text of a failed check
+@test "check-arch: clones the AUR repository with -q" {
+  temurin_package "current: 28+22"
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  [[ " $(cat "$TEST_TMPDIR/clone-opts") " == *" -q "* ]]
+}
+
 @test "check-arch: prints two empty lines when every arch answers" {
   temurin_package "current: 28+22"
   check_arch 28+23
@@ -5101,6 +5199,7 @@ current_asset: '$2'}"
 #!/usr/bin/env bash
 echo "$*" >>"$TEST_TMPDIR/check-asset.args"
 echo silent.example >>"$AURTOMATOR_HOSTS_DIR/silent"
+echo https://silent.example/x >"$AURTOMATOR_HOSTS_DIR/failed"
 echo "https://silent.example/x: Operation timed out after 30000 milliseconds with 0 bytes received" >&2
 exit 1
 STUB
@@ -5355,6 +5454,7 @@ cooldown_days: 7"
 #!/usr/bin/env bash
 echo "$*" >>"$TEST_TMPDIR/check-arch.args"
 echo silent.example >>"$AURTOMATOR_HOSTS_DIR/silent"
+echo https://silent.example/x >"$AURTOMATOR_HOSTS_DIR/failed"
 echo "https://silent.example/x: silent.example did not answer earlier in this run" >&2
 exit 1
 STUB

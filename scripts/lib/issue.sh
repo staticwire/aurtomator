@@ -78,14 +78,19 @@ close_comment() {
 # from this count on
 HOST_ISSUE_MIN=5
 
-# Print the host, in lower case and without the port, of the first URL in
-# check_failed status file $1: the URL that http_get or git failed on
+# Print the host that the lines of _hosts on stdin give package $1: check-all.sh writes
+# the package and the host of the request its failed check failed on, split by a tab
+recorded_host() {
+  LC_ALL=C awk -F'\t' -v p="$1" '$1 == p && NF == 2 && $2 ~ /^[a-z0-9.-]+$/ { h = $2 } END { if (h != "") print h }'
+}
+
+# Print the host of check_failed status file $1 from _hosts beside it. The server writes part
+# of the error, so a URL in the text names no host.
 failure_host() {
-  # The host ends where url_host ends it, so a host with a letter beyond ASCII has none
-  local LC_ALL=C status
+  local status
   status=$(<"$1")
-  if [[ "$status" == check_failed:* && "$status" =~ https?://([A-Za-z0-9.-]+)([/:?#[:space:]]|$) ]]; then
-    printf '%s\n' "${BASH_REMATCH[1],,}"
+  if [[ "$status" == check_failed:* && -f "${1%/*}/_hosts" ]]; then
+    recorded_host "${1##*/}" <"${1%/*}/_hosts"
   fi
 }
 
@@ -107,22 +112,115 @@ failed_hosts() {
   done | LC_ALL=C sort
 }
 
-# Print the issue body for host $2, run URL $3 and packages $4... of status
-# directory $1. Errors share 50000 of the 65536 characters GitHub accepts.
+# Bodies of host issues stay within this many characters, under the 65536 that GitHub accepts
+HOST_BODY_MAX=60000
+# Errors in a host issue keep at least this many characters, or their package is only named
+HOST_ERROR_MIN=500
+
+# Print the issue body for host $2, run URL $3 and packages $4... of status directory $1. Errors
+# share the room that the lines around them leave, and the packages past it are named in one line.
 host_issue_body() {
-  local dir="$1" host="$2" url="$3" package status limit
+  local dir="$1" host="$2" url="$3" head foot status entry share room cost i k n limit names=""
+  local lead=$'\nThis issue has no room for the errors of '
   shift 3
-  limit=$((50000 / $#))
-  ((limit <= 4000)) || limit=4000
+  # In the C locale of the job containers, bash counts bytes
+  local LC_ALL=C.UTF-8
+  local -a pkgs=("$@") texts=() least=() prefix=(0) suffix=()
+  n=$#
   # The backticks are Markdown code around the host and the package names
   # shellcheck disable=SC2016
-  printf 'Host: `%s`\nStatus: check failed\nRun: %s\n' "$host" "$url"
-  for package in "$@"; do
-    status=$(<"$dir/$package")
-    # shellcheck disable=SC2016
-    printf '\nPackage: `%s`\n\n%s\n' "$package" "$(_code_block "${status#*: }" "$limit")"
+  head=$(printf 'Host: `%s`\nStatus: check failed\nRun: %s' "$host" "$url")$'\n'
+  foot=$'\nAuto-created by update workflow, which closes it when fewer than '"$HOST_ISSUE_MIN"$' packages of the host fail to check.\n'
+  room=$((HOST_BODY_MAX - ${#head} - ${#foot}))
+  for ((i = 0; i < n; i++)); do
+    status=$(<"$dir/${pkgs[i]}")
+    texts+=("${status#*: }")
+    entry=$(_host_entry "${pkgs[i]}" "${texts[i]}" "$HOST_ERROR_MIN")$'\n'
+    least+=("${#entry}")
+    prefix+=($((prefix[i] + ${#entry})))
   done
-  printf '\nAuto-created by update workflow, which closes it when fewer than %s packages of the host fail to check.\n' "$HOST_ISSUE_MIN"
+  # The names in backticks and their separators, from each package to the last
+  suffix[n]=0
+  for ((i = n - 1; i >= 0; i--)); do
+    suffix[i]=$((suffix[i + 1] + ${#pkgs[i]} + 4))
+  done
+  # The most packages whose errors fit beside the line that names all the others
+  for ((k = n; k > 0; k--)); do
+    cost=${prefix[k]}
+    ((k == n)) || cost=$((cost + ${#lead} + suffix[k] + 6))
+    ((cost > room)) || break
+  done
+  if ((k < n)); then
+    names=$(_host_names $((room - prefix[k] - 1)) "${pkgs[@]:k}")$'\n'
+  fi
+  room=$((room - ${#names}))
+  printf '%s' "$head"
+  for ((i = 0; i < k; i++)); do
+    # Each error gets its least size and an equal part of what the least sizes leave
+    share=$((least[i] + (room - prefix[k] + prefix[i]) / (k - i)))
+    limit=4000
+    entry=$(_host_entry "${pkgs[i]}" "${texts[i]}" "$limit")$'\n'
+    while ((${#entry} > share && limit > HOST_ERROR_MIN)); do
+      limit=$((limit - ${#entry} + share))
+      ((limit > HOST_ERROR_MIN)) || limit=$HOST_ERROR_MIN
+      entry=$(_host_entry "${pkgs[i]}" "${texts[i]}" "$limit")$'\n'
+    done
+    printf '%s' "$entry"
+    room=$((room - ${#entry}))
+  done
+  printf '%s%s' "$names" "$foot"
+}
+
+# Print the part of a host issue for package $1 with error $2, cut to its last $3 characters
+_host_entry() {
+  # shellcheck disable=SC2016
+  printf '\nPackage: `%s`\n\n%s' "$1" "$(_code_block "$2" "$3")"
+}
+
+# Print the line that names packages $2... in at most $1 characters: as many names as fit, then
+# the count of the others
+_host_names() {
+  local room="$1" lead=$'\nThis issue has no room for the errors of ' line count fits=0 sum=0 size i n
+  shift
+  local LC_ALL=C.UTF-8
+  local -a list=("$@")
+  n=$#
+  # The names in backticks take their length and 2, a separator 2, and " and " 5
+  size=$((${#lead} + 1))
+  for ((i = 0; i < n; i++)); do
+    sum=$((sum + ${#list[i]} + 2))
+  done
+  if ((size + sum + (n > 1 ? 2 * (n - 2) + 5 : 0) <= room)); then
+    fits=$n
+  else
+    sum=0
+    for ((i = 0; i < n; i++)); do
+      sum=$((sum + ${#list[i]} + 2))
+      # The count, as in " and 12 more packages", takes at most 31 characters
+      ((size + sum + 2 * i + 31 <= room)) || break
+      fits=$((i + 1))
+    done
+  fi
+  line=""
+  for ((i = 0; i < fits; i++)); do
+    if ((i == 0)); then
+      line="\`${list[i]}\`"
+    elif ((i == n - 1)); then
+      line+=" and \`${list[i]}\`"
+    else
+      line+=", \`${list[i]}\`"
+    fi
+  done
+  if ((fits < n)); then
+    count="$((n - fits)) packages"
+    ((n - fits != 1)) || count="1 package"
+    if ((fits > 0)); then
+      line+=" and $((n - fits)) more ${count#* }"
+    else
+      line=$count
+    fi
+  fi
+  printf '%s%s.' "$lead" "$line"
 }
 
 # Print the comment for host $1 and run URL $2 on a host issue a run closes

@@ -169,6 +169,15 @@ srcinfo_pkgver() {
   awk '/^\tpkgver = /{print substr($0, 11); exit}' "$1"
 }
 
+# Fails for pkgver $1 of an AUR .SRCINFO, which co-maintainers write, that validate_pkgver
+# refuses or that starts with +. Empty ones pass, and _bump_version then changes nothing.
+aur_pkgver_ok() {
+  if [[ -n "$1" ]] && { ! validate_pkgver "$1" 2>/dev/null || [[ "$1" == +* ]]; }; then
+    log_err "The AUR .SRCINFO has pkgver = $(_shown_line "$1"), which aurtomator does not take"
+    return 1
+  fi
+}
+
 # Print the words of the one top-level arch=(...) line of PKGBUILD $1, one a
 # line; fails for any other arch line or a word that is no plain arch name
 pkgbuild_arch_words() {
@@ -301,6 +310,7 @@ check_arches_back() {
       return 1
     fi
     old_ver=$(srcinfo_pkgver "$ref/.SRCINFO")
+    aur_pkgver_ok "$old_ver" || return 1
     if [[ -n "${6:-}" ]]; then
       old_up=$(_unformat_version "$old_ver" "$6")
       new_up=$(_unformat_version "$4" "$6")
@@ -366,8 +376,8 @@ probe_url() {
   local response code type
   request_begin "$1" || return 2
   response=$(curl --globoff -sIL -o /dev/null -w '%{http_code} %{content_type}' \
-    --max-time 10 --max-redirs 5 "$1" 2>/dev/null) || {
-    request_end
+    --max-time 10 --max-redirs 5 --proto '=https' --proto-redir '=https' "$1" 2>/dev/null) || {
+    request_end 2
     return 2
   }
   request_end

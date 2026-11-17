@@ -580,8 +580,8 @@ validate_pkg() {
         fi
         ;;
       registry)
-        if [[ ! "$value" =~ ^(@[A-Za-z0-9._~-]+/)?[A-Za-z0-9._~-]+$ ]]; then
-          log_err "$shown: upstream.registry must be a package name of A-Za-z0-9._~-, after an @scope/ at most: ${value@Q}"
+        if [[ ! "$value" =~ ^(@[A-Za-z0-9._~-]+/)?[A-Za-z0-9._~-]+$ || "/${value#@}/" == */./* || "/${value#@}/" == */../* ]]; then
+          log_err "$shown: upstream.registry must be a package name of A-Za-z0-9._~-, after an @scope/ at most, neither of them . or ..: ${value@Q}"
           ((errors++))
         fi
         ;;

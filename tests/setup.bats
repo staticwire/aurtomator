@@ -1393,6 +1393,15 @@ EOF
   [[ "$output" == *"1 issue(s) found."* ]]
 }
 
+@test "setup verify: counts a secret by its whole name" {
+  write_full_config ""
+
+  GH_SECRETS=$'AUR_SSH_KEY_OLD\t2026-03-26\nAUR_GIT_NAME\t2026-03-26\nAUR_GIT_EMAIL\t2026-03-26' \
+    run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"! Secrets: 2/3 configured"* ]]
+}
+
 @test "setup verify: a missing secret is an issue" {
   write_full_config ""
 

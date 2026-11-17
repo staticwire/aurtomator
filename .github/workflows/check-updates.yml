@@ -285,7 +285,11 @@ jobs:
           for f in "$DATA"/statuses/*; do
             name=${f##*/}
             [[ -f "$f" && "$name" =~ $name_re ]] || continue
-            grep -qE '^(new_version|available_downgrade|new_build|arch_back): ' "$f" || continue
+            # Errors of failed checks hold lines of upstream, so the start of a status decides
+            case "$(<"$f")" in
+              "new_version: "* | "available_downgrade: "* | "new_build: "* | "arch_back: "*) ;;
+              *) continue ;;
+            esac
             # builder writes the statuses, so a name takes a prepare job only with its YAML
             [[ -f "packages/$name.yml" ]] || continue
             if ((${#to_prepare[@]} < 256)); then
@@ -928,13 +932,18 @@ jobs:
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
 
+          # Read once, since the loop below takes each pair of open issue and package
+          declare -A statuses=()
+          for status_file in "$STATUS_DIR"/*; do
+            [[ -f "$status_file" && "${status_file##*/}" != _* ]] || continue
+            statuses[${status_file##*/}]=$(<"$status_file")
+          done
+
           while read -r number title; do
             [[ -n "$number" ]] || continue
-            for status_file in "$STATUS_DIR"/*; do
-              [[ -f "$status_file" ]] || continue
-              pkg_name=$(basename "$status_file")
-              [[ "$pkg_name" == _* ]] && continue
-              status=$(cat "$status_file")
+            for pkg_name in "${!statuses[@]}"; do
+              status=${statuses[$pkg_name]}
+              status_file="$STATUS_DIR/$pkg_name"
               # Check issues close when the check passes, and update or held issues when the
               # version is in the AUR
               case "$title:$status" in
@@ -1017,10 +1026,13 @@ jobs:
         run: |
           STATUS_DIR=".status"
           [[ -d "$STATUS_DIR" ]] || exit 0
-          # Runs whose check left a package unchecked close none
-          if grep -qs '^unchecked: ' "$STATUS_DIR"/*; then
-            exit 0
-          fi
+          # Runs whose check left a package unchecked close none. Errors of failed checks hold
+          # lines of upstream, so the start of a status decides.
+          for f in "$STATUS_DIR"/*; do
+            if [[ -f "$f" && "$(<"$f")" == "unchecked: "* ]]; then
+              exit 0
+            fi
+          done
 
           has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
           [[ "$has_issues" != "false" ]] || exit 0
@@ -1076,12 +1088,14 @@ jobs:
           }
 
           # Opens an issue with label $1, title $2 and body $3, and turns a
-          # refusal of GitHub into a warning
+          # refusal of GitHub into a warning and created=false
           create_issue() {
             local out
+            created=true
             if out=$(gh issue create --title "$2" --label "$1" --body "$3" 2>&1); then
               echo "$out"
             else
+              created=false
               echo "::warning::Could not create the issue $2: ${out//$'\n'/ }"
             fi
           }
@@ -1114,6 +1128,12 @@ jobs:
             fi
             body=$(lib host_issue_body "$STATUS_DIR" "$host" "$RUN_URL" "${list[@]}")
             create_issue auto-update "❌ $host: ${#list[@]} packages failed to check" "$body"
+            # The packages of a refused host issue get issues of their own below
+            if [[ "$created" == false ]]; then
+              for pkg_name in "${list[@]}"; do
+                unset 'shared[$pkg_name]'
+              done
+            fi
           done <<<"$hosts"
 
           for status_file in "$STATUS_DIR"/*; do

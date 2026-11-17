@@ -79,31 +79,50 @@ script_error() {
 # Prints status $1 with a space for each tab and control character but newlines, since
 # the records of a run split their lines at tabs
 status_text() {
-  printf '%s\n' "$1" | LC_ALL=C tr '\001-\011\013-\037\177' ' '
+  printf '%s\n' "$1" | shown_text
 }
 
-# Clears the request in flight of a check that exited with $1. After a timeout it
-# prints the URL, and remembers the host when a HEAD request of 10 s gets no status
+# Prints stdin with a space for each tab and control character but newlines: the errors and
+# warnings of a check hold text of upstream and the AUR, which a terminal would act on
+shown_text() {
+  LC_ALL=C tr '\001-\011\013-\037\177' ' '
+}
+
+# Clears the requests of a check that exited with $1 and prints the URL of the one that failed. After a
+# timeout that is the request in flight, and its host turns silent when a HEAD request of 10 s gets no status.
 request_done() {
-  local url check rc=0 code
+  local url="" check rc=0 code
   host_memory || return 0
   if [[ "$1" == 124 || "$1" == 137 ]] && { read -r url && read -r check; } <"$AURTOMATOR_HOSTS_DIR/request"; then
-    printf '%s\n' "$url"
     code=$(curl --globoff -sI -o /dev/null --max-time 10 --proto '=https' -A "$USER_AGENT" -w '%{http_code}' "$check" 2>/dev/null) || rc=$?
     if ((rc == 28)) && [[ "$code" == 000 ]]; then
       remember_host "$url"
     fi
+  elif [[ "$1" != 0 ]]; then
+    read -r url <"$AURTOMATOR_HOSTS_DIR/failed" || url=""
   fi
   : >"$AURTOMATOR_HOSTS_DIR/request"
+  : >"$AURTOMATOR_HOSTS_DIR/failed"
+  [[ -z "$url" ]] || printf '%s\n' "$url"
 }
 
-# Succeeds when a check that failed with exit code $1 and error $2 gets a second
-# pass: none after a timeout, none when the first URL of $2 is on a silent host
+# Succeeds when a check that failed with exit code $1 gets a second pass: none
+# after a timeout, none when the host of its failed request $2 is silent
 second_pass() {
+  local host
   (($1 != 124 && $1 != 137)) || return 1
-  host_memory || return 0
-  [[ "$2" =~ https?://([A-Za-z0-9.-]+) ]] || return 0
-  ! grep -qxF -e "${BASH_REMATCH[1],,}" "$AURTOMATOR_HOSTS_DIR/silent"
+  host_memory && host=$(url_host "$2") || return 0
+  ! grep -qxF -e "$host" "$AURTOMATOR_HOSTS_DIR/silent"
+}
+
+# Notes for _hosts the host of URL $2, the failed request of package $1, or no host
+note_failed_host() {
+  local host
+  if host=$(url_host "$2"); then
+    FAILED_HOSTS[$1]=$host
+  else
+    unset 'FAILED_HOSTS[$1]'
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -145,6 +164,7 @@ if [[ "$MODE" == check || "$MODE" == update ]]; then
   trap 'rm -rf "$AURTOMATOR_HOSTS_DIR"' EXIT
   : >"$AURTOMATOR_HOSTS_DIR/silent"
   : >"$AURTOMATOR_HOSTS_DIR/request"
+  : >"$AURTOMATOR_HOSTS_DIR/failed"
 fi
 
 STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
@@ -276,7 +296,7 @@ handed_failure() {
     local handed
     handed=$(<"$file")
     if [[ "$handed" == update_failed:* ]]; then
-      printf '%s\n' "$handed"
+      status_text "$handed"
       return
     fi
   fi
@@ -347,15 +367,16 @@ find_asset() {
     in_flight=$(request_done "$rc")
     err=$(script_error "$rc" "$err_file" "$CHECK_TIMEOUT" "$in_flight")
     rm -f "$err_file"
+    note_failed_host "$2" "$in_flight"
     if ((rc == 3)); then
-      printf '%s\n' "$err" >&2
+      status_text "$err" >&2
       echo "pending: $3" >"${STATUS_DIR}/$2"
       return 1
     fi
     if ((rc != 0)); then
-      log_err "Failed to check $2: $err"
+      log_err "Failed to check $2: $(status_text "$err")"
       status_text "check_failed: ${err}" >"${STATUS_DIR}/$2"
-      if (($4 == 1)) && second_pass "$rc" "$err"; then
+      if (($4 == 1)) && second_pass "$rc" "$in_flight"; then
         RECHECK+=("$1")
       fi
       return 1
@@ -412,19 +433,20 @@ find_arches() {
   in_flight=$(request_done "$rc")
   err=$(script_error "$rc" "$err_file" "$CHECK_TIMEOUT" "$in_flight")
   rm -f "$err_file"
+  note_failed_host "$2" "$in_flight"
   first=${text%%$'\n'*}
   second=""
   [[ "$text" != *$'\n'* ]] || second=${text#*$'\n'}
   # Waits name their start, the arches they wait for and the AUR commit that builds them
   if ((rc == 3)) && [[ "$second" =~ $wait_re ]] && waited=${BASH_REMATCH[1]} commit=${BASH_REMATCH[2]} &&
     valid_time "$first" && arch_list_ok "$waited"; then
-    printf '%s\n' "$err" >&2
+    status_text "$err" >&2
     echo "pending: $3" >"${STATUS_DIR}/$2"
     printf '%s\t%s\t%s\t%s\t%s\n' "$2" "$3" "$waited" "$first" "$commit" >>"${STATUS_DIR}/_arches"
     return 1
   fi
   if ((rc == 0)) && arch_record_ok "$first" "$second"; then
-    [[ -z "$err" ]] || printf '%s\n' "$err" >&2
+    [[ -z "$err" ]] || status_text "$err" >&2
     ARCH_OUT=$first
     # Lines with no arch and no wait tell prepare to put back every arch of arch_out
     if [[ -n "$first$second" || -n "$(pkg_get "$1" '.arch_out // {} | keys | .[]')" ]]; then
@@ -433,9 +455,9 @@ find_arches() {
     return 0
   fi
   ((rc != 0 && rc != 3)) || err="check-arch.sh printed ${text@Q}"
-  log_err "Failed to check $2: $err"
+  log_err "Failed to check $2: $(status_text "$err")"
   status_text "check_failed: ${err}" >"${STATUS_DIR}/$2"
-  if (($4 == 1)) && second_pass "$rc" "$err"; then
+  if (($4 == 1)) && second_pass "$rc" "$in_flight"; then
     RECHECK+=("$1")
   fi
   return 1
@@ -448,7 +470,7 @@ run_package() {
   local pkg_file="$1" pass="$2"
   local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false in_flight
   local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
-  local stem yaml_name
+  local stem yaml_name host
   # The write-back of current takes regular files alone, so a linked YAML keeps its old current
   if [[ -L "$pkg_file" ]]; then
     stem="${pkg_file##*/}"
@@ -469,6 +491,7 @@ run_package() {
     fi
     return 0
   fi
+  unset 'FAILED_HOSTS[$pkg_name]'
   # --prepare and --publish keep a wait for the cooldown from the check run
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]] && [[ "${CHECKED[$pkg_name]:-}" == "cooldown: "* ]]; then
     if valid_date "${CHECKED[$pkg_name]#cooldown: }"; then
@@ -500,6 +523,10 @@ run_package() {
         ;;
       up_to_date | check_failed:*)
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
+        host=$(recorded_host "$pkg_name" <<<"${CHECKED[_hosts]:-}")
+        if [[ "$found" == check_failed:* && -n "$host" ]]; then
+          FAILED_HOSTS[$pkg_name]=$host
+        fi
         return
         ;;
       "downgrade_skipped: "* | "jump_skipped: "* | "held: "* | "pending: "*)
@@ -538,15 +565,16 @@ run_package() {
   if ((check_rc != 0)); then
     check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT" "$in_flight")
     rm -f "$err_file"
-    log_err "Failed to check $pkg_name: $check_err"
+    log_err "Failed to check $pkg_name: $(status_text "$check_err")"
     status_text "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
-    if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded ]] && second_pass "$check_rc" "$check_err"; then
+    note_failed_host "$pkg_name" "$in_flight"
+    if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded ]] && second_pass "$check_rc" "$in_flight"; then
       RECHECK+=("$pkg_file")
     fi
     return
   fi
   # CI shows the output of this script alone, so the warnings of a check that passed go there
-  cat -- "$err_file" >&2
+  shown_text <"$err_file" >&2
   rm -f "$err_file"
 
   # Up-to-date packages with asset_regex get a rebuild when the asset value of
@@ -615,7 +643,7 @@ run_package() {
   check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT" alerts)
   rm -f "$err_file"
   if ((check_rc != 0)); then
-    log_err "Failed to check $pkg_name: $check_err"
+    log_err "Failed to check $pkg_name: $(status_text "$check_err")"
     status_text "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
@@ -644,7 +672,7 @@ run_package() {
   check_err=$(<"$err_file")
   rm -f "$err_file"
   if ((check_rc != 0)); then
-    log_err "Failed to check $pkg_name: $check_err"
+    log_err "Failed to check $pkg_name: $(status_text "$check_err")"
     status_text "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
@@ -754,6 +782,7 @@ fi
 CHECK_END=$(($(date -u +%s) + CHECK_BUDGET))
 
 RECHECK=()
+declare -A FAILED_HOSTS=()
 for pkg_file in "${check_files[@]:check_start}" "${check_files[@]:0:check_start}"; do
   if check_time_left; then
     run_package "$pkg_file" 1
@@ -784,6 +813,16 @@ for pkg_file in "${check_files[@]}"; do
     printf '%s\n' "$stem"
   fi
 done >"${STATUS_DIR}/_packages"
+
+# The host of the request each failed check failed on, for the host issues
+hosts=$(
+  for pkg_name in "${!FAILED_HOSTS[@]}"; do
+    if [[ -f "${STATUS_DIR}/${pkg_name}" && "$(<"${STATUS_DIR}/${pkg_name}")" == check_failed:* ]]; then
+      printf '%s\t%s\n' "$pkg_name" "${FAILED_HOSTS[$pkg_name]}"
+    fi
+  done | LC_ALL=C sort
+)
+[[ -z "$hosts" ]] || printf '%s\n' "$hosts" >"${STATUS_DIR}/_hosts"
 
 # The arches each package lacks after the run, for the issues of arches out
 if [[ "$MODE" == "publish" ]]; then

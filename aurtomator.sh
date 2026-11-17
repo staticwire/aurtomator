@@ -336,6 +336,15 @@ check_cache_dirs() {
     fi
     kind=""
   done
+  # The path of the cache holds no link here, and each directory above can rename the cache whole
+  dir=$cache
+  while [[ "$dir" == /?* ]]; do
+    dir=${dir%/*}
+    if ! private_dir "${dir:-/}" shared; then
+      echo "${dir:-/} belongs to another account or lets group or others write it, and they could swap the copy of aurtomator below it before it runs; set XDG_CACHE_HOME to a directory with no such directory above it" >&2
+      exit 1
+    fi
+  done
 }
 # Succeeds when the copy is the checkout of the pin as the fetch left it, which only the user can write
 copy_ok() {
@@ -358,6 +367,9 @@ if [[ ! -d "$copy" ]]; then
   check_release "$workflow" "${pins[0]}" "$sha"
   # The XDG Base Directory Specification asks for mode 0700, which a umask of 0002 would not give
   (umask 077 && mkdir -p "${copy%/*}")
+  # New caches get their path at the target of links here, as existing ones did above
+  cache=$(cd -P -- "$cache" && pwd -P) || exit 1
+  copy="$cache/aurtomator/$sha"
   check_cache_dirs
   tmp="$(mktemp -d "$copy.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
