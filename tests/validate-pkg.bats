@@ -247,7 +247,8 @@ current: '$current'"
     'github-asset|tag|v[1-9]' 'github-asset|tag|a b' 'github-asset|tag|v1..2' 'github-asset|tag|x@{1}' \
     'github-nightly|nightly_tag|n?x' 'repology|repology|firefox/../../robots.txt?x=[1-3]#' \
     'repology|repology|a b' 'archpkg|archpkg|linux&repo=Testing&q=../x y' 'archpkg|archpkg|-x' \
-    'archpkg|archpkg|.x' 'repology|repology|:x'; do
+    'archpkg|archpkg|.x' 'repology|repology|:x' 'pypi|registry|..' 'crates|registry|.' 'npm|registry|@scope/..' \
+    'npm|registry|@../pkg' 'npm|registry|@./pkg'; do
     IFS='|' read -r strategy field value <<<"$entry"
     case "$strategy" in
       gitea-tag) fields="  host: codeberg.org" ;;

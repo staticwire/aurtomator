@@ -549,6 +549,12 @@ verify_release() {
   fi
 }
 
+# Succeeds when the lines of the secret list $1 name secret $2 in their first field: a name
+# such as AUR_SSH_KEY_OLD holds the name of another secret
+secret_listed() {
+  awk -v name="$2" '$1 == name { found = 1 } END { exit !found }' <<<"$1"
+}
+
 verify_all() {
   header "verify" "Checking everything works"
 
@@ -597,12 +603,12 @@ verify_all() {
       secret_list=$(gh secret list -R "$gh_repo" 2>/dev/null || true)
       local secret_count=0
       local secret_expected=3 # AUR_SSH_KEY + AUR_GIT_NAME + AUR_GIT_EMAIL
-      echo "$secret_list" | grep -q "AUR_SSH_KEY" && ((secret_count++)) || true
-      echo "$secret_list" | grep -q "AUR_GIT_NAME" && ((secret_count++)) || true
-      echo "$secret_list" | grep -q "AUR_GIT_EMAIL" && ((secret_count++)) || true
+      secret_listed "$secret_list" AUR_SSH_KEY && ((secret_count++)) || true
+      secret_listed "$secret_list" AUR_GIT_NAME && ((secret_count++)) || true
+      secret_listed "$secret_list" AUR_GIT_EMAIL && ((secret_count++)) || true
       if [[ -n "$GPG_KEY_ID" ]]; then
         ((secret_expected++))
-        echo "$secret_list" | grep -q "GPG_SIGNING_KEY" && ((secret_count++)) || true
+        secret_listed "$secret_list" GPG_SIGNING_KEY && ((secret_count++)) || true
       fi
       if [[ "$secret_count" -eq "$secret_expected" ]]; then
         ok "Secrets: ${secret_count}/${secret_expected} configured"

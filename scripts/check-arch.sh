@@ -54,7 +54,7 @@ done
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 aur="$work/aur"
-if ! aur_clone "https://aur.archlinux.org/${PKG_NAME}.git" "$aur" --no-checkout >&2; then
+if ! aur_clone "https://aur.archlinux.org/${PKG_NAME}.git" "$aur" --no-checkout -q >&2; then
   log_warn "$PKG_NAME: no answer from the AUR, so the arches out stay out in this run"
   finish "${out_keys[*]}"
 fi
@@ -118,6 +118,7 @@ for arch in "${ask[@]}"; do
   dir="$work/HEAD"
   [[ " ${out_now[*]} " != *" $arch "* ]] || dir="$work/$arch"
   old_ver=$(srcinfo_pkgver "$dir/.SRCINFO")
+  aur_pkgver_ok "$old_ver" || exit 1
   old_asset=""
   [[ -z "$asset_var" ]] || old_asset=$(_plain_value "$dir/PKGBUILD" "$asset_var")
   old_up=""
@@ -127,6 +128,11 @@ for arch in "${ask[@]}"; do
     new_up=$(_unformat_version "$VERSION" "$format")
   fi
   while IFS= read -r url; do
+    # Co-maintainers write these URLs, and the messages bring them to the terminal
+    if has_control "$url"; then
+      log_err "$PKG_NAME $VERSION: the AUR .SRCINFO has a source_$arch URL with a control character: $(_shown_line "$url")"
+      exit 1
+    fi
     rc=0
     probe_url "$url" || rc=$?
     if ((rc == 2)); then

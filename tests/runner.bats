@@ -688,6 +688,34 @@ EOF
   [ "$output" = "name: pinned" ]
 }
 
+# Accounts that can rename what a directory above the cache holds can swap the whole cache
+@test "runner: runs no copy below a directory above the cache that others can write" {
+  local above="$TEST_TMPDIR/shared"
+  mkdir -p "$above/cache"
+  chmod 0700 "$above/cache"
+  chmod 0777 "$above"
+  XDG_CACHE_HOME="$above/cache" run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$above belongs to another account or lets group or others write it, and they could swap the copy of aurtomator below it before it runs; set XDG_CACHE_HOME to a directory with no such directory above it" ]
+  [ ! -e "$above/cache/aurtomator/$PINNED" ]
+
+  chmod +t "$above"
+  XDG_CACHE_HOME="$above/cache" run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+}
+
+# The check of the directories above reads the path of a new cache at its target too
+@test "runner: makes a new cache below a link to a directory of the user" {
+  mkdir -p "$TEST_TMPDIR/real-parent"
+  chmod 0700 "$TEST_TMPDIR/real-parent"
+  ln -s "$TEST_TMPDIR/real-parent" "$TEST_TMPDIR/link-parent"
+  XDG_CACHE_HOME="$TEST_TMPDIR/link-parent/cache" run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+  [ -d "$TEST_TMPDIR/real-parent/cache/aurtomator/$PINNED" ]
+}
+
 # The owner of a link in a directory with the sticky bit can point it elsewhere after the check
 @test "runner: runs no copy through a link at the aurtomator directory of the cache" {
   local real="$TEST_TMPDIR/real"

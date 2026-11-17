@@ -2914,6 +2914,40 @@ current: '2.0.0'"
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
+# Errors and warnings of a check hold text of upstream, which a terminal acts on
+@test "check-all: prints the error and the warnings of a check without control characters" {
+  local esc
+  esc=$(printf '\033')
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  stub_script check-update.sh 1 "boom ${esc}[2K${esc}[1;32mOK"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Failed to check pkg: boom  [2K [1;32mOK"* ]]
+  [[ "$output" != *"$esc"* ]]
+  stub_script check-update.sh 0 "warning ${esc}[2K"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning  [2K"* ]]
+  [[ "$output" != *"$esc"* ]]
+}
+
+@test "check-all --publish: keeps the host of a failed check alone" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  create_test_package "other" "github-release" "upstream:
+  project: owner/repo
+current: '2.0.0'"
+  checked_status pkg "check_failed: API down"
+  checked_status other "up_to_date"
+  printf 'pkg\tapi.github.com\nother\tgithub.com\nghost\tgitlab.com\npkg\tGitHub.com x\n' >"$TEST_TMPDIR/.status/_hosts"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'pkg\tapi.github.com' ]
+}
+
 @test "check-all --publish: keeps a skipped downgrade and publishes nothing" {
   create_test_package "older" "github-release" "upstream:
   project: owner/repo
@@ -3214,6 +3248,18 @@ current: '1.0.0'"
   printf 'update_failed: audit failed\nline two\n' >"$TEST_TMPDIR/out/status/pkg"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = $'update_failed: audit failed\nline two' ]
+}
+
+# PKGBUILD code of prepare writes that status, and the records of a run split their lines at tabs
+@test "check-all --publish: writes a space for each tab and control character of the handed update failure" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/status"
+  printf 'update_failed: audit\tfailed\033[2K\nline two\n' >"$TEST_TMPDIR/out/status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = $'update_failed: audit failed [2K\nline two' ]
 }
 
 @test "check-all --publish: takes no other status from the prepare run" {
@@ -3785,6 +3831,37 @@ MOCKCURL
   [ "$(failed_hosts "$TEST_TMPDIR/.status")" = "silent.example p1 p2 p3 p4 p5" ]
 }
 
+# git prints the text of an ERR packet of the server, which can name any URL
+@test "check-all: _hosts names the host of the request that failed, whatever URL its error names" {
+  host_checks "a git https://live.example/a.git" "b git https://live.example/b.git"
+  cat >"$MOCK_DIR/git" <<'MOCKGIT'
+#!/usr/bin/env bash
+[[ "${*: -1}" == */a.git ]] || exit 0
+printf 'fatal: remote error: see https://github.com/status\nunchecked: x\n' >&2
+exit 128
+MOCKGIT
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/b")" = "up_to_date" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'a\tlive.example' ]
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  [ "$(failure_host "$TEST_TMPDIR/.status/a")" = "live.example" ]
+}
+
+@test "check-all: a URL of a silent host in the text of an error takes no second pass from the check" {
+  host_checks "a http https://silent.example/a" "b git https://live.example/b.git"
+  echo silent.example >"$TEST_TMPDIR/silent-hosts"
+  cat >"$MOCK_DIR/git" <<'MOCKGIT'
+#!/usr/bin/env bash
+printf 'fatal: remote error: see https://silent.example/status\n' >&2
+exit 128
+MOCKGIT
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'a\nb\nb' ]
+  [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'a\tsilent.example\nb\tlive.example' ]
+}
+
 # === check-all.sh --verify ===
 
 # Helper: one package with a prepared update, its handed over status and the
@@ -4160,79 +4237,55 @@ EOF
 
 # === failure_host and failed_hosts ===
 
-@test "failure_host: names the host of the URL that http_get could not read" {
-  printf '%s\n' 'check_failed: → Checking demo (strategy: github-release, current: 1.0)' \
-    'https://api.github.com/repos/o/demo/releases/latest: The requested URL returned error: 503' \
-    '✗ Strategy failed for demo' >"$TEST_TMPDIR/demo"
-  run failure_host "$TEST_TMPDIR/demo"
+@test "failure_host: names the host that check-all.sh recorded for the failed check" {
+  mkdir -p "$TEST_TMPDIR/st"
+  printf '%s\n' 'check_failed: → Checking demo (strategy: git-tag, current: 1.0)' \
+    'fatal: remote error: see https://github.com/status' \
+    'Failed to fetch tags from https://git.example.org/demo.git' >"$TEST_TMPDIR/st/demo"
+  printf 'other\tgithub.com\ndemo\tgit.example.org\n' >"$TEST_TMPDIR/st/_hosts"
+  run failure_host "$TEST_TMPDIR/st/demo"
   [ "$status" -eq 0 ]
-  [ "$output" = "api.github.com" ]
+  [ "$output" = "git.example.org" ]
 }
 
-@test "failure_host: names the host of the URL that git could not reach" {
-  echo "check_failed: fatal: unable to access 'https://gitlab.com/o/demo.git/': Could not resolve host: gitlab.com" >"$TEST_TMPDIR/demo"
-  run failure_host "$TEST_TMPDIR/demo"
+# Servers write the text of the error, so a URL there names no host
+@test "failure_host: names no host from the text of the error" {
+  mkdir -p "$TEST_TMPDIR/st"
+  echo "check_failed: https://api.github.com/repos/o/demo/releases/latest: The requested URL returned error: 503" >"$TEST_TMPDIR/st/demo"
+  run failure_host "$TEST_TMPDIR/st/demo"
   [ "$status" -eq 0 ]
-  [ "$output" = "gitlab.com" ]
+  [ -z "$output" ]
 }
 
-@test "failure_host: names the host of the first URL, in lower case and without the port" {
-  printf '%s\n' 'check_failed: https://Git-Mirror.Example.ORG:8443/o/demo.git: error: 404' 'https://api.github.com/x: error: 503' >"$TEST_TMPDIR/demo"
-  run failure_host "$TEST_TMPDIR/demo"
-  [ "$output" = "git-mirror.example.org" ]
-  echo "check_failed: http://example.org/demo: Protocol \"http\" disabled" >"$TEST_TMPDIR/demo"
-  run failure_host "$TEST_TMPDIR/demo"
-  [ "$output" = "example.org" ]
-  # Hosts end at #, ?, a space or the end of the text
-  local url
-  for url in 'https://example.com#frag: error: 503' 'https://example.com?q=1: error: 503' \
-    'https://example.com timed out' 'https://example.com'; do
-    echo "check_failed: $url" >"$TEST_TMPDIR/demo"
-    run failure_host "$TEST_TMPDIR/demo"
-    [ "$output" = "example.com" ] || {
-      echo "taken: $url as $output"
+@test "failure_host: prints nothing for a failed update or a line of _hosts that names no host" {
+  local line
+  mkdir -p "$TEST_TMPDIR/st"
+  echo "update_failed: boom" >"$TEST_TMPDIR/st/demo"
+  printf 'demo\tapi.github.com\n' >"$TEST_TMPDIR/st/_hosts"
+  run failure_host "$TEST_TMPDIR/st/demo"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  echo "check_failed: boom" >"$TEST_TMPDIR/st/demo"
+  for line in $'demo\tapi.github.com x' $'demo\tGitHub.com' $'demo\t' $'demo\tgithub.com\textra' 'demo github.com' \
+    $'demo\tgİthub.com'; do
+    printf '%s\n' "$line" >"$TEST_TMPDIR/st/_hosts"
+    run failure_host "$TEST_TMPDIR/st/demo"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || {
+      echo "taken: ${line@Q} as $output"
       return 1
     }
   done
 }
 
-# Hosts with a letter beyond ASCII are no hosts that url_host accepts, so their package gets its own issue
-@test "failure_host: prints nothing for a host with a letter beyond ASCII, in every locale" {
-  local locale url locales=(C C.UTF-8)
-  if locale -a | grep -qix 'en_US.utf8'; then
-    locales+=(en_US.UTF-8)
-  fi
-  for locale in "${locales[@]}"; do
-    for url in 'https://exÉmple.com/x' 'https://gİthub.com/x' 'https://ＧＩＴＨＵＢ.com/x'; do
-      echo "check_failed: $url: error: 503" >"$TEST_TMPDIR/demo"
-      LC_ALL=$locale run failure_host "$TEST_TMPDIR/demo"
-      [ "$status" -eq 0 ]
-      [ -z "$output" ] || {
-        echo "taken under $locale: $url as $output"
-        return 1
-      }
-    done
-  done
-}
-
-@test "failure_host: prints nothing for an error without a URL or for a failed update" {
-  echo "check_failed: timed out after 120 s" >"$TEST_TMPDIR/demo"
-  run failure_host "$TEST_TMPDIR/demo"
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
-  echo "update_failed: https://api.github.com/x: error: 503" >"$TEST_TMPDIR/demo"
-  run failure_host "$TEST_TMPDIR/demo"
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
-}
-
 # Writes into $TEST_TMPDIR/st the statuses of $1 packages, named $3 and a
-# number, whose check failed on host $2
+# number, whose check failed on host $2, and their lines of _hosts
 fail_checks() {
   local i
   mkdir -p "$TEST_TMPDIR/st"
   for ((i = 1; i <= $1; i++)); do
     echo "check_failed: https://$2/repos/o/$3$i/tags: The requested URL returned error: 503" >"$TEST_TMPDIR/st/$3$i"
+    printf '%s\t%s\n' "$3$i" "$2" >>"$TEST_TMPDIR/st/_hosts"
   done
 }
 
@@ -4305,40 +4358,81 @@ EOF
   [ "$output" = "$expected" ]
 }
 
-@test "host_issue_body: cuts each error to a share of 50000 characters, 4000 at most" {
-  local i tail packages=()
+# Writes into $TEST_TMPDIR/st the statuses of $1 packages, named $2 and a number,
+# whose errors hold $3 characters
+long_failures() {
+  local i tail
   mkdir -p "$TEST_TMPDIR/st"
-  tail=$(printf 'x%.0s' {1..4000})
-  for i in 1 2 3 4 5; do
-    echo "check_failed: HEAD${tail}" >"$TEST_TMPDIR/st/p$i"
-    packages+=("p$i")
+  tail=$(printf 'x%.0s' $(seq "$3"))
+  for ((i = 1; i <= $1; i++)); do
+    echo "check_failed: ${tail}" >"$TEST_TMPDIR/st/$2$i"
   done
+}
+
+# Prints the packages named $2 and a number from 1 to $1
+numbered() {
+  local i
+  for ((i = 1; i <= $1; i++)); do
+    printf '%s\n' "$2$i"
+  done
+}
+
+@test "host_issue_body: cuts each error to an equal share of the room, 4000 characters at most" {
+  local packages
+  long_failures 5 p 4004
+  mapfile -t packages < <(numbered 5 p)
   run --keep-empty-lines host_issue_body "$TEST_TMPDIR/st" h https://example.invalid/run "${packages[@]}"
   [ "$status" -eq 0 ]
   [ "${lines[7]}" = "[first 4 characters cut]" ]
-  [ "${lines[8]}" = "$tail" ]
-  for i in {6..20}; do
-    echo "check_failed: HEAD${tail}" >"$TEST_TMPDIR/st/p$i"
-    packages+=("p$i")
-  done
-  run --keep-empty-lines host_issue_body "$TEST_TMPDIR/st" h https://example.invalid/run "${packages[@]}"
+  [ "$(grep -c '^\[first 4 characters cut\]$' <<<"$output")" -eq 5 ]
+  long_failures 20 p 4004
+  mapfile -t packages < <(numbered 20 p)
+  run host_issue_body "$TEST_TMPDIR/st" h https://example.invalid/run "${packages[@]}"
   [ "$status" -eq 0 ]
-  [ "${lines[7]}" = "[first 1504 characters cut]" ]
-  [ "${lines[8]}" = "${tail:1500}" ]
+  [ "$(grep -c '^Package: `p[0-9]*`$' <<<"$output")" -eq 20 ]
+  [ "$(grep -c '^\[first 10[0-9][0-9] characters cut\]$' <<<"$output")" -eq 20 ]
+  [[ "$output" != *"no room"* ]]
+  local LC_ALL=C.UTF-8
+  ((${#output} <= 60000 && ${#output} > 59900))
+}
+
+# Prints how many packages body $1 holds: those with an error, those named and those counted
+body_packages() {
+  local named=0 counted=0 line
+  line=$(grep '^This issue has no room for the errors of ' <<<"$1") || true
+  if [[ -n "$line" ]]; then
+    named=$(grep -o '`[^`]*`' <<<"$line" | grep -c .) || true
+    [[ ! "$line" =~ ([0-9]+)\ (more\ )?packages?\.$ ]] || counted=${BASH_REMATCH[1]}
+  fi
+  echo $(($(grep -c '^Package: `' <<<"$1") + named + counted))
 }
 
 # GitHub refuses the body of an issue over 65536 characters
-@test "host_issue_body: stays under 65536 characters for 100 packages with long errors" {
-  local i tail packages=()
-  mkdir -p "$TEST_TMPDIR/st"
-  tail=$(printf 'x%.0s' {1..4000})
-  for i in {1..100}; do
-    echo "check_failed: ${tail}" >"$TEST_TMPDIR/st/package-name-$i"
-    packages+=("package-name-$i")
-  done
+@test "host_issue_body: names the packages past the room of 60000 characters" {
+  local packages
+  long_failures 1000 package-name-of-30-characters- 4000
+  mapfile -t packages < <(numbered 1000 package-name-of-30-characters-)
   run host_issue_body "$TEST_TMPDIR/st" api.github.com https://github.com/owner/repo/actions/runs/1 "${packages[@]}"
   [ "$status" -eq 0 ]
-  ((${#output} < 65536))
+  [ "$(body_packages "$output")" -eq 1000 ]
+  [[ "$output" == *$'\n\nThis issue has no room for the errors of `package-name-of-30-characters-'*$'` and `package-name-of-30-characters-1000`.\n\nAuto-created by update workflow,'* ]]
+  [ "$(grep -c '^Package: `' <<<"$output")" -eq 41 ]
+  local LC_ALL=C.UTF-8
+  ((${#output} <= 60000))
+}
+
+@test "host_issue_body: counts the packages whose names pass the room too" {
+  local packages name
+  name=$(printf 'n%.0s' {1..80})
+  long_failures 1000 "$name" 4000
+  mapfile -t packages < <(numbered 1000 "$name")
+  run host_issue_body "$TEST_TMPDIR/st" api.github.com https://github.com/owner/repo/actions/runs/1 "${packages[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^Package: `' <<<"$output")" -eq 0 ]
+  [ "$(body_packages "$output")" -eq 1000 ]
+  [[ "$output" =~ \`\ and\ [0-9]+\ more\ packages\.$'\n\n'Auto-created ]]
+  local LC_ALL=C.UTF-8
+  ((${#output} <= 60000 && ${#output} > 59800))
 }
 
 @test "host_close_comment: says that fewer than 5 packages of the host failed to check" {
@@ -4429,6 +4523,13 @@ EOF
   [ "$status" -eq 0 ]
   [ -f "$TEST_TMPDIR/st/_without" ]
   [ ! -s "$TEST_TMPDIR/st/_without" ]
+}
+
+@test "clean_statuses: keeps the lines of _hosts that name a package and a host" {
+  make_statuses _hosts=$'foo\tapi.github.com\nbar baz\tgithub.com\nqux\tGitHub.com\nquux\t\ncorge\tgithub.com\textra\nfoo-2\tgit.example.org\n_x\tgithub.com\ngrault\tgİthub.com\nFoo\tgithub.com'
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/st/_hosts")" = $'foo\tapi.github.com\nfoo-2\tgit.example.org' ]
 }
 
 # Helper: writes the statuses given as name=status pairs to $TEST_TMPDIR/st
@@ -6094,6 +6195,54 @@ write_srcinfo_archs() {
   run timeout 10 bash -c 'source "$1/scripts/lib.sh"; _bump_version "demo-1.0-1" 1.0 1.1 "" 2' _ "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
   [ "$output" = "demo-1.1-1" ]
+}
+
+# The part before the first + of such a version is empty
+@test "_bump_version: returns for an old version that starts with +" {
+  run timeout 10 bash -c 'source "$1/scripts/lib.sh"; _bump_version "source = https://e.org/a.tar.gz" +1 +2' _ "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "source = https://e.org/a.tar.gz" ]
+  run timeout 10 bash -c 'source "$1/scripts/lib.sh"; _bump_version "source = https://e.org/a-+1.tar.gz" +1 +2' _ "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "source = https://e.org/a-+2.tar.gz" ]
+}
+
+@test "aur_pkgver_ok: refuses a pkgver of the AUR that validate_pkgver refuses or that starts with +" {
+  local ver
+  for ver in 1.0 28+22 1.0_rc1 ""; do
+    run aur_pkgver_ok "$ver"
+    [ "$status" -eq 0 ] || {
+      echo "refused: ${ver@Q}"
+      return 1
+    }
+  done
+  for ver in +1 '+' '1.0 x' 'a$b' "$(printf '1%.0s' {1..300})"; do
+    run aur_pkgver_ok "$ver"
+    [ "$status" -eq 1 ] || {
+      echo "taken: ${ver@Q}"
+      return 1
+    }
+    [[ "$output" == *"The AUR .SRCINFO has pkgver = "* ]]
+  done
+}
+
+@test "check_prepared_srcinfo: refuses an AUR pkgver that starts with +" {
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" +1 2 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  run timeout 20 bash -c 'source "$1/scripts/lib.sh"; check_prepared_srcinfo "" "$1/old.SRCINFO" "$1/new.SRCINFO" 1.1.0' _ "$TEST_TMPDIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR .SRCINFO has pkgver = +1, which aurtomator does not take"* ]]
+}
+
+@test "check_arches_back: refuses an AUR pkgver that starts with +" {
+  mkdir -p "$TEST_TMPDIR/arches/aarch64" "$TEST_TMPDIR/prepared"
+  printf 'pkgname=demo\nsha256sums_aarch64=(SKIP)\n' >"$TEST_TMPDIR/arches/aarch64/PKGBUILD"
+  printf 'pkgname=demo\nsha256sums_aarch64=(SKIP)\n' >"$TEST_TMPDIR/prepared/PKGBUILD"
+  write_srcinfo "$TEST_TMPDIR/arches/aarch64/.SRCINFO" +1 1 "$H1" "$H2"
+  write_srcinfo "$TEST_TMPDIR/prepared/.SRCINFO" 1.1.0 1 "$H3" "$H4"
+  run timeout 20 bash -c 'source "$1/scripts/lib.sh"; check_arches_back "$1/arches" "$1/prepared" aarch64 1.1.0' _ "$TEST_TMPDIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR .SRCINFO has pkgver = +1, which aurtomator does not take"* ]]
 }
 
 @test "check_prepared_srcinfo: accepts the AUR copy of a package with a VCS pin" {

@@ -199,6 +199,7 @@ request_begin() {
   fi
   if grep -qxF -e "$host" "$AURTOMATOR_HOSTS_DIR/silent"; then
     printf '%s: %s did not answer earlier in this run\n' "$1" "$host" >&2
+    request_failed "$1"
     return 1
   fi
   printf '%s\n%s\n' "$1" "${2:-$1}" >"$AURTOMATOR_HOSTS_DIR/request"
@@ -209,10 +210,22 @@ git_request_begin() {
   request_begin "$1" "${1%/}/info/refs?service=git-upload-pack"
 }
 
-# End the request that request_begin started
+# End the request that request_begin started, as one that failed for an exit code $1 other than 0
 request_end() {
+  local url
   if host_memory; then
+    if [[ "${1:-0}" != 0 ]] && read -r url <"$AURTOMATOR_HOSTS_DIR/request"; then
+      request_failed "$url"
+    fi
     : >"$AURTOMATOR_HOSTS_DIR/request"
+  fi
+}
+
+# Record URL $1 as the request of the check that failed last. The issues count a failed check
+# under its host, since the server writes part of the text of the error.
+request_failed() {
+  if host_memory; then
+    printf '%s\n' "$1" >"$AURTOMATOR_HOSTS_DIR/failed"
   fi
 }
 
@@ -238,7 +251,7 @@ http_get() {
   request_begin "$1" || return 28
   # stdout goes out through fd 3, and stderr into failure
   { failure=$(_curl_get "$@" 2>&1 >&3 3>&-); } 3>&1 || rc=$?
-  request_end
+  request_end "$rc"
   if ((rc == 0)); then
     return 0
   fi
@@ -268,6 +281,7 @@ http_get_json() {
   answer=${answer%$'\n'*}
   if [[ ! "$(yq 'tag' <<<"$answer" 2>/dev/null)" =~ ^!!(map|seq)$ ]]; then
     printf '%s: the answer is not JSON\n' "$url" >&2
+    request_failed "$1"
     return 1
   fi
   printf '%s\n' "$answer"
@@ -458,7 +472,7 @@ remote_tags() {
   git_request_begin "$1" || return 1
   GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 \
     git ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||' || rc=$?
-  request_end
+  request_end "$rc"
   return "$rc"
 }
 

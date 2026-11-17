@@ -21,7 +21,7 @@ aur_clone() {
       return 0
     fi
     if [[ "$attempt" -eq 3 ]]; then
-      request_end
+      request_end 1
       log_err "Failed to clone AUR repo $1 after 3 attempts"
       return 1
     fi

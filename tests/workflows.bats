@@ -656,6 +656,15 @@ run_decide_step() {
   [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
 }
 
+# Errors of failed checks hold lines of the server, as of a git ERR packet
+@test "check-updates: Decide prepares nothing for a failed check whose error holds a version line" {
+  mkdir -p "$BATS_TEST_TMPDIR/ws/packages"
+  printf 'name: pkg\n' >"$BATS_TEST_TMPDIR/ws/packages/pkg.yml"
+  run run_decide_step pkg=$'check_failed: fatal: remote error: access denied\nnew_version: 9.9.9'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+}
+
 @test "check-updates: Decide does nothing when nothing changed" {
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
@@ -1914,8 +1923,14 @@ upstream_issue_body() { echo "upstream_issue_body $*" >>"$BODY_LOG" && echo body
 host_issue_body() { echo "host_issue_body $*" >>"$BODY_LOG" && echo body; }
 arch_issue_body() { echo "arch_issue_body $*" >>"$BODY_LOG" && echo body; }
 EOF
+  rm -f "$ws/.status/_hosts"
   for pair in "$@"; do
-    printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
+    # Each failed check adds its line to _hosts
+    if [[ "${pair%%=*}" == _hosts ]]; then
+      printf '%s\n' "${pair#*=}" >>"$ws/.status/_hosts"
+    else
+      printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
+    fi
   done
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -1927,6 +1942,10 @@ if [[ "$*" == "api repos/$GITHUB_REPOSITORY --jq .has_issues" ]]; then
 fi
 if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_FAIL:-}" ]]; then
   printf 'GraphQL: was submitted too quickly (createIssue)\nsecond line\n' >&2
+  exit 1
+fi
+if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_FAIL_HOST:-}" && "$*" == *" packages failed to check "* ]]; then
+  printf 'GraphQL: body is too long (maximum is 65536 characters)\n' >&2
   exit 1
 fi
 [[ "$1 $2" == "issue list" ]] || exit 0
@@ -1951,7 +1970,6 @@ while (($#)); do
 done
 titles=$(grep "^$emoji" <<<"${GH_TITLES:-}" | head -n "$limit") || true
 case "$jq_expr" in
-  length) grep -c . <<<"$titles" ;;
   ".[].title") [[ -z "$titles" ]] || printf '%s\n' "$titles" ;;
   *) exit 2 ;;
 esac
@@ -1965,7 +1983,7 @@ EOF
   step_run issues "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
-    GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GITHUB_REPOSITORY=owner/fork \
+    GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GH_CREATE_FAIL_HOST="${GH_CREATE_FAIL_HOST:-}" GITHUB_REPOSITORY=owner/fork \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
@@ -2145,11 +2163,12 @@ EOF
 }
 
 # Prints a name=status pair for each of $1 packages, named $3 and a number,
-# whose check failed on host $2
+# whose check failed on host $2, and the pair of its line of _hosts
 host_failures() {
   local i
   for ((i = 1; i <= $1; i++)); do
-    printf '%s\n' "$3$i=check_failed: https://$2/repos/o/$3$i/tags: The requested URL returned error: 503"
+    printf '%s\n' "$3$i=check_failed: https://$2/repos/o/$3$i/tags: The requested URL returned error: 503" \
+      "_hosts=$3$i"$'\t'"$2"
   done
 }
 
@@ -2226,6 +2245,17 @@ host_failures() {
   [ "$output" = "1" ]
 }
 
+# Packages of a refused host issue would get no issue at all
+@test "check-updates: the packages of a refused host issue get issues of their own" {
+  local pairs
+  mapfile -t pairs < <(host_failures 5 api.github.com a)
+  GH_CREATE_FAIL_HOST=1 run_issue_step "${pairs[@]}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::Could not create the issue ❌ api.github.com: 5 packages failed to check: GraphQL: body is too long"* ]]
+  run grep -c '^issue create --title ❌ a[1-5]: check failed ' "$GH_LOG"
+  [ "$output" = "5" ]
+}
+
 @test "check-updates: a refused issue gives a warning with the error of gh" {
   GH_CREATE_FAIL=1 run_issue_step foo="update_failed: boom" bar="held: 1.0"
   [ "$status" -eq 0 ]
@@ -2243,8 +2273,14 @@ run_close_step() {
 close_comment() { echo "close_comment $*" >>"$BODY_LOG" && echo comment; }
 arch_close_comment() { echo "arch_close_comment $*" >>"$BODY_LOG" && echo comment; }
 EOF
+  rm -f "$ws/.status/_hosts"
   for pair in "$@"; do
-    printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
+    # Each failed check adds its line to _hosts
+    if [[ "${pair%%=*}" == _hosts ]]; then
+      printf '%s\n' "${pair#*=}" >>"$ws/.status/_hosts"
+    else
+      printf '%s\n' "${pair#*=}" >"$ws/.status/${pair%%=*}"
+    fi
   done
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -2988,6 +3024,21 @@ run_bare_issues_step() {
   [ "$output" = "0" ]
 }
 
+# Hundreds of open issues and of packages would make it start programs by the ten thousand
+@test "check-updates: the close step starts no program for each pair of open issue and package" {
+  local bin="$BATS_TEST_TMPDIR/bin" tool
+  mkdir -p "$bin"
+  for tool in cat basename; do
+    printf '#!/bin/sh\necho %s >>"%s"\nexec /usr/bin/%s "$@"\n' "$tool" "$BATS_TEST_TMPDIR/tools.log" "$tool" >"$bin/$tool"
+    chmod +x "$bin/$tool"
+  done
+  GH_OPEN=$'11 ❌ foo: check failed\n12 ❌ bar: update failed\n13 ✋ baz: update held' \
+    run_close_step foo=up_to_date bar=up_to_date baz="updated: 2.0" qux=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^issue close' "$GH_LOG")" -eq 3 ]
+  [ ! -s "$BATS_TEST_TMPDIR/tools.log" ]
+}
+
 @test "check-updates: closes the issue of a host once fewer than 5 of its packages failed to check" {
   local pairs
   mapfile -t pairs < <(host_failures 4 api.github.com a && host_failures 5 apixgithub.com x && host_failures 5 cdn.gitlab.com y)
@@ -3009,6 +3060,15 @@ run_bare_issues_step() {
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+@test "check-updates: an unchecked line in the error of a failed check closes host issues all the same" {
+  local pairs
+  mapfile -t pairs < <(host_failures 4 api.github.com a)
+  GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check' CLOSE_STEP="Close resolved host issues" \
+    run_close_step "${pairs[@]}" $'b=check_failed: fatal: remote error: access denied\nunchecked: x'
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 21 --comment Fewer than 5 packages of `api.github.com` failed to check in https://example.invalid/run.' "$GH_LOG"
 }
 
 # Failed publish runs leave the check statuses, and the failing packages of a host under the
