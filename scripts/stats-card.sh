@@ -45,8 +45,8 @@ if [[ ! "${ARG[name]}" =~ ^[A-Za-z0-9._-]{1,100}$ ]]; then
   exit 1
 fi
 for key in packages out; do
-  if [[ ! -d "${ARG[$key]}" ]]; then
-    log_err "--$key is not a directory: ${ARG[$key]}"
+  if [[ -L "${ARG[$key]}" || ! -d "${ARG[$key]}" ]]; then
+    log_err "--$key is a link or no directory: ${ARG[$key]}"
     exit 1
   fi
 done
@@ -57,9 +57,10 @@ if [[ ! -f "${ARG[journal]}" ]]; then
 fi
 
 pkg_count=0
+# Links count for no package, since record-events.sh reads no YAML through them
 for file in "${ARG[packages]}"/*.yml; do
   name="${file##*/}"
-  [[ -f "$file" && "${name%.yml}" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]] || continue
+  [[ -f "$file" && ! -L "$file" && "${name%.yml}" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]] || continue
   ((++pkg_count))
 done
 numbers=$(stats_numbers "${ARG[journal]}" "$DATE") || exit 1

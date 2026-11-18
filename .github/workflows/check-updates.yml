@@ -531,13 +531,14 @@ jobs:
           done
 
       # git and curl read the AUR repo and the sources as builder, who cannot reach the
-      # Docker socket that root has in a job container
+      # Docker socket that root has in a job container. The run number moves the start of the loop.
       - name: Verify checksums
         uses: ./aurtomator/.github/actions/run-as-builder
         with:
           args: --verify handoff
           statuses: /data/status
           handoff: /data/handoff
+          keep-env: GITHUB_RUN_NUMBER
 
       - *stop-builder
 

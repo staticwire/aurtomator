@@ -57,7 +57,7 @@ The defenses of the workflow sit in a few steps that several jobs share through 
 - Artifacts: each job takes the artifact of the job before it by the `artifact-id` from its outputs, because jobs can replace artifacts of the same name. `verify` takes the matrix handoffs by the pattern `handoff-*` and the newest attempt of each package, and uploading one needs the runtime token of a job, which `builder` never gets.
 - Setup AUR SSH: fails with `The secret AUR_SSH_KEY is empty` when the secret is missing, and writes the Ed25519 host key that <https://aur.archlinux.org> publishes, with `StrictHostKeyChecking yes`. New AUR host keys reach runs through aurtomator releases.
 - Setup GPG: imports `GPG_SIGNING_KEY` for `builder`, takes the ID of its first secret key and signs one line with it. It fails when gpg cannot import the secret or no secret key can sign, as with a public key block, an expired key or a key with a passphrase. Without the secret it skips signing.
-- Record statistics: runs `record-events.sh` and `stats-card.sh` as root on the copies of the run, with 120 seconds, and drops the statistics with a warning when they fail, so the commit of the README and the YAMLs goes on.
+- Record statistics: runs `record-events.sh` and `stats-card.sh` as root on the package YAMLs of the checkout and the copies of the run, with 120 seconds, and drops the statistics with a warning when they fail, so the commit of the README and the YAMLs goes on. Both scripts read no YAML through a link and stop when `packages/` is a link.
 
 ## README update
 

@@ -460,6 +460,18 @@ valid_time() {
   [[ "$(date -u -d "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" == "$1" ]]
 }
 
+# Prints the seconds in environment variable $1, or $2 when it is unset or empty. Only digits
+# reach (( )), where bash runs $(...) in an array subscript and reads 010 as octal.
+env_seconds() {
+  local -x LC_ALL=C
+  local value="${!1:-$2}"
+  if [[ ! "$value" =~ ^(0|[1-9][0-9]{0,5})$ ]]; then
+    log_err "$1 must be a whole number of seconds from 0 to 999999: ${value@Q}"
+    return 1
+  fi
+  printf '%s\n' "$value"
+}
+
 # Prints the first day, YYYY-MM-DD, on which package file $1 may be pushed
 # again, or nothing without a cooldown. Returns 1 when a field is not valid.
 cooldown_until() {

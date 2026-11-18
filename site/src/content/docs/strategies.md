@@ -375,7 +375,7 @@ With `upstream.describe`, the strategy prints what the `git describe` recipes of
 
 New commits are new versions, and pushes of `git-latest` packages wait 7 days after the last one unless `cooldown_days` says otherwise, see [Cooldown](/features/cooldown/).
 
-The clone runs with `GIT_ALLOW_PROTOCOL=https`, so URLs from pull requests cannot read local repositories, use the SSH key of the machine, or redirect the clone to http.
+URLs that do not start with `https://` fail the check with `Only HTTPS URLs supported: <url>` before any clone, also in a YAML that reached the branch without `validate-pkg.sh`. The clone runs with `GIT_ALLOW_PROTOCOL=https`, so URLs from pull requests cannot read local repositories, use the SSH key of the machine, or redirect the clone to http.
 
 **Example YAML:**
 

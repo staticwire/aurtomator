@@ -30,23 +30,23 @@ DRY_RUN=""
 
 # Time budget of one package, in seconds: for its version check, and for
 # its update, verify or publish
-CHECK_TIMEOUT="${AURTOMATOR_CHECK_TIMEOUT:-120}"
-UPDATE_TIMEOUT="${AURTOMATOR_UPDATE_TIMEOUT:-300}"
+CHECK_TIMEOUT=$(env_seconds AURTOMATOR_CHECK_TIMEOUT 120) || exit 1
+UPDATE_TIMEOUT=$(env_seconds AURTOMATOR_UPDATE_TIMEOUT 300) || exit 1
 
 # Time budget of the verify loop, in seconds: no package starts after it,
 # so the verify job ends within its 30 minutes
-VERIFY_BUDGET="${AURTOMATOR_VERIFY_BUDGET:-1200}"
+VERIFY_BUDGET=$(env_seconds AURTOMATOR_VERIFY_BUDGET 1200) || exit 1
 
 # Time budget of the loop of a check run, in seconds: no check and no step of a check starts
 # after it, so the check job ends within its 30 minutes
-CHECK_BUDGET="${AURTOMATOR_CHECK_BUDGET:-1200}"
+CHECK_BUDGET=$(env_seconds AURTOMATOR_CHECK_BUDGET 1200) || exit 1
 
 # Time budget of the publish loop, in seconds: no publish starts after it,
 # so the publish job ends within its 30 minutes
-PUBLISH_BUDGET="${AURTOMATOR_PUBLISH_BUDGET:-1200}"
+PUBLISH_BUDGET=$(env_seconds AURTOMATOR_PUBLISH_BUDGET 1200) || exit 1
 
 # Pause, in seconds, before a package whose check failed is checked again
-RECHECK_DELAY="${AURTOMATOR_RECHECK_DELAY:-60}"
+RECHECK_DELAY=$(env_seconds AURTOMATOR_RECHECK_DELAY 60) || exit 1
 
 # The UTC day of the run, for the cooldown
 TODAY=$(date -u +%F)
@@ -208,8 +208,8 @@ fi
 # Failed verifies, exit code 3 of a moved AUR repo included, take the update
 # out with update_failed. Only package names from packages/ reach a path.
 if [[ "$MODE" == "verify" ]]; then
-  # Slow sources early in the list would take the budget of the same packages in
-  # every run, so the loop starts at another package each hour
+  # Slow sources early in the list would take the budget of the same packages in every run, so each
+  # run of the workflow starts the loop one package later, and runs by hand one package each hour
   verify_files=()
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     if [[ -f "$pkg_file" ]]; then
@@ -217,7 +217,11 @@ if [[ "$MODE" == "verify" ]]; then
     fi
   done
   verify_start=0
-  ((${#verify_files[@]} == 0)) || verify_start=$(($(date -u +%s) / 3600 % ${#verify_files[@]}))
+  if ((${#verify_files[@]} > 0)) && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
+    verify_start=$((GITHUB_RUN_NUMBER % ${#verify_files[@]}))
+  elif ((${#verify_files[@]} > 0)); then
+    verify_start=$(($(date -u +%s) / 3600 % ${#verify_files[@]}))
+  fi
   # Packages on this list keep the status of the check run in publish, so only this loop writes it
   rm -f "${WORK_DIR}/status/_unverified"
   for pkg_file in "${verify_files[@]:verify_start}" "${verify_files[@]:0:verify_start}"; do

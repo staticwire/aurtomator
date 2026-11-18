@@ -26,7 +26,7 @@ alerts:
 
 Rules fire once at each crossing, when the new version meets their condition and `current` does not. `from` rules can stay in the file after their release, and `when: major` rules fire again at the next major. Versions are compared in `pkgver` form, as `current` holds them, with `vercmp` for `from` and by the first number for `when: major`, so `9 → 10` is a new major. Packages without `current` fire no rule. Downgrades and version jumps that the package does not allow are skipped first, see [Downgrades and version jumps](/features/downgrades/).
 
-With `hold: true`, `check-all.sh` writes `held: <version>`, logs the first line below and pushes nothing, and the README shows `✋ 29+1 held`. The maintainer makes the edit, publishes the version by hand and sets `current` to it, and the rule no longer fires. Without `hold`, the update goes on and the log gets the second line. Each rule that fires logs its own line, so held updates show the notes of the other rules too.
+With `hold: true`, `check-all.sh` writes `held: <version>`, logs the first line below and pushes nothing, and the README shows `✋ 29+1 held`. The maintainer makes the edit, publishes the version by hand with the `.SRCINFO` of `makepkg --printsrcinfo` and sets `current` to it, and the rule no longer fires. Pushes whose `.SRCINFO` keeps the old version stop the next update, see [Downgrades and version jumps](/features/downgrades/). Without `hold`, the update goes on and the log gets the second line. Each rule that fires logs its own line, so held updates show the notes of the other rules too.
 
 ```text
 ! myjdk-ea: update 28+25 → 29+1 held: Raise makedepends java-environment to 28

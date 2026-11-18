@@ -102,6 +102,32 @@ secret_lines() {
   done
 }
 
+# pull_request_target gives pull requests of forks a write token and the secrets, and its
+# github.ref names the base branch, so the deploy job of docs.yml would run for a pull request
+@test "workflows: run on the triggers of this table alone" {
+  local workflow
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    printf '%s %s\n' "${workflow##*/}" "$(yq -o=json -I=0 '.on' "$workflow")"
+  done >"$BATS_TEST_TMPDIR/actual"
+  printf '%s\n' \
+    'check-updates.yml {"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false}}}}' \
+    'ci.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]}}' \
+    'codeql.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"schedule":[{"cron":"41 3 * * 1"}]}' \
+    'docs.yml {"push":{"branches":["main"],"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"pull_request":{"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"workflow_dispatch":null}' \
+    'notify-failure.yml {"workflow_call":null}' \
+    'release-please.yml {"push":{"branches":["main"]}}' \
+    'validate.yml {"workflow_call":null}' >"$BATS_TEST_TMPDIR/expected"
+  diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
+}
+
+# Pinned actions, the base image and the Python packages of the CI image, and the packages of the
+# site move only through the pull requests of Dependabot
+@test "dependabot: watches the actions, the CI image, its Python packages and the site" {
+  run yq -o=json -I=0 '[.updates[] | [.["package-ecosystem"], .directory]]' "$GITHUB_DIR/dependabot.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[["github-actions","/"],["docker","/ci-image"],["uv","/ci-image"],["npm","/site"]]' ]
+}
+
 # The token a checkout leaves in .git/config would reach builder, which owns the workspace
 @test "workflows: no checkout keeps its credentials" {
   local workflow count=0
@@ -1327,7 +1353,7 @@ sudo_commands() {
   expected=(
     "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
-    "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
+    "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
     "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/update-readme.sh cwd=$work"
   )
   for entry in "${expected[@]}"; do

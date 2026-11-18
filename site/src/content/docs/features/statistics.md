@@ -36,7 +36,7 @@ time,package,event,version,previous,run
 | `added` | packages whose YAML is new |
 | `removed` | packages whose YAML is gone |
 
-Pushes are always written. Other statuses are written when they differ in kind from the last row of the package: pushes, `up_to_date`, `tracked` and `added` are one kind, and each wait, each failure and `removed` is a kind of its own. Waits are written again for another version. Packages that fail for a month give one `check_failed` row, so the card counts the times packages started to fail. Updates that are not out yet, such as `new_version`, write no row, and waits for [cooldown](/features/cooldown/) count as `up_to_date`.
+Pushes are always written. Other statuses are written when they differ in kind from the last row of the package: pushes, `up_to_date`, `tracked` and `added` are one kind, and each wait, each failure and `removed` is a kind of its own. Waits are written again for another version. Packages that fail for a month give one `check_failed` row, so the card counts the times packages started to fail. Updates that are not out yet, such as `new_version`, write no row, and waits for [cooldown](/features/cooldown/) count as `up_to_date`. Links in `packages/` count as no package: root reads these files in the job that holds the keys, so a link gets no row, a YAML that became a link gets `removed`, and the card counts no link.
 
 Up-to-date packages whose `current` changed without a push of the run, by a hand edit or a push whose commit did not land, get an `updated` row, or `downgrade` when the version went down. Renamed packages get `removed` and `added` rows. Rows hold no free text: errors stay in their issue and in the run log.
 

@@ -1148,7 +1148,7 @@ EOF
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
   [ "$status" -eq 0 ]
   [[ "$output" =~ ^r3\.[0-9a-f]{7}$ ]]
-  [ "$(cat "$TEST_TMPDIR/git-clone-options")" = "--bare --quiet --filter=tree:0" ]
+  [ "$(cat "$TEST_TMPDIR/git-clone-options")" = "--bare --quiet --filter=tree:0 --" ]
 }
 
 @test "git-latest: fails on a repository without commits" {
@@ -1199,7 +1199,7 @@ current: 'r2.$(printf '%0*d' "$len" 0)'"
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
   [ "$status" -eq 0 ]
   [ "$output" = "r4.$(git -C "$fake_repo" rev-parse feature | cut -c1-7)" ]
-  [ "$(cat "$TEST_TMPDIR/git-clone-options")" = "--bare --quiet --filter=tree:0 --branch=feature" ]
+  [ "$(cat "$TEST_TMPDIR/git-clone-options")" = "--bare --quiet --filter=tree:0 --branch=feature --" ]
 }
 
 @test "git-latest: fails on a branch the repository lacks" {
@@ -1225,7 +1225,23 @@ current: 'r2.$(printf '%0*d' "$len" 0)'"
 
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git-file"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"transport 'file' not allowed"* ]]
+  [ "$output" = "Only HTTPS URLs supported: file://$TEST_TMPDIR/local-repo" ]
+}
+
+# YAMLs can reach the branch without validate-pkg.sh, and git clone reads a URL that starts
+# with - as an option
+@test "git-latest: refuses an upstream.url that is no https URL before any clone" {
+  local url
+  fake_git_upstream
+  for url in "-uhttps://git.example.com/repo.git" "http://git.example.com/repo.git" "git://git.example.com/repo.git"; do
+    create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: '$url'"
+    run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+    [ "$status" -eq 1 ]
+    [ "$output" = "Only HTTPS URLs supported: $url" ]
+  done
+  [ ! -e "$TEST_TMPDIR/git-clone" ]
 }
 
 @test "git-latest: refuses an ssh URL without connecting" {
@@ -1241,7 +1257,7 @@ EOF
 
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git-ssh"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"transport 'ssh' not allowed"* ]]
+  [ "$output" = "Only HTTPS URLs supported: ssh://git.example.com/repo.git" ]
   [ ! -e "$TEST_TMPDIR/ssh.args" ]
 }
 
@@ -2246,11 +2262,13 @@ Failed to fetch tags from codeberg.org/gated-owner/gated-repo" ]
 @test "git-latest: fails when clone fails" {
   create_test_package "test-badurl" "git-latest" "upstream:
   type: git
-  url: /nonexistent/repo/path"
+  url: https://git.example.com/missing.git"
+  printf '#!/usr/bin/env bash\nexit 128\n' >"$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/git"
 
   run "$TEST_TMPDIR/strategies/git-latest.sh" "test-badurl"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Failed to clone"* ]]
+  [[ "$output" == *"Failed to clone https://git.example.com/missing.git"* ]]
 }
 
 @test "git-latest: clone failure keeps the git error message" {

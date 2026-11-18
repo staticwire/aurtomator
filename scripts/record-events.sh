@@ -46,16 +46,26 @@ if [[ ! "$RUN" =~ ^[0-9]*$ ]]; then
   log_err "GITHUB_RUN_ID is not a number: ${RUN@Q}"
   exit 1
 fi
-if [[ ! -d "${ARG[before]}" ]]; then
-  log_err "--before is not a directory: ${ARG[before]}"
+if [[ -L "${ARG[before]}" || ! -d "${ARG[before]}" ]]; then
+  log_err "--before is a link or no directory: ${ARG[before]}"
   exit 1
 fi
+if [[ -L "${ARG[after]}" || (-e "${ARG[after]}" && ! -d "${ARG[after]}") ]]; then
+  log_err "--after is a link or no directory: ${ARG[after]}"
+  exit 1
+fi
+
+# Succeeds for package YAML $1 that is a regular file and no link: root runs this
+# script on packages/ of the checkout, in the job with the keys
+yaml_file() {
+  [[ -f "$1" && ! -L "$1" ]]
+}
 
 # The current version in package YAML $1, empty when it has none or one
 # outside the version alphabet
 current_of() {
   local value
-  [[ -f "$1" ]] || return 0
+  yaml_file "$1" || return 0
   value=$(pkg_get "$1" '.current // ""' 2>/dev/null) || return 0
   [[ "$value" =~ ^[A-Za-z0-9._+]{1,$PKGVER_MAX}$ ]] || return 0
   printf '%s\n' "$value"
@@ -76,7 +86,7 @@ fi
 
 declare -A YAML=()
 for file in "${ARG[before]}"/*.yml; do
-  [[ -f "$file" ]] || continue
+  yaml_file "$file" || continue
   name="${file##*/}"
   name="${name%.yml}"
   [[ "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]] || continue

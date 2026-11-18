@@ -8,11 +8,13 @@
 # AURTOMATOR_RETRY_DELAY set the pauses, in seconds.
 # Args: $1=url, $2=destination, $3...=options for git clone
 aur_clone() {
-  local attempt delay="${AURTOMATOR_RETRY_DELAY:-5}"
+  local attempt delay clone_delay
+  delay=$(env_seconds AURTOMATOR_RETRY_DELAY 5) || return 1
   # Pauses before SSH clones lower the load of the shared GitHub Actions addresses on the
   # SSH rate limit of the AUR; the HTTPS clones of prepare and verify skip them
   if [[ "$1" == ssh://* ]]; then
-    sleep "${AURTOMATOR_CLONE_DELAY:-2}"
+    clone_delay=$(env_seconds AURTOMATOR_CLONE_DELAY 2) || return 1
+    sleep "$clone_delay"
   fi
   git_request_begin "$1" || return 1
   for attempt in 1 2 3; do
@@ -69,7 +71,8 @@ aur_export() {
 # Args: $1=clone directory, $2=version, $3=strategy (for the commit message),
 #       $4=pkgrel, 1 by default, $5=arches put back, for "Add <arches> to <version>"
 aur_commit_push() {
-  local dir="$1" version="$2" message attempt delay="${AURTOMATOR_RETRY_DELAY:-5}"
+  local dir="$1" version="$2" message attempt delay
+  delay=$(env_seconds AURTOMATOR_RETRY_DELAY 5) || return 1
   [[ "${4:-1}" == 1 ]] || version+="-$4"
   message="$version release from $3"
   [[ -z "${5:-}" ]] || message="Add $5 to $version"

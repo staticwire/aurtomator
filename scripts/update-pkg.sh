@@ -95,6 +95,7 @@ fi
 
 aur_reanchor "$aur_dir"
 aur_base=$(git -C "$aur_dir" rev-parse HEAD)
+aur_srcinfo_current "$aur_dir" || exit 1
 
 # Copy PKGBUILD, .SRCINFO and the AUR base commit for publish-pkg.sh
 hand_over() {
