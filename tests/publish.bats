@@ -2914,6 +2914,185 @@ current: '2.0.0'"
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
+# Packages the check loop did not reach keep their issues and their row in the journal
+@test "check-all --publish: keeps a package the check run left unchecked" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "unchecked: the check ran out of its 20 minutes in this run"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+}
+
+# The issues of the file name stay open, and the arches out of the YAML name no package
+@test "check-all --publish: keeps the failed check of a YAML under another name and lists none of its arches out" {
+  local sha
+  sha=$(printf 'a%.0s' {1..40})
+  create_test_package "good" "github-release" "upstream:
+  project: owner/repo
+current: '2.0'
+arch_out:
+  aarch64: '$sha'"
+  printf "name: old-name\nstrategy: github-release\nupstream:\n  project: owner/repo\ncurrent: '3.0'\narch_out:\n  aarch64: '%s'\n" \
+    "$sha" >"$TEST_TMPDIR/packages/renamed.yml"
+  checked_status good up_to_date
+  checked_status renamed "check_failed: packages/renamed.yml: name 'old-name' must equal the file name"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/renamed")" = "check_failed: packages/renamed.yml: name 'old-name' must equal the file name" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_without")" = $'good\t2.0\taarch64' ]
+}
+
+@test "check-all --publish: keeps the failed check of a YAML that is a link and lists none of its arches out" {
+  create_test_package "real" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'
+arch_out:
+  aarch64: '$(printf 'a%.0s' {1..40})'"
+  mv "$TEST_TMPDIR/packages/real.yml" "$TEST_TMPDIR/outside.yml"
+  ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/real.yml"
+  checked_status real "check_failed: packages/real.yml is a link, and the runs read regular files alone"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/real")" = "check_failed: packages/real.yml is a link, and the runs read regular files alone" ]
+  [ ! -s "$TEST_TMPDIR/.status/_without" ]
+}
+
+# The check run fails such files, and the other packages keep their records
+@test "check-all --publish: writes _without past a YAML it cannot read" {
+  local sha
+  sha=$(printf 'a%.0s' {1..40})
+  create_test_package "good" "github-release" "upstream:
+  project: owner/repo
+current: '2.0'
+arch_out:
+  aarch64: '$sha'"
+  printf 'name: [bad\n' >"$TEST_TMPDIR/packages/bad.yml"
+  printf 'name: odd\nstrategy: github-release\nupstream:\n  project: owner/repo\ncurrent: 1.0\narch_out: 5\n' >"$TEST_TMPDIR/packages/odd.yml"
+  checked_status good up_to_date
+  checked_status bad "check_failed: packages/bad.yml: name '' must equal the file name"
+  checked_status odd up_to_date
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_without")" = $'good\t2.0\taarch64' ]
+  [ "$(cat "$TEST_TMPDIR/.status/bad")" = "check_failed: packages/bad.yml: name '' must equal the file name" ]
+  [ "$(cat "$TEST_TMPDIR/.status/odd")" = "up_to_date" ]
+}
+
+# Servers write the stderr of git, and the issue steps read a status once for each open issue.
+# The issue shows the status with its line of the cut.
+@test "check-all: keeps the last 3900 bytes of a long error" {
+  local long
+  long=$(printf 'x%.0s' {1..10000})
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  stub_script check-update.sh 1 "${long}END"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$TEST_TMPDIR/.status/pkg")" = "check_failed: [first 6104 bytes cut]" ]
+  [ "$(tail -n 1 "$TEST_TMPDIR/.status/pkg")" = "${long:0:3896}END" ]
+  [ "$(wc -l <"$TEST_TMPDIR/.status/pkg")" -eq 2 ]
+  run failure_issue_body "$TEST_TMPDIR/.status/pkg" https://example.invalid/run
+  [[ "$output" == *$'```\n[first 6104 bytes cut]\n'* ]]
+}
+
+@test "check-all: cuts a long error between two characters" {
+  local long kept
+  long=$(printf 'é%.0s' {1..3000})
+  kept=$(printf 'é%.0s' {1..1949})
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  stub_script check-update.sh 1 "$long"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$TEST_TMPDIR/.status/pkg")" = "check_failed: [first 2102 bytes cut]" ]
+  [ "$(tail -n 1 "$TEST_TMPDIR/.status/pkg")" = "$kept" ]
+  iconv -f UTF-8 -t UTF-8 "$TEST_TMPDIR/.status/pkg" >/dev/null
+}
+
+# PKGBUILD code of prepare can write that status
+@test "check-all --publish: keeps the last 3900 bytes of a long handed update failure" {
+  local long
+  long=$(printf 'x%.0s' {1..10000})
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/status"
+  printf 'update_failed: %sEND\n' "$long" >"$TEST_TMPDIR/out/status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$TEST_TMPDIR/.status/pkg")" = "update_failed: [first 6119 bytes cut]" ]
+  [ "$(tail -n 1 "$TEST_TMPDIR/.status/pkg")" = "${long:0:3896}END" ]
+}
+
+@test "check-all --publish: prints the error of publish-pkg.sh without control characters" {
+  local esc
+  esc=$(printf '\033')
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 1 "refused ${esc}[2K"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"refused  [2K"* ]]
+  [[ "$output" != *"$esc"* ]]
+}
+
+# awk compares two fields that look like numbers as numbers, and 1e2 and 100 are both 100
+@test "check-all --verify and --publish: take the asset value of their own package" {
+  local name
+  for name in 1e2 100; do
+    create_test_package "$name" "github-release" "upstream:
+  project: owner/repo
+  asset_regex: '^pkg_(.+)\\.tar\\.gz\$'
+  asset_var: _pkg
+current: '1.0.0'
+current_asset: '1.0.0-a'"
+  done
+  checked_status 1e2 "new_version: 2.0.0"
+  checked_status 100 up_to_date
+  printf '1e2\t2.0.0-a\n100\t9.9-z\n' >"$TEST_TMPDIR/.status/_assets"
+  mkdir -p "$TEST_TMPDIR/out/prepared/1e2"
+  stub_script verify-pkg.sh 0
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "1e2 2.0.0 $TEST_TMPDIR/out/prepared/1e2 --asset 2.0.0-a" ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "1e2 2.0.0 $TEST_TMPDIR/out/prepared/1e2 --asset 2.0.0-a" ]
+}
+
+@test "check-all --verify and --publish: take the arch record of their own package" {
+  local name
+  for name in 1e2 100; do
+    create_test_package "$name" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'
+arch_out:
+  aarch64: '$(printf 'a%.0s' {1..40})'"
+  done
+  checked_status 1e2 "new_version: 2.0.0"
+  checked_status 100 up_to_date
+  printf '1e2\t2.0.0\taarch64\t\n100\t9.9\taarch64\t\n' >"$TEST_TMPDIR/.status/_arches"
+  mkdir -p "$TEST_TMPDIR/out/prepared/1e2"
+  stub_script verify-pkg.sh 0
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/verify-pkg.sh.args")" = "1e2 2.0.0 $TEST_TMPDIR/out/prepared/1e2 --arch-out aarch64" ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "1e2 2.0.0 $TEST_TMPDIR/out/prepared/1e2 --arch-out aarch64" ]
+}
+
 # Errors and warnings of a check hold text of upstream, which a terminal acts on
 @test "check-all: prints the error and the warnings of a check without control characters" {
   local esc
@@ -2946,6 +3125,27 @@ current: '2.0.0'"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'pkg\tapi.github.com' ]
+}
+
+# The host issues read _hosts also after a publish that its job stopped
+@test "check-all --publish: writes _hosts before its first publish" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  create_test_package "failed" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  checked_status failed "check_failed: API down"
+  printf 'failed\tapi.github.com\n' >"$TEST_TMPDIR/.status/_hosts"
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  rm -f "$TEST_TMPDIR/scripts/publish-pkg.sh"
+  printf '#!/usr/bin/env bash\ncat -- "%s/.status/_hosts" >"%s/hosts.seen" 2>&1\n' "$TEST_TMPDIR" "$TEST_TMPDIR" >"$TEST_TMPDIR/scripts/publish-pkg.sh"
+  chmod +x "$TEST_TMPDIR/scripts/publish-pkg.sh"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/hosts.seen")" = $'failed\tapi.github.com' ]
+  [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'failed\tapi.github.com' ]
 }
 
 @test "check-all --publish: keeps a skipped downgrade and publishes nothing" {
@@ -3239,6 +3439,22 @@ current: '1.0.0'"
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
+# Publishes started past the budget would run into the 30 minutes of the publish job
+@test "check-all --publish: keeps the new version of a package past its time budget" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 0
+  run env AURTOMATOR_PUBLISH_BUDGET=0 "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
+  [[ "$output" == *"pkg: publish ran out of its 0 minutes in this run"* ]]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+}
+
 @test "check-all --publish: keeps the update failure the prepare run recorded" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
@@ -3279,16 +3495,16 @@ current: '2.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/other")" = "up_to_date" ]
 }
 
-@test "check-all --publish: leaves a deferred package as available, without an error" {
+@test "check-all --publish: records an AUR repo that moved after the prepare as a failed update" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo
 current: '1.0.0'"
   checked_status pkg "new_version: 2.0.0"
   mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
-  stub_script publish-pkg.sh 3
+  stub_script publish-pkg.sh 3 "The AUR repo of pkg moved since the prepare"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
-  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
-  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: The AUR repo of pkg moved since the prepare" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
 @test "check-all --publish: records a refused publish" {
@@ -4057,6 +4273,16 @@ EOF
   [ "$output" = "$expected" ]
 }
 
+# awk compares two fields that look like numbers as numbers, and 1e2 and 100 are both 100
+@test "alert_issue_body: lists the notes of its own package alone" {
+  echo "held: 2.0" >"$TEST_TMPDIR/1e2"
+  printf '1e2\thold\tMine\n100\thold\tNot this one\n' >"$TEST_TMPDIR/_alerts"
+  run alert_issue_body "$TEST_TMPDIR/1e2" https://example.invalid/run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *Mine* ]]
+  [[ "$output" != *"Not this one"* ]]
+}
+
 @test "alert_issue_body: writes the body without _alerts" {
   echo "held: 29+1" >"$TEST_TMPDIR/demo"
   run --keep-empty-lines alert_issue_body "$TEST_TMPDIR/demo" https://example.invalid/run
@@ -4246,6 +4472,15 @@ EOF
   run failure_host "$TEST_TMPDIR/st/demo"
   [ "$status" -eq 0 ]
   [ "$output" = "git.example.org" ]
+}
+
+@test "failure_host: names the host of its own package alone" {
+  mkdir -p "$TEST_TMPDIR/st"
+  echo "check_failed: 503" >"$TEST_TMPDIR/st/1e2"
+  printf '1e2\tgithub.com\n100\tgitlab.com\n' >"$TEST_TMPDIR/st/_hosts"
+  run failure_host "$TEST_TMPDIR/st/1e2"
+  [ "$status" -eq 0 ]
+  [ "$output" = "github.com" ]
 }
 
 # Servers write the text of the error, so a URL there names no host

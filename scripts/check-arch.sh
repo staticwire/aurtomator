@@ -138,6 +138,9 @@ for arch in "${ask[@]}"; do
     if ((rc == 2)); then
       log_err "$PKG_NAME $VERSION: no answer from $url"
       exit 1
+    elif ((rc == 3)); then
+      log_err "$PKG_NAME $VERSION: $url answered with status $PROBE_CODE"
+      exit 1
     elif ((rc == 1)); then
       log_warn "$PKG_NAME $VERSION: no archive for $arch at $url"
       missing[$arch]=1

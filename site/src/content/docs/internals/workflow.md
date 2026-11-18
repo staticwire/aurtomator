@@ -66,7 +66,7 @@ The defenses of the workflow sit in a few steps that several jobs share through 
 1. The badges between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: `Validate packages` and `Check AUR Package Updates`, the status of `validate.yml` and `check-updates.yml` of the repository that `GITHUB_REPOSITORY` or the GitHub `origin` names, and `maintained with aurtomator`.
 2. The package table between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`: the statistics card, a row for each package with its name, `current`, strategy, `last_updated` and status label, and the version of aurtomator, see [Updates of aurtomator](/features/aurtomator-updates/). Packages without a status show `✨ new` without `current` and `✅ tracking` with it. Each name links to `https://aur.archlinux.org/pkgbase/<name>`.
 
-While `packages/` holds no package, the script writes nothing, so repositories from the template keep their setup steps in the README. Each marker is a line of its own, once, with the start above the end, and the script stops before it writes anything otherwise. The table is HTML, because Markdown cells take no attributes, and `nowrap` keeps Strategy, Updated and Status on one line:
+While `packages/` holds no package, the script writes nothing, so repositories from the template keep their setup steps in the README. Each marker is a line of its own, once, with the start above the end. Otherwise the script leaves README.md as it is and ends with code 3, as it does when README.md is missing or a link, and the builder step turns that code into a warning, so the run goes on. The table is HTML, because Markdown cells take no attributes, and `nowrap` keeps Strategy, Updated and Status on one line:
 
 ```html
 <table>

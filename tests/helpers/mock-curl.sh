@@ -12,6 +12,8 @@ for arg in "$@"; do
   prev="$arg"
   url="$arg"
 done
+# Tests that check the options of a request name a file for them in CURL_ARGS_LOG
+[[ -z "${CURL_ARGS_LOG:-}" ]] || printf '%s\n' "$*" >>"$CURL_ARGS_LOG"
 
 # Failed requests, as curl -f writes them with the -w texts of http_get and
 # http_get_json: the URL on stdout for the latter, the error on stderr
@@ -84,6 +86,11 @@ case "$url" in
   # Repology: no newest or outdated entry outside the AUR
   *repology.org/api/v1/project/aur-only)
     echo '[{"repo": "aur", "status": "newest", "version": "2.0"}, {"repo": "debian_unstable", "status": "devel", "version": "2.1rc1"}, {"repo": "debian_12", "status": "legacy", "version": "0.9"}]'
+    ;;
+  # Repology: the block of a client that sent more than one request per second, a 403 page
+  # in HTML, which curl -f does not print
+  *repology.org/api/v1/project/blocked-project)
+    http_error 403
     ;;
   # Repology: a project it does not know, as wingide
   *repology.org/api/v1/project/missing-project)

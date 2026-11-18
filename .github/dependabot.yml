@@ -8,6 +8,13 @@ updates:
     directory: "/ci-image"
     schedule:
       interval: "monthly"
+  - package-ecosystem: "uv"
+    directory: "/ci-image"
+    schedule:
+      interval: "monthly"
+    groups:
+      codecov:
+        patterns: ["*"]
   - package-ecosystem: "npm"
     directory: "/site"
     schedule:

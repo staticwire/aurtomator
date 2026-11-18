@@ -17,7 +17,7 @@ Before it touches issues, the job writes the run summary, which the run page sho
 | `🚀 aurtomator <release> available` | `aurtomator-update` | newer release, see [Updates of aurtomator](/features/aurtomator-updates/) | pin reaches the latest release, or newer releases get their own issue |
 | `❌ Check AUR Package Updates failed` | `auto-update` | failed jobs, see [Failed runs](#failed-runs) | next run without failed jobs |
 
-Packages get no second issue of the same kind while one is open, and issues closed while their package still fails come back in the next run. Each body links the run. Errors hold text from upstream, so they stand in a code block, where links, images and mentions do not render, and keep their last 4000 characters. Closing comments name the run and show the new status.
+Packages get no second issue of the same kind while one is open, and issues closed while their package still fails come back in the next run. Each body links the run. Errors hold text from upstream, so they stand in a code block, where links, images and mentions do not render, and keep their last 3900 bytes after a line `[first <n> bytes cut]`. Closing comments name the run and show the new status.
 
 Packages whose YAML you delete get no further check, so the next run closes their `update failed`, `check failed`, `update held` and arch issues with a comment that names the deleted file. YAML files whose `name` differs from their file name get `check_failed` under the file name, and their issues stay open.
 

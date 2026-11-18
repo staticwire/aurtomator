@@ -448,6 +448,16 @@ EOF
   grep -qx 'GIT_TERMINAL_PROMPT=0' "$TEST_TMPDIR/ls-remote.env"
 }
 
+# Runs with --update have no time limit, and a stall ends the listing as it ends a fetch of verify
+@test "git-tag: lists the tags under the speed limit of a fetch in verify" {
+  create_test_package "test-git-tag" "git-tag" "upstream:
+  url: https://git.example.org/~owner/repo"
+
+  run "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/ls-remote.configs")" = "-c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60" ]
+}
+
 @test "git-tag: tag_version_replace builds the version from the groups" {
   create_test_package "test-git-tag" "git-tag" "upstream:
   url: https://git.example.org/~owner/prefixed
@@ -752,6 +762,29 @@ $2}"
 
 # === repology ===
 
+# Repology blocks clients that send more than one request per second, and asks bulk clients
+# for a User-Agent with a link to their repository
+@test "repology: waits a second, then asks with a User-Agent that links the repository" {
+  create_test_package "test-repology" "repology" "upstream:
+  repology: testpkg"
+  printf '#!/bin/sh\nif [ -e "$CURL_ARGS_LOG" ]; then echo "after $*"; else echo "before $*"; fi >>"%s/sleep.log"\n' \
+    "$TEST_TMPDIR" >"$TEST_TMPDIR/mock-bin/sleep"
+  chmod +x "$TEST_TMPDIR/mock-bin/sleep"
+  CURL_ARGS_LOG="$TEST_TMPDIR/curl.args" run "$TEST_TMPDIR/strategies/repology.sh" "test-repology"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/sleep.log")" = "before 1" ]
+  [[ "$(cat "$TEST_TMPDIR/curl.args")" == *"-A aurtomator/1.0 (+https://github.com/staticwire/aurtomator) -w"* ]]
+}
+
+@test "repology: names the block of repology.org on a 403" {
+  create_test_package "test-repology" "repology" "upstream:
+  repology: blocked-project"
+  run "$TEST_TMPDIR/strategies/repology.sh" "test-repology"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"repology.org/api/v1/project/blocked-project: The requested URL returned error: 403"* ]]
+  [[ "$output" == *"repology.org answered 403, as it does to clients that send more than one request per second"* ]]
+}
+
 @test "repology: returns newest version from Repology" {
   create_test_package "test-repology" "repology" "upstream:
   repology: testpkg"
@@ -1024,14 +1057,23 @@ fake_git_upstream() {
     git -C "$fake_repo" commit -q -m "commit $i"
   done
 
+  # The clone logs its options of git -c, its file size limit in KiB, GIT_ALLOC_LIMIT, and 1 when
+  # SIGXFSZ is ignored, which is bit 24 of SigIgn
   cat >"$MOCK_DIR/git" <<EOF
 #!/usr/bin/env bash
+configs=()
+while [[ "\${1:-}" == -c && \$# -ge 2 ]]; do
+  configs+=(-c "\$2")
+  shift 2
+done
 if [[ "\$1" == "clone" ]]; then
   echo "\${GIT_ALLOW_PROTOCOL:-unset} \${@: -2:1}" >>"$TEST_TMPDIR/git-clone"
   echo "\${*:2:\$#-3}" >>"$TEST_TMPDIR/git-clone-options"
-  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git clone "\${@:2:\$#-3}" "file://$fake_repo" "\${@: -1}"
+  ignored=\$(awk '/^SigIgn:/ { print \$2 }' /proc/\$\$/status)
+  echo "\${configs[*]} files=\$(ulimit -f) alloc=\${GIT_ALLOC_LIMIT:-unset} xfsz=\$(((0x\$ignored >> 24) & 1))" >>"$TEST_TMPDIR/git-clone-limits"
+  exec env -u GIT_ALLOW_PROTOCOL /usr/bin/git "\${configs[@]}" clone "\${@:2:\$#-3}" "file://$fake_repo" "\${@: -1}"
 fi
-exec env GIT_NO_LAZY_FETCH=1 /usr/bin/git "\$@"
+exec env GIT_NO_LAZY_FETCH=1 /usr/bin/git "\${configs[@]}" "\$@"
 EOF
   chmod +x "$MOCK_DIR/git"
 }
@@ -1085,6 +1127,18 @@ EOF
 
 # Bare clones of googleapis/mcp-toolbox, 1.4 GB, do not fit in the time of
 # a check. The strategy reads commits and tags only.
+# Servers send any pack, whatever the filter asks
+@test "git-latest: clones under the limits of a fetch in verify" {
+  fake_git_upstream
+  create_test_package "test-git" "git-latest" "upstream:
+  type: git
+  url: https://git.example.com/repo.git"
+
+  run "$TEST_TMPDIR/strategies/git-latest.sh" "test-git"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/git-clone-limits")" = "-c pack.threads=1 -c core.bigFileThreshold=16m -c fetch.unpackLimit=1 -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 files=1048576 alloc=1073741824 xfsz=1" ]
+}
+
 @test "git-latest: clones without trees" {
   fake_git_upstream
   create_test_package "test-git" "git-latest" "upstream:
@@ -1918,6 +1972,7 @@ curl_agents() {
 }
 
 # SourceForge answers a bare Mozilla/5.0 with HTTP 403
+# repology adds a link to the repository to its User-Agent, which its own test checks
 @test "strategies: send aurtomator/1.0 as the User-Agent" {
   record_curl
   create_test_package "scrape" "webpage-scrape" "upstream:
@@ -1927,8 +1982,6 @@ curl_agents() {
   project: owner/repo"
   create_test_package "rust" "crates" "upstream:
   registry: serde"
-  create_test_package "repo" "repology" "upstream:
-  repology: firefox"
 
   run "$TEST_TMPDIR/strategies/webpage-scrape.sh" scrape
   [ "$status" -eq 0 ]
@@ -1936,9 +1989,7 @@ curl_agents() {
   [ "$status" -eq 0 ]
   run "$TEST_TMPDIR/strategies/crates.sh" rust
   [ "$status" -eq 0 ]
-  run "$TEST_TMPDIR/strategies/repology.sh" repo
-  [ "$status" -eq 0 ]
-  [ "$(curl_agents | wc -l)" -eq 4 ]
+  [ "$(curl_agents | wc -l)" -eq 3 ]
   [ "$(curl_agents | sort -u)" = "aurtomator/1.0" ]
   run ! grep -qi 'user-agent' "$TEST_TMPDIR/curl.args"
 }
@@ -1977,7 +2028,7 @@ curl_max_filesizes() {
   [ "$status" -eq 0 ]
   run "$TEST_TMPDIR/strategies/repology.sh" repo
   [ "$status" -eq 0 ]
-  [ "$(curl_max_filesizes | wc -l)" -eq "$(grep -cx -- '-A' "$TEST_TMPDIR/curl.args")" ]
+  [ "$(curl_max_filesizes | wc -l)" -eq "$(grep -cx -- '--globoff' "$TEST_TMPDIR/curl.args")" ]
   [ "$(curl_max_filesizes | sort -u)" = "50M" ]
 }
 

@@ -16,12 +16,12 @@ setup() {
 echo "$*" >>"$TEST_TMPDIR/gpg.args"
 for arg in "$@"; do
   case "$arg" in
-    VALIDKEY123|SUBKEY002|VALIDKEY123!|SUBKEY002!)
+    600D000000000123|5B00000000000002|600D000000000123!|5B00000000000002!)
       if [[ "$*" == *"--list-secret-keys"* ]]; then
         echo "sec   ed25519/MASTERAAA 2026-01-01 [SC]"
         echo "      ABCDEF1234567890"
         echo "uid           [ultimate] Test User <test@test>"
-        echo "ssb   ed25519/SUBKEY002 2026-01-01 [S]"
+        echo "ssb   ed25519/5B00000000000002 2026-01-01 [S]"
         exit 0
       fi
       if [[ "$*" == *"--sign"* || "$*" == *"--batch"*"--sign"* ]]; then
@@ -38,14 +38,14 @@ for arg in "$@"; do
       fi
       exit 0
       ;;
-    MASTERKEY001|FFFFFFFFFFFFFFFFFFFFFFFFMASTERKEY001)
+    A000000000000001|FFFFFFFFFFFFFFFFFFFFFFFFA000000000000001)
       if [[ "$*" == *"--list-secret-keys"* && "$*" == *"--with-colons"* ]]; then
-        echo "sec:u:255:22:MASTERKEY001:1767225600:::u:::scESC:::+:::23::0:"
-        echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFMASTERKEY001:"
+        echo "sec:u:255:22:A000000000000001:1767225600:::u:::scESC:::+:::23::0:"
+        echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFA000000000000001:"
         exit 0
       fi
       if [[ "$*" == *"--list-secret-keys"* ]]; then
-        echo "sec   ed25519/MASTERKEY001 2026-01-01 [SC]"
+        echo "sec   ed25519/A000000000000001 2026-01-01 [SC]"
         echo "      1234567890ABCDEF"
         echo "uid           [ultimate] Master User <master@test>"
         exit 0
@@ -64,12 +64,12 @@ for arg in "$@"; do
       fi
       exit 0
       ;;
-    PASSKEY003)
+    9A55000000000003)
       if [[ "$*" == *"--list-secret-keys"* ]]; then
         echo "sec   ed25519/MASTERXXX 2026-01-01 [SC]"
         echo "      FEDCBA0987654321"
         echo "uid           [ultimate] Pass User <pass@test>"
-        echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
+        echo "ssb   ed25519/9A55000000000003 2026-01-01 [S]"
         exit 0
       fi
       if [[ "$*" == *"--batch"*"--sign"* ]]; then
@@ -87,7 +87,7 @@ for arg in "$@"; do
       fi
       exit 0
       ;;
-    BADKEY999)
+    BAD0000000000999)
       if [[ "$*" == *"--list-secret-keys"* ]]; then
         echo "gpg: error reading key: No public key" >&2
         exit 2
@@ -211,14 +211,14 @@ EOF
   chmod +x "$TEST_TMPDIR/mock-bin/ssh"
 }
 
-# Helper: gpg for the passphrase strip of PASSKEY003; the main keyring exports the key with its
+# Helper: gpg for the passphrase strip of 9A55000000000003; the main keyring exports the key with its
 # passphrase, and the temporary keyring (--homedir) exports the copy
 mock_gpg_strip_flow() {
   cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   *--with-keygrip*)
-    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
+    echo "ssb   ed25519/9A55000000000003 2026-01-01 [S]"
     echo "      Keygrip = 0123456789ABCDEF0123456789ABCDEF01234567"
     ;;
   *--homedir*--export-secret-subkeys*)
@@ -234,7 +234,7 @@ case "$*" in
   *--import*) cat >/dev/null ;;
   *--list-secret-keys*)
     echo "sec   ed25519/MASTERXXX 2026-01-01 [SC]"
-    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
+    echo "ssb   ed25519/9A55000000000003 2026-01-01 [S]"
     ;;
   *--sign*) exit 2 ;;
 esac
@@ -362,13 +362,13 @@ EOF
 # === GPG step ===
 
 @test "setup gpg: valid key accepted" {
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key VALIDKEY123 --non-interactive
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key 600D000000000123 --non-interactive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"GPG key: VALIDKEY123"* ]]
+  [[ "$output" == *"GPG key: 600D000000000123"* ]]
 }
 
 @test "setup gpg: invalid key rejected" {
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key BADKEY999 --non-interactive
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key BAD0000000000999 --non-interactive
   [ "$status" -ne 0 ]
   [[ "$output" == *"Key not found"* ]]
 }
@@ -380,27 +380,52 @@ EOF
 }
 
 @test "setup gpg: subkey without passphrase accepted" {
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key SUBKEY002 --non-interactive
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key 5B00000000000002 --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"no passphrase, ready for CI"* ]]
 }
 
 @test "setup gpg: refuses a primary key" {
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key MASTERKEY001 --non-interactive
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key A000000000000001 --non-interactive
   [ "$status" -eq 1 ]
-  [[ "$output" == *"MASTERKEY001 is a primary key"* ]]
+  [[ "$output" == *"A000000000000001 is a primary key"* ]]
   [[ "$output" == *"gpg --quick-add-key"* ]]
   run ! grep -q 'export-secret' "$TEST_TMPDIR/gpg.args"
 }
 
 @test "setup gpg: refuses a primary key given by its fingerprint" {
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key FFFFFFFFFFFFFFFFFFFFFFFFMASTERKEY001 --non-interactive
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key FFFFFFFFFFFFFFFFFFFFFFFFA000000000000001 --non-interactive
   [ "$status" -eq 1 ]
   [[ "$output" == *"is a primary key"* ]]
 }
 
+# gpg --fingerprint prints fingerprints in groups of four, and gpg takes them with the spaces
+@test "setup gpg: refuses a primary key given by its fingerprint with spaces" {
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key 'FFFF FFFF FFFF FFFF FFFF  FFFF A000 0000 0000 0001' --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FFFFFFFFFFFFFFFFFFFFFFFFA000000000000001 is a primary key"* ]]
+}
+
+@test "setup gpg: saves a key ID with 0x and lower case letters as its hex digits in upper case" {
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key 0x600d000000000123 --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"GPG key: 600D000000000123"* ]]
+  grep -qx "GPG_KEY_ID='600D000000000123'" "$TEST_TMPDIR/.aurtomator.conf"
+}
+
+# gpg also takes e-mail addresses, names and IDs with !, which can select the primary key
+@test "setup gpg: refuses a key ID other than 8, 16, 40 or 64 hex digits" {
+  local id
+  for id in nopass@test 600D00000000012 '600D000000000123!' 600D00000000012G; do
+    run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key "$id" --non-interactive
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$id is no key ID or fingerprint in hex"* ]]
+    [[ "$output" == *"gpg --list-secret-keys --keyid-format long"* ]]
+  done
+}
+
 @test "setup gpg: passphrase key skips GPG in non-interactive" {
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key PASSKEY003 --non-interactive
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key 9A55000000000003 --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"passphrase"* ]]
   [[ "$output" == *"Cannot remove passphrase in non-interactive"* ]]
@@ -504,21 +529,21 @@ EOF
 # === Config persistence ===
 
 @test "setup: saves config file" {
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key VALIDKEY123 --non-interactive
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key 600D000000000123 --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"Config saved to .aurtomator.conf"* ]]
   [ -f "$TEST_TMPDIR/.aurtomator.conf" ]
-  grep -q "VALIDKEY123" "$TEST_TMPDIR/.aurtomator.conf"
+  grep -q "600D000000000123" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
 @test "setup: second run loads saved config" {
   # First run: save GPG key
-  "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key VALIDKEY123 --non-interactive 2>/dev/null
+  "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key 600D000000000123 --non-interactive 2>/dev/null
 
   # The second run takes the saved key without --gpg-key
   run "$TEST_TMPDIR/scripts/setup.sh" gpg --non-interactive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"GPG key: VALIDKEY123"* ]]
+  [[ "$output" == *"GPG key: 600D000000000123"* ]]
 }
 
 @test "setup: config contains identity fields" {
@@ -576,12 +601,12 @@ EOF
 }
 
 @test "setup gpg: --gpg-key overrides saved key" {
-  write_full_config "BADKEY999"
+  write_full_config "BAD0000000000999"
 
-  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key VALIDKEY123 --non-interactive
+  run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key 600D000000000123 --non-interactive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"GPG key: VALIDKEY123"* ]]
-  grep -qx "GPG_KEY_ID='VALIDKEY123'" "$TEST_TMPDIR/.aurtomator.conf"
+  [[ "$output" == *"GPG key: 600D000000000123"* ]]
+  grep -qx "GPG_KEY_ID='600D000000000123'" "$TEST_TMPDIR/.aurtomator.conf"
 }
 
 @test "setup ssh: --ssh-key overrides saved path" {
@@ -600,7 +625,7 @@ EOF
 # === Verify step ===
 
 @test "setup verify: all green with valid config" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
 
   run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
   [ "$status" -eq 0 ]
@@ -638,13 +663,13 @@ EOF
 }
 
 @test "setup verify: runs every check after a failed one" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   mock_ssh_denied
 
   run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
   [ "$status" -eq 1 ]
   [[ "$output" == *"✗ SSH: cannot connect to aur.archlinux.org"* ]]
-  [[ "$output" == *"✓ GPG: signing works with VALIDKEY123"* ]]
+  [[ "$output" == *"✓ GPG: signing works with 600D000000000123"* ]]
   [[ "$output" == *"✓ Secrets: 4/4 configured"* ]]
   [[ "$output" == *"1 issue(s) found."* ]]
   [[ "$output" == *"$TEST_TMPDIR/scripts/setup.sh verify"* ]]
@@ -652,7 +677,7 @@ EOF
 
 # Unknown host keys, refused keys and the network fail the same check
 @test "setup verify: shows why ssh failed" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   cat >"$TEST_TMPDIR/mock-bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 echo "No ED25519 host key is known for aur.archlinux.org and you have requested strict checking." >&2
@@ -719,7 +744,7 @@ EOF
 # === Secrets step ===
 
 @test "setup secrets: sets all secrets via gh" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   log_gh_calls
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
@@ -733,7 +758,7 @@ EOF
 }
 
 @test "setup secrets: stops on a .aurtomator.conf that git tracks and sets nothing" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   git -C "$TEST_TMPDIR" add -f .aurtomator.conf
   log_gh_calls
 
@@ -746,18 +771,18 @@ EOF
 # The values can come from a file a commit changed, so they show before the
 # question, a key path as the file it names
 @test "setup secrets: shows each value and the key file before it sets them" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   sed -i "s|^AUR_SSH_KEY=.*|AUR_SSH_KEY='ssh/../ssh/aur.pem'|" "$TEST_TMPDIR/.aurtomator.conf"
   cd "$TEST_TMPDIR"
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"  AUR_GIT_NAME: Test User"$'\n'"  AUR_GIT_EMAIL: test@test.com"$'\n'"  AUR_SSH_KEY: the key in $(realpath "$TEST_TMPDIR/ssh/aur.pem")"$'\n'"  GPG_SIGNING_KEY: GPG key VALIDKEY123"$'\n'*"Setting secrets on test/repo:"* ]]
+  [[ "$output" == *"  AUR_GIT_NAME: Test User"$'\n'"  AUR_GIT_EMAIL: test@test.com"$'\n'"  AUR_SSH_KEY: the key in $(realpath "$TEST_TMPDIR/ssh/aur.pem")"$'\n'"  GPG_SIGNING_KEY: GPG key 600D000000000123"$'\n'*"Setting secrets on test/repo:"* ]]
 }
 
 # On a terminal gh prints a line of its own for each secret
 @test "setup secrets: prints one line per secret" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
@@ -769,7 +794,7 @@ EOF
 }
 
 @test "setup secrets: shows the error of a failed gh" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   # gh that is logged in and refuses every secret
   cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -809,7 +834,7 @@ EOF
 }
 
 @test "setup secrets: skips GPG_SIGNING_KEY for a passphrase key without a copy" {
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
@@ -820,7 +845,7 @@ EOF
 
 @test "setup secrets: manual path omits a passphrase key without a copy" {
   mock_gh_unavailable
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
@@ -830,16 +855,16 @@ EOF
 
 @test "setup secrets: manual path prints the export command for a key without passphrase" {
   mock_gh_unavailable
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"gpg --export-secret-subkeys --armor 'VALIDKEY123!'"* ]]
+  [[ "$output" == *"gpg --export-secret-subkeys --armor '600D000000000123!'"* ]]
   [[ "$output" != *"has a passphrase"* ]]
 }
 
 @test "setup secrets: gh stores only the signing subkey" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   cat >"$TEST_TMPDIR/mock-bin/gh" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
@@ -853,11 +878,11 @@ EOF
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
   grep -q 'mocked-clean' "$TEST_TMPDIR/secret-GPG_SIGNING_KEY"
-  grep -q -- '--export-secret-subkeys --armor VALIDKEY123!$' "$TEST_TMPDIR/gpg.args"
+  grep -q -- '--export-secret-subkeys --armor 600D000000000123!$' "$TEST_TMPDIR/gpg.args"
 }
 
 @test "setup secrets: stores no empty GPG_SIGNING_KEY" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   # gpg that signs, so the key has no passphrase, and exports nothing
   cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'
 #!/usr/bin/env bash
@@ -884,7 +909,7 @@ EOF
 @test "setup gpg: removes the temporary keyring after the passphrase-free copy" {
   mock_gh_unavailable
   mock_gpg_strip_flow
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
   mkdir -p "$TEST_TMPDIR/tmp"
 
   TMPDIR="$TEST_TMPDIR/tmp" run "$TEST_TMPDIR/scripts/setup.sh" gpg <<<"y"
@@ -896,7 +921,7 @@ EOF
 @test "setup gpg: removes the temporary keyring when the terminal closes after the passphrase is gone" {
   mock_gh_unavailable
   mock_gpg_strip_flow
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
   mkdir -p "$TEST_TMPDIR/tmp"
   # Mock gpg-connect-agent that removes the passphrase and then sends SIGHUP to the topmost setup.sh
   # process, as a closing terminal does
@@ -919,7 +944,7 @@ EOF
 @test "setup gpg secrets: manual path prints the passphrase-free copy" {
   mock_gh_unavailable
   mock_gpg_strip_flow
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
 
   # Answer "y" to "Proceed? (Y/n)"
   run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<"y"
@@ -932,7 +957,7 @@ EOF
 
 @test "setup gpg secrets: gh stores the passphrase-free copy" {
   mock_gpg_strip_flow
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
 
   # gh that keeps each secret it is given in a file named after the secret
   cat >"$TEST_TMPDIR/mock-bin/gh" <<EOF
@@ -953,7 +978,7 @@ EOF
 
 @test "setup gpg secrets: prints one line for the passphrase-free copy" {
   mock_gpg_strip_flow
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
 
   run "$TEST_TMPDIR/scripts/setup.sh" gpg secrets <<<$'y\ny'
   [ "$status" -eq 0 ]
@@ -963,7 +988,7 @@ EOF
 
 @test "setup gpg secrets: reports a failed upload of the passphrase-free copy" {
   mock_gpg_strip_flow
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
 
   # gh that is logged in but fails to set any secret
   cat >"$TEST_TMPDIR/mock-bin/gh" <<'EOF'
@@ -1062,7 +1087,7 @@ EOF
 }
 
 @test "setup verify: through the aurtomator script, names it for a re-run" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   mock_ssh_denied
 
   AURTOMATOR_RUNNER=./aurtomator.sh run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
@@ -1082,7 +1107,7 @@ EOF
 }
 
 @test "setup secrets: through the aurtomator script, names it for the passphrase-free copy" {
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
 
   AURTOMATOR_RUNNER=./aurtomator.sh run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
   [ "$status" -eq 0 ]
@@ -1126,7 +1151,7 @@ log_gh_calls() {
 }
 
 @test "setup secrets: refuses a passphrase-protected key from --ssh-key and sets no secret" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   mkdir -p "$TEST_TMPDIR/ssh-pass"
   ssh-keygen -t ed25519 -f "$TEST_TMPDIR/ssh-pass/key" -N "testpass" -q
   log_gh_calls
@@ -1153,7 +1178,7 @@ log_gh_calls() {
 }
 
 @test "setup secrets: refuses a missing SSH key" {
-  write_full_config "VALIDKEY123"
+  write_full_config "600D000000000123"
   log_gh_calls
 
   run "$TEST_TMPDIR/scripts/setup.sh" secrets --ssh-key "$TEST_TMPDIR/ssh/missing.pem" --non-interactive
@@ -1284,22 +1309,22 @@ log_gh_calls() {
 #!/usr/bin/env bash
 case "$*" in
   *--with-colons*) echo "fpr:::::::::0000000000000000000000000000000000000000:" ;;
-  *--list-secret-keys*) echo "ssb   cv25519/NOSIGN01 2026-01-01 [E]" ;;
+  *--list-secret-keys*) echo "ssb   cv25519/E0000001 2026-01-01 [E]" ;;
 esac
 exit 0
 EOF
-  write_full_config "NOSIGN01"
+  write_full_config "E0000001"
 
   run "$TEST_TMPDIR/scripts/setup.sh" gpg --non-interactive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"! gpg lists no signing flag [S] for NOSIGN01"* ]]
-  [[ "$output" == *"✓ GPG key: NOSIGN01 (no passphrase, ready for CI)"* ]]
+  [[ "$output" == *"! gpg lists no signing flag [S] for E0000001"* ]]
+  [[ "$output" == *"✓ GPG key: E0000001 (no passphrase, ready for CI)"* ]]
 }
 
 @test "setup gpg: declining the passphrase-free copy turns GPG off" {
   mock_gh_unavailable
   mock_gpg_strip_flow
-  write_full_config "PASSKEY003"
+  write_full_config "9A55000000000003"
   mkdir -p "$TEST_TMPDIR/tmp"
 
   TMPDIR="$TEST_TMPDIR/tmp" run "$TEST_TMPDIR/scripts/setup.sh" gpg <<<"n"
@@ -1319,7 +1344,7 @@ fail=${STRIP_FAIL:-}
 case "$*" in
   *--with-keygrip*)
     [[ "$fail" == keygrip ]] && exit 0
-    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
+    echo "ssb   ed25519/9A55000000000003 2026-01-01 [S]"
     echo "      Keygrip = 0123456789ABCDEF0123456789ABCDEF01234567"
     ;;
   *--homedir*--export-secret-subkeys*)
@@ -1340,7 +1365,7 @@ case "$*" in
     ;;
   *--list-secret-keys*)
     echo "sec   ed25519/MASTERXXX 2026-01-01 [SC]"
-    echo "ssb   ed25519/PASSKEY003 2026-01-01 [S]"
+    echo "ssb   ed25519/9A55000000000003 2026-01-01 [S]"
     ;;
   *--sign*) exit 2 ;;
 esac
@@ -1364,7 +1389,7 @@ EOF
   mkdir -p "$TEST_TMPDIR/tmp"
   local step expected
   while IFS='|' read -r step expected; do
-    write_full_config "PASSKEY003"
+    write_full_config "9A55000000000003"
     STRIP_FAIL="$step" TMPDIR="$TEST_TMPDIR/tmp" run "$TEST_TMPDIR/scripts/setup.sh" gpg <<<"y"
     [ "$status" -eq 0 ]
     [[ "$output" == *"✗ $expected"* ]]
@@ -1385,11 +1410,11 @@ EOF
 [[ "$*" == *--sign* ]] && exit 2
 exit 0
 EOF
-  write_full_config "NOSIGN01"
+  write_full_config "E0000001"
 
   run "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
   [ "$status" -eq 1 ]
-  [[ "$output" == *"✗ GPG: cannot sign with NOSIGN01"* ]]
+  [[ "$output" == *"✗ GPG: cannot sign with E0000001"* ]]
   [[ "$output" == *"1 issue(s) found."* ]]
 }
 

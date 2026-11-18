@@ -4,6 +4,7 @@
 # gpg tool: and git tool: run those tools alone, to show the behavior that the code relies on
 
 load helpers/setup.sh
+bats_require_minimum_version 1.5.0
 
 # The keys are generated once per file, and every test gets a copy of the
 # keyring
@@ -149,54 +150,50 @@ teardown() {
   [[ "$output" == *"signing failed: No pinentry"* ]]
 }
 
-# === Passphrase strip as setup.sh does it ===
+# === Passphrase strip of setup.sh ===
 
-@test "gpg-real: full passphrase strip flow works" {
-  # This replicates setup.sh lines 277-330 exactly
-  local tmp_gnupg
-  tmp_gnupg=$(mktemp -d)
-  chmod 700 "$tmp_gnupg"
-  echo "pinentry-program /usr/bin/pinentry" >"$tmp_gnupg/gpg-agent.conf"
-  echo "allow-loopback-pinentry" >>"$tmp_gnupg/gpg-agent.conf"
-
-  # Step 1: Export signing subkey (with passphrase, via loopback)
-  local exported_key
-  exported_key=$(echo "testpass123" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
-    --export-secret-subkeys --armor "${WITHPASS_SUBKEY_ID}!" 2>/dev/null) || true
-  [[ -n "$exported_key" ]]
-
-  # Step 2: Import into temp keyring
-  echo "$exported_key" | gpg --homedir "$tmp_gnupg" --batch --import 2>/dev/null
-
-  # Step 3: Get keygrip
-  local keygrip
-  keygrip=$(gpg --homedir "$tmp_gnupg" --list-secret-keys --with-keygrip 2>/dev/null |
-    grep -A1 "\[S\]" | grep Keygrip | awk '{print $3}' || true)
-  [[ -n "$keygrip" ]]
-
-  # Step 4: Change passphrase to empty via loopback (simulates pinentry)
-  # old pass + empty new pass + empty repeat for each subkey
-  printf '%s\n\n\n\n' "testpass123" | gpg --homedir "$tmp_gnupg" --batch --yes \
-    --pinentry-mode loopback --command-fd 0 --passwd "${WITHPASS_SUBKEY_ID}" 2>/dev/null || true
-
-  # Step 5: export the copy without a passphrase
-  local clean_key
-  clean_key=$(gpg --homedir "$tmp_gnupg" --batch --pinentry-mode loopback \
-    --passphrase "" --export-secret-subkeys --armor "${WITHPASS_SUBKEY_ID}!" 2>/dev/null) || true
-  [[ -n "$clean_key" ]]
-  [[ "$clean_key" == *"BEGIN PGP PRIVATE KEY BLOCK"* ]]
-
-  # Step 6: the copy signs without a passphrase
-  local verify_gnupg
-  verify_gnupg=$(mktemp -d)
-  chmod 700 "$verify_gnupg"
-  echo "$clean_key" | gpg --homedir "$verify_gnupg" --batch --import 2>/dev/null
-  echo "test" | gpg --homedir "$verify_gnupg" --batch --pinentry-mode error \
-    --sign --local-user "$WITHPASS_SUBKEY_ID" >/dev/null 2>&1
-
-  gpgconf --homedir "$tmp_gnupg" --kill gpg-agent 2>/dev/null || true
-  gpgconf --homedir "$verify_gnupg" --kill gpg-agent 2>/dev/null || true
-  rm -rf "$tmp_gnupg" "$verify_gnupg"
+# The pinentry of the user answers the three dialogs of setup_gpg: the passphrase twice, then no
+# passphrase for the copy. Without gh, setup.sh prints the copy for the secret.
+@test "setup gpg: makes a copy of a subkey with a passphrase that signs without one" {
+  local fake="$TEST_TMPDIR/fake-pinentry" verify="$TEST_TMPDIR/verify" key
+  cat >"$fake" <<'EOF'
+#!/usr/bin/env bash
+desc=""
+echo "OK Pleased to meet you"
+while IFS= read -r line; do
+  case "$line" in
+    SETDESC*) desc=$line && echo OK ;;
+    GETPIN*)
+      if [[ "$desc" == *[Nn]ew* ]]; then
+        echo OK
+      else
+        printf 'D testpass123\nOK\n'
+      fi
+      ;;
+    BYE*) echo "OK closing connection" && exit 0 ;;
+    *) echo OK ;;
+  esac
+done
+EOF
+  chmod +x "$fake"
+  echo "pinentry-program $fake" >>"$GNUPGHOME/gpg-agent.conf"
+  printf '#!/bin/sh\nexit 1\n' >"$MOCK_DIR/gh"
+  chmod +x "$MOCK_DIR/gh"
+  ssh-keygen -q -t ed25519 -N "" -f "$TEST_TMPDIR/aur"
+  # Should a dialog reach /usr/bin/pinentry, it takes the curses one, which fails without a terminal
+  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE \
+    "$TEST_TMPDIR/scripts/setup.sh" gpg secrets --gpg-key "$WITHPASS_SUBKEY_ID" --ssh-key "$TEST_TMPDIR/aur" <<<y
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"passphrase-free copy created for CI"* ]]
+  key=$(sed -n '/^-----BEGIN PGP PRIVATE KEY BLOCK-----$/,/^-----END PGP PRIVATE KEY BLOCK-----$/p' <<<"$output")
+  mkdir -m 0700 "$verify"
+  gpg --homedir "$verify" --batch --import <<<"$key"
+  gpg --homedir "$verify" --batch --pinentry-mode error --sign --local-user "$WITHPASS_SUBKEY_ID" <<<test >/dev/null
+  gpgconf --homedir "$verify" --kill gpg-agent
+  # The key of the user keeps its passphrase
+  gpgconf --kill gpg-agent
+  run ! gpg --batch --pinentry-mode error --sign --local-user "$WITHPASS_SUBKEY_ID" <<<test
+  gpgconf --kill gpg-agent
 }
 
 @test "gpg-real: no-passphrase key needs no stripping" {
@@ -219,7 +216,7 @@ teardown() {
     -c commit.gpgsign=true \
     commit --amend --no-edit
 
-  git log --show-signature -1 2>&1 | grep -qi "good signature\|gpg"
+  git verify-commit HEAD
 }
 
 @test "git tool: signs a commit with a master key" {
@@ -233,7 +230,7 @@ teardown() {
     -c commit.gpgsign=true \
     commit --amend --no-edit
 
-  git log --show-signature -1 2>&1 | grep -qi "good signature\|gpg"
+  git verify-commit HEAD
 }
 
 @test "git tool: commits without a signature" {
@@ -260,7 +257,7 @@ teardown() {
     commit --amend --no-edit
 
   git log -1 --format=%s | grep -q "4.0.0 release from test"
-  git log --show-signature -1 2>&1 | grep -qi "good signature\|gpg"
+  git verify-commit HEAD
 }
 
 # === aur_commit_push with GPG_KEY_ID ===
@@ -328,9 +325,23 @@ stage_aur_update() {
   [[ "$output" != *"Cannot remove passphrase"* ]]
 }
 
+# gpg selects the primary key for its e-mail address and for its fingerprint with spaces
+@test "gpg-real: setup.sh refuses the primary key by its fingerprint with spaces and by e-mail" {
+  local fpr
+  fpr=$(gpg --list-secret-keys --with-colons "$NOPASS_MASTER_ID" | awk -F: '$1 == "fpr" { print $10; exit }')
+  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" gpg \
+    --gpg-key "$(sed -E 's/(.{4})/\1 /g' <<<"$fpr")" --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$fpr is a primary key"* ]]
+  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" gpg \
+    --gpg-key nopass@test --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nopass@test is no key ID or fingerprint in hex"* ]]
+}
+
 @test "gpg-real: setup.sh rejects nonexistent key" {
   run "$TEST_TMPDIR/scripts/setup.sh" gpg \
-    --gpg-key "NONEXISTENT999" --non-interactive
+    --gpg-key "0000000000000999" --non-interactive
   [ "$status" -ne 0 ]
   [[ "$output" == *"Key not found"* ]]
 }

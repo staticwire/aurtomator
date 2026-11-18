@@ -71,6 +71,20 @@ run_blocks() {
   [ "$output" = "/ci-image" ]
 }
 
+# codecov-action downloads the newest CLI unless it gets one, so the test job installs the CLI
+# that requirements.txt pins by hash, and Dependabot moves the pins
+@test "ci: Codecov uploads with the CLI of ci-image/requirements.txt, which Dependabot updates" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.updates[] | select(.["package-ecosystem"] == "uv") | .directory' "$GITHUB_DIR/dependabot.yml"
+  [ "$output" = "/ci-image" ]
+  run yq '.jobs.test.steps[] | select(.name == "Install the Codecov CLI") | .run' "$ci"
+  [[ "$output" == *"/opt/codecov/bin/pip install --require-hashes --no-deps -r ci-image/requirements.txt"* ]]
+  run yq '.jobs.test.steps[] | select(.name == "Upload coverage to Codecov") | .with.binary' "$ci"
+  [ "$output" = "/opt/codecov/bin/codecovcli" ]
+  grep -q '^codecov-cli==' "$GITHUB_DIR/../ci-image/requirements.txt"
+  grep -q -- '--hash=sha256:' "$GITHUB_DIR/../ci-image/requirements.txt"
+}
+
 @test "workflows: every container comes from the image job" {
   local workflow line count=0
   for workflow in "$GITHUB_DIR"/workflows/*.yml; do
@@ -1148,6 +1162,7 @@ if [[ -n "${LATE_OUT:-}" ]]; then
   (exec 2>/dev/null && sleep 0.5 && printf '%s\n' "$LATE_OUT") &
   (exec >/dev/null && sleep 1 && printf '%s\n' "$LATE_OUT" >&2) &
 fi
+[[ "$*" != */update-readme.sh ]] || exit "${README_RC:-${SUDO_RC:-0}}"
 exit "${SUDO_RC:-0}"
 EOF
   chmod +x "$bin/chown" "$bin/git" "$bin/sudo"
@@ -1206,6 +1221,23 @@ sudo_commands() {
   run sudo_commands
   [ "${#lines[@]}" -eq 1 ]
   [[ "${lines[0]}" == *"/check-all.sh cwd="* ]]
+}
+
+# update-readme.sh ends with 3 when it leaves README.md as it is, and the step warns after
+# the token, where the runner reads workflow commands again
+@test "run-as-builder: warns and goes on when update-readme.sh leaves the README as it is" {
+  local i resumed=-1 warned=-1
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  SUDO_OUT=ok README_RC=3 run_builder_step check "Check updates"
+  [ "$status" -eq 0 ]
+  for i in "${!lines[@]}"; do
+    [[ ! "${lines[i]}" =~ ^::[0-9a-f]{32}::$ ]] || resumed=$i
+    [[ "${lines[i]}" != "::warning::README.md stays as it is"* ]] || warned=$i
+  done
+  ((resumed >= 0 && warned > resumed))
+  SUDO_OUT=ok README_RC=1 run_builder_step check "Check updates"
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"::warning::"* ]]
 }
 
 @test "run-as-builder: gives builder its own directory and runs no git" {
@@ -1337,6 +1369,17 @@ make_builder_inputs() {
   [ "$(cat "$work/.status/_assets")" = $'foo\t2.0-x' ]
   [ "$(cat "$work/.status/_arches")" = $'foo\t2.0\taarch64\t' ]
   [ "$(stat -c %a "$work/.status/_assets" "$work/.status/_arches")" = $'644\n644' ]
+}
+
+# awk compares two fields that look like numbers as numbers, and 1e2 and 100 are both 100
+@test "run-as-builder: gives builder no line of a package that awk reads as the same number" {
+  local work="$BATS_TEST_TMPDIR/work"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  printf '100\t9.9-z\n1e2\t2.0-x\n' >"$BATS_TEST_TMPDIR/data/status/_assets"
+  PACKAGE_INPUT=1e2 SUDO_OUT=ok run_builder_step prepare "Prepare updates"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$work/.status/_assets")" = $'1e2\t2.0-x' ]
 }
 
 @test "run-as-builder: copies nothing of one package through a link" {
@@ -1920,7 +1963,11 @@ run_issue_step() {
 failure_issue_body() { echo "failure_issue_body $*" >>"$BODY_LOG" && echo body; }
 alert_issue_body() { echo "alert_issue_body $*" >>"$BODY_LOG" && echo body; }
 upstream_issue_body() { echo "upstream_issue_body $*" >>"$BODY_LOG" && echo body; }
-host_issue_body() { echo "host_issue_body $*" >>"$BODY_LOG" && echo body; }
+# BIG_BODY writes 60000 characters of three bytes each
+host_issue_body() {
+  echo "host_issue_body $*" >>"$BODY_LOG"
+  if [[ -n "${BIG_BODY:-}" ]]; then printf '€%.0s' {1..60000}; else echo body; fi
+}
 arch_issue_body() { echo "arch_issue_body $*" >>"$BODY_LOG" && echo body; }
 EOF
   rm -f "$ws/.status/_hosts"
@@ -1935,6 +1982,10 @@ EOF
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
+# The size of a body that comes on stdin, in bytes
+if [[ " $* " == *" --body-file - "* ]]; then
+  wc -c >>"$GH_BODY_LOG"
+fi
 if [[ "$*" == "api repos/$GITHUB_REPOSITORY --jq .has_issues" ]]; then
   [[ -z "${GH_API_FAIL:-}" ]] || exit 1
   echo "${GH_HAS_ISSUES:-true}"
@@ -1978,13 +2029,15 @@ EOF
   chmod +x "$bin/gh" "$bin/sudo"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   BODY_LOG="$BATS_TEST_TMPDIR/body.log"
+  GH_BODY_LOG="$BATS_TEST_TMPDIR/gh-body.log"
   : >"$GH_LOG"
   : >"$BODY_LOG"
+  : >"$GH_BODY_LOG"
   step_run issues "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GH_CREATE_FAIL_HOST="${GH_CREATE_FAIL_HOST:-}" GITHUB_REPOSITORY=owner/fork \
-    RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
+    GH_BODY_LOG="$GH_BODY_LOG" BIG_BODY="${BIG_BODY:-}" RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: an open issue of another package holds back no issue" {
@@ -2053,7 +2106,7 @@ EOF
   run_issue_step foo="held: 29+1" _alerts=$'foo\thold\tRaise makedepends'
   [ "$status" -eq 0 ]
   grep -qx 'label create update-held --color fbca04 --description Update waits for a hand edit' "$GH_LOG"
-  grep -qx 'issue create --title ✋ foo: update held --label update-held --body body' "$GH_LOG"
+  grep -qx 'issue create --title ✋ foo: update held --label update-held --body-file -' "$GH_LOG"
 }
 
 @test "check-updates: an open issue of a held update holds back another one" {
@@ -2068,8 +2121,8 @@ EOF
     _alerts=$'foo\tnotice\tCreate the package for the old major\nbar\tnotice\tCheck the old line'
   [ "$status" -eq 0 ]
   grep -qx 'label create update-notice --color 1d76db --description Published update needs a hand edit' "$GH_LOG"
-  grep -qx 'issue create --title 🔔 foo: 29+1 notice --label update-notice --body body' "$GH_LOG"
-  grep -qx 'issue create --title 🔔 bar: 1.0 notice --label update-notice --body body' "$GH_LOG"
+  grep -qx 'issue create --title 🔔 foo: 29+1 notice --label update-notice --body-file -' "$GH_LOG"
+  grep -qx 'issue create --title 🔔 bar: 1.0 notice --label update-notice --body-file -' "$GH_LOG"
 }
 
 @test "check-updates: an open notice of the version holds back another one" {
@@ -2092,7 +2145,7 @@ EOF
   run_issue_step _upstream="newer: 0.7.0"
   [ "$status" -eq 0 ]
   grep -qx 'label create aurtomator-update --color 0e8a16 --description Newer aurtomator release' "$GH_LOG"
-  grep -qx 'issue create --title 🚀 aurtomator 0.7.0 available --label aurtomator-update --body body' "$GH_LOG"
+  grep -qx 'issue create --title 🚀 aurtomator 0.7.0 available --label aurtomator-update --body-file -' "$GH_LOG"
 }
 
 @test "check-updates: an open issue of the release holds back another one" {
@@ -2131,7 +2184,7 @@ EOF
   run_issue_step foo=up_to_date _without=$'foo\t28+23\taarch64 riscv64'
   [ "$status" -eq 0 ]
   grep -qx 'label create arch-missing --color e99695 --description Published without some arches' "$GH_LOG"
-  grep -qx 'issue create --title ⚠️ foo: 28+23 without aarch64 riscv64 --label arch-missing --body body' "$GH_LOG"
+  grep -qx 'issue create --title ⚠️ foo: 28+23 without aarch64 riscv64 --label arch-missing --body-file -' "$GH_LOG"
   [ "$(cat "$BODY_LOG")" = "arch_issue_body foo 28+23 aarch64 riscv64 https://example.invalid/run" ]
 }
 
@@ -2177,7 +2230,7 @@ host_failures() {
   mapfile -t pairs < <(host_failures 5 api.github.com a)
   run_issue_step "${pairs[@]}" b="check_failed: https://github.com/o/b: error: 503" c="update_failed: boom"
   [ "$status" -eq 0 ]
-  grep -qx 'issue create --title ❌ api.github.com: 5 packages failed to check --label auto-update --body body' "$GH_LOG"
+  grep -qx 'issue create --title ❌ api.github.com: 5 packages failed to check --label auto-update --body-file -' "$GH_LOG"
   grep -q '^issue create --title ❌ b: check failed ' "$GH_LOG"
   grep -q '^issue create --title ❌ c: update failed ' "$GH_LOG"
   run grep -c '^issue create' "$GH_LOG"
@@ -2225,7 +2278,7 @@ host_failures() {
   GH_TITLES=$'❌ apixgithubxcom: 9 packages failed to check\n❌ api.github.com: 9 packages failed to check twice\n❌ api.github.com: many packages failed to check' \
     run_issue_step "${pairs[@]}"
   [ "$status" -eq 0 ]
-  grep -qx 'issue create --title ❌ api.github.com: 5 packages failed to check --label auto-update --body body' "$GH_LOG"
+  grep -qx 'issue create --title ❌ api.github.com: 5 packages failed to check --label auto-update --body-file -' "$GH_LOG"
 }
 
 @test "check-updates: the issue step creates each label once and lists its open issues once" {
@@ -2254,6 +2307,27 @@ host_failures() {
   [[ "$output" == *"::warning::Could not create the issue ❌ api.github.com: 5 packages failed to check: GraphQL: body is too long"* ]]
   run grep -c '^issue create --title ❌ a[1-5]: check failed ' "$GH_LOG"
   [ "$output" = "5" ]
+}
+
+# Linux refuses one argument over 128 KiB, and the 60000 characters of a host issue can take
+# three times as many bytes
+@test "check-updates: gh gets the body of an issue on stdin" {
+  local pairs
+  mapfile -t pairs < <(host_failures 5 api.github.com a)
+  BIG_BODY=1 run_issue_step "${pairs[@]}"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue create --title ❌ api.github.com: 5 packages failed to check --label auto-update --body-file -' "$GH_LOG"
+  [ "$(cat "$GH_BODY_LOG")" = 180000 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "1" ]
+}
+
+# awk compares two fields that look like numbers as numbers, and 1e2 and 100 are both 100
+@test "check-updates: opens no notice issue from the alerts of another package" {
+  run_issue_step 1e2="updated: 2.0" _alerts=$'100\tnotice\tCheck the old line'
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "check-updates: a refused issue gives a warning with the error of gh" {
@@ -3043,7 +3117,7 @@ run_bare_issues_step() {
   local pairs
   mapfile -t pairs < <(host_failures 4 api.github.com a && host_failures 5 apixgithub.com x && host_failures 5 cdn.gitlab.com y)
   GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check\n22 ❌ apixgithub.com: 5 packages failed to check\n23 ❌ gitlab.com: 7 packages failed to check\n24 ❌ gitlab.com: many packages failed to check' \
-    CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}"
+    CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}" _packages=a1
   [ "$status" -eq 0 ]
   grep -qx 'issue close 21 --comment Fewer than 5 packages of `api.github.com` failed to check in https://example.invalid/run.' "$GH_LOG"
   grep -qx 'issue close 23 --comment Fewer than 5 packages of `gitlab.com` failed to check in https://example.invalid/run.' "$GH_LOG"
@@ -3056,7 +3130,7 @@ run_bare_issues_step() {
   local pairs
   mapfile -t pairs < <(host_failures 4 api.github.com a)
   GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check\n22 ❌ late: check failed' \
-    CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}" "late=unchecked: the check ran out of its 20 minutes in this run"
+    CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}" _packages=late "late=unchecked: the check ran out of its 20 minutes in this run"
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
@@ -3066,7 +3140,7 @@ run_bare_issues_step() {
   local pairs
   mapfile -t pairs < <(host_failures 4 api.github.com a)
   GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check' CLOSE_STEP="Close resolved host issues" \
-    run_close_step "${pairs[@]}" $'b=check_failed: fatal: remote error: access denied\nunchecked: x'
+    run_close_step "${pairs[@]}" _packages=b $'b=check_failed: fatal: remote error: access denied\nunchecked: x'
   [ "$status" -eq 0 ]
   grep -qx 'issue close 21 --comment Fewer than 5 packages of `api.github.com` failed to check in https://example.invalid/run.' "$GH_LOG"
 }
@@ -3081,9 +3155,19 @@ run_bare_issues_step() {
   run yq '.jobs.issues.steps[] | select(.name == "Close resolved issues") | .run' "$CHECK_UPDATES"
   [[ "$output" != *host_close_comment* ]]
   mapfile -t pairs < <(host_failures 2 api.github.com a)
-  GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check' CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}"
+  GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check' CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}" _packages=a1
   [ "$status" -eq 0 ]
   grep -qx 'issue close 21 --comment Fewer than 5 packages of `api.github.com` failed to check in https://example.invalid/run.' "$GH_LOG"
+}
+
+# check-all.sh writes _packages after its loop, so a publish that its job stops leaves none
+@test "check-updates: closes no host issue on statuses without _packages" {
+  local pairs
+  mapfile -t pairs < <(host_failures 2 api.github.com a)
+  GH_OPEN=$'21 ❌ api.github.com: 6 packages failed to check' CLOSE_STEP="Close resolved host issues" run_close_step "${pairs[@]}"
+  [ "$status" -eq 0 ]
+  run grep -c '^issue close' "$GH_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "check-updates: closes the arch issue of a package that _without of publish lists no more" {
@@ -3094,6 +3178,13 @@ run_bare_issues_step() {
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "1" ]
   [ "$(cat "$BODY_LOG")" = "arch_close_comment foo https://example.invalid/run" ]
+}
+
+# awk compares two fields that look like numbers as numbers, and 1e2 and 100 are both 100
+@test "check-updates: closes the arch issue of a package when _without lists another one alone" {
+  GH_OPEN=$'12 ⚠️ 1e2: 2.0 without aarch64' run_close_step 1e2=up_to_date 100=up_to_date _without=$'100\t1.0\taarch64'
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 12 --comment comment' "$GH_LOG"
 }
 
 @test "check-updates: keeps the arch issues in a run without the _without of publish" {
@@ -3179,6 +3270,22 @@ run_bare_issues_step() {
   [ "$status" -eq 0 ]
   [ "$(cat "$ssh_dir/aur")" = "key-text" ]
   [ -f "$ssh_dir/known_hosts" ]
+}
+
+# ssh waits for a silent host as long as TCP does, minutes past the timeout of a publish
+@test "check-updates: Setup AUR SSH gives up a connection after 30 seconds" {
+  local step="$BATS_TEST_TMPDIR/step.sh" bin="$BATS_TEST_TMPDIR/bin" ssh_dir="$BATS_TEST_TMPDIR/ssh" block dir
+  block=$(step_run publish "Setup AUR SSH")
+  # The test above pins the directory of the step, and this one reads it from SSH_DIR
+  dir=$(sed -n 's/^ *SSH_DIR="\(.*\)"$/\1/p' <<<"$block")
+  [ -n "$dir" ]
+  printf '%s\n' "${block//"$dir"/"$ssh_dir"}" >"$step"
+  mkdir -p "$bin"
+  printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
+  chmod +x "$bin/chown"
+  run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$step"
+  [ "$status" -eq 0 ]
+  grep -qx '  ConnectTimeout 30' "$ssh_dir/config"
 }
 
 # Runs before setup secrets push nothing and commit the README

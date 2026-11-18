@@ -27,7 +27,7 @@ alert_issue_body() {
   local status package notes state=Published footer="Close it once the edit is done."
   status=$(<"$1")
   package="${1##*/}"
-  notes=$(awk -F'\t' -v p="$package" '$1 == p { sub(/^[^\t]*\t[^\t]*\t/, ""); print }' "${1%/*}/_alerts" 2>/dev/null) || true
+  notes=$(awk -F'\t' -v p="$package" '$1 "" == p "" { sub(/^[^\t]*\t[^\t]*\t/, ""); print }' "${1%/*}/_alerts" 2>/dev/null) || true
   [[ -z "$notes" ]] || notes=$(_code_block "$notes")
   if [[ "$status" == held:* ]]; then
     state=Held
@@ -81,7 +81,7 @@ HOST_ISSUE_MIN=5
 # Print the host that the lines of _hosts on stdin give package $1: check-all.sh writes
 # the package and the host of the request its failed check failed on, split by a tab
 recorded_host() {
-  LC_ALL=C awk -F'\t' -v p="$1" '$1 == p && NF == 2 && $2 ~ /^[a-z0-9.-]+$/ { h = $2 } END { if (h != "") print h }'
+  LC_ALL=C awk -F'\t' -v p="$1" '$1 "" == p "" && NF == 2 && $2 ~ /^[a-z0-9.-]+$/ { h = $2 } END { if (h != "") print h }'
 }
 
 # Print the host of check_failed status file $1 from _hosts beside it. The server writes part
