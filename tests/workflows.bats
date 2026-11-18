@@ -85,6 +85,24 @@ run_blocks() {
   grep -q -- '--hash=sha256:' "$GITHUB_DIR/../ci-image/requirements.txt"
 }
 
+# Default setup of code scanning skips the pull requests of Dependabot, which move the pins of
+# actions, so the workflow of advanced setup analyzes every pull request
+@test "codeql: analyzes the workflows on pull requests, pushes to main and once a week" {
+  local codeql="$GITHUB_DIR/workflows/codeql.yml"
+  run yq -o=json -I=0 '.on | keys' "$codeql"
+  [ "$output" = '["push","pull_request","schedule"]' ]
+  run yq '.on.push.branches[0] + " " + .on.pull_request.branches[0]' "$codeql"
+  [ "$output" = "main main" ]
+  run yq -o=json -I=0 '.permissions' "$codeql"
+  [ "$output" = '{"contents":"read"}' ]
+  run yq -o=json -I=0 '.jobs.analyze.permissions' "$codeql"
+  [ "$output" = '{"contents":"read","security-events":"write"}' ]
+  run yq '.jobs.analyze.steps[] | select(.uses == "github/codeql-action/init@*") | .with.languages + " " + .with["build-mode"] + " " + .with.queries' "$codeql"
+  [ "$output" = "actions none security-extended" ]
+  run yq '.jobs.analyze.steps[] | select(.uses == "github/codeql-action/analyze@*") | .with.category' "$codeql"
+  [ "$output" = "/language:actions" ]
+}
+
 @test "workflows: every container comes from the image job" {
   local workflow line count=0
   for workflow in "$GITHUB_DIR"/workflows/*.yml; do

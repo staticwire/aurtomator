@@ -18,7 +18,7 @@ actionlint
 
 ## Test job
 
-The job runs in the image that the `image` job of `ci.yml` reads, the job of [Permissions and container](/internals/workflow/#permissions-and-container) without its pin check. It installs `bash bats git go-yq jq curl openssh namcap ruby ruby-erb` and gems `bashcov` 4.0.0, `simplecov-cobertura` 4.0.0, `simplecov` 1.3.2 and `rexml` 3.4.4, each at its version and without resolving dependencies, so no newer gem release runs in a required check. Then it runs the suite once, under bashcov:
+The job runs in the image that the `image` job of `ci.yml` reads, the job of [Permissions and container](/internals/workflow/#permissions-and-container) without its pin check. It installs `bash bats git go-yq jq curl openssh namcap python ruby ruby-erb` and gems `bashcov` 4.0.0, `simplecov-cobertura` 4.0.0, `simplecov` 1.3.2 and `rexml` 3.4.4, each at its version and without resolving dependencies, so no newer gem release runs in a required check. Then it runs the suite once, under bashcov:
 
 ```bash
 bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
@@ -41,3 +41,9 @@ The two jobs call the reusable workflows of the same commit with `uses: ./.githu
 `validate` calls `validate.yml` with `contents: read`, as your repository does. Its job `packages` installs `git` and `go-yq` and runs `validate-pkg.sh --all`, without `builder`, since it runs no PKGBUILD. In aurtomator, `packages/` holds `example.yml.sample` alone, so the job checks the call itself: the pin check, the two checkouts and the container.
 
 `pipeline` calls `check-updates.yml` with `contents: write` and `issues: write` and aurtomator as the package repository. With no package there, `image`, `check` and `issues` run and the other jobs are skipped; one test in `tests/scripts.bats` keeps `update-readme.sh` from changing the aurtomator README. The job shows what the BATS tests cannot: the runner finds the action in `aurtomator/`, checkouts at `job.workflow_sha` work in the containers, and artifacts pass between jobs. It runs for pushes and for pull requests from aurtomator branches. Pull requests from forks get a read-only token. Dependabot pull requests skip it too: the permissions of the job would give the image and the actions they bring a token that writes before review, and `ci-ok` counts the skipped job as passed.
+
+## CodeQL
+
+`codeql.yml` analyzes the workflows of the repository with the `security-extended` queries of CodeQL on pull requests to `main`, on pushes to `main` and on Mondays at 03:41 UTC. Default setup of code scanning skips the pull requests of Dependabot, and those move the pins of actions in the workflows, so the repository runs this workflow in its place. Default setup stays off, since GitHub refuses the results of other CodeQL uploads while it is on.
+
+On Dependabot pull requests its job holds `security-events: write`, unlike the jobs that skip them. That token changes code scanning alerts and analyses and nothing else, CodeQL reads the workflows of the pull request and runs none of them, and the only new code that gets the token is a new version of `actions/checkout` or `github/codeql-action` in `codeql.yml` itself.
