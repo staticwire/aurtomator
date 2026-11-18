@@ -94,7 +94,13 @@ runs:
           if [[ -d packages && ! -L packages ]]; then
             for f in packages/*.yml; do
               [[ "${f#packages/}" =~ ^${name_re}\.yml$ ]] || continue
-              take "$f" "$f"
+              # Links become links to themselves, which check-all.sh fails without reading anything
+              if [[ -L "$f" ]]; then
+                install -d "$WORK/packages"
+                ln -s "${f#packages/}" "$WORK/$f"
+              else
+                take "$f" "$f"
+              fi
             done
           fi
           if dir_ok "$STATUSES"; then
@@ -107,8 +113,9 @@ runs:
           if dir_ok "$HANDOFF"; then
             (cd "$HANDOFF" && find prepared status -type f -print0 2>/dev/null || true) |
               while IFS= read -r -d '' f; do
+                # status/_unverified lists the packages that verify did not reach
                 if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
-                  [[ "$f" =~ ^status/${name_re}$ ]]; then
+                  [[ "$f" =~ ^status/(${name_re}|_unverified)$ ]]; then
                   take "$HANDOFF/$f" "handoff/$f"
                 fi
               done

@@ -138,6 +138,9 @@ for arch in "${ask[@]}"; do
     if ((rc == 2)); then
       log_err "$PKG_NAME $VERSION: no answer from $url"
       exit 1
+    elif ((rc == 3)) && [[ "$PROBE_CODE" == 403 ]]; then
+      log_err "$PKG_NAME $VERSION: $url answered with status 403, which S3 also gives for missing files in buckets without public listing"
+      exit 1
     elif ((rc == 3)); then
       log_err "$PKG_NAME $VERSION: $url answered with status $PROBE_CODE"
       exit 1

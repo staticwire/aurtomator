@@ -225,14 +225,21 @@ gpg_key_has_passphrase() {
   ! echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$1" >/dev/null 2>&1
 }
 
-# Key IDs, long or short, and fingerprints name the primary key when the
-# fingerprint of the primary key ends with them
+# Key IDs, long or short, and fingerprints name the primary key when the fingerprint of the
+# primary key ends with them, or starts with them for v5 keys, whose fingerprints have 64 digits
 # Args: $1=key id
 gpg_is_primary_key() {
   local id="${1#0x}" fpr
   fpr=$(gpg --list-secret-keys --with-colons "$1" 2>/dev/null |
     awk -F: '$1 == "fpr" { print $10; exit }')
-  [[ -n "$fpr" && "${fpr^^}" == *"${id^^}" ]]
+  fpr=${fpr^^}
+  id=${id^^}
+  [[ -n "$fpr" ]] || return 1
+  if ((${#fpr} == 64)); then
+    [[ "$fpr" == "$id"* ]]
+  else
+    [[ "$fpr" == *"$id" ]]
+  fi
 }
 
 # gpg also takes e-mail addresses, names and IDs with !, which can select the primary key
