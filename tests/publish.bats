@@ -213,7 +213,7 @@ $2"
 }
 
 @test "update-pkg --prepare: with current, goes on past a .SRCINFO without a readable pkgver" {
-  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_pkgbuild "$OLD" latest 1 "sha256sums=('SKIP' 'SKIP')"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" latest 1 SKIP SKIP
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
   mock_pkg_tools
@@ -697,6 +697,49 @@ current: '0.9.0'"
   [ "$status" -eq 2 ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+# The AUR shows the version of .SRCINFO, which pushes by hand without makepkg --printsrcinfo leave
+# behind, and the rules of downgrades compare with it: PKGBUILD 2.0.0 would go down to 1.5.0
+@test "update-pkg: fails when the AUR .SRCINFO holds another pkgver or pkgrel than the PKGBUILD" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  mock_pkg_tools
+  mock_source_tools
+  local case pb_ver pb_rel new
+  for case in "1.1.0 1 1.1.0" "2.0.0 1 1.5.0" "1.0.0 2 1.0.0"; do
+    read -r pb_ver pb_rel new <<<"$case"
+    rm -rf "$TEST_TMPDIR/aur-remote" "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/out"
+    write_pkgbuild "$OLD" "$pb_ver" "$pb_rel" "sha256sums=('SKIP' 'SKIP')"
+    write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+    make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+    run "$TEST_TMPDIR/scripts/update-pkg.sh" demo "$new" --prepare "$TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"The AUR PKGBUILD has $pb_ver-$pb_rel and its .SRCINFO 1.0.0-1, which the AUR shows; run makepkg --printsrcinfo > .SRCINFO in the AUR repo and push it"* ]]
+    [ ! -e "$TEST_TMPDIR/out/demo" ]
+    run "$TEST_TMPDIR/scripts/update-pkg.sh" demo "$new"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"The AUR PKGBUILD has $pb_ver-$pb_rel and its .SRCINFO 1.0.0-1"* ]]
+    [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+    [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+  done
+}
+
+# Values that bash expands are no plain version, and the update writes a literal in their place
+@test "update-pkg: compares no pkgver of the PKGBUILD that bash expands with the AUR .SRCINFO" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" '${_ver}' 1 "sha256sums=('SKIP' 'SKIP')"
+  sed -i '1i _ver=1.0.0' "$OLD"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  grep -qx 'pkgver=1.1.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
 }
 
 @test "update-pkg: refuses an unknown option" {
@@ -1195,6 +1238,18 @@ current: '1.0.0'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
 }
 
+@test "publish-pkg: fails when the AUR .SRCINFO holds another pkgver than its PKGBUILD" {
+  setup_publish
+  local work="$TEST_TMPDIR/aur-work-demo"
+  sed -i 's/^pkgver=.*/pkgver=1.1.0/' "$work/PKGBUILD"
+  commit_aur_state "pkgver by hand"
+  cp "$work/PKGBUILD" "$work/.SRCINFO" "$PREPARED/"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR PKGBUILD has 1.1.0-2 and its .SRCINFO 1.0.0-2, which the AUR shows"* ]]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
+}
+
 @test "publish-pkg: clones the AUR repo without a checkout and keeps its other files" {
   setup_publish
   aur_add_file demo.install "post_install() { :; }"
@@ -1589,15 +1644,39 @@ commit_aur_state() {
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
-@test "verify-pkg: has nothing to verify when the prepared files are those of the AUR at its version" {
+# Versions pushed by hand reach the AUR without verify, so verify checks the checksums of the AUR
+@test "verify-pkg: checks the checksums of the AUR when the prepared files are those of the AUR at its version" {
   setup_verify
-  local work="$TEST_TMPDIR/aur-work-demo"
-  sed -i 's/^pkgver=.*/pkgver="1.0.0"/' "$work/PKGBUILD"
+  local work="$TEST_TMPDIR/aur-work-demo" sum
+  sum=$(printf 'source of %s\n' "https://example.com/demo-1.0.0.tar.gz" | sha256sum | cut -d' ' -f1)
+  write_pkgbuild "$work/PKGBUILD" '"1.0.0"' 2 "sha256sums=('$sum' '$SUM_LOCAL')"
+  write_srcinfo "$work/.SRCINFO" 1.0.0 2 "$sum" "$SUM_LOCAL"
   commit_aur_state "quote pkgver"
   cp "$work/PKGBUILD" "$work/.SRCINFO" "$PREPARED/"
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"The prepared files of demo are those of the AUR, nothing to verify"* ]]
+  [[ "$output" == *"The prepared files of demo are those of the AUR, and their checksums match the sources"* ]]
+  grep -q ' https://example.com/demo-1.0.0.tar.gz$' "$TEST_TMPDIR/curl.args"
+  # Pushes by hand can keep the checksums of the version before
+  write_pkgbuild "$work/PKGBUILD" '"1.0.0"' 2 "sha256sums=('$H1' '$SUM_LOCAL')"
+  write_srcinfo "$work/.SRCINFO" 1.0.0 2 "$H1" "$SUM_LOCAL"
+  commit_aur_state "old checksums"
+  cp "$work/PKGBUILD" "$work/.SRCINFO" "$PREPARED/"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sha256sums of https://example.com/demo-1.0.0.tar.gz is $H1, the source has $sum"* ]]
+  [[ "$output" == *"The AUR has demo 1.0.0 already, with checksums that its sources do not match"* ]]
+}
+
+@test "verify-pkg: fails when the AUR .SRCINFO holds another pkgver than its PKGBUILD" {
+  setup_verify
+  local work="$TEST_TMPDIR/aur-work-demo"
+  sed -i 's/^pkgver=.*/pkgver=1.1.0/' "$work/PKGBUILD"
+  commit_aur_state "pkgver by hand"
+  cp "$work/PKGBUILD" "$work/.SRCINFO" "$PREPARED/"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR PKGBUILD has 1.1.0-2 and its .SRCINFO 1.0.0-2, which the AUR shows"* ]]
   [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
@@ -3467,6 +3546,28 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg2")" = "update_failed: prepare and verify handed over no update" ]
+  # So does a list in a status directory that is a link
+  rm "$TEST_TMPDIR/out/status/_unverified"
+  mv "$TEST_TMPDIR/unverified" "$TEST_TMPDIR/out/status/_unverified"
+  mv "$TEST_TMPDIR/out/status" "$TEST_TMPDIR/linked-status"
+  ln -s "$TEST_TMPDIR/linked-status" "$TEST_TMPDIR/out/status"
+  checked_status pkg2 "new_version: 2.0.0"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg2")" = "update_failed: prepare and verify handed over no update" ]
+}
+
+# PKGBUILD code of prepare can write the handed status, and bash drops a NUL from what it reads
+@test "check-all --publish: takes no handed update failure with a NUL byte" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/status"
+  printf 'update_failed: audit\0failed\n' >"$TEST_TMPDIR/out/status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
 }
 
 # Publishes started past the budget would run into the 30 minutes of the publish job
@@ -3851,6 +3952,44 @@ EOF
   [ ! -e "$TEST_TMPDIR/pwned" ]
 }
 
+# bash runs $(...) in an array subscript of (( )), and reads 010 as octal
+@test "check-all: refuses a time from the environment that is no whole number of seconds" {
+  local name value
+  flaky_check flaky
+  for name in AURTOMATOR_CHECK_TIMEOUT AURTOMATOR_UPDATE_TIMEOUT AURTOMATOR_VERIFY_BUDGET \
+    AURTOMATOR_CHECK_BUDGET AURTOMATOR_PUBLISH_BUDGET AURTOMATOR_RECHECK_DELAY; do
+    for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 010 1.5 -1 1000000 " 5"; do
+      run env "$name=$value" "$TEST_TMPDIR/scripts/check-all.sh"
+      [ "$status" -eq 1 ]
+      [[ "$output" == *"$name must be a whole number of seconds from 0 to 999999: "* ]] || {
+        echo "taken for $name: $value"
+        return 1
+      }
+    done
+  done
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+  [ ! -e "$TEST_TMPDIR/checks" ]
+  AURTOMATOR_CHECK_BUDGET=999999 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "aur_clone and aur_commit_push: refuse a pause from the environment that is no whole number of seconds" {
+  local value
+  for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 1.5; do
+    AURTOMATOR_RETRY_DELAY=$value run aur_clone https://aur.archlinux.org/demo.git "$TEST_TMPDIR/clone"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AURTOMATOR_RETRY_DELAY must be a whole number of seconds from 0 to 999999: "* ]]
+    AURTOMATOR_CLONE_DELAY=$value run aur_clone ssh://aur@aur.archlinux.org/demo.git "$TEST_TMPDIR/clone"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AURTOMATOR_CLONE_DELAY must be a whole number of seconds from 0 to 999999: "* ]]
+    AURTOMATOR_RETRY_DELAY=$value run aur_commit_push "$TEST_TMPDIR/clone" 1.0 github-release
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AURTOMATOR_RETRY_DELAY must be a whole number of seconds from 0 to 999999: "* ]]
+  done
+  [ ! -e "$TEST_TMPDIR/clone" ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
 # Helper: a date whose first reading of epoch seconds gives 1000000 and every later one $1 seconds more
 # Usage: clock_after <seconds>
 clock_after() {
@@ -4200,6 +4339,18 @@ current: '1.0.0'"
   checked_status pkg "new_version: 2.0.0"
 }
 
+# Each package directory below a linked prepared directory would be a directory of someone else
+@test "check-all --verify: verifies nothing in a prepared directory that is a link" {
+  setup_check_verify
+  stub_script verify-pkg.sh 0
+  mv "$TEST_TMPDIR/out/prepared" "$TEST_TMPDIR/elsewhere"
+  ln -s "$TEST_TMPDIR/elsewhere" "$TEST_TMPDIR/out/prepared"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
+  [ -d "$TEST_TMPDIR/elsewhere/pkg" ]
+}
+
 @test "check-all --verify: keeps a verified update and runs no strategy" {
   setup_check_verify
   stub_script check-update.sh 1 "strategy ran"
@@ -4212,7 +4363,33 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "new_version: 2.0.0" ]
 }
 
-# Slow sources early in the list would take the budget of the same packages in every run
+# Slow sources early in the list would take the budget of the same packages in every run, and
+# the hour of a daily run stays the same
+@test "check-all --verify: starts the loop one package later in each run of the workflow" {
+  local name
+  for name in a b c; do
+    create_test_package "$name" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+    mkdir -p "$TEST_TMPDIR/out/prepared/$name" "$TEST_TMPDIR/out/status"
+    echo "new_version: 2.0.0" >"$TEST_TMPDIR/out/status/$name"
+    checked_status "$name" "new_version: 2.0.0"
+  done
+  stub_script verify-pkg.sh 0
+  printf '%s\n' '#!/bin/sh' 'if [ "$*" = "-u +%s" ]; then echo 7200; else exec /usr/bin/date "$@"; fi' >"$MOCK_DIR/date"
+  chmod +x "$MOCK_DIR/date"
+  GITHUB_RUN_NUMBER=7 run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cut -d ' ' -f 1 "$TEST_TMPDIR/verify-pkg.sh.args" | tr '\n' ' ')" = "b c a " ]
+  # Values that are no run number leave the hour
+  rm "$TEST_TMPDIR/verify-pkg.sh.args"
+  GITHUB_RUN_NUMBER="x[\$(touch $TEST_TMPDIR/pwned)]" run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cut -d ' ' -f 1 "$TEST_TMPDIR/verify-pkg.sh.args" | tr '\n' ' ')" = "c a b " ]
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
+# Runs by hand have no run number
 @test "check-all --verify: starts the loop at another package each hour" {
   local name
   for name in a b c; do
@@ -6629,6 +6806,49 @@ write_srcinfo_archs() {
   sed 's/64-aarch64/65-aarch64/; s/pkgver = 64/pkgver = 65/' "$TEST_TMPDIR/arches/aarch64/.SRCINFO" >"$TEST_TMPDIR/prepared/.SRCINFO"
   run check_arches_back "$TEST_TMPDIR/arches" "$TEST_TMPDIR/prepared" aarch64 65
   [ "$status" -eq 0 ]
+}
+
+# Values that the PKGBUILD of the commit holds as text keep their version, as in any update
+@test "check_arches_back: keeps a line whose value the PKGBUILD of the commit holds as text" {
+  mkdir -p "$TEST_TMPDIR/arches/aarch64" "$TEST_TMPDIR/prepared"
+  printf "pkgname=demo\ndepends_aarch64=('foo>=1.0')\nsha256sums_aarch64=(SKIP)\n" >"$TEST_TMPDIR/arches/aarch64/PKGBUILD"
+  cp "$TEST_TMPDIR/arches/aarch64/PKGBUILD" "$TEST_TMPDIR/prepared/PKGBUILD"
+  printf '%s\n' "pkgbase = demo" $'\tpkgver = 1.0' $'\tpkgrel = 1' $'\tarch = aarch64' \
+    $'\tdepends_aarch64 = foo>=1.0' $'\tsha256sums_aarch64 = SKIP' "" "pkgname = demo" \
+    >"$TEST_TMPDIR/arches/aarch64/.SRCINFO"
+  sed 's/pkgver = 1.0/pkgver = 1.1/' "$TEST_TMPDIR/arches/aarch64/.SRCINFO" >"$TEST_TMPDIR/prepared/.SRCINFO"
+  run check_arches_back "$TEST_TMPDIR/arches" "$TEST_TMPDIR/prepared" aarch64 1.1
+  [ "$status" -eq 0 ]
+  sed -i 's/foo>=1.0/foo>=1.1/' "$TEST_TMPDIR/prepared/.SRCINFO"
+  run check_arches_back "$TEST_TMPDIR/arches" "$TEST_TMPDIR/prepared" aarch64 1.1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"puts aarch64 back with depends_aarch64 = foo>=1.1 in pkgbase = demo, expected depends_aarch64 = foo>=1.0 in pkgbase = demo"* ]]
+}
+
+# Arch names without a letter could equal a version, and then the old version would stay
+@test "_bump_version: takes no arch name without a letter" {
+  run _bump_version "https://example.com/64/app-64.tar.gz" 64 65 "" "" "x86_64 64"
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://example.com/65/app-65.tar.gz" ]
+}
+
+# arm starts armv7h, whose 7 is no version 7
+@test "_bump_version: keeps the longest arch name that starts at a place" {
+  run _bump_version "https://example.com/app-7-armv7h.tar.gz" 7 8 "" "" "arm armv7h"
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://example.com/app-8-armv7h.tar.gz" ]
+}
+
+# Arches that come back are in no line of the AUR .SRCINFO, so their names come from the arguments
+@test "check_prepared_srcinfo: keeps the digits of an arch that comes back in a common source line" {
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 64 "source = https://example.com/app-64-aarch64-docs.tar.gz"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 65 "source = https://example.com/app-65-aarch64-docs.tar.gz"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 65 "" "" 1 "" "" "" aarch64
+  [ "$status" -eq 0 ]
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 65 "" "" 1 "" "" aarch64 ""
+  [ "$status" -eq 0 ]
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 65
+  [ "$status" -eq 1 ]
 }
 
 @test "check_prepared_srcinfo: accepts the AUR copy of a package with a VCS pin" {

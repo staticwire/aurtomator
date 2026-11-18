@@ -343,7 +343,7 @@ added_rows() {
   for before in "$TEST_TMPDIR/none" "$TEST_TMPDIR/packages/a.yml"; do
     run --separate-stderr "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]/#"$TEST_TMPDIR/packages"/"$before"}"
     [ "$status" -eq 1 ]
-    [[ "$stderr" == *"--before is not a directory"* ]]
+    [[ "$stderr" == *"--before is a link or no directory"* ]]
   done
   [ ! -e "$TEST_TMPDIR/out.csv" ]
 }
@@ -605,6 +605,37 @@ added_rows() {
   run --separate-stderr timeout 10 "$TEST_TMPDIR/scripts/record-events.sh" "${args[@]}"
   [ "$status" -eq 1 ]
   [[ "$stderr" == *"$TEST_TMPDIR/stats is a link or no directory, so it holds no journal"* ]]
+  [ ! -e "$TEST_TMPDIR/out.csv" ]
+}
+
+# Root reads packages/ of the checkout in the job with the keys, so links there lead anywhere
+@test "record-events: reads no package YAML through a link" {
+  pkg real 1.0
+  st real up_to_date
+  printf 'current: s3cr3t.value.42\n' >"$TEST_TMPDIR/outside.yml"
+  ln -s ../outside.yml "$TEST_TMPDIR/packages/leak.yml"
+  st leak "check_failed: x"
+  ln -sf ../outside.yml "$TEST_TMPDIR/after/real.yml"
+  record
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/out.csv")" = $'time,package,event,version,previous,run\n2026-11-10T05:17:22Z,real,tracked,1.0,,44' ]
+}
+
+@test "record-events: a linked --before or --after exits 1 and writes nothing" {
+  pkg a 1.0
+  st a up_to_date
+  mv "$TEST_TMPDIR/packages" "$TEST_TMPDIR/real-packages"
+  ln -s real-packages "$TEST_TMPDIR/packages"
+  record
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--before is a link or no directory: $TEST_TMPDIR/packages"* ]]
+  rm "$TEST_TMPDIR/packages"
+  mv "$TEST_TMPDIR/real-packages" "$TEST_TMPDIR/packages"
+  mv "$TEST_TMPDIR/after" "$TEST_TMPDIR/real-after"
+  ln -s real-after "$TEST_TMPDIR/after"
+  record
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--after is a link or no directory: $TEST_TMPDIR/after"* ]]
   [ ! -e "$TEST_TMPDIR/out.csv" ]
 }
 
@@ -878,6 +909,32 @@ pushes() {
   [ -z "$(ls -A "$TEST_TMPDIR/card")" ]
 }
 
+# The journal reads no package YAML through a link, so the card counts none
+@test "stats-card: the header counts no linked YAML, and a linked --packages or --out exits 1" {
+  touch "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/outside.yml"
+  ln -s ../outside.yml "$TEST_TMPDIR/packages/b.yml"
+  journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1'
+  card 2026-11-08
+  [ "$status" -eq 0 ]
+  grep -q '<tspan font-weight="600" fill="#1f2328">1</tspan> package <tspan' "$TEST_TMPDIR/card/card.svg"
+  rm -r "$TEST_TMPDIR/card"
+  mv "$TEST_TMPDIR/packages" "$TEST_TMPDIR/real-packages"
+  ln -s real-packages "$TEST_TMPDIR/packages"
+  card 2026-11-08
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--packages is a link or no directory: $TEST_TMPDIR/packages"* ]]
+  [ -z "$(ls -A "$TEST_TMPDIR/card")" ]
+  rm "$TEST_TMPDIR/packages"
+  mv "$TEST_TMPDIR/real-packages" "$TEST_TMPDIR/packages"
+  mkdir "$TEST_TMPDIR/real-card"
+  rmdir "$TEST_TMPDIR/card"
+  ln -s real-card "$TEST_TMPDIR/card"
+  card 2026-11-08
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--out is a link or no directory: $TEST_TMPDIR/card"* ]]
+  [ -z "$(ls -A "$TEST_TMPDIR/real-card")" ]
+}
+
 @test "stats-card: a wrong name, day, option or path exits 1 and draws nothing" {
   journal '2026-11-01T10:00:00Z,a,tracked,1.0,,1'
   mkdir -p "$TEST_TMPDIR/card"
@@ -917,7 +974,7 @@ pushes() {
     for value in "$TEST_TMPDIR/none" "$J"; do
       run --separate-stderr "$script" "${args[@]/#"$TEST_TMPDIR/$key"/"$value"}"
       [ "$status" -eq 1 ]
-      [[ "$stderr" == *"is not a directory: $value"* ]] || {
+      [[ "$stderr" == *"is a link or no directory: $value"* ]] || {
         echo "taken for $key: $value"
         return 1
       }

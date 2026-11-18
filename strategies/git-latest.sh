@@ -35,6 +35,11 @@ case "$upstream_type" in
     exit 1
     ;;
 esac
+# YAMLs can reach the branch without validate-pkg.sh
+if [[ "$repo_url" != https://* ]]; then
+  echo "Only HTTPS URLs supported: $repo_url" >&2
+  exit 1
+fi
 
 # Clone bare repo to get commit count + hash. https only, so a URL from the
 # YAML reaches no local repository and no ssh host, and no redirect to http.
@@ -52,7 +57,7 @@ git_request_begin "$repo_url" || exit 1
 # with 1 GiB for the pack and for one object; an ignored SIGXFSZ makes a write past it fail, no dump.
 if ! (trap '' XFSZ && ulimit -f $((1024 * 1024)) && GIT_ALLOC_LIMIT=$((1024 * 1024 * 1024)) GIT_ALLOW_PROTOCOL=https \
   git -c pack.threads=1 -c core.bigFileThreshold=16m -c fetch.unpackLimit=1 -c http.lowSpeedLimit=102400 \
-  -c http.lowSpeedTime=60 clone "${clone_args[@]}" "$repo_url" "$tmp_dir/repo"); then
+  -c http.lowSpeedTime=60 clone "${clone_args[@]}" -- "$repo_url" "$tmp_dir/repo"); then
   request_end 1
   echo "Failed to clone $repo_url" >&2
   exit 1

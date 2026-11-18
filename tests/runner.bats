@@ -40,9 +40,29 @@ pin() {
   printf 'jobs:\n  check-updates:\n    uses: %s # %s\n' "$1" "${2:-v1.0.0}" >"$REPO/.github/workflows/check-updates.yml"
 }
 
+# Helper: a stat that shows the directories $@ with the owner that a user namespace gives the
+# accounts it does not map
+mock_unmapped() {
+  local real
+  real=$(command -v stat)
+  printf '%s\n' "$@" >"$TEST_TMPDIR/unmapped"
+  cat >"$MOCK_DIR/stat" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1 \$2" == "-c %u %a" ]] && grep -qxF -- "\${@: -1}" "$TEST_TMPDIR/unmapped"; then
+  echo "\$(cat /proc/sys/kernel/overflowuid) \$("$real" -c %a -- "\${@: -1}")"
+  exit 0
+fi
+exec "$real" "\$@"
+EOF
+  chmod +x "$MOCK_DIR/stat"
+}
+
 setup() {
   setup_test_env
   export XDG_CACHE_HOME="$TEST_TMPDIR/cache"
+  # Directories above the home directory may show an unmapped owner in a user namespace
+  export HOME="$TEST_TMPDIR/home"
+  mkdir -m 0700 "$HOME"
 
   # https://github.com/<owner>/<repo> is $TEST_TMPDIR/github/<owner>/<repo>
   git config --global url."file://$TEST_TMPDIR/github/".insteadOf https://github.com/
@@ -533,6 +553,21 @@ shape() {
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
+# Another repository can still run a copy that it fetched long ago, when a new pin cleans the cache
+@test "runner: the cleanup counts the age of a copy from its last run" {
+  local cache="$XDG_CACHE_HOME/aurtomator"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  touch -d '40 days ago' "$cache/$PINNED"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$TIP" v1.1.0
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: tip" ]
+  [ -d "$cache/$PINNED" ]
+}
+
 @test "runner: the first run of a pin removes the copies made over 30 days ago" {
   local cache="$XDG_CACHE_HOME/aurtomator" old=0000000000000000000000000000000000000001 recent=0000000000000000000000000000000000000002
   mkdir -p "$cache/$old" "$cache/$recent" "$cache/cafe"
@@ -703,6 +738,40 @@ EOF
   XDG_CACHE_HOME="$above/cache" run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 0 ]
   [ "$output" = "name: pinned" ]
+}
+
+# User namespaces show accounts they do not map, root of the host among them, with the overflow
+# uid, and whoever can rename what a directory above the home directory holds can swap the home too
+@test "runner: takes directories above the home directory that show the owner of a user namespace" {
+  local dir=$TEST_TMPDIR above=()
+  while [[ "$dir" == /?* ]]; do
+    above+=("$dir")
+    dir=${dir%/*}
+  done
+  mock_unmapped "${above[@]}" /
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+}
+
+@test "runner: names the user namespace for a directory that shows its owner and is not above the home directory" {
+  local other="$TEST_TMPDIR/other" uid
+  uid=$(cat /proc/sys/kernel/overflowuid)
+  mkdir -m 0755 "$other"
+  mock_unmapped "$other"
+  XDG_CACHE_HOME="$other/cache" run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$other shows the owner $uid, which a user namespace gives the accounts it does not map, so the script cannot tell whether another account could swap the copy of aurtomator below it; set XDG_CACHE_HOME to a directory below your home directory, or run the script outside the namespace" ]
+  [ ! -e "$other/cache/aurtomator/$PINNED" ]
+}
+
+@test "runner: runs no copy below a directory above the home directory that shows the owner of a user namespace and others can write" {
+  chmod 0777 "$TEST_TMPDIR"
+  mock_unmapped "$TEST_TMPDIR"
+  run "$REPO/aurtomator.sh" sample
+  chmod 0700 "$TEST_TMPDIR"
+  [ "$status" -eq 1 ]
+  [ "$output" = "$TEST_TMPDIR belongs to another account or lets group or others write it, and they could swap the copy of aurtomator below it before it runs; set XDG_CACHE_HOME to a directory with no such directory above it" ]
 }
 
 # The check of the directories above reads the path of a new cache at its target too

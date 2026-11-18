@@ -310,6 +310,25 @@ _pkgbuild_text() {
   '
 }
 
+# Fails when the .SRCINFO of AUR copy $1 holds another pkgver or pkgrel than its PKGBUILD, as pushes
+# by hand without makepkg --printsrcinfo leave it: the AUR shows the version of .SRCINFO
+aur_srcinfo_current() {
+  local -x LC_ALL=C
+  local ver rel srcinfo_ver srcinfo_rel
+  # Links, missing files and a .SRCINFO without pkgver are left to the other checks
+  [[ -f "$1/PKGBUILD" && ! -L "$1/PKGBUILD" && -f "$1/.SRCINFO" && ! -L "$1/.SRCINFO" ]] || return 0
+  srcinfo_ver=$(srcinfo_pkgver "$1/.SRCINFO")
+  [[ -n "$srcinfo_ver" ]] || return 0
+  ver=$(_plain_value "$1/PKGBUILD" pkgver)
+  rel=$(_plain_value "$1/PKGBUILD" pkgrel)
+  # Values that bash expands are no version to compare, and the update writes a literal there
+  [[ "$ver$rel" != *[\$\`]* ]] || return 0
+  srcinfo_rel=$(awk '/^\tpkgrel = /{print substr($0, 11); exit}' "$1/.SRCINFO")
+  [[ "$ver-$rel" != "$srcinfo_ver-$srcinfo_rel" ]] || return 0
+  log_err "The AUR PKGBUILD has $(_shown_line "$ver-$rel") and its .SRCINFO $(_shown_line "$srcinfo_ver-$srcinfo_rel"), which the AUR shows; run makepkg --printsrcinfo > .SRCINFO in the AUR repo and push it"
+  return 1
+}
+
 # update-pkg.sh hands over the files of the AUR when the AUR has the version,
 # the asset value and the arches of the update, and only then
 # Args: $1=AUR copy, $2=prepared directory, $3=version, $4=asset_var, if any,
@@ -320,6 +339,7 @@ check_handed_aur_files() {
   # Under a UTF-8 locale grep leaves out a line with a byte that is no UTF-8
   local -x LC_ALL=C
   local aur_ver aur_asset="" same=false
+  aur_srcinfo_current "$1" || return 1
   aur_ver=$(_plain_value "$1/PKGBUILD" pkgver)
   [[ -z "${4:-}" ]] || aur_asset=$(_plain_value "$1/PKGBUILD" "$4")
   if cmp -s "$1/PKGBUILD" "$2/PKGBUILD" && cmp -s "$1/.SRCINFO" "$2/.SRCINFO"; then

@@ -310,6 +310,25 @@ if [[ -d "$cache" ]]; then
   cache=$(cd -P -- "$cache" && pwd -P) || exit 1
 fi
 copy="$cache/aurtomator/$sha"
+# User namespaces show the accounts they do not map, root of the host among them, with this uid
+overflow_uid=$(cat /proc/sys/kernel/overflowuid 2>/dev/null) || overflow_uid=65534
+home=""
+if [[ "${HOME:-}" == /* ]]; then
+  home=$(cd -P -- "$HOME" 2>/dev/null && pwd -P) || home=""
+fi
+# Succeeds for directory $1 that shows the overflow uid as its owner and gives group and others
+# no write access, or has the sticky bit
+unmapped_dir() {
+  local owner mode
+  read -r owner mode < <(stat -c '%u %a' -- "$1") || return 1
+  mode=$((8#$mode))
+  [[ "$owner" == "$overflow_uid" ]] && ((! (mode & 8#022) || mode & 8#1000))
+}
+# Whoever can rename what a directory above the home directory holds can swap the home directory
+# and every file the shell runs, so such directories may show an unmapped owner
+above_home() {
+  [[ -n "$home" && ("$1" == / || "$home" == "$1"/*) ]]
+}
 # Succeeds when no other account can rename what directory $1 holds: it is no link, belongs to the user and
 # gives group and others no write access; with $2=shared root may own it, and a sticky bit as on /tmp counts
 private_dir() {
@@ -340,10 +359,14 @@ check_cache_dirs() {
   dir=$cache
   while [[ "$dir" == /?* ]]; do
     dir=${dir%/*}
-    if ! private_dir "${dir:-/}" shared; then
-      echo "${dir:-/} belongs to another account or lets group or others write it, and they could swap the copy of aurtomator below it before it runs; set XDG_CACHE_HOME to a directory with no such directory above it" >&2
+    private_dir "${dir:-/}" shared && continue
+    if unmapped_dir "${dir:-/}"; then
+      above_home "${dir:-/}" && continue
+      echo "${dir:-/} shows the owner $overflow_uid, which a user namespace gives the accounts it does not map, so the script cannot tell whether another account could swap the copy of aurtomator below it; set XDG_CACHE_HOME to a directory below your home directory, or run the script outside the namespace" >&2
       exit 1
     fi
+    echo "${dir:-/} belongs to another account or lets group or others write it, and they could swap the copy of aurtomator below it before it runs; set XDG_CACHE_HOME to a directory with no such directory above it" >&2
+    exit 1
   done
 }
 # Succeeds when the copy is the checkout of the pin as the fetch left it, which only the user can write
@@ -384,11 +407,14 @@ if [[ ! -d "$copy" ]]; then
     echo "$copy appeared during the fetch and is no checkout of $sha that only you can write; remove it, then run $0 again" >&2
     exit 1
   fi
-  # Pins still in use after 30 days are fetched again on their next run, and SIGKILL leaves the
-  # directory of a fetch. Runs at the same time can remove their own directory while find reads.
+  # Copies that no run used for 30 days go, and so do the fetch directories that SIGKILL leaves.
+  # Runs at the same time can remove their own directory while find reads.
   find "${copy%/*}" -mindepth 1 -maxdepth 1 -regextype posix-extended -regex '.*/[0-9a-f]{40}([.][A-Za-z0-9]{6})?' -mtime +30 \
     -exec rm -rf -- {} + 2>/dev/null || true
 fi
+# Each run sets the time of its copy, since another repository on this cache can run a copy that
+# it fetched long ago when a new pin cleans the cache
+touch -c -- "$copy" 2>/dev/null || true
 
 # The documented commands. Another script of scripts/ is a step of the CI
 # jobs and runs after a warning.
