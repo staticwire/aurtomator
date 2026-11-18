@@ -16,7 +16,7 @@ The check reads `arch=()` of AUR PKGBUILD. The PKGBUILD needs one `arch=(...)` t
 
 ## The wait
 
-Each check sends `HEAD` requests to the `https` URLs of `source_<arch>` at the new version. Statuses 404 and 410, and HTML pages, mean the archive is missing. Other statuses of 400 or more, such as 429 or 503, tell nothing about the archive, so the check fails with `<url> answered with status <code>`.
+Each check sends `HEAD` requests to the `https` URLs of `source_<arch>` at the new version. Statuses 404 and 410, and HTML pages, mean the archive is missing. Other statuses of 400 or more, such as 429 or 503, tell nothing about the archive, so the check fails with `<url> answered with status <code>`. Packages with archives in S3 buckets without public listing get no wait, since S3 answers 403 for missing files there: the check fails in every run until the archive appears, and its error names S3.
 
 | Archives of the version | Status | Then |
 |---|---|---|

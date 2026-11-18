@@ -37,8 +37,8 @@ UPDATE_TIMEOUT="${AURTOMATOR_UPDATE_TIMEOUT:-300}"
 # so the verify job ends within its 30 minutes
 VERIFY_BUDGET="${AURTOMATOR_VERIFY_BUDGET:-1200}"
 
-# Time budget of the loop of a check run, in seconds: no check starts after it,
-# so the check job ends within its 30 minutes
+# Time budget of the loop of a check run, in seconds: no check and no step of a check starts
+# after it, so the check job ends within its 30 minutes
 CHECK_BUDGET="${AURTOMATOR_CHECK_BUDGET:-1200}"
 
 # Time budget of the publish loop, in seconds: no publish starts after it,
@@ -218,10 +218,19 @@ if [[ "$MODE" == "verify" ]]; then
   done
   verify_start=0
   ((${#verify_files[@]} == 0)) || verify_start=$(($(date -u +%s) / 3600 % ${#verify_files[@]}))
+  # Packages on this list keep the status of the check run in publish, so only this loop writes it
+  rm -f "${WORK_DIR}/status/_unverified"
   for pkg_file in "${verify_files[@]:verify_start}" "${verify_files[@]:0:verify_start}"; do
     pkg_name=$(package_name "$pkg_file") || continue
     prepared="${WORK_DIR}/prepared/${pkg_name}"
     if [[ -L "${WORK_DIR}/prepared" || ! -d "$prepared" ]]; then
+      continue
+    fi
+    if ((SECONDS >= VERIFY_BUDGET)); then
+      log_warn "$pkg_name: verify ran out of its $((VERIFY_BUDGET / 60)) minutes in this run"
+      rm -rf "$prepared"
+      mkdir -p "${WORK_DIR}/status"
+      printf '%s\n' "$pkg_name" >>"${WORK_DIR}/status/_unverified"
       continue
     fi
 
@@ -239,10 +248,7 @@ if [[ "$MODE" == "verify" ]]; then
     arch_record=$(awk -F'\t' -v p="$pkg_name" '$1 "" == p "" { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}")
     arch_out=""
     verify_rc=0
-    if ((SECONDS >= VERIFY_BUDGET)); then
-      verify_rc=1
-      verify_err="verify ran out of its $((VERIFY_BUDGET / 60)) minutes in this run"
-    elif ! validate_pkgver "$version" 2>/dev/null; then
+    if ! validate_pkgver "$version" 2>/dev/null; then
       verify_rc=1
       verify_err="no new version from the check run"
     elif [[ -n "$asset_regex" ]] && ! validate_asset_value "$asset" 2>/dev/null; then
@@ -313,6 +319,14 @@ handed_failure() {
   echo "update_failed: prepare and verify handed over no update"
 }
 
+# Succeeds when verify ran out of its time before package $1, as status/_unverified of the
+# handoff lists, which the jobs take from verify alone
+unverified() {
+  local file="${WORK_DIR}/status/_unverified"
+  [[ -d "${WORK_DIR}/status" && ! -L "${WORK_DIR}/status" && -f "$file" && ! -L "$file" ]] &&
+    grep -qxF -e "$1" -- "$file"
+}
+
 updated=0
 dry_runs=0
 checked=0
@@ -372,6 +386,7 @@ find_asset() {
       return 1
     fi
   else
+    step_time_left "$2" || return 1
     err_file=$(mktemp)
     ASSET_VALUE=$(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-asset.sh" "$2" "$3" 2>"$err_file") || rc=$?
     in_flight=$(request_done "$rc")
@@ -438,6 +453,7 @@ find_arches() {
     return 0
   fi
   [[ "$MODE" == check ]] && missing_arch_allowed "$1" || return 0
+  step_time_left "$2" || return 1
   err_file=$(mktemp)
   text=$(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-arch.sh" "$2" "$3" \
     ${ASSET_VALUE:+--asset} ${ASSET_VALUE:+"$ASSET_VALUE"} 2>"$err_file") || rc=$?
@@ -523,8 +539,8 @@ run_package() {
           return
         fi
         if [[ -L "${WORK_DIR}/prepared" || ! -d "${WORK_DIR}/prepared/${pkg_name}" ]]; then
-          # The check run left it for a later run, past the 256 jobs of a run
-          if grep -qxF -e "$pkg_name" <<<"${CHECKED[_deferred]:-}"; then
+          # The check run left it for a later run, past the 256 jobs of a run, or verify past its budget
+          if grep -qxF -e "$pkg_name" <<<"${CHECKED[_deferred]:-}" || unverified "$pkg_name"; then
             printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
           else
             handed_failure "$pkg_name" >"${STATUS_DIR}/${pkg_name}"
@@ -654,6 +670,7 @@ run_package() {
 
   # Alerts name upstream steps that need a hand edit. Those with
   # hold: true keep the update back until the maintainer publishes it.
+  step_time_left "$pkg_name" || return 0
   err_file=$(mktemp)
   check_rc=0
   alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" 2>"$err_file") || check_rc=$?
@@ -784,9 +801,25 @@ check_time_left() {
   [[ "$MODE" != check ]] || (($(date -u +%s) < CHECK_END))
 }
 
+# Gives status unchecked to package $1, which the check run did not reach or did not finish.
+# Such packages keep their issues and their journal row.
+mark_unchecked() {
+  log_warn "$1: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run"
+  echo "unchecked: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run" >"${STATUS_DIR}/$1"
+}
+
+# Succeeds while a check run has time left for the next step of the check of package $1, and
+# gives the package status unchecked otherwise
+step_time_left() {
+  check_time_left && return 0
+  mark_unchecked "$1"
+  return 1
+}
+
 check_files=()
+# Links count wherever they lead, since the jobs hand builder each one as a link to itself
 for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-  [[ ! -f "$pkg_file" ]] || check_files+=("$pkg_file")
+  [[ ! -f "$pkg_file" && ! -L "$pkg_file" ]] || check_files+=("$pkg_file")
 done
 # Slow hosts early in the list would take the budget of the same packages in
 # every run, so each run of the workflow starts the loop one package later
@@ -814,9 +847,7 @@ for pkg_file in "${check_files[@]:check_start}" "${check_files[@]:0:check_start}
   if check_time_left; then
     run_package "$pkg_file" 1
   elif pkg_name=$(package_name "$pkg_file"); then
-    # Packages the loop does not reach keep their issues and their journal row
-    log_warn "$pkg_name: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run"
-    echo "unchecked: the check ran out of its $((CHECK_BUDGET / 60)) minutes in this run" >"${STATUS_DIR}/${pkg_name}"
+    mark_unchecked "$pkg_name"
   fi
 done
 

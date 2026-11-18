@@ -244,8 +244,9 @@ jobs:
             # find follows no link. It fails on a missing prepared/ or status/, and the step goes on.
             (cd "$WORK/handoff" && find prepared status -type f -print0 2>/dev/null || true) |
               while IFS= read -r -d '' f; do
+                # status/_unverified lists the packages that verify did not reach
                 if [[ "$f" =~ ^prepared/(${name_re})/(PKGBUILD|\.SRCINFO|base)$ ]] ||
-                  [[ "$f" =~ ^status/(${name_re})$ ]]; then
+                  [[ "$f" =~ ^status/(${name_re}|_unverified)$ ]]; then
                   # Jobs of one package hand over that package alone
                   [[ -z "${PACKAGE:-}" || "${BASH_REMATCH[1]}" == "$PACKAGE" ]] || continue
                   take "handoff/$f" "$DATA/upload/$f"
@@ -345,7 +346,7 @@ jobs:
             echo "to-prepare=$list"
           } >>"$GITHUB_OUTPUT"
 
-      # Runs without packages have no status to upload
+      # Runs without packages upload _packages, and _upstream when the release check answered
       - name: Upload statuses
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -120,6 +120,8 @@ jobs:
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage/coverage.xml
+          # The search of the CLI would take tests/coverage.bats for a report
+          disable_search: true
           fail_ci_if_error: false
           binary: /opt/codecov/bin/codecovcli
 

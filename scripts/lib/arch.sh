@@ -299,7 +299,7 @@ prepared_arch_words() {
 # Check the arches $3 that come back in prepared dir $2 against their commits in
 # $1/<arch>/; $4 to $8 are version, pkgver_dash, pkgver_format, asset_var, asset
 check_arches_back() {
-  local arch ref sums old_ver old_up="" new_up="" old_asset="" text i old new key old_val ok want
+  local arch ref sums old_ver old_up="" new_up="" old_asset="" text i old new key old_val ok want arch_words
   local -a back_arches ref_lines new_lines
   read -ra back_arches <<<"$3"
   for arch in "${back_arches[@]}"; do
@@ -317,6 +317,7 @@ check_arches_back() {
     fi
     [[ -z "${7:-}" ]] || old_asset=$(_plain_value "$ref/PKGBUILD" "$7")
     text=$(_pkgbuild_text "$ref/PKGBUILD" "${7:-}")
+    arch_words="$(_srcinfo_arch_words "$ref/.SRCINFO") $arch"
     mapfile -t ref_lines < <(srcinfo_arch_lines "$ref/.SRCINFO" "$arch")
     mapfile -t new_lines < <(srcinfo_arch_lines "$2/.SRCINFO" "$arch")
     if ((${#ref_lines[@]} != ${#new_lines[@]})); then
@@ -342,8 +343,8 @@ check_arches_back() {
       elif [[ "$key" != source_* && "$text" == *"$old_val"* ]]; then
         [[ "$new" == "$old" ]] || ok=false
       else
-        want=$(_bump_version "$old" "$old_ver" "$4" "$old_up" "$new_up")
-        _bumped_line "$old" "$new" "$old_ver" "$4" "$old_up" "$new_up" "${5:-}" "$old_asset" "${8:-}" || ok=false
+        want=$(_bump_version "$old" "$old_ver" "$4" "$old_up" "$new_up" "$arch_words")
+        _bumped_line "$old" "$new" "$old_ver" "$4" "$old_up" "$new_up" "${5:-}" "$old_asset" "${8:-}" "$arch_words" || ok=false
       fi
       [[ "${new_lines[$i]%%$'\t'*}" == "${ref_lines[$i]%%$'\t'*}" ]] || ok=false
       if [[ "$ok" == false ]]; then
@@ -358,15 +359,16 @@ check_arches_back() {
 # Print the https URLs of source_$2 of .SRCINFO $1 with version $3 replaced by
 # $4; $5 to $9 are the upstream versions, pkgver_dash and asset values
 arch_urls() {
-  local key=$'\tsource_'"$2"' = ' old="$3" new="$4" dash="$7" url
+  local key=$'\tsource_'"$2"' = ' old="$3" new="$4" dash="$7" url arch_words
+  arch_words="$(_srcinfo_arch_words "$1") $2"
   while IFS= read -r url; do
     url="${url#*::}"
     [[ "$url" == https://* ]] || continue
     [[ -z "$8" ]] || url="${url//"$8"/"$9"}"
     if [[ "$dash" == [_.] ]]; then
-      url=$(_bump_version "$url" "${old//"$dash"/-}" "${new//"$dash"/-}")
+      url=$(_bump_version "$url" "${old//"$dash"/-}" "${new//"$dash"/-}" "" "" "$arch_words")
     fi
-    _bump_version "$url" "$old" "$new" "$5" "$6"
+    _bump_version "$url" "$old" "$new" "$5" "$6" "$arch_words"
   done < <(awk -v k="$key" 'index($0, k) == 1 { print substr($0, length(k) + 1) }' "$1")
 }
 

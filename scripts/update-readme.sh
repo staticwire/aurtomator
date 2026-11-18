@@ -61,8 +61,9 @@ check_markers() {
 }
 
 pkg_files=()
+# Links count wherever they lead, since the jobs hand builder each one as a link to itself
 for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-  [[ -f "$pkg_file" ]] || continue
+  [[ -f "$pkg_file" || -L "$pkg_file" ]] || continue
   pkg_files+=("$pkg_file")
 done
 # Repositories made from the template keep their setup steps until their first

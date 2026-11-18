@@ -22,6 +22,108 @@ run_blocks() {
   [ "$count" -gt 2 ]
 }
 
+# Prints the permissions of workflow $1 and of each of its jobs, one line each
+permission_lines() {
+  printf '%s %s\n' "${1##*/}" "$(yq -o=json -I=0 '.permissions' "$1")"
+  yq -o=json -I=0 '.jobs | to_entries | .[] | [.key, .value.permissions]' "$1" | sed "s|^|${1##*/} |"
+}
+
+# Jobs without permissions take those of their workflow, and steps of builder run in such jobs
+@test "workflows: hold the permissions of this table" {
+  local workflow
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    permission_lines "$workflow"
+  done >"$BATS_TEST_TMPDIR/actual"
+  printf '%s\n' \
+    'check-updates.yml {"contents":"read"}' \
+    'check-updates.yml ["image",null]' \
+    'check-updates.yml ["check",null]' \
+    'check-updates.yml ["prepare",null]' \
+    'check-updates.yml ["verify",null]' \
+    'check-updates.yml ["publish",{"contents":"write"}]' \
+    'check-updates.yml ["issues",{"contents":"read","issues":"write"}]' \
+    'ci.yml {"contents":"read"}' \
+    'ci.yml ["image",null]' \
+    'ci.yml ["lint",null]' \
+    'ci.yml ["test",null]' \
+    'ci.yml ["validate",{"contents":"read"}]' \
+    'ci.yml ["pipeline",{"contents":"write","issues":"write"}]' \
+    'ci.yml ["merge-image",{"contents":"write","pull-requests":"write"}]' \
+    'ci.yml ["ci-ok",{}]' \
+    'codeql.yml {"contents":"read"}' \
+    'codeql.yml ["analyze",{"contents":"read","security-events":"write"}]' \
+    'docs.yml {"contents":"read"}' \
+    'docs.yml ["build",null]' \
+    'docs.yml ["deploy",{"pages":"write","id-token":"write"}]' \
+    'notify-failure.yml {"actions":"read","issues":"write"}' \
+    'notify-failure.yml ["notify",null]' \
+    'release-please.yml {"contents":"read"}' \
+    'release-please.yml ["release-please",null]' \
+    'validate.yml {"contents":"read"}' \
+    'validate.yml ["image",null]' \
+    'validate.yml ["packages",null]' >"$BATS_TEST_TMPDIR/expected"
+  diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
+}
+
+# Prints workflow $1, job, step and secret for each secrets.<name> in a step, then the
+# count of secrets.<name> in the whole file
+secret_lines() {
+  yq -r '.jobs | to_entries | .[] | .key as $job | .value.steps[] | (.name // .id // .uses) as $step |
+    .. | select(tag == "!!str") | match("secrets\.([A-Za-z0-9_]+)"; "g") |
+    $job + "/" + $step + " " + .captures[0].string' "$1" | sed "s|^|${1##*/} |"
+  printf '%s %s\n' "${1##*/}" "$(yq '[.. | select(tag == "!!str") | match("secrets\.([A-Za-z0-9_]+)"; "g")] | length' "$1")"
+}
+
+# The steps of builder see no secret, and each step of publish sees only the secrets it uses
+@test "workflows: name each secret in the steps of this table alone" {
+  local workflow
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    secret_lines "$workflow"
+  done >"$BATS_TEST_TMPDIR/actual"
+  printf '%s\n' \
+    'check-updates.yml publish/Setup workspace AUR_GIT_NAME' \
+    'check-updates.yml publish/Setup workspace AUR_GIT_EMAIL' \
+    'check-updates.yml publish/Setup AUR SSH AUR_SSH_KEY' \
+    'check-updates.yml publish/Setup GPG GPG_SIGNING_KEY' \
+    'check-updates.yml publish/Publish updates AUR_GIT_NAME' \
+    'check-updates.yml publish/Publish updates AUR_GIT_EMAIL' \
+    'check-updates.yml 6' \
+    'ci.yml 0' \
+    'codeql.yml 0' \
+    'docs.yml 0' \
+    'notify-failure.yml 0' \
+    'release-please.yml release-please/app-token RELEASE_APP_PRIVATE_KEY' \
+    'release-please.yml 1' \
+    'validate.yml 0' >"$BATS_TEST_TMPDIR/expected"
+  diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
+  for workflow in "$GITHUB_DIR"/actions/*/action.yml; do
+    run yq '[.. | select(tag == "!!str") | match("secrets\.")] | length' "$workflow"
+    [ "$output" = 0 ]
+  done
+}
+
+# The token a checkout leaves in .git/config would reach builder, which owns the workspace
+@test "workflows: no checkout keeps its credentials" {
+  local workflow count=0
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    echo "$workflow"
+    run yq '[.jobs[].steps[] | select(.uses // "" | test("^actions/checkout@")) | select(.with["persist-credentials"] != false)] | length' "$workflow"
+    [ "$output" = 0 ]
+    run yq '[.jobs[].steps[] | select(.uses // "" | test("^actions/checkout@"))] | length' "$workflow"
+    count=$((count + output))
+  done
+  [ "$count" -gt 10 ]
+}
+
+# Pull requests build the site, and main alone deploys it, in the environment of GitHub Pages
+@test "docs: deploys the site from main alone" {
+  local docs="$GITHUB_DIR/workflows/docs.yml"
+  run yq '.jobs.deploy.if' "$docs"
+  [ "$output" = "github.ref == 'refs/heads/main'" ]
+  run yq -o=json -I=0 '[.jobs.deploy.needs, .jobs.deploy.environment.name]' "$docs"
+  [ "$output" = '["build","github-pages"]' ]
+}
+
 @test "actions: no run block expands an expression" {
   local action count=0
   for action in "$GITHUB_DIR"/actions/*/action.yml; do
@@ -83,6 +185,13 @@ run_blocks() {
   [ "$output" = "/opt/codecov/bin/codecovcli" ]
   grep -q '^codecov-cli==' "$GITHUB_DIR/../ci-image/requirements.txt"
   grep -q -- '--hash=sha256:' "$GITHUB_DIR/../ci-image/requirements.txt"
+}
+
+# The search of the CLI takes tests/coverage.bats for a report, by its name
+@test "ci: Codecov uploads coverage/coverage.xml alone" {
+  run yq -o=json -I=0 '.jobs.test.steps[] | select(.name == "Upload coverage to Codecov") | .with | [.files, .disable_search]' \
+    "$GITHUB_DIR/workflows/ci.yml"
+  [ "$output" = '["coverage/coverage.xml",true]' ]
 }
 
 # Default setup of code scanning skips the pull requests of Dependabot, which move the pins of
@@ -960,6 +1069,8 @@ run_take_step() {
   add_attempt 1 _x under
   mkdir -p "$ws/handoffs/1/status" "$BATS_TEST_TMPDIR/elsewhere/prepared/foo"
   echo x >"$ws/handoffs/1/status/-x"
+  # PKGBUILD code of prepare could write the list that only verify hands publish
+  echo foo >"$ws/handoffs/1/status/_unverified"
   echo linked >"$BATS_TEST_TMPDIR/elsewhere/prepared/foo/PKGBUILD"
   ln -s "$BATS_TEST_TMPDIR/elsewhere" "$ws/handoffs/9"
   run run_take_step
@@ -1292,6 +1403,8 @@ make_builder_inputs() {
   echo notes >"$ho/prepared/foo/notes.txt"
   ln -s "$BATS_TEST_TMPDIR/secret" "$ho/prepared/foo/link"
   echo "update_failed: boom" >"$ho/status/foo"
+  echo foo >"$ho/status/_unverified"
+  echo x >"$ho/status/_other"
   mkdir -p "$ho/status/sub" "$ho/prepared/foo/status" "$ho/prepared/xstatus"
   echo x >"$ho/status/sub/x"
   echo x >"$ho/prepared/foo/status/x"
@@ -1308,7 +1421,7 @@ make_builder_inputs() {
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
   [ "$output" = "$(printf '%s\n' ./.status ./.status/_upstream ./.status/foo ./README.md ./handoff ./handoff/prepared \
     ./handoff/prepared/foo ./handoff/prepared/foo/.SRCINFO ./handoff/prepared/foo/PKGBUILD ./handoff/prepared/foo/base \
-    ./handoff/status ./handoff/status/foo ./packages ./packages/foo.yml)" ]
+    ./handoff/status ./handoff/status/_unverified ./handoff/status/foo ./packages ./packages/foo.yml ./packages/link.yml)" ]
   [ "$(cat "$work/packages/foo.yml")" = "name: foo" ]
   [ "$(cat "$work/handoff/status/foo")" = "update_failed: boom" ]
   [ "$(stat -c %a "$work/handoff/prepared/foo/PKGBUILD")" = "644" ]
@@ -1338,6 +1451,22 @@ make_builder_inputs() {
   [ "$status" -eq 0 ]
   [ -d "$work" ]
   [ -z "$(ls -A "$work")" ]
+}
+
+# check-all.sh and update-readme.sh then fail the YAML by its file name, so its issues stay open
+@test "run-as-builder: gives builder a package YAML that is a link as a link to itself" {
+  local work="$BATS_TEST_TMPDIR/work"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  ln -s "$BATS_TEST_TMPDIR/secret" "$BATS_TEST_TMPDIR/ws/packages/bad link.yml"
+  SUDO_OUT=ok run_builder_step check "Check updates"
+  [ "$status" -eq 0 ]
+  [ -L "$work/packages/link.yml" ]
+  [ "$(readlink "$work/packages/link.yml")" = link.yml ]
+  [ ! -L "$work/packages/bad link.yml" ]
+  [ ! -e "$work/packages/bad link.yml" ]
+  run grep -rl secret "$work"
+  [ "$status" -eq 1 ]
 }
 
 # Pull requests can commit .status/ and handoff/, which the jobs never read
@@ -1744,6 +1873,8 @@ make_handoff() {
   mkdir -p "$work/handoff/prepared/bar"
   echo pkgbuild >"$work/handoff/prepared/bar/PKGBUILD"
   echo "update_failed: forged" >"$work/handoff/status/bar"
+  # The list of the packages that verify did not reach goes out of verify alone
+  echo foo >"$work/handoff/status/_unverified"
   HAND_OVER_PACKAGE=foo run_hand_over_step
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$BATS_TEST_TMPDIR/data"
@@ -1752,7 +1883,7 @@ make_handoff() {
   run_hand_over_step
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1/upload" && find . -type f | LC_ALL=C sort' _ "$BATS_TEST_TMPDIR/data"
-  [ "$output" = $'./prepared/bar/PKGBUILD\n./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/bar\n./status/foo' ]
+  [ "$output" = $'./prepared/bar/PKGBUILD\n./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base\n./status/_unverified\n./status/bar\n./status/foo' ]
 }
 
 # Links would put a file that root can read into an artifact anyone with
@@ -3290,20 +3421,36 @@ run_bare_issues_step() {
   [ -f "$ssh_dir/known_hosts" ]
 }
 
-# ssh waits for a silent host as long as TCP does, minutes past the timeout of a publish
-@test "check-updates: Setup AUR SSH gives up a connection after 30 seconds" {
-  local step="$BATS_TEST_TMPDIR/step.sh" bin="$BATS_TEST_TMPDIR/bin" ssh_dir="$BATS_TEST_TMPDIR/ssh" block dir
+# Runs Setup AUR SSH with AUR_SSH_KEY=key-text and $BATS_TEST_TMPDIR/ssh in place of its SSH_DIR;
+# the test above pins the directory of the step, and this helper reads it from SSH_DIR
+run_setup_ssh_step() {
+  local step="$BATS_TEST_TMPDIR/step.sh" bin="$BATS_TEST_TMPDIR/bin" block dir
   block=$(step_run publish "Setup AUR SSH")
-  # The test above pins the directory of the step, and this one reads it from SSH_DIR
   dir=$(sed -n 's/^ *SSH_DIR="\(.*\)"$/\1/p' <<<"$block")
   [ -n "$dir" ]
-  printf '%s\n' "${block//"$dir"/"$ssh_dir"}" >"$step"
+  printf '%s\n' "${block//"$dir"/"$BATS_TEST_TMPDIR/ssh"}" >"$step"
   mkdir -p "$bin"
   printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
   chmod +x "$bin/chown"
   run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$step"
+}
+
+# ssh waits for a silent host as long as TCP does, minutes past the timeout of a publish
+@test "check-updates: Setup AUR SSH gives up a connection after 30 seconds" {
+  run_setup_ssh_step
   [ "$status" -eq 0 ]
-  grep -qx '  ConnectTimeout 30' "$ssh_dir/config"
+  grep -qx '  ConnectTimeout 30' "$BATS_TEST_TMPDIR/ssh/config"
+}
+
+# https://aur.archlinux.org lists the Ed25519 host key as SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
+@test "check-updates: Setup AUR SSH trusts the AUR host key alone and keeps the key to builder" {
+  local ssh_dir="$BATS_TEST_TMPDIR/ssh"
+  run_setup_ssh_step
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$ssh_dir" "$ssh_dir/aur")" = $'700\n600' ]
+  run ssh-keygen -lf "$ssh_dir/known_hosts"
+  [ "$output" = "256 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4 aur.archlinux.org (ED25519)" ]
+  grep -qx '  StrictHostKeyChecking yes' "$ssh_dir/config"
 }
 
 # Runs before setup secrets push nothing and commit the README
@@ -3526,6 +3673,33 @@ make_gpg_key() {
     fi
     [ ! -s "$BATS_TEST_TMPDIR/env" ]
   done
+}
+
+# GPG_KEY_ID goes to GITHUB_ENV, where a value of another form could set other variables
+@test "check-updates: Setup GPG takes a key ID of 16 hex digits alone" {
+  local id bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$bin"
+  cat >"$bin/gpg" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == "--batch --with-colons --list-secret-keys" ]]; then
+  printf 'sec:u:255:22:%s:1700000000::::::scESC:::+:::23::0:\n' "$FAKE_ID"
+else
+  cat >/dev/null
+fi
+EOF
+  chmod +x "$bin/gpg"
+  for id in ABCD 0123456789abcdef 0123456789ABCDEF0 ''; do
+    echo "$id"
+    export FAKE_ID="$id"
+    run_setup_gpg_step key
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::GPG_SIGNING_KEY holds no secret key that can sign"* ]]
+    [ ! -s "$BATS_TEST_TMPDIR/env" ]
+  done
+  export FAKE_ID=0123456789ABCDEF
+  run_setup_gpg_step key
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/env")" = GPG_KEY_ID=0123456789ABCDEF ]
 }
 
 # Branch names can hold # and %, which a URL path reads as a fragment and an escape

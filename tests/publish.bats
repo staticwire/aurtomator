@@ -2953,10 +2953,15 @@ arch_out:
   aarch64: '$(printf 'a%.0s' {1..40})'"
   mv "$TEST_TMPDIR/packages/real.yml" "$TEST_TMPDIR/outside.yml"
   ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/real.yml"
+  # The jobs hand builder such a YAML as a link to itself
+  ln -s loop.yml "$TEST_TMPDIR/packages/loop.yml"
   checked_status real "check_failed: packages/real.yml is a link, and the runs read regular files alone"
+  checked_status loop "check_failed: packages/loop.yml is a link, and the runs read regular files alone"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/real")" = "check_failed: packages/real.yml is a link, and the runs read regular files alone" ]
+  [ "$(cat "$TEST_TMPDIR/.status/loop")" = "check_failed: packages/loop.yml is a link, and the runs read regular files alone" ]
+  grep -qx loop "$TEST_TMPDIR/.status/_packages"
   [ ! -s "$TEST_TMPDIR/.status/_without" ]
 }
 
@@ -3439,6 +3444,31 @@ current: '1.0.0'"
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
+# Only verify writes _unverified: the jobs take no such file from prepare
+@test "check-all --publish: keeps the new version of a package that verify did not reach" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  create_test_package "pkg2" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  checked_status pkg2 "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/status"
+  echo pkg2 >"$TEST_TMPDIR/out/status/_unverified"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg2")" = "new_version: 2.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: prepare and verify handed over no update" ]
+  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
+  # A list behind a link counts for nothing
+  mv "$TEST_TMPDIR/out/status/_unverified" "$TEST_TMPDIR/unverified"
+  ln -s "$TEST_TMPDIR/unverified" "$TEST_TMPDIR/out/status/_unverified"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg2")" = "update_failed: prepare and verify handed over no update" ]
+}
+
 # Publishes started past the budget would run into the 30 minutes of the publish job
 @test "check-all --publish: keeps the new version of a package past its time budget" {
   create_test_package "pkg" "github-release" "upstream:
@@ -3847,11 +3877,90 @@ current: '1.0.0'"
   chmod +x "$TEST_TMPDIR/scripts/check-update.sh"
   clock_after 1199
   run "$TEST_TMPDIR/scripts/check-all.sh"
+  # bats shows these lines when the test fails, so a failure names the status it read
+  printf '%s\n' "$output" "status of pkg: $(cat "$TEST_TMPDIR/.status/pkg" 2>&1)"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
   clock_after 1200
   run "$TEST_TMPDIR/scripts/check-all.sh"
+  printf '%s\n' "$output" "status of pkg: $(cat "$TEST_TMPDIR/.status/pkg" 2>&1)"
   [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
+}
+
+# Helper: a date whose first reading of epoch seconds gives 1000000 and every later one 1000000 plus
+# the seconds in $TEST_TMPDIR/clock, 1199, and a check-update.sh that prints $1 and sets them to 1200
+# Usage: check_until_budget <version>
+check_until_budget() {
+  rm -f "$TEST_TMPDIR/clock-read"
+  echo 1199 >"$TEST_TMPDIR/clock"
+  cat >"$MOCK_DIR/date" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == "-u +%s" ]]; then
+  [[ -e "$TEST_TMPDIR/clock-read" ]] && echo \$((1000000 + \$(<"$TEST_TMPDIR/clock"))) && exit 0
+  : >"$TEST_TMPDIR/clock-read"
+  echo 1000000
+  exit 0
+fi
+exec /usr/bin/date "\$@"
+EOF
+  chmod +x "$MOCK_DIR/date"
+  rm -f "$TEST_TMPDIR/scripts/check-update.sh"
+  cat >"$TEST_TMPDIR/scripts/check-update.sh" <<EOF
+#!/usr/bin/env bash
+echo 1200 >"$TEST_TMPDIR/clock"
+echo "$1"
+EOF
+  chmod +x "$TEST_TMPDIR/scripts/check-update.sh"
+}
+
+# Helper: replace script $1 of scripts/ with one that logs its name to $TEST_TMPDIR/steps
+fake_step() {
+  rm -f "$TEST_TMPDIR/scripts/$1"
+  printf '#!/usr/bin/env bash\necho %s >>"%s/steps"\n' "$1" "$TEST_TMPDIR" >"$TEST_TMPDIR/scripts/$1"
+  chmod +x "$TEST_TMPDIR/scripts/$1"
+}
+
+# Steps that start after the budget would add their 120 s to the 20 minutes of the loop
+@test "check-all: starts no alerts after the time budget of the loop" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'
+alerts:
+  - when: major
+    hold: true
+    note: Hand edit"
+  check_until_budget 2.0.0
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
+  [[ "$output" == *"pkg: the check ran out of its 20 minutes in this run"* ]]
+}
+
+@test "check-all: starts no check of the asset value after the time budget of the loop" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+  asset_regex: 'app-([0-9]+)'
+current: '1.0.0'"
+  check_until_budget ""
+  fake_step check-asset.sh
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/steps" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
+}
+
+@test "check-all: starts no check of the arches after the time budget of the loop" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'
+arch_out:
+  aarch64: '0123456789012345678901234567890123456789'"
+  check_until_budget ""
+  fake_step check-arch.sh
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/steps" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
 }
 
@@ -4130,7 +4239,8 @@ current: '1.0.0'"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
   [ ! -e "$TEST_TMPDIR/out/prepared/pkg" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: verify ran out of its 0 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/_unverified")" = pkg ]
+  [[ "$output" == *"pkg: verify ran out of its 0 minutes in this run"* ]]
 }
 
 # bash takes SECONDS from the environment, as the time the shell has run
@@ -4140,11 +4250,14 @@ current: '1.0.0'"
   run env SECONDS=1200 "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/verify-pkg.sh.args" ]
-  [ "$(cat "$TEST_TMPDIR/out/status/pkg")" = "update_failed: verify ran out of its 20 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/out/status/_unverified")" = pkg ]
+  [[ "$output" == *"pkg: verify ran out of its 20 minutes in this run"* ]]
+  # Each run of verify writes the list anew
   setup_check_verify
   run env SECONDS=1100 "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   grep -qx "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" "$TEST_TMPDIR/verify-pkg.sh.args"
+  [ ! -e "$TEST_TMPDIR/out/status/_unverified" ]
 }
 
 @test "check-all --verify: takes out an update that fails, with update_failed" {
@@ -5437,9 +5550,10 @@ sha256sums=('$H3' '$H4')"
 @test "check_prepared_pkgbuild: rejects checksum arrays after a command substitution with more than a plain command" {
   local lead
   # shellcheck disable=SC2016
-  # The ) of a case pattern leaves $(case x in a) open, and time takes a case after it
+  # The ) of a case pattern leaves $(case x in a) open, and time takes a case after it.
+  # bash sets a to the string (1)b=2 for a=(1)b=2.
   for lead in '_v=$(echo "1")' '_v=$(echo 1 | cut -c1)' '_v=$(echo $pkgver)' '_v=$(echo a #)' '_v=$((1 + 2))' \
-    'POSIXLY_CORRECT=1' 'BASH_ALIASES[q]=x' '_v=${!pkgver}' '_v=$(case x in a)' '_v=$(time case x in a)'; do
+    'POSIXLY_CORRECT=1' 'BASH_ALIASES[q]=x' '_v=${!pkgver}' '_v=$(case x in a)' '_v=$(time case x in a)' 'a=(1)b=2'; do
     write_pkgbuild "$OLD" 1.0.0 2 "$lead
 sha256sums=('$H1' '$H2')"
     write_pkgbuild "$NEW" 1.1.0 1 "$lead
@@ -5917,6 +6031,29 @@ write_srcinfo_lookalike() {
   run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 2.1
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 4 is not the AUR source with the new version"* ]]
+}
+
+# x86_64, aarch64, armv7h and i686 hold the versions 64, 86, 7 and 686 as text
+@test "check_prepared_srcinfo: keeps the digits of arch names that hold the old version" {
+  local case old new arch
+  for case in 64:65:x86_64 64:65:aarch64 86:87:x86_64 7:8:armv7h 686:687:i686; do
+    IFS=: read -r old new arch <<<"$case"
+    echo "$case"
+    write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" "$old" "" "" "$arch" "https://example.com/app-$old-$arch.tar.gz" "$H1"
+    write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" "$new" "" "" "$arch" "https://example.com/app-$new-$arch.tar.gz" "$H3"
+    run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" "$new"
+    [ "$status" -eq 0 ]
+  done
+  write_srcinfo_line "$TEST_TMPDIR/old.SRCINFO" 64 "provides_x86_64 = demo=64"
+  write_srcinfo_line "$TEST_TMPDIR/new.SRCINFO" 65 "provides_x86_64 = demo=65"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 65
+  [ "$status" -eq 0 ]
+  # The digits of the arch name stay the old ones
+  write_srcinfo_archs "$TEST_TMPDIR/new.SRCINFO" 65 "" "" x86_64 "https://example.com/app-65-x86_65.tar.gz" "$H3"
+  write_srcinfo_archs "$TEST_TMPDIR/old.SRCINFO" 64 "" "" x86_64 "https://example.com/app-64-x86_64.tar.gz" "$H1"
+  run check_prepared_srcinfo "" "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO" 65
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"expected source_x86_64 = https://example.com/app-65-x86_64.tar.gz" ]]
 }
 
 @test "check_prepared_srcinfo: rejects a line changed beyond the version" {
@@ -6478,6 +6615,20 @@ write_srcinfo_archs() {
   run timeout 20 bash -c 'source "$1/scripts/lib.sh"; check_arches_back "$1/arches" "$1/prepared" aarch64 1.1.0' _ "$TEST_TMPDIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"The AUR .SRCINFO has pkgver = +1, which aurtomator does not take"* ]]
+}
+
+@test "check_arches_back: keeps the digits of an arch name that holds the old version" {
+  local dir
+  mkdir -p "$TEST_TMPDIR/arches/aarch64" "$TEST_TMPDIR/prepared"
+  for dir in arches/aarch64 prepared; do
+    printf 'pkgname=demo\nsha256sums_aarch64=(SKIP)\n' >"$TEST_TMPDIR/$dir/PKGBUILD"
+  done
+  printf '%s\n' "pkgbase = demo" $'\tpkgver = 64' $'\tpkgrel = 1' $'\tarch = aarch64' \
+    $'\tsource_aarch64 = https://example.com/app-64-aarch64.tar.gz' $'\tsha256sums_aarch64 = SKIP' "" "pkgname = demo" \
+    >"$TEST_TMPDIR/arches/aarch64/.SRCINFO"
+  sed 's/64-aarch64/65-aarch64/; s/pkgver = 64/pkgver = 65/' "$TEST_TMPDIR/arches/aarch64/.SRCINFO" >"$TEST_TMPDIR/prepared/.SRCINFO"
+  run check_arches_back "$TEST_TMPDIR/arches" "$TEST_TMPDIR/prepared" aarch64 65
+  [ "$status" -eq 0 ]
 }
 
 @test "check_prepared_srcinfo: accepts the AUR copy of a package with a VCS pin" {

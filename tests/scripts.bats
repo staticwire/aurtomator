@@ -1176,6 +1176,17 @@ MOCKCURL
   [ "$output" = https://example.com/build/4216/demo-aarch64.tar.gz ]
 }
 
+@test "arch.sh: arch_urls keeps the digits of arch names that hold the old version" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  printf '%s\n' 'pkgbase = demo' $'\tpkgver = 64' $'\tarch = x86_64' $'\tarch = aarch64' \
+    $'\tsource_aarch64 = https://example.com/v64/demo-64-aarch64-x86_64.tar.gz' >"$TEST_TMPDIR/.SRCINFO"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" aarch64 64 65 "" "" "" "" ""
+  [ "$output" = https://example.com/v65/demo-65-aarch64-x86_64.tar.gz ]
+  printf '\tsource_armv7h = %s\n' https://example.com/7/demo-armv7h.tar.gz >"$TEST_TMPDIR/.SRCINFO"
+  run arch_urls "$TEST_TMPDIR/.SRCINFO" armv7h 7 8 "" "" "" "" ""
+  [ "$output" = https://example.com/8/demo-armv7h.tar.gz ]
+}
+
 # Helper: a curl that logs its arguments, prints $CURL_W and exits $CURL_RC
 mock_probe_curl() {
   cat >"$MOCK_DIR/curl" <<MOCKCURL
@@ -1197,6 +1208,7 @@ MOCKCURL
     "0|1|410 application/octet-stream"
     "0|1|200 Text/HTML; charset=utf-8"
     "0|3|400 application/octet-stream"
+    "0|3|403 application/xml"
     "0|3|429 text/html; charset=utf-8"
     "0|3|503 text/html"
     "0|2|000 "
@@ -1495,13 +1507,17 @@ MOCKCURL
   printf "name: old-name\nstrategy: github-release\ncurrent: '3.0'\n" >"$TEST_TMPDIR/packages/renamed.yml"
   printf "name: linked\nstrategy: github-release\ncurrent: '1.0'\n" >"$TEST_TMPDIR/outside.yml"
   ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/linked.yml"
+  # The jobs hand builder such a YAML as a link to itself
+  ln -s loop.yml "$TEST_TMPDIR/packages/loop.yml"
   echo "check_failed: packages/renamed.yml: name 'old-name' must equal the file name" >"$TEST_TMPDIR/.status/renamed"
   echo "check_failed: packages/linked.yml is a link, and the runs read regular files alone" >"$TEST_TMPDIR/.status/linked"
+  echo "check_failed: packages/loop.yml is a link, and the runs read regular files alone" >"$TEST_TMPDIR/.status/loop"
   printf '%s\n' "# test" "<!-- PACKAGES:START -->" "<!-- PACKAGES:END -->" >"$TEST_TMPDIR/README.md"
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/renamed">renamed</a></td><td>-</td><td nowrap>-</td><td nowrap>-</td><td nowrap>❌ failed</td></tr>' "$TEST_TMPDIR/README.md"
   grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/linked">linked</a></td><td>-</td><td nowrap>-</td><td nowrap>-</td><td nowrap>❌ failed</td></tr>' "$TEST_TMPDIR/README.md"
+  grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/loop">loop</a></td><td>-</td><td nowrap>-</td><td nowrap>-</td><td nowrap>❌ failed</td></tr>' "$TEST_TMPDIR/README.md"
   run grep -c old-name "$TEST_TMPDIR/README.md"
   [ "$output" = "0" ]
 }
@@ -4380,12 +4396,16 @@ alerts:
   create_test_package "pkg-link" "step" "current: 1.0"
   mv "$TEST_TMPDIR/packages/pkg-link.yml" "$TEST_TMPDIR/outside.yml"
   ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/pkg-link.yml"
+  # The jobs hand builder such a YAML as a link to itself
+  ln -s pkg-loop.yml "$TEST_TMPDIR/packages/pkg-loop.yml"
   # A record of the run keeps its name
   ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/_alerts.yml"
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-link")" = "check_failed: packages/pkg-link.yml is a link, and the runs read regular files alone" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg-loop")" = "check_failed: packages/pkg-loop.yml is a link, and the runs read regular files alone" ]
   grep -qx pkg-link "$TEST_TMPDIR/.status/_packages"
+  grep -qx pkg-loop "$TEST_TMPDIR/.status/_packages"
   [ ! -e "$TEST_TMPDIR/.status/_alerts" ]
 }
 
@@ -5037,6 +5057,16 @@ arch_wait:
   check_arch 28+23
   [ "$ARCH_RC" -eq 1 ]
   grep -qF "$(arch_source_url aarch64 28+23) answered with status 503" "$TEST_TMPDIR/arch.err"
+  [[ "$(<"$TEST_TMPDIR/arch.err")" != *S3* ]]
+}
+
+# Bot protection and rate limits answer 403 too, so 403 fails the check like 503
+@test "check-arch: fails the check on 403 and names S3 in the error" {
+  temurin_package "current: 28+22"
+  archive_forbidden aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 1 ]
+  grep -qF "$(arch_source_url aarch64 28+23) answered with status 403, which S3 also gives for missing files in buckets without public listing" "$TEST_TMPDIR/arch.err"
 }
 
 @test "check-arch: a commit of arch_out missing from the AUR fails the check" {

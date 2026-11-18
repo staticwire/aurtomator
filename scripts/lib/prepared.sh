@@ -478,14 +478,20 @@ _asset_pkgrel() {
 
 # Replace the old version in line $1 by the new one, also in the forms _ for . and +, before
 # the first +, and without the last component while a dot stays; longest first, never inside a number
-# Args: $1=line, $2=old version, $3=new version, $4=old upstream version, $5=new upstream version
+# Args: $1=line, $2=old version, $3=new version, $4=old upstream version, $5=new upstream version,
+#       $6=arch names, which stay as they are, separated by spaces
 _bump_version() {
-  local rest="$1" lead=" $1" old="$2" new="$3" out="" i matched
+  local rest="$1" lead=" $1" old="$2" new="$3" out="" i matched word kept
   if [[ -z "$old" ]]; then
     printf '%s\n' "$rest"
     return 0
   fi
-  local -a olds=("$old") news=("$new")
+  local -a olds=("$old") news=("$new") arch_names=() words=()
+  read -ra words <<<"${6:-}"
+  # Arch names without a letter could equal a version
+  for word in "${words[@]}"; do
+    [[ "$word" != *[A-Za-z]* ]] || arch_names+=("$word")
+  done
   if [[ "$old" == *[.+]* ]]; then
     olds+=("${old//[.+]/_}")
     news+=("${new//[.+]/_}")
@@ -508,6 +514,18 @@ _bump_version() {
   # lead is the line after a space, so its character at the length of the
   # part already read is the one before rest
   while [[ -n "$rest" ]]; do
+    # The longest arch name that starts here stays as it is, so x86_64 keeps the 64 of version 64
+    kept=""
+    for word in "${arch_names[@]}"; do
+      if [[ "$rest" == "$word"* ]] && ((${#word} > ${#kept})); then
+        kept="$word"
+      fi
+    done
+    if [[ -n "$kept" ]]; then
+      out+="$kept"
+      rest="${rest:${#kept}}"
+      continue
+    fi
     matched=false
     for i in "${!olds[@]}"; do
       # Empty forms, as before the + of +1, would match at every position and never move on
@@ -559,29 +577,40 @@ _undash_version() {
   printf '%s\n' "$out$rest"
 }
 
-# Args: $1=AUR line, $2=prepared line, $3=old version, $4=new version, $5=pkgver_dash or drop
+# Args: $1=AUR line, $2=prepared line, $3=old and $4=new version, $5=pkgver_dash or drop, $6=arch names
 # Returns: 0 when the prepared line is the AUR line with the version replaced, a dash in place
 #          of the pkgver_dash character counting as that character, or as nothing for drop
 _bumped_with_dash() {
-  [[ "$(_undash_version "$2" "$4" "$5")" == "$(_bump_version "$(_undash_version "$1" "$3" "$5")" "$3" "$4")" ]]
+  [[ "$(_undash_version "$2" "$4" "$5")" == "$(_bump_version "$(_undash_version "$1" "$3" "$5")" "$3" "$4" "" "" "${6:-}")" ]]
 }
 
 # Args: $1=AUR line, $2=prepared line, $3=old and $4=new version, $5=old and $6=new upstream
-#       version, $7=pkgver_dash or drop, $8=old and $9=new asset value
+#       version, $7=pkgver_dash or drop, $8=old and $9=new asset value, $10=arch names
 # Returns: 0 when the prepared line is the AUR line with the version and each asset value
 #          replaced, the parts between the asset values compared one by one
 _bumped_line() {
   local old="$1" new="$2"
   if [[ -n "${8:-}" ]]; then
     while [[ "$old" == *"$8"* ]]; do
-      if [[ "$new" != *"$9"* ]] || ! _bumped_line "${old%%"$8"*}" "${new%%"$9"*}" "${@:3:5}"; then
+      if [[ "$new" != *"$9"* ]] || ! _bumped_line "${old%%"$8"*}" "${new%%"$9"*}" "${@:3:5}" "" "" "${10:-}"; then
         return 1
       fi
       old="${old#*"$8"}"
       new="${new#*"$9"}"
     done
   fi
-  [[ "$new" == "$(_bump_version "$old" "$3" "$4" "$5" "$6")" ]] || _bumped_with_dash "$old" "$new" "$3" "$4" "$7"
+  [[ "$new" == "$(_bump_version "$old" "$3" "$4" "$5" "$6" "${10:-}")" ]] || _bumped_with_dash "$old" "$new" "$3" "$4" "$7" "${10:-}"
+}
+
+# Print the arch names of .SRCINFO $1, from its arch lines and the ends of its keys, as
+# source_x86_64 ends, separated by spaces
+_srcinfo_arch_words() {
+  awk -F' = ' '
+    { key = $1; sub(/^[ \t]+/, "", key) }
+    key == "arch" { words[$2] = 1 }
+    key ~ /^[a-z0-9]+_./ { sub(/^[a-z0-9]+_/, "", key); words[key] = 1 }
+    END { for (word in words) printf "%s ", word }
+  ' "$1"
 }
 
 # Print line $1 with pkgrel $4 in each <version $2>-<pkgrel $3> and <version>_<pkgrel> that has
@@ -604,13 +633,13 @@ _with_rel() {
   printf '%s\n' "$line"
 }
 
-# Succeeds as _bumped_line does; when the AUR PKGBUILD expands pkgrel ($12=yes), each version
-# with AUR pkgrel $10 in line $1 first takes pkgrel $11 of the update, as _with_rel writes it
+# Succeeds as _bumped_line does, with arch names $13; when the AUR PKGBUILD expands pkgrel ($12=yes),
+# each version with AUR pkgrel $10 in line $1 first takes pkgrel $11 of the update, as _with_rel writes it
 _bumped_any_rel() {
   if [[ "${12:-}" == yes && -n "${10}" && "${10}" != "${11}" ]]; then
-    _bumped_line "$(_with_rel "$1" "$3" "${10}" "${11}")" "${@:2:8}"
+    _bumped_line "$(_with_rel "$1" "$3" "${10}" "${11}")" "${@:2:8}" "${13:-}"
   else
-    _bumped_line "${@:1:9}"
+    _bumped_line "${@:1:9}" "${13:-}"
   fi
 }
 
@@ -712,6 +741,8 @@ check_prepared_srcinfo() {
     old_up=$(_unformat_version "$old_ver" "$format")
     new_up=$(_unformat_version "$version" "$format")
   fi
+  local arch_words
+  arch_words="$(_srcinfo_arch_words "$1") ${9:-} ${10:-}"
 
   local -A skip_sources=() hashed_sources=() source_counts=()
   local checksum entry
@@ -781,8 +812,8 @@ check_prepared_srcinfo() {
       source)
         n="${source_counts[$key]:-0}"
         source_counts[$key]=$((n + 1))
-        expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
-        if ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel" "$expands" &&
+        expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up" "$arch_words")
+        if ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel" "$expands" "$arch_words" &&
           ! { [[ -n "${skip_sources["${key#source}:$n"]:-}" ]] &&
             _name_differs_in_digits "$expected" "$new"; }; then
           log_err "Prepared .SRCINFO line $((i + 1)) is not the AUR source with the new version: $(_shown_line "$new"), expected $(_shown_line "$expected")"
@@ -812,8 +843,8 @@ check_prepared_srcinfo() {
             log_err "Prepared .SRCINFO line $((i + 1)) changes a value the PKGBUILD holds as text: $(_shown_line "$new"), expected $(_shown_line "$old")"
             return 1
           fi
-        elif ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel" "$expands"; then
-          expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up")
+        elif ! _bumped_any_rel "$old" "$new" "$old_ver" "$version" "$old_up" "$new_up" "$dash" "$old_asset" "$new_asset" "$old_rel" "$rel" "$expands" "$arch_words"; then
+          expected=$(_bump_version "$old" "$old_ver" "$version" "$old_up" "$new_up" "$arch_words")
           log_err "Prepared .SRCINFO line $((i + 1)) does not follow the version as the PKGBUILD does: $(_shown_line "$new"), expected $(_shown_line "$expected")"
           return 1
         fi

@@ -339,6 +339,24 @@ stage_aur_update() {
   [[ "$output" == *"nopass@test is no key ID or fingerprint in hex"* ]]
 }
 
+# gpg makes v5 keys for ed448, and their key IDs are the first 64 bits of the fingerprint
+@test "gpg-real: setup.sh refuses the primary key of a v5 key by its key IDs" {
+  local keys fpr id
+  env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE gpg --batch --compliance=gnupg --pinentry-mode loopback \
+    --passphrase '' --quick-gen-key "Test V5 <v5@test>" ed448 sign never 2>/dev/null
+  keys=$(gpg --batch --with-colons --list-secret-keys v5@test)
+  fpr=$(awk -F: '$1 == "fpr" { print $10; exit }' <<<"$keys")
+  id=$(awk -F: '$1 == "sec" { print $5; exit }' <<<"$keys")
+  [ "${#fpr}" -eq 64 ]
+  [ "$id" = "${fpr:0:16}" ]
+  for id in "$id" "${id:0:8}"; do
+    run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" gpg \
+      --gpg-key "$id" --non-interactive
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$id is a primary key"* ]]
+  done
+}
+
 @test "gpg-real: setup.sh rejects nonexistent key" {
   run "$TEST_TMPDIR/scripts/setup.sh" gpg \
     --gpg-key "0000000000000999" --non-interactive
