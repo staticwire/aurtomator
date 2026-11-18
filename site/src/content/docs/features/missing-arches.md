@@ -16,7 +16,7 @@ The check reads `arch=()` of AUR PKGBUILD. The PKGBUILD needs one `arch=(...)` t
 
 ## The wait
 
-Each check sends `HEAD` requests to the `https` URLs of `source_<arch>` at the new version. Statuses of 400 or more, and HTML pages, mean the archive is missing.
+Each check sends `HEAD` requests to the `https` URLs of `source_<arch>` at the new version. Statuses 404 and 410, and HTML pages, mean the archive is missing. Other statuses of 400 or more, such as 429 or 503, tell nothing about the archive, so the check fails with `<url> answered with status <code>`.
 
 | Archives of the version | Status | Then |
 |---|---|---|

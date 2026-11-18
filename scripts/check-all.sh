@@ -41,6 +41,10 @@ VERIFY_BUDGET="${AURTOMATOR_VERIFY_BUDGET:-1200}"
 # so the check job ends within its 30 minutes
 CHECK_BUDGET="${AURTOMATOR_CHECK_BUDGET:-1200}"
 
+# Time budget of the publish loop, in seconds: no publish starts after it,
+# so the publish job ends within its 30 minutes
+PUBLISH_BUDGET="${AURTOMATOR_PUBLISH_BUDGET:-1200}"
+
 # Pause, in seconds, before a package whose check failed is checked again
 RECHECK_DELAY="${AURTOMATOR_RECHECK_DELAY:-60}"
 
@@ -67,13 +71,35 @@ bounded_alerts() {
   bounded "$CHECK_TIMEOUT" bash -c 'source "$1/scripts/lib.sh" && fired_alerts "${@:2}"' _ "$AURTOMATOR_DIR" "$@"
 }
 
+# Errors keep their last bytes, since a server writes the stderr of git. With the line that
+# counts the bytes cut, a status fits the 4000 characters that an issue shows.
+ERROR_MAX=3900
+
 # Prints the error of a per-package script: its stderr, or the budget it ran out
 # of and the URL $4 of a request in flight. $1=exit code, $2=stderr file, $3=budget
 script_error() {
   case "$1" in
     124 | 137) echo "${4:+$4: }timed out after $3 s" ;;
-    *) cat "$2" ;;
+    *) last_bytes "$2" ;;
   esac
+}
+
+# Prints file $1 whole, or the count of the bytes cut and its last ERROR_MAX bytes
+last_bytes() {
+  local size text cut LC_ALL=C
+  size=$(wc -c <"$1")
+  if ((size <= ERROR_MAX)); then
+    cat -- "$1"
+    return
+  fi
+  text=$(tail -c "$ERROR_MAX" -- "$1")
+  cut=$((size - ERROR_MAX))
+  # The cut can fall inside a character of UTF-8
+  while [[ "$text" == [$'\x80'-$'\xbf']* ]]; do
+    text=${text:1}
+    cut=$((cut + 1))
+  done
+  printf '[first %s bytes cut]\n%s\n' "$cut" "$text"
 }
 
 # Prints status $1 with a space for each tab and control character but newlines, since
@@ -179,24 +205,6 @@ if [[ "$MODE" == "prepare" || "$MODE" == "verify" || "$MODE" == "publish" ]] && 
   done
 fi
 
-# Print the name of package file $1, or fail for a name other than the file name, which
-# validate-pkg.sh refuses too: the name reaches the paths of statuses and prepared files
-package_name() {
-  local name stem="${1##*/}"
-  stem="${stem%.yml}"
-  name=$(pkg_get "$1" .name)
-  if [[ "$name" != "$stem" ]]; then
-    log_err "packages/${stem}.yml: name ${name@Q} must equal the file name"
-    return 1
-  fi
-  # Names of the AUR form, one a line in _packages, start with no _ as the records in .status do
-  if ! (LC_ALL=C && [[ "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
-    log_err "packages/${stem@Q}.yml: the name must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"
-    return 1
-  fi
-  printf '%s\n' "$name"
-}
-
 # Failed verifies, exit code 3 of a moved AUR repo included, take the update
 # out with update_failed. Only package names from packages/ reach a path.
 if [[ "$MODE" == "verify" ]]; then
@@ -227,8 +235,8 @@ if [[ "$MODE" == "verify" ]]; then
     esac
     asset_regex=$(pkg_get "$pkg_file" '.upstream.asset_regex // ""')
     asset=""
-    [[ -z "$asset_regex" ]] || asset=$(awk -F'\t' -v p="$pkg_name" '$1 == p { v = $2 } END { print v }' <<<"${CHECKED[_assets]:-}")
-    arch_record=$(awk -F'\t' -v p="$pkg_name" '$1 == p { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}")
+    [[ -z "$asset_regex" ]] || asset=$(awk -F'\t' -v p="$pkg_name" '$1 "" == p "" { v = $2 } END { print v }' <<<"${CHECKED[_assets]:-}")
+    arch_record=$(awk -F'\t' -v p="$pkg_name" '$1 "" == p "" { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}")
     arch_out=""
     verify_rc=0
     if ((SECONDS >= VERIFY_BUDGET)); then
@@ -294,8 +302,10 @@ handed_failure() {
   if [[ -d "$status_dir" && ! -L "$status_dir" && -f "$file" && ! -L "$file" ]] &&
     ! _has_nul "$file"; then
     local handed
-    handed=$(<"$file")
-    if [[ "$handed" == update_failed:* ]]; then
+    # PKGBUILD code of prepare can write this file
+    if [[ "$(head -c 14 -- "$file")" == update_failed: ]]; then
+      handed=$(last_bytes "$file")
+      [[ "$handed" == update_failed:* ]] || handed="update_failed: $handed"
       status_text "$handed"
       return
     fi
@@ -356,7 +366,7 @@ find_asset() {
       printf '%s\n' "${CHECKED[$2]}" >"${STATUS_DIR}/$2"
       return 1
     fi
-    ASSET_VALUE=$(awk -F'\t' -v p="$2" '$1 == p { v = $2 } END { print v }' <<<"${CHECKED[_assets]:-}")
+    ASSET_VALUE=$(awk -F'\t' -v p="$2" '$1 "" == p "" { v = $2 } END { print v }' <<<"${CHECKED[_assets]:-}")
     if ! validate_asset_value "$ASSET_VALUE" 2>/dev/null; then
       echo "check_failed: no asset value from the check run" >"${STATUS_DIR}/$2"
       return 1
@@ -385,9 +395,10 @@ find_asset() {
   printf '%s\t%s\n' "$2" "$ASSET_VALUE" >>"${STATUS_DIR}/_assets"
 }
 
-# Print the line of package $1 in _arches of the check run
+# Print the line of package $1 in _arches of the check run. awk compares two fields that look
+# like numbers as numbers, so the comparisons of names add an empty string.
 arch_record_line() {
-  awk -F'\t' -v p="$1" '$1 == p { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}"
+  awk -F'\t' -v p="$1" '$1 "" == p "" { l = $0 } END { print l }' <<<"${CHECKED[_arches]:-}"
 }
 
 # --publish keeps the start of the wait of record line $2 for version $3 in
@@ -476,7 +487,7 @@ run_package() {
     stem="${pkg_file##*/}"
     stem="${stem%.yml}"
     log_err "packages/${stem@Q}.yml is a link, and the runs read regular files alone"
-    if [[ "$MODE" == check ]] && (LC_ALL=C && [[ "$stem" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
+    if [[ "$MODE" == check || "$MODE" == publish ]] && (LC_ALL=C && [[ "$stem" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
       echo "check_failed: packages/${stem}.yml is a link, and the runs read regular files alone" >"${STATUS_DIR}/${stem}"
     fi
     return 0
@@ -485,7 +496,7 @@ run_package() {
     # Its status keeps the issues of the file name open, since its YAML is still there
     stem="${pkg_file##*/}"
     stem="${stem%.yml}"
-    if [[ "$MODE" == check ]] && (LC_ALL=C && [[ "$stem" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
+    if [[ "$MODE" == check || "$MODE" == publish ]] && (LC_ALL=C && [[ "$stem" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
       yaml_name=$(pkg_get "$pkg_file" .name 2>/dev/null) || yaml_name=""
       echo "check_failed: packages/${stem}.yml: name ${yaml_name@Q} must equal the file name" >"${STATUS_DIR}/${stem}"
     fi
@@ -520,8 +531,14 @@ run_package() {
           fi
           return
         fi
+        # Later runs find the version again, as for a package the check run deferred
+        if ((SECONDS >= PUBLISH_BUDGET)); then
+          log_warn "$pkg_name: publish ran out of its $((PUBLISH_BUDGET / 60)) minutes in this run"
+          printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
+          return
+        fi
         ;;
-      up_to_date | check_failed:*)
+      up_to_date | check_failed:* | unchecked:*)
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         host=$(recorded_host "$pkg_name" <<<"${CHECKED[_hosts]:-}")
         if [[ "$found" == check_failed:* && -n "$host" ]]; then
@@ -731,7 +748,7 @@ run_package() {
   update_rc=0
   bounded "$UPDATE_TIMEOUT" "${cmd[@]}" 2>"$err_file" || update_rc=$?
   update_err=$(script_error "$update_rc" "$err_file" "$UPDATE_TIMEOUT")
-  cat -- "$err_file" >&2
+  shown_text <"$err_file" >&2
   rm -f "$err_file"
 
   case "$MODE:$update_rc" in
@@ -753,10 +770,8 @@ run_package() {
       # AUR already at this version, YAML synced by update-pkg.sh or publish-pkg.sh
       echo "up_to_date" >"${STATUS_DIR}/${pkg_name}"
       ;;
-    publish:3)
-      # The AUR moved after prepare; the next run prepares again
-      echo "$available" >"${STATUS_DIR}/${pkg_name}"
-      ;;
+    # Exit code 3 of publish, an AUR repo that moved after the prepare, takes the update out
+    # as in verify, and the next run prepares again
     *)
       log_err "Failed to update $pkg_name to $latest"
       status_text "update_failed: ${update_err}" >"${STATUS_DIR}/${pkg_name}"
@@ -783,6 +798,18 @@ CHECK_END=$(($(date -u +%s) + CHECK_BUDGET))
 
 RECHECK=()
 declare -A FAILED_HOSTS=()
+# Publish keeps the failed checks of the check run, so their hosts go to _hosts before the loop,
+# for the host issues of a publish that its job stops
+if [[ "$MODE" == publish ]]; then
+  for pkg_file in "${check_files[@]}"; do
+    [[ ! -L "$pkg_file" ]] || continue
+    pkg_name=$(package_name "$pkg_file" 2>/dev/null) || continue
+    [[ "${CHECKED[$pkg_name]:-}" == check_failed:* ]] || continue
+    host=$(recorded_host "$pkg_name" <<<"${CHECKED[_hosts]:-}")
+    [[ -z "$host" ]] || printf '%s\t%s\n' "$pkg_name" "$host"
+  done | LC_ALL=C sort >"${STATUS_DIR}/_hosts"
+  [[ -s "${STATUS_DIR}/_hosts" ]] || rm -f "${STATUS_DIR}/_hosts"
+fi
 for pkg_file in "${check_files[@]:check_start}" "${check_files[@]:0:check_start}"; do
   if check_time_left; then
     run_package "$pkg_file" 1
@@ -824,13 +851,15 @@ hosts=$(
 )
 [[ -z "$hosts" ]] || printf '%s\n' "$hosts" >"${STATUS_DIR}/_hosts"
 
-# The arches each package lacks after the run, for the issues of arches out
+# The arches each package lacks after the run, for the issues of arches out. Files the check
+# fails name no package, and an arch_out that is no map counts as none, as in the check.
 if [[ "$MODE" == "publish" ]]; then
   : >"${STATUS_DIR}/_without"
-  for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-    [[ -f "$pkg_file" ]] || continue
-    arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")')
-    [[ -z "$arches_out" ]] || printf '%s\t%s\t%s\n' "$(pkg_get "$pkg_file" .name)" \
+  for pkg_file in "${check_files[@]}"; do
+    [[ ! -L "$pkg_file" ]] || continue
+    pkg_name=$(package_name "$pkg_file" 2>/dev/null) || continue
+    arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")' 2>/dev/null) || continue
+    [[ -z "$arches_out" ]] || printf '%s\t%s\t%s\n' "$pkg_name" \
       "$(pkg_get "$pkg_file" '.current // ""')" "$arches_out" >>"${STATUS_DIR}/_without"
   done
 fi

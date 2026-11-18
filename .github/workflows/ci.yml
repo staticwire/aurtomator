@@ -82,7 +82,7 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Sy --noconfirm --needed archlinux-keyring
-          pacman -Su --noconfirm --needed bash bats git go-yq jq curl openssh namcap ruby ruby-erb
+          pacman -Su --noconfirm --needed bash bats git go-yq jq curl openssh namcap python ruby ruby-erb
           # gem would resolve a dependency to its newest release, so every gem
           # the two need is named here at its version
           gem install --no-document --ignore-dependencies bashcov:4.0.0 simplecov-cobertura:4.0.0 simplecov:1.3.2 rexml:3.4.4
@@ -109,11 +109,19 @@ jobs:
             sed -i "s|<source>.*</source>|<source>.</source>|g" coverage/coverage.xml
           fi
 
+      # codecov-action downloads the newest CLI unless it gets one, and Dependabot moves the
+      # versions and hashes of requirements.txt
+      - name: Install the Codecov CLI
+        run: |
+          python -m venv /opt/codecov
+          /opt/codecov/bin/pip install --require-hashes --no-deps -r ci-image/requirements.txt
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage/coverage.xml
           fail_ci_if_error: false
+          binary: /opt/codecov/bin/codecovcli
 
   # Runs the validator of this commit as a packages repository runs it
   # from its pin

@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Mock git for the bats tests: ls-remote answers fixed tags by URL, every other command runs real git
 
+# Options of git -c come before the command, and ls-remote.configs logs them
+configs=()
+while [[ "${1:-}" == -c && $# -ge 2 ]]; do
+  configs+=(-c "$2")
+  shift 2
+done
 if [[ "${1:-}" != ls-remote ]]; then
-  exec /usr/bin/git "$@"
+  exec /usr/bin/git "${configs[@]}" "$@"
 fi
 
 echo "$*" >>"$TEST_TMPDIR/ls-remote.args"
+echo "${configs[*]}" >>"$TEST_TMPDIR/ls-remote.configs"
 env | grep '^GIT_' | sort >>"$TEST_TMPDIR/ls-remote.env"
 
 tags=()

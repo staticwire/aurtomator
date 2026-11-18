@@ -26,7 +26,7 @@ aurtomator has 16 version detection strategies. Pick the one that reads the sour
 ## Strategy limitations
 
 - The GitHub strategies send `GITHUB_TOKEN` when it is set. The workflow sets it to the workflow token, which allows 1,000 requests per hour per repository, and local runs without a token get 60. `github-tag` reads tags with `git ls-remote`, outside this limit.
-- Requests with curl retry timeouts, refused connections and HTTP 408, 429, 500, 502, 503, 504, 522 and 524 answers twice, 5 seconds apart. The git calls of `git-latest`, `github-tag` and `git-tag` make one attempt. Checks that fail within their time limit run once more after the other packages and a pause of 60 seconds.
+- Requests with curl retry timeouts, refused connections and HTTP 408, 429, 500, 502, 503, 504, 522 and 524 answers twice, 5 seconds apart or after the wait of a `Retry-After` header, and start no retry later than 75 seconds after the first attempt. The git calls of `git-latest`, `github-tag` and `git-tag` make one attempt and stop when they receive less than 100 KiB/s for 60 seconds. Checks that fail within their time limit run once more after the other packages and a pause of 60 seconds.
 - Answers can hold at most 50 MB, and `webpage-scrape` pages 5 MB, unless `upstream.max_answer_mb` sets another limit, see [Package YAML](/package-yaml/).
 - Without `tag_version_regex`, the tag strategies keep only tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out. They pick the newest version by `vercmp`, the order of pacman, which puts `1.0.0rc1` and `1.0.0-rc1` below `1.0.0`, so regexes that let pre-release tags through pick the release once it is out. Repositories that tag releases `13` and `14` and builds `2026102100` give the build, which `check-all.sh` holds as a version jump, see [Downgrades and version jumps](/features/downgrades/); `tag_version_regex: '^([0-9]{1,3})$'` keeps the releases.
 - `gitlab-tag` reads at most 100 tags and `gitea-tag` 50. `git-tag` with the `.git` URL of the project reads every tag, and `gitea-release` reads up to 500 releases.
@@ -367,7 +367,7 @@ upstream:
 
 Each type reads only its own of `host`, `project` and `url`, and `validate-pkg.sh` refuses the others.
 
-**Version:** `r<count>.<hash>`, the usual form of `-git` packages, such as `r431.66db9ce`: the number of commits on `HEAD` and its hash. The clone holds commits and tags alone, `--filter=tree:0`, since the strategy reads no files. With `upstream.branch`, `HEAD` is that branch, as makepkg checks it out for `#branch=`, and branches the repository does not have fail the clone. The hash takes as many characters as the hash in `current`, and 7 without `current`: `git rev-parse --short` in `pkgver()` gives more characters as repositories grow, and `vercmp` reads `r2173.ef2e985` as newer than `r2173.ef2e985d` of the same commit.
+**Version:** `r<count>.<hash>`, the usual form of `-git` packages, such as `r431.66db9ce`: the number of commits on `HEAD` and its hash. The clone holds commits and tags alone, `--filter=tree:0`, since the strategy reads no files. Servers can send more than the filter asks, so the clone stops at 1 GiB for the pack and for one object, as fetches in verify do. With `upstream.branch`, `HEAD` is that branch, as makepkg checks it out for `#branch=`, and branches the repository does not have fail the clone. The hash takes as many characters as the hash in `current`, and 7 without `current`: `git rev-parse --short` in `pkgver()` gives more characters as repositories grow, and `vercmp` reads `r2173.ef2e985` as newer than `r2173.ef2e985d` of the same commit.
 
 With `upstream.describe`, the strategy prints what the `git describe` recipes of the [Arch package guidelines for VCS packages](https://manual.archlinux.page/package-guidelines/vcs/) print: `git describe --long`, with `--tags` for `describe: tags` and annotated tags alone for `describe: annotated`. `upstream.tag_prefix` is cut from the tag first, as `sed 's/^v//'` does, then `v1.2.0-rc1-47-g0bbf5ad` becomes `1.2.0.rc1.r47.g0bbf5ad`. The hash keeps at least the length of the hash after `.g` in `current`. Repositories without a tag reachable from `HEAD` fail with `git describe finds no tag reachable from HEAD of <url>`.
 
@@ -475,7 +475,7 @@ pkgver_dash: .
 
 ### repology
 
-**Upstream:** the Repology API, `https://repology.org/api/v1/project/{name}`, a fallback when no other strategy fits.
+**Upstream:** the Repology API, `https://repology.org/api/v1/project/{name}`, a fallback when no other strategy fits. Repology allows one request per second and blocks clients that send more, so the strategy waits one second before its request and sends a User-Agent with a link to the aurtomator repository. Blocked requests fail with `repology.org answered 403, as it does to clients that send more than one request per second`.
 
 | Field | Required | Description |
 |---|---|---|

@@ -649,6 +649,7 @@ jobs:
             "Host aur.archlinux.org" \
             "  IdentityFile $SSH_DIR/aur" \
             "  User aur" \
+            "  ConnectTimeout 30" \
             "  StrictHostKeyChecking yes" \
             "  ControlMaster auto" \
             "  ControlPath $SSH_DIR/cm-%r@%h:%p" \
@@ -999,7 +1000,7 @@ jobs:
             while read -r number title; do
               [[ -n "$number" && "$title" =~ $title_re ]] || continue
               pkg_name=${BASH_REMATCH[1]}
-              awk -F'\t' -v p="$pkg_name" '$1 == p { found = 1 } END { exit !found }' "$STATUS_DIR/_without" && continue
+              awk -F'\t' -v p="$pkg_name" '$1 "" == p "" { found = 1 } END { exit !found }' "$STATUS_DIR/_without" && continue
               comment=$(lib arch_close_comment "$pkg_name" "$RUN_URL")
               gh issue close "$number" --comment "$comment"
             done <<<"$arched"
@@ -1026,6 +1027,8 @@ jobs:
         run: |
           STATUS_DIR=".status"
           [[ -d "$STATUS_DIR" ]] || exit 0
+          # check-all.sh writes _packages after its loop, so a publish that its job stops leaves none
+          [[ -f "$STATUS_DIR/_packages" ]] || exit 0
           # Runs whose check left a package unchecked close none. Errors of failed checks hold
           # lines of upstream, so the start of a status decides.
           for f in "$STATUS_DIR"/*; do
@@ -1065,8 +1068,17 @@ jobs:
 
           # gh issue list fails when Issues are turned off, so the step reads has_issues first and
           # ends with a notice. Any other failure of the list fails the step.
-          if grep -qsE '^(check_failed|update_failed|held|newer):' "$STATUS_DIR"/* || [[ -s "$STATUS_DIR/_alerts" ]] ||
-            grep -qs . "$STATUS_DIR/_without"; then
+          kinds=false
+          for f in "$STATUS_DIR"/*; do
+            [[ -f "$f" ]] || continue
+            # Errors of failed checks hold lines of upstream, so the start of a status decides
+            first=""
+            IFS= read -r first <"$f" || true
+            case "$first" in
+              check_failed:* | update_failed:* | held:* | newer:*) kinds=true ;;
+            esac
+          done
+          if [[ "$kinds" == true || -s "$STATUS_DIR/_alerts" ]] || grep -qs . "$STATUS_DIR/_without"; then
             has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
             if [[ "$has_issues" == "false" ]]; then
               echo "::notice::Issues are disabled in $GITHUB_REPOSITORY, so the run opens no issue"
@@ -1087,12 +1099,12 @@ jobs:
             titles[$1]=$(gh issue list --label "$1" --state open --limit 1000 --json title --jq '.[].title')
           }
 
-          # Opens an issue with label $1, title $2 and body $3, and turns a
-          # refusal of GitHub into a warning and created=false
+          # Opens an issue with label $1, title $2 and body $3, which goes on stdin since Linux refuses
+          # one argument over 128 KiB, and turns a refusal of GitHub into a warning and created=false
           create_issue() {
             local out
             created=true
-            if out=$(gh issue create --title "$2" --label "$1" --body "$3" 2>&1); then
+            if out=$(printf '%s' "$3" | gh issue create --title "$2" --label "$1" --body-file - 2>&1); then
               echo "$out"
             else
               created=false
@@ -1168,7 +1180,7 @@ jobs:
                 ;;
               "updated: "* | "downgrade: "*)
                 # The alerts of a published update are notices, since a hold stops the update
-                if awk -F'\t' -v p="$pkg_name" '$1 == p { found = 1 } END { exit !found }' "$STATUS_DIR/_alerts" 2>/dev/null; then
+                if awk -F'\t' -v p="$pkg_name" '$1 "" == p "" { found = 1 } END { exit !found }' "$STATUS_DIR/_alerts" 2>/dev/null; then
                   open_issue update-notice 1d76db "Published update needs a hand edit" "🔔 $pkg_name: ${status#*: } notice" alert_issue_body "$status_file"
                 fi
                 ;;

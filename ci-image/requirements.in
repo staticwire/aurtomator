@@ -1,0 +1,3 @@
+# The Codecov CLI of the test job in ci.yml. requirements.txt pins it and its dependencies by
+# hash, and Dependabot compiles it again from this file
+codecov-cli

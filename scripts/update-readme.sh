@@ -4,6 +4,9 @@
 # <!-- BADGES:START -->, <!-- BADGES:END -->, <!-- PACKAGES:START --> and <!-- PACKAGES:END -->
 #
 # Usage: ./scripts/update-readme.sh
+#
+# Exits with 3 when it leaves README.md as it is for its shape: a link, no file or broken markers.
+# The run-as-builder action turns that code into a warning, so the run goes on.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -15,11 +18,11 @@ readonly STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
 
 if [[ -L "$README" ]]; then
   log_err "README.md is a symbolic link, so the update would copy the text of the file it points to into README.md"
-  exit 1
+  exit 3
 fi
 if [[ ! -f "$README" ]]; then
   log_err "README.md not found"
-  exit 1
+  exit 3
 fi
 
 # Fixed names such as README.md.tmp can be links that a commit added
@@ -69,16 +72,16 @@ if ((${#pkg_files[@]} == 0)); then
   exit 0
 fi
 
-check_markers "$PKG_START" "$PKG_END" || exit 1
+check_markers "$PKG_START" "$PKG_END" || exit 3
 has_badges=false
 if grep -qxF -- "$BADGES_START" "$README"; then
-  check_markers "$BADGES_START" "$BADGES_END" || exit 1
+  check_markers "$BADGES_START" "$BADGES_END" || exit 3
   has_badges=true
   # The badge rewrite drops the lines between its markers, so a marker of the table there would go
   line_of() { grep -nxF -- "$1" "$README" | cut -d: -f1; }
   if (($(line_of "$BADGES_END") > $(line_of "$PKG_START") && $(line_of "$PKG_END") > $(line_of "$BADGES_START"))); then
     log_err "README.md has a marker of one pair between $BADGES_START and $BADGES_END or between $PKG_START and $PKG_END; keep the two pairs apart"
-    exit 1
+    exit 3
   fi
 fi
 
@@ -151,20 +154,28 @@ table_header=$'<table>\n<tr><th>Package</th><th>Version</th><th>Strategy</th><th
 
 pkg_count=0
 for pkg_file in "${pkg_files[@]}"; do
-  name=$(pkg_get "$pkg_file" .name)
-  current=$(pkg_get "$pkg_file" '.current // "-"')
-  strategy=$(pkg_get "$pkg_file" .strategy)
-  last_updated=$(pkg_get "$pkg_file" '.last_updated // "-"')
-  arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")')
-
-  status_file="${STATUS_DIR}/${name}"
-  if [[ -f "$status_file" ]]; then
-    status=$(status_label "$(cat "$status_file")" "$arches_out" "$current")
-  elif [[ "$current" == "-" || "$current" == "null" ]]; then
-    status="✨ new"
-    current="-"
+  name=${pkg_file##*/}
+  name=${name%.yml}
+  # Rows go by the file name, as the statuses do. The runs fail a link and a YAML whose name is
+  # not its file name, a YAML that yq cannot read among them.
+  if [[ -L "$pkg_file" ]] || ! package_name "$pkg_file" >/dev/null 2>&1; then
+    (LC_ALL=C && [[ "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]) || continue
+    current="-" strategy="-" last_updated="-" status="❌ failed"
   else
-    status="✅ tracking"
+    current=$(pkg_get "$pkg_file" '.current // "-"')
+    strategy=$(pkg_get "$pkg_file" .strategy)
+    last_updated=$(pkg_get "$pkg_file" '.last_updated // "-"')
+    # arch_out values that are no map count as none, as in the check
+    arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")' 2>/dev/null) || arches_out=""
+    status_file="${STATUS_DIR}/${name}"
+    if [[ -f "$status_file" ]]; then
+      status=$(status_label "$(cat "$status_file")" "$arches_out" "$current")
+    elif [[ "$current" == "-" || "$current" == "null" ]]; then
+      status="✨ new"
+      current="-"
+    else
+      status="✅ tracking"
+    fi
   fi
 
   link="<a href=\"https://aur.archlinux.org/pkgbase/$(html_text "$name")\">$(html_text "$name")</a>"

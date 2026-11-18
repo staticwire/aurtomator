@@ -58,7 +58,7 @@ echo "$version"
 
 ## Functions of common.sh
 
-`http_get <url> [curl option]...` runs `curl -sfL --max-time 30` over `https` only, redirects included, and retries timeouts, refused connections and HTTP 408, 429, 500, 502, 503, 504, 522 and 524 answers twice, 5 seconds apart. It reads at most `MAX_ANSWER_MB` megabytes and sends the User-Agent of `USER_AGENT`. Failures print the URL and the curl error and name Cloudflare challenges. In `check-all.sh` runs, hosts that timed out without an answer fail every later request at once. Caller options come after these and win.
+`http_get <url> [curl option]...` runs `curl -sfL --max-time 30` over `https` only, redirects included, and retries timeouts, refused connections and HTTP 408, 429, 500, 502, 503, 504, 522 and 524 answers twice, 5 seconds apart or after the wait of a `Retry-After` header, and starts no retry later than 75 seconds after the first attempt. It reads at most `MAX_ANSWER_MB` megabytes and sends the User-Agent of `USER_AGENT`. Failures print the URL and the curl error and name Cloudflare challenges. In `check-all.sh` runs, hosts that timed out without an answer fail every later request at once. Caller options come after these and win.
 
 | Function | Does |
 |---|---|

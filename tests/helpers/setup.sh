@@ -195,8 +195,13 @@ archive_missing() {
   arch_source_url "$1" "$2" >>"$TEST_TMPDIR/missing"
 }
 
-# Mock curl that answers HEAD requests with 404 for URLs in $TEST_TMPDIR/missing,
-# with no status for those in silent and with a file otherwise; logs to heads.log
+# Make the archive of arch $1 at version $2 answer 503
+archive_refused() {
+  arch_source_url "$1" "$2" >>"$TEST_TMPDIR/refused"
+}
+
+# Mock curl that answers HEAD requests with 404 for URLs in $TEST_TMPDIR/missing, with 503 for
+# those in refused, with no status for those in silent and with a file otherwise; logs to heads.log
 mock_heads() {
   cat >"$MOCK_DIR/curl" <<EOF
 #!/usr/bin/env bash
@@ -205,6 +210,10 @@ echo "\$url" >>"$TEST_TMPDIR/heads.log"
 if grep -qxF -e "\$url" "$TEST_TMPDIR/silent" 2>/dev/null; then
   printf '000 '
   exit 28
+fi
+if grep -qxF -e "\$url" "$TEST_TMPDIR/refused" 2>/dev/null; then
+  printf '503 text/html; charset=utf-8'
+  exit 0
 fi
 if grep -qxF -e "\$url" "$TEST_TMPDIR/missing" 2>/dev/null; then
   printf '404 text/html; charset=utf-8'

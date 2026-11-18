@@ -370,10 +370,12 @@ arch_urls() {
   done < <(awk -v k="$key" 'index($0, k) == 1 { print substr($0, length(k) + 1) }' "$1")
 }
 
-# Returns 0 when URL $1 answers a HEAD request with a file, 1 for a status of
-# 400 or more or an HTML page, and 2 when it gives no status
+# Returns 0 when URL $1 answers a HEAD request with a file, 1 for 404, 410 or an HTML page, 2 when
+# it gives no status, and 3 for another status of 400 or more, which PROBE_CODE then holds
+# shellcheck disable=SC2034
 probe_url() {
   local response code type
+  PROBE_CODE=""
   request_begin "$1" || return 2
   response=$(curl --globoff -sIL -o /dev/null -w '%{http_code} %{content_type}' \
     --max-time 10 --max-redirs 5 --proto '=https' --proto-redir '=https' "$1" 2>/dev/null) || {
@@ -386,7 +388,14 @@ probe_url() {
   type="${type//[[:space:]]/}"
   # The server chooses the status line, and (( )) would run a subscript
   [[ "$code" =~ ^[1-5][0-9]{2}$ ]] || return 2
-  if ((10#$code >= 400)) || [[ "${type,,}" == text/html ]]; then
+  [[ "$code" != 404 && "$code" != 410 ]] || return 1
+  # 429 and 5xx tell nothing about the archive, and their error pages are HTML
+  if ((10#$code >= 400)); then
+    PROBE_CODE=$code
+    request_failed "$1"
+    return 3
+  fi
+  if [[ "${type,,}" == text/html ]]; then
     return 1
   fi
 }

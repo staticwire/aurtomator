@@ -235,6 +235,16 @@ gpg_is_primary_key() {
   [[ -n "$fpr" && "${fpr^^}" == *"${id^^}" ]]
 }
 
+# gpg also takes e-mail addresses, names and IDs with !, which can select the primary key
+# Args: $1=key id. Prints its hex digits in upper case, without spaces and 0x
+gpg_key_id() {
+  local id="${1//[[:space:]]/}"
+  id=${id#0[xX]}
+  id=${id^^}
+  [[ "$id" =~ ^([0-9A-F]{8}|[0-9A-F]{16}|[0-9A-F]{40}|[0-9A-F]{64})$ ]] || return 1
+  printf '%s\n' "$id"
+}
+
 # The temporary keyring holds the signing subkey without a passphrase; setup_gpg
 # sets this as the EXIT trap, so Ctrl-C or a closed terminal does not leave it
 TMP_GNUPG=""
@@ -271,6 +281,15 @@ setup_gpg() {
     ok "GPG signing skipped"
     return 0
   fi
+
+  local key_id
+  if ! key_id=$(gpg_key_id "$GPG_KEY_ID"); then
+    fail "$GPG_KEY_ID is no key ID or fingerprint in hex"
+    printf "\n  Pass the ID of the signing subkey, the ssb line with [S] in:\n"
+    printf "    gpg --list-secret-keys --keyid-format long\n\n"
+    return 1
+  fi
+  GPG_KEY_ID=$key_id
 
   local key_info
   if ! key_info=$(gpg --list-secret-keys --keyid-format long "$GPG_KEY_ID" 2>/dev/null); then
@@ -313,11 +332,15 @@ setup_gpg() {
       return 0
     fi
 
-    # Passphrase removal runs in a temporary keyring with the signing subkey alone
+    # Passphrase removal runs in a temporary keyring with the signing subkey alone. Its agent asks
+    # with the pinentry that gpg-agent.conf of the user names, as the first dialog does.
     TMP_GNUPG=$(mktemp -d)
     trap remove_tmp_gnupg EXIT
     chmod 700 "$TMP_GNUPG"
-    echo "pinentry-program /usr/bin/pinentry" >"$TMP_GNUPG/gpg-agent.conf"
+    local pinentry
+    pinentry=$(awk '$1 == "pinentry-program" { sub(/^[ \t]*pinentry-program[ \t]+/, ""); p = $0 } END { print p }' \
+      "${GNUPGHOME:-$HOME/.gnupg}/gpg-agent.conf" 2>/dev/null) || pinentry=""
+    echo "pinentry-program ${pinentry:-/usr/bin/pinentry}" >"$TMP_GNUPG/gpg-agent.conf"
 
     # The ! suffix exports this subkey alone; pinentry asks for its passphrase
     local exported_key

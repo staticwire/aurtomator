@@ -85,7 +85,7 @@ runs:
             for name in _arches _assets; do
               [[ -f "$STATUSES/$name" && ! -L "$STATUSES/$name" ]] || continue
               install -d "$WORK/.status"
-              awk -F'\t' -v p="$PACKAGE" '$1 == p' "$STATUSES/$name" >"$WORK/.status/$name"
+              awk -F'\t' -v p="$PACKAGE" '$1 "" == p ""' "$STATUSES/$name" >"$WORK/.status/$name"
               chmod 0644 "$WORK/.status/$name"
             done
           fi
@@ -124,8 +124,15 @@ runs:
         echo "::stop-commands::$token"
         rc=0
         (cd "$WORK" && sudo "--preserve-env=$keep" -u builder "$code/scripts/check-all.sh" "${check_args[@]}") 2>&1 | cat || rc=$?
+        readme_rc=0
         if [[ "$rc" -eq 0 && "$README_TOO" == true ]]; then
-          (cd "$WORK" && sudo "--preserve-env=$keep" -u builder "$code/scripts/update-readme.sh") 2>&1 | cat || rc=$?
+          (cd "$WORK" && sudo "--preserve-env=$keep" -u builder "$code/scripts/update-readme.sh") 2>&1 | cat || readme_rc=$?
         fi
         echo "::$token::"
+        # update-readme.sh ends with 3 when it leaves README.md as it is, and the run goes on
+        if [[ "$readme_rc" -eq 3 ]]; then
+          echo "::warning::README.md stays as it is, the log of this step names the reason"
+        elif [[ "$readme_rc" -ne 0 ]]; then
+          rc=$readme_rc
+        fi
         exit "$rc"

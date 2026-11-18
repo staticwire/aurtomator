@@ -1187,14 +1187,18 @@ MOCKCURL
   chmod +x "$MOCK_DIR/curl"
 }
 
-@test "arch.sh: probe_url tells a file from a missing one and from no answer" {
+# 429 and 5xx tell nothing about the archive, and their error pages are HTML
+@test "arch.sh: probe_url tells a file from a missing one, from no answer and from another error" {
   local entry rc expected
   local -a cases=(
     "0|0|200 application/octet-stream"
     "0|0|399 application/gzip"
-    "0|1|400 application/octet-stream"
     "0|1|404 text/html; charset=utf-8"
+    "0|1|410 application/octet-stream"
     "0|1|200 Text/HTML; charset=utf-8"
+    "0|3|400 application/octet-stream"
+    "0|3|429 text/html; charset=utf-8"
+    "0|3|503 text/html"
     "0|2|000 "
     "0|2|BASH_VERSINFO[\$(id>$TEST_TMPDIR/pwned)] text/plain"
     "7|2|000 "
@@ -1211,6 +1215,9 @@ MOCKCURL
       echo "$entry gave $rc"
       return 1
     }
+    if ((rc == 3)); then
+      [ "$PROBE_CODE" = "${CURL_W%% *}" ]
+    fi
   done
   [ ! -e "$TEST_TMPDIR/pwned" ]
   [ "$(head -1 "$TEST_TMPDIR/curl.args")" = "--globoff -sIL -o /dev/null -w %{http_code} %{content_type} --max-time 10 --max-redirs 5 --proto =https --proto-redir =https https://example.com/demo-aarch64.tar.gz" ]
@@ -1246,7 +1253,7 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = '--globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
+  [ "$output" = '--globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --retry-max-time 75 --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
 }
 
 # Helper: a curl that writes $CURL_STDERR to stderr, as its -w does on a
@@ -1452,9 +1459,9 @@ MOCKCURL
   ! grep -q $'[\t\033]' "$TEST_TMPDIR/.status/pkg"
 }
 
-# --prepare and --publish read the statuses of the check run, and a YAML that YAML cannot read
-# gets one under its file name
-@test "check-all: fails a YAML it cannot read under its file name, in the check run alone" {
+# The check, the README and publish fail a YAML that YAML cannot read under its file name and go
+# on with the other packages, and prepare hands over no status for it
+@test "check-all: fails a YAML it cannot read under its file name and goes on with the others" {
   stand_in_strategy step 2.0.0
   create_test_package "pkg" "step" "current: '1.0.0'"
   printf 'name: [broken\n' >"$TEST_TMPDIR/packages/bad.yml"
@@ -1463,11 +1470,40 @@ MOCKCURL
   [ "$(cat "$TEST_TMPDIR/.status/bad")" = "check_failed: packages/bad.yml: name '' must equal the file name" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
 
+  printf '%s\n' "# test" "<!-- PACKAGES:START -->" "<!-- PACKAGES:END -->" >"$TEST_TMPDIR/README.md"
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/bad">bad</a></td><td>-</td><td nowrap>-</td><td nowrap>-</td><td nowrap>❌ failed</td></tr>' "$TEST_TMPDIR/README.md"
+  grep -qF '<td nowrap>✨ 2.0.0 available</td>' "$TEST_TMPDIR/README.md"
+
+  printf 'up_to_date\n' >"$TEST_TMPDIR/.status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/bad")" = "check_failed: packages/bad.yml: name '' must equal the file name" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "up_to_date" ]
+
   rm -rf "$TEST_TMPDIR/.status"
   mkdir -p "$TEST_TMPDIR/.status"
   printf 'new_version: 2.0.0\n' >"$TEST_TMPDIR/.status/pkg"
   run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/out/status/bad" ]
+}
+
+# The statuses and the issues of such a YAML go by its file name
+@test "update-readme: names the row of a link or of a YAML under another name by its file" {
+  printf "name: old-name\nstrategy: github-release\ncurrent: '3.0'\n" >"$TEST_TMPDIR/packages/renamed.yml"
+  printf "name: linked\nstrategy: github-release\ncurrent: '1.0'\n" >"$TEST_TMPDIR/outside.yml"
+  ln -s "$TEST_TMPDIR/outside.yml" "$TEST_TMPDIR/packages/linked.yml"
+  echo "check_failed: packages/renamed.yml: name 'old-name' must equal the file name" >"$TEST_TMPDIR/.status/renamed"
+  echo "check_failed: packages/linked.yml is a link, and the runs read regular files alone" >"$TEST_TMPDIR/.status/linked"
+  printf '%s\n' "# test" "<!-- PACKAGES:START -->" "<!-- PACKAGES:END -->" >"$TEST_TMPDIR/README.md"
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/renamed">renamed</a></td><td>-</td><td nowrap>-</td><td nowrap>-</td><td nowrap>❌ failed</td></tr>' "$TEST_TMPDIR/README.md"
+  grep -qF '<tr><td><a href="https://aur.archlinux.org/pkgbase/linked">linked</a></td><td>-</td><td nowrap>-</td><td nowrap>-</td><td nowrap>❌ failed</td></tr>' "$TEST_TMPDIR/README.md"
+  run grep -c old-name "$TEST_TMPDIR/README.md"
+  [ "$output" = "0" ]
 }
 
 @test "check-update: refuses a strategy that is no plain name" {
@@ -1588,7 +1624,7 @@ MOCKGIT
   run aur_clone https://aur.archlinux.org/pkg.git "$TEST_TMPDIR/aur" --no-checkout
   [ "$status" -eq 0 ]
   [ ! -s "$AURTOMATOR_HOSTS_DIR/request" ]
-  [ "$(cat "$TEST_TMPDIR/git.log")" = "ls-remote --tags --refs https://git.example/repo.git|https://git.example/repo.git https://git.example/repo.git/info/refs?service=git-upload-pack
+  [ "$(cat "$TEST_TMPDIR/git.log")" = "-c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 ls-remote --tags --refs https://git.example/repo.git|https://git.example/repo.git https://git.example/repo.git/info/refs?service=git-upload-pack
 clone --no-checkout https://aur.archlinux.org/pkg.git $TEST_TMPDIR/aur|https://aur.archlinux.org/pkg.git https://aur.archlinux.org/pkg.git/info/refs?service=git-upload-pack" ]
 }
 
@@ -2069,7 +2105,7 @@ EOF
   ln -s outside/readme "$TEST_TMPDIR/README.md"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"README.md is a symbolic link"* ]]
   [ -L "$TEST_TMPDIR/README.md" ]
 }
@@ -2890,7 +2926,7 @@ EOF
   rm -f "$TEST_TMPDIR/README.md"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"README.md not found"* ]]
 }
 
@@ -2903,7 +2939,7 @@ no markers here
 EOF
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"PACKAGES:START"* ]]
 }
 
@@ -2916,7 +2952,7 @@ EOF
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"No <!-- PACKAGES:END --> marker found in README.md"* ]]
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
@@ -2938,7 +2974,7 @@ EOF
   git -C "$TEST_TMPDIR" init -q
   create_test_package "mypkg" "github-release" $'upstream:\n  project: owner/repo'
   run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"No <!-- PACKAGES:START --> marker found in README.md"* ]]
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
@@ -2975,7 +3011,7 @@ EOF
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"No <!-- BADGES:END --> marker found in README.md"* ]]
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
@@ -2988,7 +3024,7 @@ EOF
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"README.md has <!-- PACKAGES:END --> above <!-- PACKAGES:START -->"* ]]
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
@@ -3000,7 +3036,7 @@ EOF
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"README.md has the <!-- PACKAGES:START --> line 2 times, it needs it once"* ]]
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
@@ -3012,7 +3048,7 @@ EOF
   cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
   git -C "$TEST_TMPDIR" init -q
   run "$TEST_TMPDIR/scripts/update-readme.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"README.md has <!-- BADGES:END --> above <!-- BADGES:START -->"* ]]
   cmp "$TEST_TMPDIR/README.orig" "$TEST_TMPDIR/README.md"
 }
@@ -3028,7 +3064,7 @@ EOF
     printf '<!-- %s -->\ntext\n' $order >>"$TEST_TMPDIR/README.md"
     cp "$TEST_TMPDIR/README.md" "$TEST_TMPDIR/README.orig"
     run "$TEST_TMPDIR/scripts/update-readme.sh"
-    [ "$status" -eq 1 ] || {
+    [ "$status" -eq 3 ] || {
       echo "taken: $order"
       return 1
     }
@@ -4992,6 +5028,15 @@ arch_wait:
   [ "$ARCH_RC" -eq 0 ]
   [ "$ARCH_OUT" = $'|\n|' ]
   [ ! -e "$TEST_TMPDIR/heads.log" ]
+}
+
+# After 24 h of arch_wait, a 503 taken for a missing archive would publish the version without the arch
+@test "check-arch: fails the check on an error status other than 404 or 410" {
+  temurin_package "current: 28+22"
+  archive_refused aarch64 28+23
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 1 ]
+  grep -qF "$(arch_source_url aarch64 28+23) answered with status 503" "$TEST_TMPDIR/arch.err"
 }
 
 @test "check-arch: a commit of arch_out missing from the AUR fails the check" {

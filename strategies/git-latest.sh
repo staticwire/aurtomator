@@ -48,11 +48,15 @@ if [[ -n "$branch" ]]; then
   clone_args+=("--branch=$branch")
 fi
 git_request_begin "$repo_url" || exit 1
-GIT_ALLOW_PROTOCOL=https git clone "${clone_args[@]}" "$repo_url" "$tmp_dir/repo" || {
+# Servers send any pack, whatever the filter asks. The clone takes the limits of a fetch in verify,
+# with 1 GiB for the pack and for one object; an ignored SIGXFSZ makes a write past it fail, no dump.
+if ! (trap '' XFSZ && ulimit -f $((1024 * 1024)) && GIT_ALLOC_LIMIT=$((1024 * 1024 * 1024)) GIT_ALLOW_PROTOCOL=https \
+  git -c pack.threads=1 -c core.bigFileThreshold=16m -c fetch.unpackLimit=1 -c http.lowSpeedLimit=102400 \
+  -c http.lowSpeedTime=60 clone "${clone_args[@]}" "$repo_url" "$tmp_dir/repo"); then
   request_end 1
   echo "Failed to clone $repo_url" >&2
   exit 1
-}
+fi
 request_end
 
 if [[ -n "$describe" ]]; then

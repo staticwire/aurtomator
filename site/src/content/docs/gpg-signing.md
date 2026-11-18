@@ -35,6 +35,8 @@ Pass the key ID:
 ./aurtomator.sh setup --gpg-key <subkey-id>
 ```
 
+The key ID is the hex ID of 8, 16, 40 or 64 digits that gpg prints, with or without its spaces and `0x`. The setup refuses e-mail addresses, names and IDs that end in `!`, since gpg can select the primary key for them.
+
 Or run the GPG step and answer `y` to "Enable GPG commit signing? (y/N)":
 
 ```bash
@@ -51,6 +53,6 @@ CI needs keys without a passphrase. When your subkey has one, the setup script m
 | 2nd | your passphrase again | unlocks the key in the temporary keyring, whose GPG agent has no cached passphrase |
 | 3rd | nothing, press OK | sets an empty passphrase on the copy |
 
-The passphrase goes through pinentry alone and never appears in shell variables, arguments, the environment or pipes. Your key stays as it is. With `gh`, the copy becomes the secret `GPG_SIGNING_KEY`, and without `gh` the script prints it for you to paste. The script deletes the temporary keyring right after, and also when it stops early, on errors, on `Ctrl-C` or when its terminal closes.
+The temporary keyring asks through the `pinentry-program` of your `gpg-agent.conf`, so the three dialogs come from the same pinentry. The passphrase goes through pinentry alone and never appears in shell variables, arguments, the environment or pipes. Your key stays as it is. With `gh`, the copy becomes the secret `GPG_SIGNING_KEY`, and without `gh` the script prints it for you to paste. The script deletes the temporary keyring right after, and also when it stops early, on errors, on `Ctrl-C` or when its terminal closes.
 
 The copy exists only while the script runs, so run the two steps together: `./aurtomator.sh setup gpg secrets`. Run alone, `secrets` does not set `GPG_SIGNING_KEY` for keys with a passphrase and prints that command.

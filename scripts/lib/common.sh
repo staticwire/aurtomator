@@ -115,6 +115,24 @@ pkg_file() {
   echo "$file"
 }
 
+# Print the name of package file $1, or fail for a name other than the file name, which
+# validate-pkg.sh refuses too: the name reaches the paths of statuses and prepared files
+package_name() {
+  local name stem="${1##*/}"
+  stem="${stem%.yml}"
+  name=$(pkg_get "$1" .name)
+  if [[ "$name" != "$stem" ]]; then
+    log_err "packages/${stem}.yml: name ${name@Q} must equal the file name"
+    return 1
+  fi
+  # Names of the AUR form, one a line in _packages, start with no _ as the records in .status do
+  if ! (LC_ALL=C && [[ "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
+    log_err "packages/${stem@Q}.yml: the name must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"
+    return 1
+  fi
+  printf '%s\n' "$name"
+}
+
 # === HTTP ===
 
 # Percent-encode tag $1 for the path of an API URL, byte by byte, keeping /
@@ -237,9 +255,10 @@ remember_host() {
   fi
 }
 
-# Args: $1=URL, the rest: curl options, which come after these and win
+# Args: $1=URL, the rest: curl options, which come after these and win. curl waits the
+# Retry-After of a server before a retry, so no retry starts 75 s after the first try.
 _curl_get() {
-  curl --globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused \
+  curl --globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --retry-max-time 75 \
     --proto '=https' --proto-redir '=https' --max-filesize "${MAX_ANSWER_MB:-50}M" \
     -A "$USER_AGENT" -w "$HTTP_FAILURE" "${@:2}" "$1"
 }
@@ -466,12 +485,13 @@ cooldown_until() {
   date -u -d "$last + $days days" +%F
 }
 
-# Print the tag names of the git repository at HTTPS URL $1, one per line
+# Print the tag names of the git repository at HTTPS URL $1, one per line. Runs with --update
+# have no time limit, so a stall ends the listing as it ends a fetch in verify.
 remote_tags() {
   local rc=0
   git_request_begin "$1" || return 1
-  GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 \
-    git ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||' || rc=$?
+  GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 \
+    ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||' || rc=$?
   request_end "$rc"
   return "$rc"
 }
