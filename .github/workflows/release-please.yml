@@ -14,6 +14,12 @@ jobs:
     if: github.repository == 'staticwire/aurtomator'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # actions/attest signs the archive with a Sigstore certificate for the OIDC token of this job and
+    # stores the attestation; every write to the repository goes through the token of the App
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
     steps:
       # GitHub runs the CI of a pull request opened with the workflow token only after an approval,
@@ -32,3 +38,52 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Only the run of the release commit signs its release, so a later push never signs older code
+      # with the provenance of a newer commit; a rerun of that run finds the release again
+      - name: Find the release to sign
+        id: find
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          version=$(jq -r '.["."]' .github/.release-please-manifest.json)
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The manifest holds no version: $version"
+            exit 1
+          fi
+          tag_sha=$(gh api "repos/$REPO/commits/v$version" --jq .sha) || tag_sha=""
+          if [[ "$tag_sha" != "$SHA" ]]; then
+            echo "v$version is no release of this commit"
+            exit 0
+          fi
+          assets=$(gh release view "v$version" -R "$REPO" --json assets --jq '.assets[].name')
+          if grep -qxF "aurtomator-$version.tar.gz" <<<"$assets"; then
+            echo "v$version has its archive"
+            exit 0
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Build the archive
+        if: steps.find.outputs.version != ''
+        env:
+          VERSION: ${{ steps.find.outputs.version }}
+        run: git archive --format=tar.gz --prefix="aurtomator-$VERSION/" -o "aurtomator-$VERSION.tar.gz" HEAD
+
+      - if: steps.find.outputs.version != ''
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: aurtomator-${{ steps.find.outputs.version }}.tar.gz
+
+      - name: Attach the archive
+        if: steps.find.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.find.outputs.version }}
+        run: gh release upload "v$VERSION" "aurtomator-$VERSION.tar.gz" -R "$REPO"

@@ -54,6 +54,8 @@ aurtomator follows semantic versioning, and `VERSION` holds the version of the c
 
 release-please runs with the token of a GitHub App of the repository, which reads and writes contents, issues and pull requests, made from the variable `RELEASE_APP_CLIENT_ID` and the secret `RELEASE_APP_PRIVATE_KEY`. With the workflow token, GitHub would run the CI of the release PR only after an approval.
 
+After release-please publishes a release, the workflow attaches `aurtomator-X.Y.Z.tar.gz`, an archive of the release commit that `actions/attest` signs with a Sigstore certificate of the workflow. Only the run of the release commit builds the archive, and a rerun of that run attaches an archive that a failed run left out.
+
 ## Adding a new strategy
 
 1. Create `strategies/<name>.sh` from the closest strategy. It takes the package name as its only argument, reads its settings with `pkg_get`, prints one version on stdout and exits non-zero on failure, see [Custom strategies](https://aurtomator.dev/custom-strategies/).

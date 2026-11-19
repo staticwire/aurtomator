@@ -63,7 +63,7 @@ permission_lines() {
     'notify-failure.yml {"actions":"read","issues":"write"}' \
     'notify-failure.yml ["notify",null]' \
     'release-please.yml {"contents":"read"}' \
-    'release-please.yml ["release-please",null]' \
+    'release-please.yml ["release-please",{"contents":"read","id-token":"write","attestations":"write"}]' \
     'validate.yml {"contents":"read"}' \
     'validate.yml ["image",null]' \
     'validate.yml ["packages",null]' >"$BATS_TEST_TMPDIR/expected"
@@ -602,8 +602,6 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 # GitHub runs the CI of a pull request opened with the workflow token only
 # after someone with write access approves it, and main requires that CI
 @test "release-please: opens the release PR with the token of the release App" {
-  run yq '.jobs[].steps | length' "$RELEASE"
-  [ "$output" = "2" ]
   run yq '.jobs[].steps[0].uses' "$RELEASE"
   [[ "$output" =~ ^actions/create-github-app-token@[0-9a-f]{40}$ ]]
   run grep -E '^ +- uses: actions/create-github-app-token@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' "$RELEASE"
@@ -612,8 +610,6 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   [ "$output" = '["app-token",{"client-id":"${{ vars.RELEASE_APP_CLIENT_ID }}","private-key":"${{ secrets.RELEASE_APP_PRIVATE_KEY }}","permission-contents":"write","permission-issues":"write","permission-pull-requests":"write"}]' ]
   run yq '.jobs[].steps[1].with.token' "$RELEASE"
   [ "$output" = '${{ steps.app-token.outputs.token }}' ]
-  run yq '.jobs[] | has("permissions")' "$RELEASE"
-  [ "$output" = "false" ]
 }
 
 @test "release-please: writes VERSION, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
@@ -629,6 +625,124 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
   run yq -r '.["."]' "$GITHUB_DIR/.release-please-manifest.json"
   [ "$output" = "$version" ]
+}
+
+# The archive steps attach to the release that release-please creates in the same run
+@test "release-please: signs an archive of the release after release-please, in this order" {
+  run yq -r '.jobs[].steps[] | .name // (.uses | sub("@.*"; ""))' "$RELEASE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' actions/create-github-app-token googleapis/release-please-action \
+    actions/checkout 'Find the release to sign' 'Build the archive' actions/attest 'Attach the archive')" ]
+}
+
+@test "release-please: pins checkout and attest by SHA with the version in a comment" {
+  local action
+  for action in actions/checkout actions/attest; do
+    run grep -E "^ +(- )?uses: $action@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$" "$RELEASE"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "release-please: builds, attests and attaches only the archive that the find step names" {
+  run yq -o=json -I=0 '.jobs[].steps[] | select(.uses // "" | test("^actions/checkout@")) | .with' "$RELEASE"
+  [ "$output" = '{"persist-credentials":false}' ]
+  run yq -r '.jobs[].steps[] | select(.uses // "" | test("^actions/attest@")) | .with["subject-path"]' "$RELEASE"
+  [ "$output" = 'aurtomator-${{ steps.find.outputs.version }}.tar.gz' ]
+  run yq -r '.jobs[].steps[] | select(.name == "Build the archive" or .name == "Attach the archive" or
+    (.uses // "" | test("^actions/attest@"))) | .if' "$RELEASE"
+  [ "$output" = "$(printf '%s\n' "steps.find.outputs.version != ''" "steps.find.outputs.version != ''" \
+    "steps.find.outputs.version != ''")" ]
+  run yq -r '.jobs[].steps[] | select(.name == "Find the release to sign" or .name == "Attach the archive") |
+    .env.GH_TOKEN' "$RELEASE"
+  [ "$output" = "$(printf '%s\n' '${{ steps.app-token.outputs.token }}' '${{ steps.app-token.outputs.token }}')" ]
+}
+
+# Runs step $1 of release-please.yml in a checkout whose manifest holds $MANIFEST, with a gh that
+# prints $TAG_SHA for the commit of a tag and $ASSETS for the assets of a release
+run_release_step() {
+  local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$bin" "$ws/.github"
+  printf '{".": "%s"}\n' "${MANIFEST:-}" >"$ws/.github/.release-please-manifest.json"
+  cat >"$bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GH_LOG"
+case "$1 $2" in
+  "api repos/"*)
+    [[ -n "${TAG_SHA:-}" ]] || exit 1
+    printf '%s\n' "$TAG_SHA"
+    ;;
+  "release view") printf '%s\n' "${ASSETS:-}" ;;
+esac
+EOF
+  chmod +x "$bin/gh"
+  yq ".jobs[].steps[] | select(.name == \"$1\") | .run" "$RELEASE" >"$BATS_TEST_TMPDIR/step.sh"
+  GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  : >"$GH_LOG"
+  : >"$BATS_TEST_TMPDIR/output"
+  cd "$ws"
+  run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" REPO=owner/repo \
+    SHA=abc123 TAG_SHA="${TAG_SHA:-}" ASSETS="${ASSETS:-}" VERSION="${VERSION:-}" \
+    bash -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+}
+
+# Reruns of the release job find the release again until it has its archive
+@test "release-please: the find step names the release of the commit of the run without an archive" {
+  MANIFEST=0.13.1 TAG_SHA=abc123 run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
+  grep -qxF 'api repos/owner/repo/commits/v0.13.1 --jq .sha' "$GH_LOG"
+  grep -qxF 'release view v0.13.1 -R owner/repo --json assets --jq .assets[].name' "$GH_LOG"
+}
+
+# Later pushes would sign the code of an older release with the provenance of a newer commit
+@test "release-please: the find step leaves the release of another commit" {
+  MANIFEST=0.13.0 TAG_SHA=def456 run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  run grep -c '^release ' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "release-please: the find step leaves a version without a tag" {
+  MANIFEST=0.13.1 TAG_SHA='' run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+}
+
+@test "release-please: the find step leaves a release that has its archive" {
+  MANIFEST=0.13.1 TAG_SHA=abc123 ASSETS=$'notes.txt\naurtomator-0.13.1.tar.gz' run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+}
+
+@test "release-please: the find step stops on a manifest without a version" {
+  MANIFEST='1.0$(touch pwned)' TAG_SHA=abc123 run_release_step "Find the release to sign"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"::error::"* ]]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  [ ! -e pwned ]
+  run grep -c . "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "release-please: the archive holds the commit of the run under aurtomator-<version>/" {
+  local repo="$BATS_TEST_TMPDIR/repo"
+  git init -q "$repo"
+  echo code >"$repo/file"
+  git -C "$repo" add file
+  git -C "$repo" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q -m init
+  yq '.jobs[].steps[] | select(.name == "Build the archive") | .run' "$RELEASE" >"$BATS_TEST_TMPDIR/step.sh"
+  cd "$repo"
+  run env VERSION=0.13.1 bash -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  run tar -tzf aurtomator-0.13.1.tar.gz
+  [ "$output" = "$(printf '%s\n' aurtomator-0.13.1/ aurtomator-0.13.1/file)" ]
+}
+
+@test "release-please: attaches the archive to the release of its version" {
+  VERSION=0.13.1 run_release_step "Attach the archive"
+  [ "$status" -eq 0 ]
+  grep -qxF 'release upload v0.13.1 aurtomator-0.13.1.tar.gz -R owner/repo' "$GH_LOG"
 }
 
 # === check-updates.yml: who decides what ===
