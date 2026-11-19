@@ -71,6 +71,10 @@ case "${*: -1}" in
     tags=(release-1.2 release-1.10 release-1.9)
     ;;
   https://git.example.org/~owner/empty) ;;
+  # More than 2 MB of refs, past an answer limit of 1 MB
+  https://git.example.org/~owner/huge)
+    mapfile -t tags < <(seq -f 'v1.%g' 1 40000)
+    ;;
   *)
     echo "fatal: unexpected repository ${*: -1}" >&2
     exit 128
@@ -78,5 +82,6 @@ case "${*: -1}" in
 esac
 
 for tag in "${tags[@]}"; do
-  printf '%040d\trefs/tags/%s\n' 0 "$tag"
+  # git stops at the first write that fails, such as one past a file size limit
+  printf '%040d\trefs/tags/%s\n' 0 "$tag" || exit 128
 done

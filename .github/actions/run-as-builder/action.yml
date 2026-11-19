@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ""
   keep-env:
-    description: Comma-separated names of the variables of the step that builder keeps
+    description: Comma-separated names of the variables of the step that check-all.sh keeps as builder
     required: false
     default: ""
   package:
@@ -64,22 +64,35 @@ runs:
           exit 1
         fi
         install -d -m 0700 "$WORK"
-        # Copies $1 to $WORK/$2 when it is a regular file, never a link
+        # Copies $1 to $WORK/$2 when it is a regular file of at most $3 bytes, never a link
         take() {
           [[ -f "$1" && ! -L "$1" ]] || return 0
+          if (($(stat -c %s -- "$1") > $3)); then
+            echo "::warning::$2 is larger than $3 bytes, so builder does not get it"
+            return 0
+          fi
           install -D -m 0644 "$1" "$WORK/$2"
         }
+        # The limits of the Hand over step
+        handoff_max() {
+          case "$1" in
+            */base) echo 64 ;;
+            status/*) echo 65536 ;;
+            *) echo 1048576 ;;
+          esac
+        }
+        results_max=16777216
         # The statuses and the handoff come from the artifacts of the run alone, never from
         # the checkout, so only directories that the step names count
         dir_ok() { [[ -n "$1" && -d "$1" && ! -L "$1" ]]; }
         if [[ -n "$PACKAGE" ]]; then
           # One package: its YAML, its status and the records check-all.sh reads
           if [[ -d packages && ! -L packages ]]; then
-            take "packages/$PACKAGE.yml" "packages/$PACKAGE.yml"
+            take "packages/$PACKAGE.yml" "packages/$PACKAGE.yml" "$results_max"
           fi
           if dir_ok "$STATUSES"; then
             for name in "$PACKAGE" _upstream; do
-              take "$STATUSES/$name" ".status/$name"
+              take "$STATUSES/$name" ".status/$name" "$results_max"
             done
             # These records hold a line for each package, and PKGBUILD code of this one reads them
             for name in _arches _assets; do
@@ -90,7 +103,7 @@ runs:
             done
           fi
         else
-          take README.md README.md
+          take README.md README.md "$results_max"
           if [[ -d packages && ! -L packages ]]; then
             for f in packages/*.yml; do
               [[ "${f#packages/}" =~ ^${name_re}\.yml$ ]] || continue
@@ -99,7 +112,7 @@ runs:
                 install -d "$WORK/packages"
                 ln -s "${f#packages/}" "$WORK/$f"
               else
-                take "$f" "$f"
+                take "$f" "$f" "$results_max"
               fi
             done
           fi
@@ -107,7 +120,7 @@ runs:
             for f in "$STATUSES"/*; do
               # The records of the run, such as _upstream, start with _
               [[ "${f##*/}" =~ ^(${name_re}|_[a-z]+)$ ]] || continue
-              take "$f" ".status/${f##*/}"
+              take "$f" ".status/${f##*/}" "$results_max"
             done
           fi
           if dir_ok "$HANDOFF"; then
@@ -116,7 +129,7 @@ runs:
                 # status/_unverified lists the packages that verify did not reach
                 if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
                   [[ "$f" =~ ^status/(${name_re}|_unverified)$ ]]; then
-                  take "$HANDOFF/$f" "handoff/$f"
+                  take "$HANDOFF/$f" "handoff/$f" "$(handoff_max "$f")"
                 fi
               done
           fi
@@ -133,7 +146,8 @@ runs:
         (cd "$WORK" && sudo "--preserve-env=$keep" -u builder "$code/scripts/check-all.sh" "${check_args[@]}") 2>&1 | cat || rc=$?
         readme_rc=0
         if [[ "$rc" -eq 0 && "$README_TOO" == true ]]; then
-          (cd "$WORK" && sudo "--preserve-env=$keep" -u builder "$code/scripts/update-readme.sh") 2>&1 | cat || readme_rc=$?
+          # update-readme.sh reads GITHUB_REPOSITORY alone, so it gets no token of keep-env
+          (cd "$WORK" && sudo --preserve-env=GITHUB_REPOSITORY -u builder "$code/scripts/update-readme.sh") 2>&1 | cat || readme_rc=$?
         fi
         echo "::$token::"
         # update-readme.sh ends with 3 when it leaves README.md as it is, and the run goes on

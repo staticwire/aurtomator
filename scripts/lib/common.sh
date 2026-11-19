@@ -504,11 +504,21 @@ cooldown_until() {
 # Print the tag names of the git repository at HTTPS URL $1, one per line. Runs with --update
 # have no time limit, so a stall ends the listing as it ends a fetch in verify.
 remote_tags() {
-  local rc=0
-  git_request_begin "$1" || return 1
-  GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 \
-    ls-remote --tags --refs "$1" | cut -f2 | sed 's|^refs/tags/||' || rc=$?
+  local rc=0 refs
+  refs=$(mktemp) || return 1
+  if ! git_request_begin "$1"; then
+    rm -f -- "$refs"
+    return 1
+  fi
+  # The refs take at most MAX_ANSWER_MB, and an ignored SIGXFSZ makes a write past it fail
+  (trap '' XFSZ && ulimit -f $((${MAX_ANSWER_MB:-50} * 1024)) &&
+    GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 exec git -c http.lowSpeedLimit=102400 \
+      -c http.lowSpeedTime=60 ls-remote --tags --refs "$1" >"$refs") || rc=$?
   request_end "$rc"
+  if ((rc == 0)); then
+    cut -f2 <"$refs" | sed 's|^refs/tags/||' || rc=$?
+  fi
+  rm -f -- "$refs"
   return "$rc"
 }
 

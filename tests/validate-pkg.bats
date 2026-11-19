@@ -1699,14 +1699,24 @@ cooldown_days: $value"
   done
 }
 
-# git-tag and git-latest read their upstream with git and send no HTTP request
-@test "validate: upstream.max_answer_mb applies to the strategies that send HTTP requests" {
-  create_test_package "mypkg" "git-tag" "upstream:
-  url: https://example.com/repo.git
+# git-latest clones with limits of its own
+@test "validate: upstream.max_answer_mb applies to the strategies that read answers" {
+  create_test_package "mypkg" "git-latest" "upstream:
+  type: github
+  project: owner/repo
   max_answer_mb: 80"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 1 ]
   [[ "$output" == *"upstream.max_answer_mb applies to the "*" strategies only"* ]]
+}
+
+# The tag listing of git ls-remote takes the answer limit too
+@test "validate: git-tag takes upstream.max_answer_mb" {
+  create_test_package "mypkg" "git-tag" "upstream:
+  url: https://example.com/repo.git
+  max_answer_mb: 80"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
 }
 
 @test "validate: cooldown_days that is not a whole number from 0 to 365 rejected" {

@@ -73,6 +73,32 @@ EOF
 
 # Usage: make_aur_remote <pkg> <PKGBUILD> <.SRCINFO> [file]...; sets AUR_REMOTE
 # and AUR_BASE. git clones it for an AUR URL and fetches upstream.git for https.
+# Adds a canary to PKGBUILD $1: top-level code, a pkgver() and a line of package() that each
+# create a file in $TEST_TMPDIR/canary when the PKGBUILD runs
+add_canary() {
+  local dir="$TEST_TMPDIR/canary"
+  mkdir -p "$dir"
+  # The checks refuse a checksum array below a line with more than assignments, so the
+  # canary comes after the arrays, before the first package()
+  awk -v d="$dir" -v q="'" '
+    /^package[a-z_]*\(\) \{$/ && !top {
+      print "_canary=\"$(touch " q d "/top" q ")\""
+      print "pkgver() { touch " q d "/pkgver" q "; }"
+      print ""
+      top = 1
+    }
+    { print }
+    /^package[a-z_]*\(\) \{$/ { print "  touch " q d "/package" q }
+  ' "$1" >"$1.canary"
+  mv "$1.canary" "$1"
+  grep -q '^_canary=' "$1"
+}
+
+# Succeeds when no code of a PKGBUILD of add_canary ran
+canary_untouched() {
+  [ -d "$TEST_TMPDIR/canary" ] && [ -z "$(ls -A "$TEST_TMPDIR/canary")" ]
+}
+
 make_aur_remote() {
   local work="$TEST_TMPDIR/aur-work-$1"
   AUR_REMOTE="$TEST_TMPDIR/aur-remote/$1.git"

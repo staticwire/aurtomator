@@ -32,7 +32,7 @@ readonly UPSTREAM_KEYS=(
   "gitlab-tag: host project tag_version_regex tag_version_replace max_answer_mb"
   "gitea-tag: host project tag_version_regex tag_version_replace max_answer_mb"
   "gitea-release: host project tag_version_regex tag_version_replace max_answer_mb"
-  "git-tag: url tag_version_regex tag_version_replace"
+  "git-tag: url tag_version_regex tag_version_replace max_answer_mb"
   "git-latest: type url host project branch describe tag_prefix"
   "pypi: registry max_answer_mb"
   "npm: registry max_answer_mb"

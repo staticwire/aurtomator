@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # merge-image starts a run on main after its merge, which starts no workflow by itself
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -78,15 +80,18 @@ jobs:
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
     timeout-minutes: 30
+    # bundler installs the gems of the lock and stops on a gem whose checksum differs from it. The
+    # bundler of the image runs, whatever version the lock names.
+    env:
+      BUNDLE_GEMFILE: ci-image/Gemfile
+      BUNDLE_FROZEN: "true"
+      BUNDLE_PATH: /opt/gems
+      BUNDLE_VERSION: system
     steps:
       - name: Install dependencies
         run: |
           pacman -Sy --noconfirm --needed archlinux-keyring
-          pacman -Su --noconfirm --needed bash bats git go-yq jq curl openssh namcap python ruby ruby-erb
-          # gem would resolve a dependency to its newest release, so every gem
-          # the two need is named here at its version
-          gem install --no-document --ignore-dependencies bashcov:4.0.0 simplecov-cobertura:4.0.0 simplecov:1.3.2 rexml:3.4.4
-          echo "$(ruby -e 'puts Gem.user_dir')/bin" >> "$GITHUB_PATH"
+          pacman -Su --noconfirm --needed bash bats git go-yq jq curl openssh namcap python ruby ruby-erb ruby-bundler
 
       # The Arch image builds no locale and leaves out the locale sources but en_US, and the
       # tests of locales fail in CI without en_US.UTF-8 and the source of tr_TR
@@ -101,9 +106,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install the coverage tools
+        run: bundle install
+
       - name: Run BATS tests with coverage
         run: |
-          bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
+          bundle exec bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
           # Fix absolute paths in Cobertura XML so Codecov can match files
           if [ -f coverage/coverage.xml ]; then
             sed -i "s|<source>.*</source>|<source>.</source>|g" coverage/coverage.xml
@@ -135,16 +143,64 @@ jobs:
   # Runs the pipeline as a packages repository without packages would. Forks get a read-only token,
   # and Dependabot pull requests skip it too, since these permissions would give their code write
   pipeline:
-    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
     uses: ./.github/workflows/check-updates.yml
     permissions:
       contents: write
       issues: write
 
-  # Merges a Dependabot pull request that changes only the CI image, once lint, test, validate and
-  # ci-ok passed; off unless the repository variable CI_IMAGE_AUTO_MERGE is true
+  # Fails a Dependabot pull request that brings a version with a published vulnerability, which
+  # stops merge-image and ci-ok, and opens an issue that lists the vulnerabilities
+  dependency-review:
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - id: review
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: low
+
+      - name: Open an issue for the vulnerabilities
+        if: failure() && steps.review.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          CHANGES: ${{ steps.review.outputs.vulnerable-changes }}
+        run: |
+          # The review also fails when the API fails, and then the log of the review tells why
+          if [[ -z "$CHANGES" ]] || ! jq -e 'any(.[]; (.vulnerabilities | length) > 0)' <<<"$CHANGES" >/dev/null; then
+            echo "The review failed without a vulnerable change, so no issue opens"
+            exit 0
+          fi
+          title="❌ Dependabot #$PR: published vulnerabilities"
+          # Dependabot rebases its pull requests, and each push reviews them again
+          titles=$(gh issue list -R "$REPO" --state open --limit 1000 --json title --jq '.[].title')
+          if grep -qxF -- "$title" <<<"$titles"; then
+            echo "The issue \"$title\" is open already"
+            exit 0
+          fi
+          body="$RUNNER_TEMP/vulnerabilities.md"
+          {
+            echo "Dependabot pull request #$PR brings versions with published vulnerabilities, so it is not merged by itself."
+            echo
+            echo "| Package | Version | Severity | Advisory |"
+            echo "|---|---|---|---|"
+            jq -r '.[] | . as $c | .vulnerabilities[] |
+              "| `\($c.name | gsub("[`|\n\r]"; " "))` | `\($c.version | gsub("[`|\n\r]"; " "))` | \(.severity) | [\(.advisory_ghsa_id)](\(.advisory_url)) \(.advisory_summary | gsub("[|\n\r]"; " ")) |"' <<<"$CHANGES"
+          } >"$body"
+          gh issue create -R "$REPO" --title "$title" --body-file "$body"
+
+  # Merges a Dependabot pull request that changes only files of ci-image/: the image, the gems
+  # and the Python packages of the CI. It waits for the dependency review, and it is off unless
+  # the repository variable CI_IMAGE_AUTO_MERGE is true.
   merge-image:
-    needs: [lint, test, validate, ci-ok]
+    needs: [lint, test, validate, dependency-review, ci-ok]
     if: >-
       vars.CI_IMAGE_AUTO_MERGE == 'true' &&
       github.event_name == 'pull_request' &&
@@ -155,6 +211,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write
 
     steps:
       - name: Merge image update
@@ -165,17 +222,28 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
-          if [[ "$files" != "ci-image/Dockerfile" ]]; then
-            echo "::notice::#$PR changes more than ci-image/Dockerfile and stays open"
+          if [[ -z "$files" ]]; then
+            echo "::notice::#$PR lists no file and stays open"
             exit 0
           fi
+          while IFS= read -r file; do
+            case "$file" in
+              ci-image/Dockerfile | ci-image/Gemfile | ci-image/Gemfile.lock | ci-image/requirements.in | ci-image/requirements.txt) ;;
+              *)
+                echo "::notice::#$PR changes $file and stays open"
+                exit 0
+                ;;
+            esac
+          done <<<"$files"
           # Merges nothing when the branch moved after the checks passed
           gh pr merge "$PR" -R "$REPO" --squash --match-head-commit "$HEAD_SHA"
+          # The merge with the workflow token starts no workflow, and a dispatch does
+          gh workflow run ci.yml -R "$REPO" --ref main
 
   # Required by the ruleset in place of the pipeline checks, which a fork
   # skips. always(): a skipped job counts as passed.
   ci-ok:
-    needs: [image, lint, test, validate, pipeline]
+    needs: [image, lint, test, validate, pipeline, dependency-review]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
