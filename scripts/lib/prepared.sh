@@ -321,9 +321,10 @@ aur_srcinfo_current() {
   [[ -n "$srcinfo_ver" ]] || return 0
   ver=$(_plain_value "$1/PKGBUILD" pkgver)
   rel=$(_plain_value "$1/PKGBUILD" pkgrel)
-  # Values that bash expands are no version to compare, and the update writes a literal there
-  [[ "$ver$rel" != *[\$\`]* ]] || return 0
-  srcinfo_rel=$(awk '/^\tpkgrel = /{print substr($0, 11); exit}' "$1/.SRCINFO")
+  # Values with characters that bash takes as quotes, operators or expansions are no version to
+  # compare, and the update writes a literal there
+  [[ "$ver$rel" != *[\$\`\'\"\\\;\&\|\(\)\<\>~]* ]] || return 0
+  srcinfo_rel=$(srcinfo_value "$1/.SRCINFO" pkgrel)
   [[ "$ver-$rel" != "$srcinfo_ver-$srcinfo_rel" ]] || return 0
   log_err "The AUR PKGBUILD has $(_shown_line "$ver-$rel") and its .SRCINFO $(_shown_line "$srcinfo_ver-$srcinfo_rel"), which the AUR shows; run makepkg --printsrcinfo > .SRCINFO in the AUR repo and push it"
   return 1
@@ -748,9 +749,9 @@ check_prepared_srcinfo() {
   fi
 
   local old_ver old_rel old_up="" new_up="" expands=no rel_re='[$]([{]pkgrel[^A-Za-z0-9_]|pkgrel([^A-Za-z0-9_]|$))'
-  old_ver=$(awk -F' = ' '$1 ~ /^[ \t]*pkgver$/ { print $2; exit }' "$1")
+  old_ver=$(srcinfo_value "$1" pkgver)
   aur_pkgver_ok "$old_ver" || return 1
-  old_rel=$(awk -F' = ' '$1 ~ /^[ \t]*pkgrel$/ { print $2; exit }' "$1")
+  old_rel=$(srcinfo_value "$1" pkgrel)
   if [[ -n "$old_rel" && ! "$old_rel" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     log_err "The AUR .SRCINFO has pkgrel = $(_shown_line "$old_rel"), which makepkg does not write"
     return 1

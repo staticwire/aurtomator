@@ -41,20 +41,37 @@ pin() {
 }
 
 # Helper: a stat that shows the directories $@ with the owner that a user namespace gives the
-# accounts it does not map
+# accounts it does not map: $UNMAPPED_UID, or the overflow uid of this machine
 mock_unmapped() {
-  local real
-  real=$(command -v stat)
+  local real uid
+  real=$(type -a -P stat | grep -vF -m 1 "$MOCK_DIR/")
+  uid=${UNMAPPED_UID:-$(</proc/sys/kernel/overflowuid)}
   printf '%s\n' "$@" >"$TEST_TMPDIR/unmapped"
   cat >"$MOCK_DIR/stat" <<EOF
 #!/usr/bin/env bash
 if [[ "\$1 \$2" == "-c %u %a" ]] && grep -qxF -- "\${@: -1}" "$TEST_TMPDIR/unmapped"; then
-  echo "\$(cat /proc/sys/kernel/overflowuid) \$("$real" -c %a -- "\${@: -1}")"
+  echo "$uid \$("$real" -c %a -- "\${@: -1}")"
   exit 0
 fi
 exec "$real" "\$@"
 EOF
   chmod +x "$MOCK_DIR/stat"
+}
+
+# Helper: a cat that prints $1 for the overflow uid of the kernel, or fails with $1=fail
+mock_overflowuid() {
+  local real
+  real=$(type -a -P cat | grep -vF -m 1 "$MOCK_DIR/")
+  cat >"$MOCK_DIR/cat" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == /proc/sys/kernel/overflowuid ]]; then
+  [[ "$1" != fail ]] || exit 1
+  echo "$1"
+  exit 0
+fi
+exec "$real" "\$@"
+EOF
+  chmod +x "$MOCK_DIR/cat"
 }
 
 setup() {
@@ -700,6 +717,19 @@ EOF
   [ "$output" = "$copy is a link or belongs to another user; remove it, then run $REPO/aurtomator.sh again" ]
 }
 
+# git takes a copy of another owner where safe.directory allows it, as some users set it; fakeroot
+# shows that owner, and runs without SHELLOPTS, since the nounset that bashcov exports stops it
+@test "runner: runs no copy of another owner" {
+  local copy="$XDG_CACHE_HOME/aurtomator/$PINNED"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  git config --global safe.directory '*'
+  run env -u SHELLOPTS fakeroot -- bash -c 'chown 12345 -- "$1" 2>/dev/null; exec "$2" sample' _ "$copy" \
+    "$REPO/aurtomator.sh"
+  [ "$status" -eq 1 ]
+  [ "$output" = "$copy is a link or belongs to another user; remove it, then run $REPO/aurtomator.sh again" ]
+}
+
 # Accounts that can rename what a directory holds can swap the copy between its check and its run
 @test "runner: runs no copy from a directory that others can write" {
   local dir="$XDG_CACHE_HOME/aurtomator"
@@ -754,15 +784,23 @@ EOF
   [ "$output" = "name: pinned" ]
 }
 
+# The script takes the overflow uid of the kernel, or 65534 where it cannot read it, and a refused
+# place keeps no directory of the run
 @test "runner: names the user namespace for a directory that shows its owner and is not above the home directory" {
-  local other="$TEST_TMPDIR/other" uid
-  uid=$(cat /proc/sys/kernel/overflowuid)
+  local other="$TEST_TMPDIR/other" read shown
   mkdir -m 0755 "$other"
-  mock_unmapped "$other"
-  XDG_CACHE_HOME="$other/cache" run "$REPO/aurtomator.sh" sample
-  [ "$status" -eq 1 ]
-  [ "$output" = "$other shows the owner $uid, which a user namespace gives the accounts it does not map, so the script cannot tell whether another account could swap the copy of aurtomator below it; set XDG_CACHE_HOME to a directory below your home directory, or run the script outside the namespace" ]
-  [ ! -e "$other/cache/aurtomator/$PINNED" ]
+  while read -r read shown; do
+    [[ "$read" == machine ]] || mock_overflowuid "$read"
+    UNMAPPED_UID=$shown mock_unmapped "$other"
+    XDG_CACHE_HOME="$other/cache" run "$REPO/aurtomator.sh" sample
+    [ "$status" -eq 1 ]
+    [ "$output" = "$other shows the owner $shown, which a user namespace gives the accounts it does not map, so the script cannot tell whether another account could swap the copy of aurtomator below it; set XDG_CACHE_HOME to a directory below your home directory, or run the script outside the namespace" ]
+    [ ! -e "$other/cache" ]
+  done <<EOF
+machine $(</proc/sys/kernel/overflowuid)
+65533 65533
+fail 65534
+EOF
 }
 
 @test "runner: runs no copy below a directory above the home directory that shows the owner of a user namespace and others can write" {
@@ -772,6 +810,7 @@ EOF
   chmod 0700 "$TEST_TMPDIR"
   [ "$status" -eq 1 ]
   [ "$output" = "$TEST_TMPDIR belongs to another account or lets group or others write it, and they could swap the copy of aurtomator below it before it runs; set XDG_CACHE_HOME to a directory with no such directory above it" ]
+  [ ! -e "$XDG_CACHE_HOME" ]
 }
 
 # The check of the directories above reads the path of a new cache at its target too

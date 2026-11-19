@@ -87,7 +87,7 @@ if ((handed_rc == 0)); then
   # Versions pushed by hand reach the AUR without verify, so their checksums are checked here
   mkdir "${tmp_dir}/downloads"
   if ! verify_prepared_sums "$aur_files" "$PREPARED" "${tmp_dir}/downloads"; then
-    log_err "The AUR has $PKG_NAME $VERSION already, with checksums that its sources do not match"
+    log_err "The AUR has $PKG_NAME $VERSION already, and the check of its checksums against its sources failed"
     exit 1
   fi
   log_ok "The prepared files of $PKG_NAME are those of the AUR, and their checksums match the sources"

@@ -26,7 +26,7 @@ title: Troubleshooting
 
 **Causes:**
 
-1. The key ID is wrong. `gpg --list-secret-keys --keyid-format long` lists your keys.
+1. The key ID is wrong, or the secret holds a subkey without `[S]`, such as the encryption subkey `[E]`. `gpg --list-secret-keys --keyid-format long` lists your keys with their flags, and the setup script refuses subkeys without `[S]`.
 2. The subkey expired. `gpg --quick-set-expire <master-key-fingerprint> 1y <subkey-fingerprint>` extends it, and `./aurtomator.sh setup gpg secrets` sets the secret again, since CI holds the earlier copy.
 3. The key is in another keyring, such as one of another `GNUPGHOME`.
 4. The secret `GPG_SIGNING_KEY` holds the public key block, or a key with a passphrase. `./aurtomator.sh setup gpg secrets` sets a copy without the passphrase, see [GPG signing](/gpg-signing/).

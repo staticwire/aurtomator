@@ -388,6 +388,15 @@ if [[ -e "$copy" || -L "$copy" ]] && ! copy_ok; then
 fi
 if [[ ! -d "$copy" ]]; then
   check_release "$workflow" "${pins[0]}" "$sha"
+  # Places that the check below refuses keep none of the directories this run makes, which rmdir
+  # takes deepest first
+  made=()
+  dir=${copy%/*}
+  while [[ ! -e "$dir" && ! -L "$dir" ]]; do
+    made+=("$dir")
+    dir=${dir%/*}
+  done
+  ((${#made[@]} == 0)) || trap 'rmdir -- "${made[@]}" 2>/dev/null' EXIT
   # The XDG Base Directory Specification asks for mode 0700, which a umask of 0002 would not give
   (umask 077 && mkdir -p "${copy%/*}")
   # New caches get their path at the target of links here, as existing ones did above

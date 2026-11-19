@@ -3,6 +3,11 @@
 GITHUB_DIR="$BATS_TEST_DIRNAME/../.github"
 CI_IMAGE="$BATS_TEST_DIRNAME/../ci-image/Dockerfile"
 
+# git reads and writes no config of the user running the tests, nor of the system
+setup() {
+  export GIT_CONFIG_GLOBAL="$BATS_TEST_TMPDIR/gitconfig" GIT_CONFIG_NOSYSTEM=1
+}
+
 # Prints the run blocks of every step in workflow $1
 run_blocks() {
   yq '.jobs[].steps[] | select(has("run")) | .run' "$1"
@@ -2594,6 +2599,15 @@ make_commit_repo() {
     mkdir -p "$(dirname "$results/${pair%%=*}")"
     printf '%s\n' "${pair#*=}" >"$results/${pair%%=*}"
   done
+}
+
+# Users can have git sign every commit, which would start their pinentry from these tests
+@test "workflows: the commits of the tests read no git config of the user" {
+  local home="$BATS_TEST_TMPDIR/user-home"
+  mkdir -p "$home"
+  printf '[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n' >"$home/.gitconfig"
+  HOME="$home" XDG_CONFIG_HOME="$home/.config" make_commit_repo
+  [ "$(git -C "$BATS_TEST_TMPDIR/ws" log --format=%s)" = init ]
 }
 
 # The tree of HEAD in the repository of make_commit_repo, as gh lists it,

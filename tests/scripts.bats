@@ -5666,6 +5666,28 @@ cooldown_days: $value"
   [ "$stderr" = "last_updated must be a date YYYY-MM-DD: 2026-02-30" ]
 }
 
+# validate-pkg.sh refuses the same values, and a date after today would hold every push until then
+@test "lib.sh: cooldown_until refuses a last_updated after today or not a date, also without a cooldown" {
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  local days
+  for days in 7 0; do
+    create_test_package "pkg-git" "git-latest" "last_updated: '$(utc_day 1)'
+cooldown_days: $days"
+    run --separate-stderr cooldown_until "$TEST_TMPDIR/packages/pkg-git.yml"
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "last_updated is later than today: $(utc_day 1)" ]
+    create_test_package "pkg-git" "git-latest" "last_updated: 'not-a-date'
+cooldown_days: $days"
+    run --separate-stderr cooldown_until "$TEST_TMPDIR/packages/pkg-git.yml"
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "last_updated must be a date YYYY-MM-DD: not-a-date" ]
+  done
+  create_test_package "pkg-git" "git-latest" "last_updated: '$(utc_day 0)'"
+  run cooldown_until "$TEST_TMPDIR/packages/pkg-git.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(utc_day 7)" ]
+}
+
 @test "check-all: an update of git-latest waits 7 days after the last push" {
   stand_in_strategy git-latest r2391.1f3c2a7
   create_test_package "pkg-git" "git-latest" "current: r2378.06ea49d

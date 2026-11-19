@@ -2,7 +2,7 @@
 title: GPG signing
 ---
 
-GPG is optional. With it, aurtomator signs every AUR commit with your key, and AUR users can check the signature with `git log --show-signature`. The key lives in CI secrets, and leaked CI secrets expose it. Dedicated signing subkeys limit the damage: you revoke the subkey and keep your master key. The setup script refuses master keys, so pass the ID of the subkey marked `[S]`.
+GPG is optional. With it, aurtomator signs every AUR commit with your key, and AUR users can check the signature with `git log --show-signature`. The key lives in CI secrets, and leaked CI secrets expose it. Dedicated signing subkeys limit the damage: you revoke the subkey and keep your master key. The setup script refuses master keys and subkeys that cannot sign, so pass the ID of the subkey marked `[S]`.
 
 ## Create a signing subkey
 
