@@ -31,7 +31,7 @@ export default defineConfig({
         { label: 'How it works', items: ['internals/update-process', 'internals/workflow'] },
         { label: 'Develop', items: ['develop/local-testing', 'develop/ci', { label: 'Contributing', link: `${repo}/blob/main/CONTRIBUTING.md` }] },
         { label: 'Help', items: ['help/troubleshooting', { label: 'Comparison with other tools', link: `${repo}#alternatives` }] },
-        { label: 'Project', items: [{ label: 'Security policy', link: `${repo}/security/policy` }, { label: 'Releases', link: `${repo}/releases` }] },
+        { label: 'Project', items: ['project/governance', 'project/roadmap', 'project/security-model', { label: 'Security policy', link: `${repo}/security/policy` }, { label: 'Releases', link: `${repo}/releases` }] },
       ],
     }),
   ],
