@@ -113,6 +113,49 @@ teardown() {
   teardown_test_env
 }
 
+# Prints the key ID of a new subkey of the key of e-mail address $1, with algorithm $2 and usage $3;
+# $4 is the passphrase of the key, if it has one
+add_subkey() {
+  local fpr
+  fpr=$(gpg --batch --with-colons --list-secret-keys "$1" | awk -F: '$1 == "fpr" { print $10; exit }')
+  env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE gpg --batch --pinentry-mode loopback \
+    --passphrase "${4:-}" --quick-add-key "$fpr" "$2" "$3" never 2>/dev/null
+  gpg --batch --with-colons --list-secret-keys "$1" | awk -F: '$1 == "ssb" { id = $5 } END { print id }'
+}
+
+# Writes .aurtomator.conf with key ID $1
+write_gpg_config() {
+  printf '%s\n' 'GIT_AUTHOR_NAME="Test"' 'GIT_AUTHOR_EMAIL="test@test.com"' "GPG_KEY_ID=\"$1\"" \
+    "AUR_SSH_KEY=\"$TEST_TMPDIR/ssh/aur.pem\"" >"$TEST_TMPDIR/.aurtomator.conf"
+}
+
+# The pinentry of the user answers the three dialogs of setup_gpg: the passphrase twice, then no
+# passphrase for the copy
+use_fake_pinentry() {
+  local fake="$TEST_TMPDIR/fake-pinentry"
+  cat >"$fake" <<'EOF'
+#!/usr/bin/env bash
+desc=""
+echo "OK Pleased to meet you"
+while IFS= read -r line; do
+  case "$line" in
+    SETDESC*) desc=$line && echo OK ;;
+    GETPIN*)
+      if [[ "$desc" == *[Nn]ew* ]]; then
+        echo OK
+      else
+        printf 'D testpass123\nOK\n'
+      fi
+      ;;
+    BYE*) echo "OK closing connection" && exit 0 ;;
+    *) echo OK ;;
+  esac
+done
+EOF
+  chmod +x "$fake"
+  echo "pinentry-program $fake" >>"$GNUPGHOME/gpg-agent.conf"
+}
+
 # === Key type detection ===
 
 @test "gpg tool: lists a signing subkey as ssb with [S]" {
@@ -152,31 +195,10 @@ teardown() {
 
 # === Passphrase strip of setup.sh ===
 
-# The pinentry of the user answers the three dialogs of setup_gpg: the passphrase twice, then no
-# passphrase for the copy. Without gh, setup.sh prints the copy for the secret.
+# Without gh, setup.sh prints the copy for the secret
 @test "setup gpg: makes a copy of a subkey with a passphrase that signs without one" {
-  local fake="$TEST_TMPDIR/fake-pinentry" verify="$TEST_TMPDIR/verify" key
-  cat >"$fake" <<'EOF'
-#!/usr/bin/env bash
-desc=""
-echo "OK Pleased to meet you"
-while IFS= read -r line; do
-  case "$line" in
-    SETDESC*) desc=$line && echo OK ;;
-    GETPIN*)
-      if [[ "$desc" == *[Nn]ew* ]]; then
-        echo OK
-      else
-        printf 'D testpass123\nOK\n'
-      fi
-      ;;
-    BYE*) echo "OK closing connection" && exit 0 ;;
-    *) echo OK ;;
-  esac
-done
-EOF
-  chmod +x "$fake"
-  echo "pinentry-program $fake" >>"$GNUPGHOME/gpg-agent.conf"
+  local verify="$TEST_TMPDIR/verify" key
+  use_fake_pinentry
   printf '#!/bin/sh\nexit 1\n' >"$MOCK_DIR/gh"
   chmod +x "$MOCK_DIR/gh"
   ssh-keygen -q -t ed25519 -N "" -f "$TEST_TMPDIR/aur"
@@ -193,6 +215,36 @@ EOF
   # The key of the user keeps its passphrase
   gpgconf --kill gpg-agent
   run ! gpg --batch --pinentry-mode error --sign --local-user "$WITHPASS_SUBKEY_ID" <<<test
+  gpgconf --kill gpg-agent
+}
+
+# The key gets a second secret subkey without a passphrase, which gpg would export beside the copy
+@test "setup gpg secrets: gh gets the secret of the named subkey alone" {
+  local packets enc grip
+  enc=$(add_subkey withpass@test cv25519 encr testpass123)
+  use_fake_pinentry
+  grip=$(gpg --batch --with-colons --with-keygrip --list-secret-keys withpass@test |
+    awk -F: -v id="$enc" '$1 == "ssb" { mine = $5 == id } $1 == "grp" && mine { print $10; exit }')
+  gpgconf --kill gpg-agent
+  env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE gpg-connect-agent "PASSWD $grip" /bye
+  [[ "$(gpg-connect-agent "KEYINFO $grip" /bye)" == "S KEYINFO $grip D - - - C "* ]]
+  gpgconf --kill gpg-agent
+  cat >"$MOCK_DIR/gh" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  auth) exit 0 ;;
+  secret) [[ "\$2" != set ]] || cat >"$TEST_TMPDIR/secret-\$3" ;;
+esac
+exit 0
+EOF
+  chmod +x "$MOCK_DIR/gh"
+  ssh-keygen -q -t ed25519 -N "" -f "$TEST_TMPDIR/aur"
+  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" gpg secrets \
+    --gpg-key "$WITHPASS_SUBKEY_ID" --ssh-key "$TEST_TMPDIR/aur" < <(printf 'y\ny\n')
+  [ "$status" -eq 0 ]
+  packets=$(gpg --batch --list-packets <"$TEST_TMPDIR/secret-GPG_SIGNING_KEY")
+  [ "$(grep -c '^:secret sub key packet:' <<<"$packets")" -eq 1 ]
+  [[ "$(awk '/^:secret sub key packet:/ { s = 1 } s && $1 == "keyid:" { print $2; exit }' <<<"$packets")" == "$WITHPASS_SUBKEY_ID" ]]
   gpgconf --kill gpg-agent
 }
 
@@ -355,6 +407,71 @@ stage_aur_update() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"$id is a primary key"* ]]
   done
+}
+
+@test "gpg-real: setup.sh takes a signing subkey of a v5 key by its key IDs" {
+  local fpr id
+  env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE gpg --batch --compliance=gnupg --pinentry-mode loopback \
+    --passphrase '' --quick-gen-key "Test V5 <v5@test>" ed448 cert never 2>/dev/null
+  fpr=$(gpg --batch --with-colons --list-secret-keys v5@test | awk -F: '$1 == "fpr" { print $10; exit }')
+  env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE gpg --batch --compliance=gnupg --pinentry-mode loopback \
+    --passphrase '' --quick-add-key "$fpr" ed448 sign never 2>/dev/null
+  id=$(gpg --batch --with-colons --list-secret-keys v5@test | awk -F: '$1 == "ssb" { print $5; exit }')
+  for id in "$id" "${id:0:8}"; do
+    run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" gpg \
+      --gpg-key "$id" --non-interactive
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"GPG key: $id (no passphrase, ready for CI)"* ]]
+  done
+}
+
+# gpg signs with another subkey of the key when the ID without ! names a subkey that cannot sign
+@test "gpg-real: setup.sh refuses an encryption or authentication subkey" {
+  local usage algo id
+  for usage in encr auth; do
+    algo=ed25519
+    [[ "$usage" != encr ]] || algo=cv25519
+    id=$(add_subkey nopass@test "$algo" "$usage")
+    run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" gpg \
+      --gpg-key "$id" --non-interactive
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$id cannot sign"* ]]
+    [[ "$output" != *"ready for CI"* ]]
+  done
+}
+
+# secrets alone takes the key ID that the gpg step of an earlier run saved
+@test "gpg-real: setup.sh secrets refuses a saved primary key or subkey that cannot sign" {
+  local id
+  id=$(add_subkey nopass@test cv25519 encr)
+  cat >"$MOCK_DIR/gh" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1 \$2" == "secret set" ]]; then
+  echo "\$3" >>"$TEST_TMPDIR/secrets-set"
+  cat >/dev/null
+fi
+exit 0
+EOF
+  chmod +x "$MOCK_DIR/gh"
+
+  write_gpg_config "$id"
+  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$id cannot sign"* ]]
+  write_gpg_config "$NOPASS_MASTER_ID"
+  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$NOPASS_MASTER_ID is a primary key"* ]]
+  [ ! -e "$TEST_TMPDIR/secrets-set" ]
+}
+
+@test "gpg-real: setup.sh verify signs with the saved subkey alone" {
+  local id
+  id=$(add_subkey nopass@test cv25519 encr)
+  write_gpg_config "$id"
+  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" verify --non-interactive
+  [[ "$output" == *"GPG: cannot sign with $id"* ]]
+  [[ "$output" != *"GPG: signing works"* ]]
 }
 
 @test "gpg-real: setup.sh rejects nonexistent key" {

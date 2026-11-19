@@ -487,13 +487,17 @@ cooldown_until() {
     return 1
   fi
   last=$(pkg_get "$file" '.last_updated // ""')
-  if ((days == 0)) || [[ -z "$last" ]]; then
-    return 0
-  fi
+  [[ -n "$last" ]] || return 0
   if ! valid_date "$last"; then
     echo "last_updated must be a date YYYY-MM-DD: $last" >&2
     return 1
   fi
+  # validate-pkg.sh refuses this date too, which would hold every push until that day
+  if [[ "$last" > "$(date -u +%F)" ]]; then
+    echo "last_updated is later than today: $last" >&2
+    return 1
+  fi
+  ((days != 0)) || return 0
   date -u -d "$last + $days days" +%F
 }
 

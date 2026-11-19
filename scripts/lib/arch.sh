@@ -164,9 +164,14 @@ srcinfo_arch_lines() {
     $0 == "\tarch = " a || match($0, "^\t[a-z0-9]+_" a " = ") { print section "\t" $0 }' "$1"
 }
 
+# Print the value of the first line of key $2 in .SRCINFO $1, at any indent
+srcinfo_value() {
+  awk -F' = ' -v key="$2" '$1 ~ "^[ \t]*" key "$" { print substr($0, length($1) + 4); exit }' "$1"
+}
+
 # Print the pkgver of .SRCINFO $1
 srcinfo_pkgver() {
-  awk '/^\tpkgver = /{print substr($0, 11); exit}' "$1"
+  srcinfo_value "$1" pkgver
 }
 
 # Fails for pkgver $1 of an AUR .SRCINFO, which co-maintainers write, that validate_pkgver

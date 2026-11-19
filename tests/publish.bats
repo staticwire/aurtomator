@@ -213,17 +213,22 @@ $2"
 }
 
 @test "update-pkg --prepare: with current, goes on past a .SRCINFO without a readable pkgver" {
-  write_pkgbuild "$OLD" latest 1 "sha256sums=('SKIP' 'SKIP')"
-  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" latest 1 SKIP SKIP
-  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  local drop
   mock_pkg_tools
   mock_source_tools
   create_test_package "demo" "github-nightly" "upstream:
   project: owner/repo
 current: '1.0.0'"
-  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"The AUR .SRCINFO of demo holds no pkgver to compare 1.1.0 with, so only current counts"* ]]
+  for drop in "" pkgver; do
+    rm -rf "$TEST_TMPDIR/aur-remote" "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/out"
+    write_pkgbuild "$OLD" latest 1 "sha256sums=('SKIP' 'SKIP')"
+    write_srcinfo "$TEST_TMPDIR/old.SRCINFO" latest 1 SKIP SKIP
+    [[ -z "$drop" ]] || sed -i "/^\t$drop = /d" "$TEST_TMPDIR/old.SRCINFO"
+    make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+    run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"The AUR .SRCINFO of demo holds no pkgver to compare 1.1.0 with, so only current counts"* ]]
+  done
 }
 
 @test "update-pkg --prepare: hands over the AUR files when the AUR has the version in quotes" {
@@ -724,6 +729,46 @@ current: '1.0.0'"
     [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
     [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.0.0" ]
   done
+}
+
+@test "update-pkg: reads the pkgver and pkgrel of an AUR .SRCINFO at any indent" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  mock_pkg_tools
+  mock_source_tools
+  local indent
+  for indent in '    ' $'\t\t' $' \t'; do
+    rm -rf "$TEST_TMPDIR/aur-remote" "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/out"
+    write_pkgbuild "$OLD" 2.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+    write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+    sed -i "s/^\t/$indent/" "$TEST_TMPDIR/old.SRCINFO"
+    make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+    run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 2.1.0 --prepare "$TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"The AUR PKGBUILD has 2.0.0-1 and its .SRCINFO 1.0.0-1, which the AUR shows"* ]]
+  done
+}
+
+# bash reads these values otherwise than as they are written, and the update writes a literal there
+@test "update-pkg: compares no pkgver of the PKGBUILD with characters that bash reads otherwise" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  mock_pkg_tools
+  mock_source_tools
+  local value
+  for value in '1.0\.0' '1.0.0;' '(1.0.0' '1.0.0)' '1.0.0&' '1.0.0|' '1.0.0<' '1.0.0>' '~1.0.0' "1.0'.0'" \
+    "'1.0'\".0\"" '1.0".0"'; do
+    rm -rf "$TEST_TMPDIR/aur-remote" "$TEST_TMPDIR/aur-work-demo" "$TEST_TMPDIR/out"
+    write_pkgbuild "$OLD" "$value" 1 "sha256sums=('SKIP' 'SKIP')"
+    write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+    make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+    run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0 --prepare "$TEST_TMPDIR/out"
+    [[ "$output" != *"which the AUR shows"* ]]
+  done
+  [ "$status" -eq 0 ]
+  grep -qx 'pkgver=1.1.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
 }
 
 # Values that bash expands are no plain version, and the update writes a literal in their place
@@ -1384,6 +1429,27 @@ last_updated: '2020-01-01'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .last_updated)" = "$(date -u +%Y-%m-%d)" ]
 }
 
+@test "publish-pkg --dry-run: keeps the YAML when the AUR already has the version" {
+  create_test_package "demo" "github-release" "upstream:
+  project: owner/repo
+current: '0.9.0'
+last_updated: '2020-01-01'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('$H1' '$H2')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 "$H1" "$H2"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  PREPARED="$TEST_TMPDIR/out/demo"
+  mkdir -p "$PREPARED"
+  cp "$OLD" "$PREPARED/PKGBUILD"
+  cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  echo "$AUR_BASE" >"$PREPARED/base"
+  cp "$TEST_TMPDIR/packages/demo.yml" "$TEST_TMPDIR/demo.yml.before"
+
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"demo already at 1.0.0 on AUR, nothing to do"* ]]
+  cmp "$TEST_TMPDIR/demo.yml.before" "$TEST_TMPDIR/packages/demo.yml"
+}
+
 @test "publish-pkg: syncs the YAML when the AUR has the version in quotes" {
   create_test_package "demo" "github-release" "upstream:
   project: owner/repo
@@ -1665,7 +1731,14 @@ commit_aur_state() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"sha256sums of https://example.com/demo-1.0.0.tar.gz is $H1, the source has $sum"* ]]
-  [[ "$output" == *"The AUR has demo 1.0.0 already, with checksums that its sources do not match"* ]]
+  [[ "$output" == *"The AUR has demo 1.0.0 already, and the check of its checksums against its sources failed"* ]]
+  # The line above names the cause, which need not be a checksum that does not match
+  touch "$TEST_TMPDIR/curl.fail"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not download https://example.com/demo-1.0.0.tar.gz"* ]]
+  [[ "$output" == *"The AUR has demo 1.0.0 already, and the check of its checksums against its sources failed"* ]]
+  [[ "$output" != *"do not match"* ]]
 }
 
 @test "verify-pkg: fails when the AUR .SRCINFO holds another pkgver than its PKGBUILD" {
@@ -1776,6 +1849,20 @@ commit_aur_state() {
   run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Source local.patch is a symlink or not a regular file in the AUR repo"* ]]
+}
+
+# Names with a slash and dot names would put the file of the checksum outside the downloads
+@test "_source_file: refuses a name with a slash and the names . and .." {
+  local entry
+  mock_downloads
+  mkdir "$TEST_TMPDIR/aur" "$TEST_TMPDIR/downloads"
+  for entry in "a/b::https://example.com/x.tar.gz" ".::https://example.com/x.tar.gz" \
+    "..::https://example.com/x.tar.gz" "https://example.com/x/.."; do
+    run _source_file "$entry" "$TEST_TMPDIR/aur" "$TEST_TMPDIR/downloads"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Cannot check the checksum of $entry: only local files, https downloads and git sources over https are checked"* ]]
+  done
+  [ ! -e "$TEST_TMPDIR/curl.args" ]
 }
 
 # aur_export writes a symlink as one to /nonexistent; this one leads to a
@@ -3740,11 +3827,14 @@ current: '1.0.0'"
 current: '2.0.0'"
   rm -rf "$TEST_TMPDIR/.status"
   mkdir -p "$TEST_TMPDIR/elsewhere"
+  echo "new_version: 9.9.9" >"$TEST_TMPDIR/elsewhere/pkg"
   ln -s "$TEST_TMPDIR/elsewhere" "$TEST_TMPDIR/.status"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ ! -L "$TEST_TMPDIR/.status" ]
   [ -d "$TEST_TMPDIR/.status" ]
-  [ -z "$(ls -A "$TEST_TMPDIR/elsewhere")" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: not checked before --publish" ]
+  [ "$(ls -A "$TEST_TMPDIR/elsewhere")" = "pkg" ]
+  [ "$(cat "$TEST_TMPDIR/elsewhere/pkg")" = "new_version: 9.9.9" ]
 }
 
 # === check-all.sh time budgets ===
@@ -6834,9 +6924,12 @@ write_srcinfo_archs() {
 
 # arm starts armv7h, whose 7 is no version 7
 @test "_bump_version: keeps the longest arch name that starts at a place" {
-  run _bump_version "https://example.com/app-7-armv7h.tar.gz" 7 8 "" "" "arm armv7h"
-  [ "$status" -eq 0 ]
-  [ "$output" = "https://example.com/app-8-armv7h.tar.gz" ]
+  local words
+  for words in "arm armv7h" "armv7h arm"; do
+    run _bump_version "https://example.com/app-7-armv7h.tar.gz" 7 8 "" "" "$words"
+    [ "$status" -eq 0 ]
+    [ "$output" = "https://example.com/app-8-armv7h.tar.gz" ]
+  done
 }
 
 # Arches that come back are in no line of the AUR .SRCINFO, so their names come from the arguments

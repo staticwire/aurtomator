@@ -217,12 +217,42 @@ setup_ssh() {
   fi
 }
 
-# Flush the agent cache, then sign without pinentry. Signing fails when the
-# key has a passphrase.
-# Args: $1=key id
+# Signs with subkey $1 alone, as ! asks, without pinentry and after a flush of the agent cache:
+# signing fails when the subkey has a passphrase
 gpg_key_has_passphrase() {
   gpgconf --kill gpg-agent 2>/dev/null || true
-  ! echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$1" >/dev/null 2>&1
+  ! echo "test" | gpg --batch --pinentry-mode error --sign --local-user "$1!" >/dev/null 2>&1
+}
+
+# Succeeds when the subkey of ID $1 can sign: gpg lists the whole key for the ID of any subkey, so
+# the record of that subkey, found as in gpg_is_primary_key, has to hold the capability s
+gpg_key_can_sign() {
+  gpg --list-secret-keys --with-colons "$1" 2>/dev/null | awk -F: -v id="$1" '
+    $1 == "sec" || $1 == "ssb" { caps = $12; key = 1; next }
+    $1 == "fpr" && key {
+      key = 0
+      fpr = toupper($10)
+      if (length(fpr) == 64) named = index(fpr, id) == 1
+      else named = substr(fpr, length(fpr) - length(id) + 1) == id
+      if (named && caps ~ /s/) found = 1
+    }
+    END { exit !found }'
+}
+
+# Succeeds when the export on stdin holds the secret of one subkey and no other secret: an export of
+# subkeys holds the primary key as gnu-dummy, which is the key without its secret
+gpg_export_is_subkey() {
+  gpg --batch --list-packets 2>/dev/null | awk '
+    function close_packet() {
+      if (packet != "" && !dummy) secrets[packet]++
+      packet = ""
+      dummy = 0
+    }
+    /^:/ { close_packet() }
+    /^:secret key packet:/ { packet = "key" }
+    /^:secret sub key packet:/ { packet = "sub" }
+    packet != "" && /gnu-dummy/ { dummy = 1 }
+    END { close_packet(); exit !(secrets["sub"] == 1 && secrets["key"] == 0) }'
 }
 
 # Key IDs, long or short, and fingerprints name the primary key when the fingerprint of the
@@ -262,6 +292,40 @@ remove_tmp_gnupg() {
   TMP_GNUPG=""
 }
 
+# Fails with a message unless GPG_KEY_ID names a signing subkey of the keyring, and writes the ID back
+# in the form of gpg_key_id
+check_gpg_key() {
+  local key_id
+  if ! key_id=$(gpg_key_id "$GPG_KEY_ID"); then
+    fail "$GPG_KEY_ID is no key ID or fingerprint in hex"
+    printf "\n  Pass the ID of the signing subkey, the ssb line with [S] in:\n"
+    printf "    gpg --list-secret-keys --keyid-format long\n\n"
+    return 1
+  fi
+  GPG_KEY_ID=$key_id
+
+  if ! gpg --list-secret-keys "$GPG_KEY_ID" >/dev/null 2>&1; then
+    fail "Key not found in keyring: $GPG_KEY_ID"
+    return 1
+  fi
+
+  # CI gets the signing subkey alone. The primary key certifies the others
+  # and never leaves this machine.
+  if gpg_is_primary_key "$GPG_KEY_ID"; then
+    fail "$GPG_KEY_ID is a primary key. CI signs with a signing subkey."
+    printf "\n  Create a signing subkey and pass its ID:\n"
+    printf "    gpg --quick-add-key <fingerprint> ed25519 sign 1y\n\n"
+    return 1
+  fi
+
+  if ! gpg_key_can_sign "$GPG_KEY_ID"; then
+    fail "$GPG_KEY_ID cannot sign: gpg lists no signing flag [S] for this subkey"
+    printf "\n  Pass the ID of the signing subkey, the ssb line with [S] in:\n"
+    printf "    gpg --list-secret-keys --keyid-format long\n\n"
+    return 1
+  fi
+}
+
 setup_gpg() {
   header "gpg" "Sign AUR commits with GPG (optional)"
 
@@ -289,33 +353,7 @@ setup_gpg() {
     return 0
   fi
 
-  local key_id
-  if ! key_id=$(gpg_key_id "$GPG_KEY_ID"); then
-    fail "$GPG_KEY_ID is no key ID or fingerprint in hex"
-    printf "\n  Pass the ID of the signing subkey, the ssb line with [S] in:\n"
-    printf "    gpg --list-secret-keys --keyid-format long\n\n"
-    return 1
-  fi
-  GPG_KEY_ID=$key_id
-
-  local key_info
-  if ! key_info=$(gpg --list-secret-keys --keyid-format long "$GPG_KEY_ID" 2>/dev/null); then
-    fail "Key not found in keyring: $GPG_KEY_ID"
-    return 1
-  fi
-
-  if ! echo "$key_info" | grep -q '\[S'; then
-    warn "gpg lists no signing flag [S] for $GPG_KEY_ID"
-  fi
-
-  # CI gets the signing subkey alone. The primary key certifies the others
-  # and never leaves this machine.
-  if gpg_is_primary_key "$GPG_KEY_ID"; then
-    fail "$GPG_KEY_ID is a primary key. CI signs with a signing subkey."
-    printf "\n  Create a signing subkey and pass its ID:\n"
-    printf "    gpg --quick-add-key <fingerprint> ed25519 sign 1y\n\n"
-    return 1
-  fi
+  check_gpg_key || return 1
 
   if ! gpg_key_has_passphrase "$GPG_KEY_ID"; then
     ok "GPG key: $GPG_KEY_ID (no passphrase, ready for CI)"
@@ -397,6 +435,12 @@ setup_gpg() {
       GPG_KEY_ID=""
       return 0
     fi
+    if ! gpg_export_is_subkey <<<"$GPG_CLEAN_KEY"; then
+      fail "The passphrase-free copy is not the secret of subkey $GPG_KEY_ID alone"
+      GPG_CLEAN_KEY=""
+      GPG_KEY_ID=""
+      return 0
+    fi
 
     ok "GPG key: $GPG_KEY_ID (passphrase-free copy created for CI)"
   fi
@@ -405,8 +449,11 @@ setup_gpg() {
 setup_secrets() {
   header "secrets" "GitHub Secrets"
 
-  # secrets can run without the ssh step, so the saved key is checked here too
+  # secrets can run without the ssh and gpg steps, so the saved keys are checked here too
   check_ssh_key || return 1
+  if [[ -n "$GPG_KEY_ID" ]]; then
+    check_gpg_key || return 1
+  fi
 
   local has_gh=false
   if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
@@ -495,7 +542,10 @@ setup_secrets() {
       # "!" exports this subkey alone, without the other secret subkeys
       local signing_key
       signing_key=$(gpg --export-secret-subkeys --armor "${GPG_KEY_ID}!" 2>/dev/null) || signing_key=""
-      if [[ -n "$signing_key" ]] && echo "$signing_key" | gh secret set GPG_SIGNING_KEY -R "$gh_repo" >/dev/null; then
+      if [[ -n "$signing_key" ]] && ! gpg_export_is_subkey <<<"$signing_key"; then
+        fail "GPG_SIGNING_KEY: the export is not the secret of subkey $GPG_KEY_ID alone"
+        failed=true
+      elif [[ -n "$signing_key" ]] && echo "$signing_key" | gh secret set GPG_SIGNING_KEY -R "$gh_repo" >/dev/null; then
         ok "GPG_SIGNING_KEY"
       else
         fail "GPG_SIGNING_KEY"
@@ -611,7 +661,7 @@ verify_all() {
   fi
 
   if [[ -n "$GPG_KEY_ID" ]]; then
-    if echo "test" | gpg --sign --armor --local-user "$GPG_KEY_ID" >/dev/null 2>&1; then
+    if echo "test" | gpg --sign --armor --local-user "$GPG_KEY_ID!" >/dev/null 2>&1; then
       ok "GPG: signing works with $GPG_KEY_ID"
     else
       fail "GPG: cannot sign with $GPG_KEY_ID"

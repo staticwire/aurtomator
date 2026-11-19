@@ -10,13 +10,29 @@ setup() {
   MOCK_DIR="$TEST_TMPDIR/mock-bin"
 
   # Mock gpg: accepts specific key IDs, with or without "!", and logs its
-  # arguments to $TEST_TMPDIR/gpg.args
+  # arguments to $TEST_TMPDIR/gpg.args; its exports hold one secret subkey
   cat >"$MOCK_DIR/gpg" <<'MOCKEOF'
 #!/usr/bin/env bash
 echo "$*" >>"$TEST_TMPDIR/gpg.args"
+if [[ "$*" == *"--list-packets"* ]]; then
+  if grep -q mocked; then
+    printf ':secret key packet:\n\tgnu-dummy, algo: 0, simple checksum, hash: 0\n\tkeyid: ABCDEF1234567890\n'
+    printf ':secret sub key packet:\n\tkeyid: 5B00000000000002\n'
+  fi
+  exit 0
+fi
 for arg in "$@"; do
   case "$arg" in
     600D000000000123|5B00000000000002|600D000000000123!|5B00000000000002!)
+      if [[ "$*" == *"--with-colons"* ]]; then
+        echo "sec:u:255:22:ABCDEF1234567890:1767225600:::u:::scESC:::+::ed25519:::0:"
+        echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFABCDEF1234567890:"
+        echo "ssb:u:255:22:5B00000000000002:1767225600::::::s:::+::ed25519::"
+        echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFF5B00000000000002:"
+        echo "ssb:u:255:22:600D000000000123:1767225600::::::s:::+::ed25519::"
+        echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFF600D000000000123:"
+        exit 0
+      fi
       if [[ "$*" == *"--list-secret-keys"* ]]; then
         echo "sec   ed25519/MASTERAAA 2026-01-01 [SC]"
         echo "      ABCDEF1234567890"
@@ -64,7 +80,14 @@ for arg in "$@"; do
       fi
       exit 0
       ;;
-    9A55000000000003)
+    9A55000000000003|9A55000000000003!)
+      if [[ "$*" == *"--with-colons"* ]]; then
+        echo "sec:u:255:22:FEDCBA0987654321:1767225600:::u:::scESC:::+::ed25519:::0:"
+        echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFFEDCBA0987654321:"
+        echo "ssb:u:255:22:9A55000000000003:1767225600::::::s:::+::ed25519::"
+        echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFF9A55000000000003:"
+        exit 0
+      fi
       if [[ "$*" == *"--list-secret-keys"* ]]; then
         echo "sec   ed25519/MASTERXXX 2026-01-01 [SC]"
         echo "      FEDCBA0987654321"
@@ -232,6 +255,16 @@ case "$*" in
     echo "-----END PGP PRIVATE KEY BLOCK-----"
     ;;
   *--import*) cat >/dev/null ;;
+  *--list-packets*)
+    printf ':secret key packet:\n\tgnu-dummy, algo: 0, simple checksum, hash: 0\n'
+    printf ':secret sub key packet:\n\tkeyid: 9A55000000000003\n'
+    ;;
+  *--with-colons*)
+    echo "sec:u:255:22:FEDCBA0987654321:1767225600:::u:::scESC:::+::ed25519:::0:"
+    echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFFEDCBA0987654321:"
+    echo "ssb:u:255:22:9A55000000000003:1767225600::::::s:::+::ed25519::"
+    echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFF9A55000000000003:"
+    ;;
   *--list-secret-keys*)
     echo "sec   ed25519/MASTERXXX 2026-01-01 [SC]"
     echo "ssb   ed25519/9A55000000000003 2026-01-01 [S]"
@@ -379,10 +412,12 @@ EOF
   [[ "$output" == *"GPG signing skipped"* ]]
 }
 
+# The ! keeps gpg on this subkey, where another subkey of the key could sign without a passphrase
 @test "setup gpg: subkey without passphrase accepted" {
   run "$TEST_TMPDIR/scripts/setup.sh" gpg --gpg-key 5B00000000000002 --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"no passphrase, ready for CI"* ]]
+  grep -qx -- '--batch --pinentry-mode error --sign --local-user 5B00000000000002!' "$TEST_TMPDIR/gpg.args"
 }
 
 @test "setup gpg: refuses a primary key" {
@@ -888,6 +923,12 @@ EOF
 #!/usr/bin/env bash
 [[ "$*" == *--export-secret-subkeys* ]] && exit 0
 [[ "$*" == *--sign* ]] && echo "signature"
+if [[ "$*" == *--with-colons* ]]; then
+  echo "sec:u:255:22:ABCDEF1234567890:1767225600:::u:::scESC:::+::ed25519:::0:"
+  echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFABCDEF1234567890:"
+  echo "ssb:u:255:22:600D000000000123:1767225600::::::s:::+::ed25519::"
+  echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFF600D000000000123:"
+fi
 exit 0
 EOF
   cat >"$TEST_TMPDIR/mock-bin/gh" <<EOF
@@ -1304,21 +1345,78 @@ log_gh_calls() {
   [[ "$output" == *"✓ GPG signing skipped"* ]]
 }
 
-@test "setup gpg: warns about a key without the signing flag" {
+# gpg lists the whole key for the ID of a subkey, and the primary key of this one can sign
+@test "setup gpg: refuses a subkey without the signing flag" {
   cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
-  *--with-colons*) echo "fpr:::::::::0000000000000000000000000000000000000000:" ;;
-  *--list-secret-keys*) echo "ssb   cv25519/E0000001 2026-01-01 [E]" ;;
+  *--with-colons*)
+    echo "sec:u:255:22:ABCDEF1234567890:1767225600:::u:::scESC:::+::ed25519:::0:"
+    echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFABCDEF1234567890:"
+    echo "ssb:u:255:22:5B00000000000002:1767225600::::::s:::+::ed25519::"
+    echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFF5B00000000000002:"
+    echo "ssb:u:255:18:00000000E0000001:1767225600::::::e:::+::cv25519::"
+    echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFF00000000E0000001:"
+    ;;
+  *--list-secret-keys*)
+    echo "sec   ed25519/ABCDEF1234567890 2026-01-01 [SC]"
+    echo "ssb   ed25519/5B00000000000002 2026-01-01 [S]"
+    echo "ssb   cv25519/00000000E0000001 2026-01-01 [E]"
+    ;;
 esac
 exit 0
 EOF
   write_full_config "E0000001"
 
   run "$TEST_TMPDIR/scripts/setup.sh" gpg --non-interactive
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"! gpg lists no signing flag [S] for E0000001"* ]]
-  [[ "$output" == *"✓ GPG key: E0000001 (no passphrase, ready for CI)"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ E0000001 cannot sign: gpg lists no signing flag [S] for this subkey"* ]]
+  [[ "$output" != *"ready for CI"* ]]
+}
+
+# $PACKETS names the export: two secret subkeys, or the secret of the primary key beside the subkey
+@test "setup secrets: sends no export that holds other secrets than the subkey" {
+  local packets
+  write_full_config "600D000000000123"
+  cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *--list-packets* ]]; then
+  if [[ "$PACKETS" == primary ]]; then
+    printf ':secret key packet:\n\tkeyid: ABCDEF1234567890\n:secret sub key packet:\n\tkeyid: 600D000000000123\n'
+  else
+    printf ':secret key packet:\n\tgnu-dummy, algo: 0, simple checksum, hash: 0\n'
+    printf ':secret sub key packet:\n\tkeyid: 600D000000000123\n:secret sub key packet:\n\tkeyid: E000000000000004\n'
+  fi
+  exit 0
+fi
+case "$*" in
+  *--with-colons*)
+    echo "sec:u:255:22:ABCDEF1234567890:1767225600:::u:::scESC:::+::ed25519:::0:"
+    echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFABCDEF1234567890:"
+    echo "ssb:u:255:22:600D000000000123:1767225600::::::s:::+::ed25519::"
+    echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFF600D000000000123:"
+    ;;
+  *--export-secret-subkeys*) printf '%s\n' "-----BEGIN PGP PRIVATE KEY BLOCK-----" two-subkeys "-----END PGP PRIVATE KEY BLOCK-----" ;;
+esac
+exit 0
+EOF
+  cat >"$TEST_TMPDIR/mock-bin/gh" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  api) echo "testuser" ;;
+  secret) cat >"$TEST_TMPDIR/secret-\$3" ;;
+esac
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/mock-bin/gh"
+
+  for packets in two primary; do
+    PACKETS=$packets run "$TEST_TMPDIR/scripts/setup.sh" secrets --non-interactive
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"✗ GPG_SIGNING_KEY: the export is not the secret of subkey 600D000000000123 alone"* ]]
+    [ -f "$TEST_TMPDIR/secret-AUR_SSH_KEY" ]
+    [ ! -e "$TEST_TMPDIR/secret-GPG_SIGNING_KEY" ]
+  done
 }
 
 @test "setup gpg: declining the passphrase-free copy turns GPG off" {
@@ -1335,7 +1433,7 @@ EOF
 }
 
 # Helper: the gpg and gpg-connect-agent of mock_gpg_strip_flow, with the strip step named in
-# $STRIP_FAIL failing: export, import, keygrip, passwd or clean
+# $STRIP_FAIL failing: export, import, keygrip, passwd, clean, or copy for a copy of two subkeys
 mock_gpg_strip_failing() {
   mock_gpg_strip_flow
   cat >"$TEST_TMPDIR/mock-bin/gpg" <<'EOF'
@@ -1362,6 +1460,17 @@ case "$*" in
   *--import*)
     cat >/dev/null
     [[ "$fail" == import ]] && exit 2
+    ;;
+  *--list-packets*)
+    printf ':secret key packet:\n\tgnu-dummy, algo: 0, simple checksum, hash: 0\n'
+    printf ':secret sub key packet:\n\tkeyid: 9A55000000000003\n'
+    [[ "$fail" != copy ]] || printf ':secret sub key packet:\n\tkeyid: E000000000000004\n'
+    ;;
+  *--with-colons*)
+    echo "sec:u:255:22:FEDCBA0987654321:1767225600:::u:::scESC:::+::ed25519:::0:"
+    echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFFEDCBA0987654321:"
+    echo "ssb:u:255:22:9A55000000000003:1767225600::::::s:::+::ed25519::"
+    echo "fpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFF9A55000000000003:"
     ;;
   *--list-secret-keys*)
     echo "sec   ed25519/MASTERXXX 2026-01-01 [SC]"
@@ -1401,6 +1510,7 @@ import|Failed to import key into temporary keyring
 keygrip|Could not determine keygrip for signing subkey
 passwd|Failed to remove passphrase (cancelled or timed out)
 clean|Failed to export passphrase-free key
+copy|The passphrase-free copy is not the secret of subkey 9A55000000000003 alone
 EOF
 }
 
