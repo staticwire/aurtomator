@@ -132,6 +132,13 @@ jobs:
               find "$dir" ! -type l -perm /022 -exec chmod go-w -- {} +
             fi
           done
+          # The event, the home of the steps, and the step scripts and file commands in RUNNER_TEMP
+          # are for root steps and the runner, which owns them
+          for dir in /github/home /github/workflow "$RUNNER_TEMP"; do
+            if [ -n "$dir" ] && [ -d "$dir" ]; then
+              chmod go-rwx -- "$dir"
+            fi
+          done
 
       # Fails when builder can write a file of the runner or of root steps, read the checkout,
       # use the Docker socket or get a variable of the runner
@@ -156,7 +163,8 @@ jobs:
           done
           check -r /var/run/docker.sock
           check -w /var/run/docker.sock
-          for path in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/README.md" /data; do
+          for path in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/README.md" /data /github/workflow/event.json /github/home \
+            "$RUNNER_TEMP" "$GITHUB_ENV" "$GITHUB_PATH" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY"; do
             check -r "$path"
           done
           # find skips the directories builder cannot list or enter, as the workspace after Close files,
@@ -229,15 +237,29 @@ jobs:
           mkdir "$DATA/upload" "$DATA/statuses"
           install -d -m 0700 "$RESULTS" "$RESULTS/packages"
           [[ -d "$WORK" && ! -L "$WORK" ]] || exit 0
-          # Copies $WORK/$1 to $2 when it is a regular file. builder reads it, so a link reaches
-          # only what builder can read.
+          # Copies $WORK/$1 to $2 when it is a regular file of at most $3 bytes. builder reads it,
+          # so a link reaches only what builder can read, and head stops one byte past the limit.
           take() {
             [[ -f "$WORK/$1" && ! -L "$WORK/$1" ]] || return 0
             mkdir -p "$(dirname "$2")"
             # The redirect is root's on purpose
             # shellcheck disable=SC2024
-            sudo -u builder cat -- "$WORK/$1" >"$2"
+            sudo -u builder head -c "$(($3 + 1))" -- "$WORK/$1" >"$2"
+            if [ "$(stat -c %s -- "$2")" -gt "$3" ]; then
+              rm -f -- "$2"
+              echo "::warning::$1 is larger than $3 bytes, so Hand over skips it"
+            fi
           }
+          # No real file comes near these sizes: the AUR takes no blob above 256,000 bytes, base
+          # holds one commit id, and a status keeps at most 3900 bytes of an error
+          handoff_max() {
+            case "$1" in
+              */base) echo 64 ;;
+              status/*) echo 65536 ;;
+              *) echo 1048576 ;;
+            esac
+          }
+          results_max=16777216
           # Package names never start with a dot, so . and .. do not match
           name_re='[a-z0-9][a-z0-9.+_-]*'
           if [[ -d "$WORK/handoff" && ! -L "$WORK/handoff" ]]; then
@@ -249,7 +271,7 @@ jobs:
                   [[ "$f" =~ ^status/(${name_re}|_unverified)$ ]]; then
                   # Jobs of one package hand over that package alone
                   [[ -z "${PACKAGE:-}" || "${BASH_REMATCH[1]}" == "$PACKAGE" ]] || continue
-                  take "handoff/$f" "$DATA/upload/$f"
+                  take "handoff/$f" "$DATA/upload/$f" "$(handoff_max "$f")"
                 fi
               done
           fi
@@ -258,15 +280,15 @@ jobs:
               name=${f##*/}
               # The records of the run, such as _upstream, start with _
               [[ "$name" =~ ^(${name_re}|_[a-z]+)$ ]] || continue
-              take ".status/$name" "$DATA/statuses/$name"
+              take ".status/$name" "$DATA/statuses/$name" "$results_max"
             done
           fi
-          take README.md "$RESULTS/README.md"
+          take README.md "$RESULTS/README.md" "$results_max"
           if [[ -d "$WORK/packages" && ! -L "$WORK/packages" ]]; then
             for f in "$WORK"/packages/*.yml; do
               name=${f##*/}
               [[ "$name" =~ ^${name_re}\.yml$ ]] || continue
-              take "packages/$name" "$RESULTS/packages/$name"
+              take "packages/$name" "$RESULTS/packages/$name" "$results_max"
             done
           fi
 
@@ -526,6 +548,16 @@ jobs:
             for file in "prepared/$name/PKGBUILD" "prepared/$name/.SRCINFO" "prepared/$name/base" "status/$name"; do
               # No link below the directory of the attempt
               [[ ! -L "$src/${file%%/*}" && ! -L "$src/${file%/*}" && -f "$src/$file" && ! -L "$src/$file" ]] || continue
+              # The limits of Hand over in prepare
+              case "$file" in
+                */base) max=64 ;;
+                status/*) max=65536 ;;
+                *) max=1048576 ;;
+              esac
+              if [ "$(stat -c %s -- "$src/$file")" -gt "$max" ]; then
+                echo "::warning::$src/$file is larger than $max bytes, so verify skips it"
+                continue
+              fi
               install -D -m 0644 "$src/$file" "handoff/$file"
             done
           done

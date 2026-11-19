@@ -1,4 +1,6 @@
 .simplecov -linguist-detectable
 ci-image/Dockerfile -linguist-detectable
+ci-image/Gemfile -linguist-detectable
+ci-image/Gemfile.lock -linguist-detectable
 site/** linguist-documentation
 assets/** linguist-documentation

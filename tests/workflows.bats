@@ -53,7 +53,8 @@ permission_lines() {
     'ci.yml ["test",null]' \
     'ci.yml ["validate",{"contents":"read"}]' \
     'ci.yml ["pipeline",{"contents":"write","issues":"write"}]' \
-    'ci.yml ["merge-image",{"contents":"write","pull-requests":"write"}]' \
+    'ci.yml ["dependency-review",{"contents":"read","issues":"write"}]' \
+    'ci.yml ["merge-image",{"contents":"write","pull-requests":"write","actions":"write"}]' \
     'ci.yml ["ci-ok",{}]' \
     'codeql.yml {"contents":"read"}' \
     'codeql.yml ["analyze",{"contents":"read","security-events":"write"}]' \
@@ -63,7 +64,8 @@ permission_lines() {
     'notify-failure.yml {"actions":"read","issues":"write"}' \
     'notify-failure.yml ["notify",null]' \
     'release-please.yml {"contents":"read"}' \
-    'release-please.yml ["release-please",{"contents":"read","id-token":"write","attestations":"write"}]' \
+    'release-please.yml ["release-please",{"contents":"read"}]' \
+    'release-please.yml ["sign",{"contents":"write","id-token":"write","attestations":"write"}]' \
     'validate.yml {"contents":"read"}' \
     'validate.yml ["image",null]' \
     'validate.yml ["packages",null]' >"$BATS_TEST_TMPDIR/expected"
@@ -116,7 +118,7 @@ secret_lines() {
   done >"$BATS_TEST_TMPDIR/actual"
   printf '%s\n' \
     'check-updates.yml {"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false}}}}' \
-    'ci.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]}}' \
+    'ci.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"workflow_dispatch":null}' \
     'codeql.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"schedule":[{"cron":"41 3 * * 1"}]}' \
     'docs.yml {"push":{"branches":["main"],"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"pull_request":{"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"workflow_dispatch":null}' \
     'notify-failure.yml {"workflow_call":null}' \
@@ -125,12 +127,20 @@ secret_lines() {
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
 }
 
-# Pinned actions, the base image and the Python packages of the CI image, and the packages of the
-# site move only through the pull requests of Dependabot
-@test "dependabot: watches the actions, the CI image, its Python packages and the site" {
+# Pinned actions, the base image, the Python packages and the gems of the CI image, and the
+# packages of the site move only through the pull requests of Dependabot
+@test "dependabot: watches the actions, the CI image, its Python packages and gems, and the site" {
   run yq -o=json -I=0 '[.updates[] | [.["package-ecosystem"], .directory]]' "$GITHUB_DIR/dependabot.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = '[["github-actions","/"],["docker","/ci-image"],["uv","/ci-image"],["npm","/site"]]' ]
+  [ "$output" = '[["github-actions","/"],["docker","/ci-image"],["uv","/ci-image"],["bundler","/ci-image"],["npm","/site"]]' ]
+}
+
+# merge-image merges the updates of ci-image/, and a week gives a hostile release time to be
+# found and pulled before it reaches the CI
+@test "dependabot: proposes versions of ci-image/ a week after their release, the rest after the default" {
+  run yq -o=json -I=0 '[.updates[] | [.["package-ecosystem"], .cooldown]]' "$GITHUB_DIR/dependabot.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[["github-actions",null],["docker",{"default-days":7}],["uv",{"default-days":7}],["bundler",{"default-days":7}],["npm",null]]' ]
 }
 
 # The token a checkout leaves in .git/config would reach builder, which owns the workspace
@@ -153,6 +163,15 @@ secret_lines() {
   [ "$output" = "github.ref == 'refs/heads/main'" ]
   run yq -o=json -I=0 '[.jobs.deploy.needs, .jobs.deploy.environment.name]' "$docs"
   [ "$output" = '["build","github-pages"]' ]
+}
+
+# withastro/action runs npm install, which resolves new versions when the lock lags package.json
+@test "docs: checks the lock file of the site before the build" {
+  local docs="$GITHUB_DIR/workflows/docs.yml"
+  run yq -o=json -I=0 '.jobs.build.steps[] | select(.name == "Check the lock file") | [.["working-directory"], .run]' "$docs"
+  [ "$output" = '["site","npm ci --dry-run --ignore-scripts"]' ]
+  [ "$(step_index_in "$docs" build "Check the lock file")" -lt "$(step_index_in "$docs" build "Build the site")" ]
+  [ "$(step_index_in "$docs" build "Check the lock file")" -gt "$(step_index_in "$docs" build Checkout)" ]
 }
 
 @test "actions: no run block expands an expression" {
@@ -186,14 +205,14 @@ secret_lines() {
     "archlinux:base-devel@sha256:${digest^^}" "archlinux:base@sha256:$digest" "evil/archlinux:base-devel@sha256:$digest"; do
     echo "FROM $from" >"$work/ci-image/Dockerfile"
     : >"$work/out"
-    run env -C "$work" GITHUB_OUTPUT="$work/out" bash --noprofile --norc -eo pipefail "$step"
+    run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
     echo "$from: $output"
     [ "$status" -eq 1 ]
     [ "$output" = "::error::ci-image/Dockerfile must pin archlinux:base-devel by digest" ]
     [ ! -s "$work/out" ]
   done
   printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:base-devel@sha256:$digest" >"$work/ci-image/Dockerfile"
-  run env -C "$work" GITHUB_OUTPUT="$work/out" bash --noprofile --norc -eo pipefail "$step"
+  run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
   [ "$status" -eq 0 ]
   [ "$(cat "$work/out")" = "ref=archlinux:base-devel@sha256:$digest" ]
 }
@@ -415,18 +434,36 @@ secret_lines() {
   [ "$output" = "1" ]
   run yq '.jobs.test.steps[] | select(has("run")) | .run | select(test("tests/"))' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [[ "$output" == "bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive"* ]]
+  [[ "$output" == "bundle exec bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive"* ]]
   [[ "$output" != *"|| true"* ]]
 }
 
-# gem resolves a dependency to its newest release, so the test job names
-# every gem with its version and resolves none
-@test "ci: the test job installs each gem at a fixed version and no other gem" {
-  run yq '.jobs.test.steps[] | select(has("run")) | .run' "$GITHUB_DIR/workflows/ci.yml"
-  [ "$status" -eq 0 ]
-  run grep 'gem install' <<<"$output"
-  [ "$status" -eq 0 ]
-  [ "$output" = "gem install --no-document --ignore-dependencies bashcov:4.0.0 simplecov-cobertura:4.0.0 simplecov:1.3.2 rexml:3.4.4" ]
+# The lock holds every gem at its version with its checksum, and bundler stops on a gem
+# whose checksum differs; the bundler of the image runs, whatever version the lock names
+@test "ci: the test job installs the gems of ci-image/Gemfile.lock as the lock holds them" {
+  local ci="$GITHUB_DIR/workflows/ci.yml" lock="$GITHUB_DIR/../ci-image/Gemfile.lock" gem
+  run yq -o=json -I=0 '.jobs.test.env' "$ci"
+  [ "$output" = '{"BUNDLE_GEMFILE":"ci-image/Gemfile","BUNDLE_FROZEN":"true","BUNDLE_PATH":"/opt/gems","BUNDLE_VERSION":"system"}' ]
+  run yq '[.jobs.test.steps[] | select(has("run")) | .run | select(test("gem install"))] | length' "$ci"
+  [ "$output" = 0 ]
+  run yq -r '.jobs.test.steps[] | select(.name == "Install the coverage tools") | .run' "$ci"
+  [ "$output" = "bundle install" ]
+  [ "$(step_index_in "$ci" test "Install the coverage tools")" -gt "$(step_index_in "$ci" test actions/checkout)" ]
+  run yq -r '.jobs.test.steps[] | select(.name == "Install dependencies") | .run' "$ci"
+  [[ "$output" == *" ruby ruby-erb ruby-bundler"* ]]
+  run sed -n '/^  specs:$/,/^$/s/^    \([^ ]*\) (\(.*\))$/\1 \2/p' "$lock"
+  [ "${#lines[@]}" -ge 4 ]
+  for gem in "${lines[@]}"; do
+    grep -qE "^  ${gem% *} \\(${gem#* }\\) sha256=[0-9a-f]{64}$" "$lock" || {
+      echo "no checksum: $gem"
+      return 1
+    }
+  done
+}
+
+# Prints the index of the step of job $2 in workflow $1 that is named $3 or uses action $3
+step_index_in() {
+  yq ".jobs.$2.steps | to_entries | map(select(.value.name == \"$3\" or (.value.uses // \"\" | sub(\"@.*\"; \"\")) == \"$3\")) | .[0].key" "$1"
 }
 
 @test "ci: the test job runs no validate step and the validate job calls the reusable workflow" {
@@ -451,7 +488,7 @@ secret_lines() {
   [ "$output" = "./.github/workflows/check-updates.yml" ]
   run yq '.jobs.pipeline.if' "$ci"
   [ "$status" -eq 0 ]
-  [ "$output" = "github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')" ]
+  [ "$output" = "github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')" ]
   run yq -o=json -I=0 '.jobs.pipeline.permissions' "$ci"
   [ "$status" -eq 0 ]
   [ "$output" = '{"contents":"write","issues":"write"}' ]
@@ -464,10 +501,10 @@ secret_lines() {
 }
 
 # Dependabot pull requests skip pipeline, which ci-ok counts as passed and merge-image would not
-@test "merge-image: runs only after lint, test, validate and ci-ok" {
+@test "merge-image: runs only after lint, test, validate, the dependency review and ci-ok" {
   run yq '.jobs["merge-image"].needs | sort | join(" ")' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = "ci-ok lint test validate" ]
+  [ "$output" = "ci-ok dependency-review lint test validate" ]
   run yq '.jobs["ci-ok"].needs | contains(["pipeline"])' "$GITHUB_DIR/workflows/ci.yml"
   [ "$output" = "true" ]
 }
@@ -494,6 +531,7 @@ if [[ "$1" == "api" ]]; then
   [[ -z "${GH_FAIL:-}" ]] || exit 1
   printf '%s\n' "$GH_FILES"
 fi
+[[ "$1 $2" != "pr merge" ]] || exit "${GH_MERGE_RC:-0}"
 EOF
   chmod +x "$bin/gh"
   yq '.jobs["merge-image"].steps[] | select(.name == "Merge image update") | .run' \
@@ -501,21 +539,111 @@ EOF
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   : >"$GH_LOG"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" REPO=owner/repo PR=12 HEAD_SHA=abc123 \
-    bash -e "$BATS_TEST_TMPDIR/step.sh"
+    GH_MERGE_RC="${GH_MERGE_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
-@test "merge-image: merges the tested head when only the Dockerfile changed" {
-  GH_FILES="ci-image/Dockerfile" run_merge_step
-  [ "$status" -eq 0 ]
-  grep -qx 'api repos/owner/repo/pulls/12/files --paginate --jq .\[\].filename' "$GH_LOG"
-  grep -qx 'pr merge 12 -R owner/repo --squash --match-head-commit abc123' "$GH_LOG"
+# Merges with the workflow token start no workflow, so the merge starts CI on main by dispatch
+@test "merge-image: merges the tested head when only files of ci-image/ changed, then starts CI on main" {
+  local files
+  for files in ci-image/Dockerfile $'ci-image/Gemfile\nci-image/Gemfile.lock' ci-image/Gemfile.lock \
+    $'ci-image/requirements.in\nci-image/requirements.txt' ci-image/requirements.txt; do
+    echo "$files"
+    GH_FILES="$files" run_merge_step
+    [ "$status" -eq 0 ]
+    run cat "$GH_LOG"
+    [ "$output" = "$(printf '%s\n' 'api repos/owner/repo/pulls/12/files --paginate --jq .[].filename' \
+      'pr merge 12 -R owner/repo --squash --match-head-commit abc123' 'workflow run ci.yml -R owner/repo --ref main')" ]
+  done
 }
 
 @test "merge-image: leaves a pull request that changes other files" {
-  GH_FILES=$'ci-image/Dockerfile\n.github/workflows/ci.yml' run_merge_step
+  local files
+  for files in $'ci-image/Dockerfile\n.github/workflows/ci.yml' ci-image/setup.sh ci-image/Gemfile.local ''; do
+    echo "[$files]"
+    GH_FILES="$files" run_merge_step
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"::notice::"* ]]
+    run grep -c -E '^(pr merge|workflow run)' "$GH_LOG"
+    [ "$output" = "0" ]
+  done
+}
+
+@test "merge-image: starts no CI when the merge fails" {
+  GH_MERGE_RC=1 GH_FILES="ci-image/Dockerfile" run_merge_step
+  [ "$status" -ne 0 ]
+  run grep -c '^workflow run' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+# Dependabot pull requests stop on a version with a published vulnerability of any severity
+@test "dependency-review: reviews the pull requests of Dependabot with an action pinned by SHA" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs["dependency-review"].if' "$ci"
+  [ "$output" = "github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'" ]
+  run yq -o=json -I=0 '.jobs["dependency-review"].steps[0] | [.id, .with]' "$ci"
+  [ "$output" = '["review",{"fail-on-severity":"low"}]' ]
+  run grep -E '^ +uses: actions/dependency-review-action@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' "$ci"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"::notice::"* ]]
-  run grep -c '^pr merge' "$GH_LOG"
+  run yq -r '.jobs["dependency-review"].steps[1] | .name + "|" + .if + "|" + .env.CHANGES' "$ci"
+  [ "$output" = "Open an issue for the vulnerabilities|failure() && steps.review.outcome == 'failure'|\${{ steps.review.outputs.vulnerable-changes }}" ]
+}
+
+# Runs the issue step of dependency-review for the changes in $CHANGES, with a gh that lists
+# the open issues in $GH_TITLES, keeps the body of a new issue and logs every call
+run_vulnerability_issue_step() {
+  local bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$bin" "$BATS_TEST_TMPDIR/temp"
+  cat >"$bin/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$GH_LOG"
+case "$1 $2" in
+  "issue list") printf '%s\n' "${GH_TITLES:-}" ;;
+  "issue create")
+    while (($#)); do
+      [[ "$1" != --body-file ]] || cp "$2" "$GH_BODY"
+      shift
+    done
+    ;;
+esac
+EOF
+  chmod +x "$bin/gh"
+  yq '.jobs["dependency-review"].steps[] | select(.name == "Open an issue for the vulnerabilities") | .run' \
+    "$GITHUB_DIR/workflows/ci.yml" >"$BATS_TEST_TMPDIR/step.sh"
+  GH_LOG="$BATS_TEST_TMPDIR/gh.log" GH_BODY="$BATS_TEST_TMPDIR/body.md"
+  : >"$GH_LOG"
+  rm -f "$GH_BODY"
+  run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_BODY="$GH_BODY" GH_TITLES="${GH_TITLES:-}" REPO=owner/repo PR=12 \
+    RUNNER_TEMP="$BATS_TEST_TMPDIR/temp" CHANGES="$CHANGES" bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","ecosystem":"rubygems","name":"rexml","version":"3.4.5","package_url":"pkg:gem/rexml@3.4.5","license":null,"source_repository_url":null,"vulnerabilities":[{"severity":"high","advisory_ghsa_id":"GHSA-aaaa-bbbb-cccc","advisory_summary":"Denial of service | in the parser","advisory_url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc"}]}]'
+
+@test "dependency-review: opens an issue with a row for each vulnerability" {
+  CHANGES="$VULNERABLE_CHANGES" run_vulnerability_issue_step
+  [ "$status" -eq 0 ]
+  grep -qxF -- 'issue create -R owner/repo --title ❌ Dependabot #12: published vulnerabilities --body-file '"$BATS_TEST_TMPDIR"'/temp/vulnerabilities.md' "$GH_LOG"
+  run cat "$GH_BODY"
+  [ "${lines[0]}" = "Dependabot pull request #12 brings versions with published vulnerabilities, so it is not merged by itself." ]
+  [ "${lines[1]}" = "| Package | Version | Severity | Advisory |" ]
+  [ "${lines[3]}" = '| `rexml` | `3.4.5` | high | [GHSA-aaaa-bbbb-cccc](https://github.com/advisories/GHSA-aaaa-bbbb-cccc) Denial of service   in the parser |' ]
+}
+
+@test "dependency-review: opens no issue when the review failed without a vulnerable change" {
+  local changes
+  for changes in '' '[]' '[{"name":"rexml","version":"3.4.5","vulnerabilities":[]}]'; do
+    echo "[$changes]"
+    CHANGES="$changes" run_vulnerability_issue_step
+    [ "$status" -eq 0 ]
+    [ ! -s "$GH_LOG" ]
+  done
+}
+
+# Dependabot rebases its pull requests, and each push reviews them again
+@test "dependency-review: opens no second issue for the same pull request" {
+  GH_TITLES=$'❌ pkg: update failed\n❌ Dependabot #12: published vulnerabilities' CHANGES="$VULNERABLE_CHANGES" \
+    run_vulnerability_issue_step
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
 }
 
@@ -583,18 +711,18 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 @test "release-please: runs only in the upstream repository" {
   run yq '.jobs[] | .if' "$RELEASE"
   [ "$status" -eq 0 ]
-  [ "$output" = "github.repository == 'staticwire/aurtomator'" ]
+  [ "$output" = "$(printf '%s\n' "github.repository == 'staticwire/aurtomator'" "github.repository == 'staticwire/aurtomator'")" ]
 }
 
 @test "release-please: pins the action by SHA, reads the config in .github and has a time limit" {
-  run yq '.jobs[].steps[1].uses' "$RELEASE"
+  run yq '.jobs["release-please"].steps[1].uses' "$RELEASE"
   [[ "$output" =~ ^googleapis/release-please-action@[0-9a-f]{40}$ ]]
   run grep -E '^ +- uses: googleapis/release-please-action@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' "$RELEASE"
   [ "$status" -eq 0 ]
-  run yq '.jobs[].steps[1].with | .["config-file"] + " " + .["manifest-file"]' "$RELEASE"
+  run yq '.jobs["release-please"].steps[1].with | .["config-file"] + " " + .["manifest-file"]' "$RELEASE"
   [ "$output" = ".github/release-please-config.json .github/.release-please-manifest.json" ]
   run yq '.jobs[]["timeout-minutes"] > 0' "$RELEASE"
-  [ "$output" = "true" ]
+  [ "$output" = $'true\ntrue' ]
   run yq -o=json -I=0 '.permissions' "$RELEASE"
   [ "$output" = '{"contents":"read"}' ]
 }
@@ -602,13 +730,13 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 # GitHub runs the CI of a pull request opened with the workflow token only
 # after someone with write access approves it, and main requires that CI
 @test "release-please: opens the release PR with the token of the release App" {
-  run yq '.jobs[].steps[0].uses' "$RELEASE"
+  run yq '.jobs["release-please"].steps[0].uses' "$RELEASE"
   [[ "$output" =~ ^actions/create-github-app-token@[0-9a-f]{40}$ ]]
   run grep -E '^ +- uses: actions/create-github-app-token@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' "$RELEASE"
   [ "$status" -eq 0 ]
-  run yq -o=json -I=0 '.jobs[].steps[0] | [.id, .with]' "$RELEASE"
+  run yq -o=json -I=0 '.jobs["release-please"].steps[0] | [.id, .with]' "$RELEASE"
   [ "$output" = '["app-token",{"client-id":"${{ vars.RELEASE_APP_CLIENT_ID }}","private-key":"${{ secrets.RELEASE_APP_PRIVATE_KEY }}","permission-contents":"write","permission-issues":"write","permission-pull-requests":"write"}]' ]
-  run yq '.jobs[].steps[1].with.token' "$RELEASE"
+  run yq '.jobs["release-please"].steps[1].with.token' "$RELEASE"
   [ "$output" = '${{ steps.app-token.outputs.token }}' ]
 }
 
@@ -627,12 +755,19 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   [ "$output" = "$version" ]
 }
 
-# The archive steps attach to the release that release-please creates in the same run
-@test "release-please: signs an archive of the release after release-please, in this order" {
-  run yq -r '.jobs[].steps[] | .name // (.uses | sub("@.*"; ""))' "$RELEASE"
+# Every action of a job can ask for its OIDC token, so the token and the App token never share
+# a job, and the signing job runs after the job that tags the release
+@test "release-please: signs an archive of the release in a job of its own after release-please" {
+  run yq -r '.jobs["release-please"].steps[] | .name // (.uses | sub("@.*"; ""))' "$RELEASE"
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' actions/create-github-app-token googleapis/release-please-action \
-    actions/checkout 'Find the release to sign' 'Build the archive' actions/attest 'Attach the archive')" ]
+  [ "$output" = "$(printf '%s\n' actions/create-github-app-token googleapis/release-please-action)" ]
+  run yq -r '.jobs.sign.needs' "$RELEASE"
+  [ "$output" = "release-please" ]
+  run yq -r '.jobs.sign.steps[] | .name // (.uses | sub("@.*"; ""))' "$RELEASE"
+  [ "$output" = "$(printf '%s\n' actions/checkout 'Find the release to sign' 'Build the archive' actions/attest \
+    'Attach the archive')" ]
+  run yq '[.jobs.sign | .. | select(tag == "!!str") | select(test("app-token|secrets\."))] | length' "$RELEASE"
+  [ "$output" = 0 ]
 }
 
 @test "release-please: pins checkout and attest by SHA with the version in a comment" {
@@ -654,7 +789,7 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
     "steps.find.outputs.version != ''")" ]
   run yq -r '.jobs[].steps[] | select(.name == "Find the release to sign" or .name == "Attach the archive") |
     .env.GH_TOKEN' "$RELEASE"
-  [ "$output" = "$(printf '%s\n' '${{ steps.app-token.outputs.token }}' '${{ steps.app-token.outputs.token }}')" ]
+  [ "$output" = "$(printf '%s\n' '${{ github.token }}' '${{ github.token }}')" ]
 }
 
 # Runs step $1 of release-please.yml in a checkout whose manifest holds $MANIFEST, with a gh that
@@ -682,7 +817,7 @@ EOF
   cd "$ws"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" REPO=owner/repo \
     SHA=abc123 TAG_SHA="${TAG_SHA:-}" ASSETS="${ASSETS:-}" VERSION="${VERSION:-}" \
-    bash -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+    bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Reruns of the release job find the release again until it has its archive
@@ -733,7 +868,7 @@ EOF
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q -m init
   yq '.jobs[].steps[] | select(.name == "Build the archive") | .run' "$RELEASE" >"$BATS_TEST_TMPDIR/step.sh"
   cd "$repo"
-  run env VERSION=0.13.1 bash -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+  run env VERSION=0.13.1 bash -e "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
   run tar -tzf aurtomator-0.13.1.tar.gz
   [ "$output" = "$(printf '%s\n' aurtomator-0.13.1/ aurtomator-0.13.1/file)" ]
@@ -810,13 +945,13 @@ step_run() {
   run yq '.jobs.image.steps[1].uses' "$CHECK_UPDATES"
   [[ "$output" == actions/checkout@* ]]
   step_run image "Check the pin" >"$step"
-  run env SHA= bash --noprofile --norc -eo pipefail "$step"
+  run env SHA= bash -e "$step"
   [ "$status" -eq 1 ]
   [ "$output" = "::error::job.workflow_sha is not a commit SHA: ''" ]
-  run env SHA=abc bash --noprofile --norc -eo pipefail "$step"
+  run env SHA=abc bash -e "$step"
   [ "$status" -eq 1 ]
   [ "$output" = "::error::job.workflow_sha is not a commit SHA: 'abc'" ]
-  run env SHA=0123456789abcdef0123456789abcdef01234567 bash --noprofile --norc -eo pipefail "$step"
+  run env SHA=0123456789abcdef0123456789abcdef01234567 bash -e "$step"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
@@ -1251,6 +1386,22 @@ run_take_step() {
   [ "$output" = "$(printf '%s\n' './prepared/qux/.SRCINFO kept' './prepared/qux/PKGBUILD kept' './prepared/qux/base kept')" ]
 }
 
+@test "check-updates: verify takes no file of an attempt larger than its limit" {
+  local dir="$BATS_TEST_TMPDIR/ws/handoffs/1"
+  add_attempt 1 foo kept
+  truncate -s $((1024 * 1024 + 1)) "$dir/prepared/foo/PKGBUILD"
+  printf '%064d\n' 0 >"$dir/prepared/foo/base"
+  mkdir -p "$dir/status"
+  truncate -s $((64 * 1024 + 1)) "$dir/status/foo"
+  run run_take_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::handoffs/1/prepared/foo/PKGBUILD is larger than 1048576 bytes"* ]]
+  [[ "$output" == *"::warning::handoffs/1/prepared/foo/base is larger than 64 bytes"* ]]
+  [[ "$output" == *"::warning::handoffs/1/status/foo is larger than 65536 bytes"* ]]
+  run bash -c 'cd "$1" && find . -type f' _ "$BATS_TEST_TMPDIR/ws/handoff"
+  [ "$output" = "./prepared/foo/.SRCINFO" ]
+}
+
 @test "check-updates: verify takes nothing from handoffs that is a link" {
   local ws="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$BATS_TEST_TMPDIR/elsewhere/1/prepared/foo" "$ws"
@@ -1277,7 +1428,7 @@ run_take_step() {
     [[ "$output" != *"GITHUB_OUTPUT"* ]]
     # As builder, Stop builder only signals and Hand over only reads files
     output=${output//"sudo -u builder kill -KILL -1 "/}
-    [[ "${output//"sudo -u builder cat -- "/}" != *"sudo"* ]]
+    [[ "${output//'sudo -u builder head -c "$(($3 + 1))" -- '/}" != *"sudo"* ]]
   done
 }
 
@@ -1305,7 +1456,7 @@ step_index() {
     run yq ".jobs.$job.steps[$((builder + 1)):] | .[] | select(has(\"run\")) | .run" "$CHECK_UPDATES"
     [ "$status" -eq 0 ]
     output=${output//"sudo -u builder kill -KILL -1 "/}
-    [[ "${output//"sudo -u builder cat -- "/}" != *"sudo -u builder"* ]]
+    [[ "${output//'sudo -u builder head -c "$(($3 + 1))" -- '/}" != *"sudo -u builder"* ]]
     run yq ".jobs.$job.steps[$((builder + 1)):] | .[] | .uses // \"\"" "$CHECK_UPDATES"
     [[ "$output" != *run-as-builder* ]]
   done
@@ -1323,7 +1474,7 @@ run_drop_step() {
     echo "[core]" >"$ws/aurtomator/.git/config"
   fi
   step_run check "Drop the checkouts" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 @test "check-updates: Drop the checkouts removes .git and aurtomator, and nothing else" {
@@ -1470,10 +1621,10 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
-    "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/update-readme.sh cwd=$work"
+    "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
   )
   for entry in "${expected[@]}"; do
     IFS=$'\t' read -r job name want readme <<<"$entry"
@@ -1582,6 +1733,25 @@ make_builder_inputs() {
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1/handoff" && find . -type f | LC_ALL=C sort' _ "$work"
   [ "$output" = $'./prepared/foo/.SRCINFO\n./prepared/foo/PKGBUILD\n./prepared/foo/base' ]
+}
+
+@test "run-as-builder: copies no status and no handoff file larger than its limit" {
+  local work="$BATS_TEST_TMPDIR/work" data="$BATS_TEST_TMPDIR/data"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  truncate -s $((1024 * 1024 + 1)) "$data/handoff/prepared/foo/PKGBUILD"
+  printf '%064d\n' 0 >"$data/handoff/prepared/foo/base"
+  truncate -s $((64 * 1024 + 1)) "$data/handoff/status/foo"
+  truncate -s $((16 * 1024 * 1024 + 1)) "$data/status/foo"
+  SUDO_OUT=ok run_builder_step verify "Verify checksums"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::handoff/prepared/foo/PKGBUILD is larger than 1048576 bytes"* ]]
+  [[ "$output" == *"::warning::handoff/prepared/foo/base is larger than 64 bytes"* ]]
+  [[ "$output" == *"::warning::handoff/status/foo is larger than 65536 bytes"* ]]
+  [[ "$output" == *"::warning::.status/foo is larger than 16777216 bytes"* ]]
+  run bash -c 'cd "$1" && find . -type f | LC_ALL=C sort' _ "$work"
+  [ "$output" = "$(printf '%s\n' ./.status/_upstream ./README.md ./handoff/prepared/foo/.SRCINFO \
+    ./handoff/status/_unverified ./packages/foo.yml)" ]
 }
 
 @test "run-as-builder: copies nothing from an input that is a link" {
@@ -2125,8 +2295,9 @@ make_handoff() {
   run_hand_over_step
   [ "$status" -eq 0 ]
   run env LC_ALL=C sort "$SUDO_LOG"
-  [ "$output" = "$(printf -- "-u builder cat -- $work/%s\n" .status/foo README.md handoff/prepared/foo/.SRCINFO \
-    handoff/prepared/foo/PKGBUILD handoff/prepared/foo/base handoff/status/foo packages/foo.yml | LC_ALL=C sort)" ]
+  [ "$output" = "$(printf -- "-u builder head -c %s -- $work/%s\n" 16777217 .status/foo 16777217 README.md \
+    1048577 handoff/prepared/foo/.SRCINFO 1048577 handoff/prepared/foo/PKGBUILD 65 handoff/prepared/foo/base \
+    65537 handoff/status/foo 16777217 packages/foo.yml | LC_ALL=C sort)" ]
 }
 
 # prepare hands over no status/ when no update failed. bashcov exports
@@ -2155,6 +2326,37 @@ make_handoff() {
   [ -z "$(ls -A "$BATS_TEST_TMPDIR/data/statuses")" ]
   [ -z "$(ls -A "$ws")" ]
   [ ! -s "$SUDO_LOG" ]
+}
+
+# PKGBUILD code of prepare writes the handoff, and verify copies the files of every package
+# three times, so a file past its limit stays out; head reads one byte past the limit alone
+@test "check-updates: Hand over skips each file larger than its limit" {
+  local work="$BATS_TEST_TMPDIR/work" up="$BATS_TEST_TMPDIR/data/upload"
+  make_handoff
+  truncate -s $((1024 * 1024 + 1)) "$work/handoff/prepared/foo/PKGBUILD"
+  truncate -s $((1024 * 1024)) "$work/handoff/prepared/foo/.SRCINFO"
+  printf '%064d\n' 0 >"$work/handoff/prepared/foo/base"
+  truncate -s $((64 * 1024 + 1)) "$work/handoff/status/foo"
+  mkdir -p "$work/.status" "$work/packages"
+  truncate -s $((16 * 1024 * 1024 + 1)) "$work/.status/_upstream"
+  echo "updated: 2.0" >"$work/.status/foo"
+  truncate -s $((64 * 1024 * 1024)) "$work/README.md"
+  truncate -s $((16 * 1024 * 1024)) "$work/packages/foo.yml"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  [ ! -e "$up/prepared/foo/PKGBUILD" ]
+  [ "$(stat -c %s "$up/prepared/foo/.SRCINFO")" -eq $((1024 * 1024)) ]
+  [ ! -e "$up/prepared/foo/base" ]
+  [ ! -e "$up/status/foo" ]
+  [ ! -e "$BATS_TEST_TMPDIR/data/statuses/_upstream" ]
+  [ "$(<"$BATS_TEST_TMPDIR/data/statuses/foo")" = "updated: 2.0" ]
+  [ ! -e "$BATS_TEST_TMPDIR/results/README.md" ]
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/results/packages/foo.yml")" -eq $((16 * 1024 * 1024)) ]
+  [[ "$output" == *"::warning::handoff/prepared/foo/PKGBUILD is larger than 1048576 bytes"* ]]
+  [[ "$output" == *"::warning::handoff/prepared/foo/base is larger than 64 bytes"* ]]
+  [[ "$output" == *"::warning::handoff/status/foo is larger than 65536 bytes"* ]]
+  [[ "$output" == *"::warning::.status/_upstream is larger than 16777216 bytes"* ]]
+  [[ "$output" == *"::warning::README.md is larger than 16777216 bytes"* ]]
 }
 
 # Workspace with aurtomator linked in, package a at 1.0 before the run and
@@ -3565,11 +3767,11 @@ run_bare_issues_step() {
   mkdir -p "$bin"
   printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
   chmod +x "$bin/chown"
-  run env AUR_SSH_KEY= PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$step"
+  run env AUR_SSH_KEY= PATH="$bin:$PATH" sh -e "$step"
   [ "$status" -eq 1 ]
   [ "$output" = "::error::The secret AUR_SSH_KEY is empty" ]
   [ ! -e "$ssh_dir" ]
-  run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$step"
+  run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" sh -e "$step"
   [ "$status" -eq 0 ]
   [ "$(cat "$ssh_dir/aur")" = "key-text" ]
   [ -f "$ssh_dir/known_hosts" ]
@@ -3586,7 +3788,7 @@ run_setup_ssh_step() {
   mkdir -p "$bin"
   printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
   chmod +x "$bin/chown"
-  run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" bash --noprofile --norc -eo pipefail "$step"
+  run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" sh -e "$step"
 }
 
 # ssh waits for a silent host as long as TCP does, minutes past the timeout of a publish
@@ -3692,8 +3894,11 @@ run_summary_step() {
 close_files_step() {
   local mnt="$BATS_TEST_TMPDIR/mnt"
   step_run check "Close files to builder" |
-    sed "s|for dir in /__t /github/home /github/workflow;|for dir in $mnt/t $mnt/home $mnt/workflow;|" >"$BATS_TEST_TMPDIR/step.sh"
+    sed -e "s|for dir in /__t /github/home /github/workflow;|for dir in $mnt/t $mnt/home $mnt/workflow;|" \
+      -e "s|for dir in /github/home /github/workflow \"\$RUNNER_TEMP\";|for dir in $mnt/home $mnt/workflow $mnt/temp;|" \
+      >"$BATS_TEST_TMPDIR/step.sh"
   grep -qF "for dir in $mnt/t $mnt/home $mnt/workflow;" "$BATS_TEST_TMPDIR/step.sh"
+  grep -qF "for dir in $mnt/home $mnt/workflow $mnt/temp;" "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # PKGBUILD code of prepare runs as builder, which needs aurtomator/ alone
@@ -3734,7 +3939,24 @@ close_files_step() {
   run stat -c '%n %a' "$mnt/t" "$mnt/t/node" "$mnt/t/node/bin" "$mnt/t/node/bin/node" "$mnt/home" \
     "$mnt/workflow" "$mnt/workflow/event.json" "$outside"
   [ "$output" = "$(printf '%s\n' "$mnt/t 755" "$mnt/t/node 755" "$mnt/t/node/bin 755" "$mnt/t/node/bin/node 644" \
-    "$mnt/home 755" "$mnt/workflow 755" "$mnt/workflow/event.json 644" "$outside 666")" ]
+    "$mnt/home 700" "$mnt/workflow 700" "$mnt/workflow/event.json 644" "$outside 666")" ]
+}
+
+# The event of the run, the home of the steps, and the step scripts and file commands in
+# RUNNER_TEMP stay with root, which still reads and writes them
+@test "check-updates: Close files to builder takes every right of group and others from the event, home and temp" {
+  local ws="$BATS_TEST_TMPDIR/ws" mnt="$BATS_TEST_TMPDIR/mnt"
+  mkdir -p "$ws" "$mnt/home" "$mnt/workflow" "$mnt/temp/_runner_file_commands"
+  echo event >"$mnt/workflow/event.json"
+  echo "set -e" >"$mnt/temp/step.sh"
+  chmod 0755 "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands"
+  chmod 0644 "$mnt/workflow/event.json" "$mnt/temp/step.sh"
+  close_files_step
+  run env -C "$ws" DATA="$BATS_TEST_TMPDIR/data" RUNNER_TEMP="$mnt/temp" sh -e "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  run stat -c '%n %a' "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands" "$mnt/temp/step.sh"
+  [ "$output" = "$(printf '%s\n' "$mnt/home 700" "$mnt/workflow 700" "$mnt/temp 700" \
+    "$mnt/temp/_runner_file_commands 755" "$mnt/temp/step.sh 644")" ]
 }
 
 @test "check-updates: each job with a checkout closes its files before downloads and builder" {
@@ -4219,6 +4441,9 @@ calling_workflow() {
 # with the file commands under /fc
 BUILDER_PATHS=(/fc/set_env /fc/add_path /fc/set_output /fc/step_summary /__w/_temp /__w/repo/repo
   /__w/repo/repo/aurtomator /__w /__w/_actions /__e /__t /github/home /github/workflow)
+# The files and directories of the runner that builder may not read, in the order the step tests them
+BUILDER_READ_PATHS=(/github/workflow/event.json /github/home /__w/_temp /fc/set_env /fc/add_path /fc/set_output
+  /fc/step_summary)
 
 # Runs the step Check builder; sudo logs each command it runs as builder to $CALLS/sudo, passes the
 # tests in $REACH, "<flag>:<path>" separated by spaces, and its find prints $WRITABLE and exits $FIND_RC
@@ -4262,6 +4487,9 @@ EOF
   done
   expected+=("test -r /var/run/docker.sock" "test -w /var/run/docker.sock")
   expected+=("test -r /__w/repo/repo" "test -r /__w/repo/repo/README.md" "test -r /data")
+  for path in "${BUILDER_READ_PATHS[@]}"; do
+    expected+=("test -r $path")
+  done
   expected+=("find /__w /__e /__t /github /__w/repo/repo/aurtomator ( -writable -print -quit ) -o ( -type d ( ! -readable -o ! -executable ) -prune )")
   expected+=(env)
   [ "$(cat "$CALLS/sudo")" = "$(printf '%s\n' "${expected[@]}")" ]
@@ -4282,7 +4510,19 @@ EOF
     REACH="-w:$path" run_check_builder_step
     [ "$status" -eq 1 ]
     [ "$output" = "::error::builder passes test -w $path" ]
-    [ "$(wc -l <"$CALLS/sudo")" -eq 21 ]
+    [ "$(wc -l <"$CALLS/sudo")" -eq 28 ]
+  done
+}
+
+# The event names the repository and the sender, and the step scripts and file commands hold
+# what the steps before wrote
+@test "check-updates: Check builder fails when builder can read the event, the home or the files of the steps" {
+  local path
+  for path in "${BUILDER_READ_PATHS[@]}"; do
+    echo "$path"
+    REACH="-r:$path" run_check_builder_step
+    [ "$status" -eq 1 ]
+    [ "$output" = "::error::builder passes test -r $path" ]
   done
 }
 

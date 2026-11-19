@@ -1325,6 +1325,26 @@ current: '1.0.0'"
   cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:.SRCINFO) "$PREPARED/.SRCINFO"
 }
 
+# The clone has no work tree, so the attributes of the AUR repo never reach hash-object, and an
+# attributes file of the git config does; --no-filters keeps both out
+@test "publish-pkg: commits the prepared bytes whatever the attributes of the git config say" {
+  setup_publish
+  write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' # +AAo-)+AAo-echo PWNED+AAo-x=(
+            '$H2')"
+  aur_add_file PKGBUILD "$(<"$OLD")"
+  write_pkgbuild "$PREPARED/PKGBUILD" 1.1.0 1 "sha256sums=('$H3' # +AAo-)+AAo-echo PWNED+AAo-x=(
+            '$H4')"
+  sed -i 's/^\tpkgdesc = demo$/&, $Id: kept $/' "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  aur_add_file .SRCINFO "$(<"$TEST_TMPDIR/old.SRCINFO")"
+  printf '%s\n' 'PKGBUILD working-tree-encoding=UTF-7' '.SRCINFO ident' >"$TEST_TMPDIR/attributes"
+  printf '[core]\n\tattributesFile = %s\n' "$TEST_TMPDIR/attributes" >>"$GIT_CONFIG_GLOBAL"
+
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+  cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:PKGBUILD) "$PREPARED/PKGBUILD"
+  cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:.SRCINFO) "$PREPARED/.SRCINFO"
+}
+
 @test "publish-pkg: refuses a prepared PKGBUILD that changes other lines" {
   setup_publish
   sed -i 's|https://example.com/demo|https://evil.example/demo|' "$PREPARED/PKGBUILD"
@@ -1398,6 +1418,120 @@ current: '1.0.0'"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 3 ]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$AUR_BASE" ]
+}
+
+# A rerun of a publish job that failed after its push finds the commit of its first attempt
+@test "publish-pkg: takes a head with the prepared files as the version the AUR has" {
+  local pushed
+  setup_publish
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+  pushed=$(git -C "$AUR_REMOTE" rev-parse HEAD)
+  [ "$pushed" != "$AUR_BASE" ]
+  yq -i '.current = "1.0.0" | del(.last_updated)' "$TEST_TMPDIR/packages/demo.yml"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"demo already at 1.1.0 on AUR, nothing to do"* ]]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$pushed" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .last_updated)" = "$(date -u +%F)" ]
+}
+
+@test "publish-pkg: defers when the head that moved holds other files than the prepared ones" {
+  setup_publish
+  echo "# by hand" >>"$TEST_TMPDIR/aur-work-demo/PKGBUILD"
+  commit_aur_state "change by hand"
+  echo "$AUR_BASE" >"$PREPARED/base"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"The AUR repo of demo moved from $AUR_BASE to"* ]]
+}
+
+@test "publish-pkg: defers when the head that moved holds the prepared PKGBUILD with another .SRCINFO" {
+  setup_publish
+  cp "$PREPARED/PKGBUILD" "$TEST_TMPDIR/aur-work-demo/PKGBUILD"
+  commit_aur_state "PKGBUILD by hand"
+  echo "$AUR_BASE" >"$PREPARED/base"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"The AUR repo of demo moved from $AUR_BASE to"* ]]
+}
+
+# === PKGBUILD code runs in prepare alone ===
+
+# Helper: setup_publish with the canary of add_canary in the AUR PKGBUILD and the prepared one,
+# and a curl that logs each call to $TEST_TMPDIR/curl-calls
+setup_canary_publish() {
+  setup_publish
+  add_canary "$TEST_TMPDIR/aur-work-demo/PKGBUILD"
+  commit_aur_state canary
+  add_canary "$PREPARED/PKGBUILD"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/curl-calls"\nexit 1\n' "$TEST_TMPDIR" >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
+}
+
+# The AUR SSH key and the GPG key are in place while publish runs
+@test "publish-pkg: pushes without running PKGBUILD code or asking another host" {
+  setup_canary_publish
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -q '^_canary='
+  canary_untouched
+  [ ! -e "$TEST_TMPDIR/curl-calls" ]
+}
+
+@test "publish-pkg: takes the version the AUR has without running PKGBUILD code or asking another host" {
+  setup_canary_publish
+  cp "$TEST_TMPDIR/aur-work-demo/PKGBUILD" "$PREPARED/PKGBUILD"
+  cp "$TEST_TMPDIR/old.SRCINFO" "$PREPARED/.SRCINFO"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.0.0 "$PREPARED"
+  [ "$status" -eq 2 ]
+  canary_untouched
+  [ ! -e "$TEST_TMPDIR/curl-calls" ]
+}
+
+@test "publish-pkg: defers a moved AUR repo without running PKGBUILD code or asking another host" {
+  local base
+  setup_canary_publish
+  base=$(<"$PREPARED/base")
+  echo "# by hand" >>"$TEST_TMPDIR/aur-work-demo/PKGBUILD"
+  commit_aur_state "change by hand"
+  echo "$base" >"$PREPARED/base"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 3 ]
+  canary_untouched
+  [ ! -e "$TEST_TMPDIR/curl-calls" ]
+}
+
+@test "verify-pkg: checks the sums without running PKGBUILD code" {
+  setup_verify
+  add_canary "$TEST_TMPDIR/aur-work-demo/PKGBUILD"
+  commit_aur_state canary
+  add_canary "$PREPARED/PKGBUILD"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+  canary_untouched
+}
+
+# prepare runs the PKGBUILD, as it may, and publish takes its files without running them
+@test "publish-pkg: pushes an update with --arch-out without running PKGBUILD code" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin"
+  setup_arch_prepare
+  add_canary "$work/PKGBUILD"
+  # prepare refuses a pkgver() beside a strategy other than git-latest
+  sed -i '/^pkgver() /d' "$work/PKGBUILD"
+  git -C "$work" add PKGBUILD
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qm canary
+  git -C "$work" push -q "$AUR_REMOTE" master
+  archive_missing aarch64 28+23
+  prepare_arch 28+23 aarch64
+  grep -q '^_canary=' "$PREPARED/PKGBUILD"
+  [ -e "$TEST_TMPDIR/canary/top" ]
+  rm -rf "$TEST_TMPDIR/canary"
+  mkdir "$TEST_TMPDIR/canary"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" jdk-temurin-ea-bin 28+23 "$PREPARED" --arch-out aarch64
+  [ "$status" -eq 0 ]
+  canary_untouched
 }
 
 @test "publish-pkg: refuses an update prepared for another version" {
@@ -5317,6 +5451,22 @@ make_unpushable_repo() {
   [ "$status" -eq 1 ]
   [ "$(cat "$TEST_TMPDIR/sleeps")" = $'7\n7' ]
   [[ "$output" == *"Push attempt 2 failed, retrying in 7s"* ]]
+}
+
+# check-all.sh keeps the stderr of a script for the status of a failed update, so the reason
+# that git and the AUR give goes there, and the progress of the script does not
+@test "aur_clone and aur_commit_push: leave what git prints on a failure on stderr" {
+  mock_sleep_and_clone
+  printf '#!/usr/bin/env bash\nif [[ "$1" == clone || "$*" == *" push"* ]]; then\n  echo "fatal: the remote hung up" >&2\n  exit 128\nfi\nexec /usr/bin/git "$@"\n' >"$MOCK_DIR/git"
+  make_unpushable_repo
+  AURTOMATOR_CLONE_DELAY=0 AURTOMATOR_RETRY_DELAY=0 aur_clone ssh://aur@example.invalid/demo.git "$TEST_TMPDIR/other" \
+    >"$TEST_TMPDIR/clone.out" 2>"$TEST_TMPDIR/clone.err" || true
+  [ "$(grep -c 'fatal: the remote hung up' "$TEST_TMPDIR/clone.err")" -eq 3 ]
+  [ "$(grep -c 'fatal: the remote hung up' "$TEST_TMPDIR/clone.out")" -eq 0 ]
+  AURTOMATOR_RETRY_DELAY=0 aur_commit_push "$TEST_TMPDIR/clone" 1.0.0 test \
+    >"$TEST_TMPDIR/push.out" 2>"$TEST_TMPDIR/push.err" || true
+  [ "$(grep -c 'fatal: the remote hung up' "$TEST_TMPDIR/push.err")" -eq 3 ]
+  [ "$(grep -c 'fatal: the remote hung up' "$TEST_TMPDIR/push.out")" -eq 0 ]
 }
 
 @test "aur_commit_push: stops when git has nothing to commit" {

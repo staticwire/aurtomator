@@ -11,11 +11,11 @@ aurtomator has one maintainer, who makes the final decisions on changes, release
 | Maintainer | [noctuum](https://github.com/noctuum) | Reviews and merges pull requests, triages issues, answers security reports, publishes releases, and keeps this site current |
 | Second owner | [arsenoganesian](https://github.com/arsenoganesian) | Holds admin rights to the repository and the staticwire organization, and takes over from the maintainer if they cannot continue |
 | Contributors | Anyone with a GitHub account | Open issues and pull requests as [CONTRIBUTING.md](https://github.com/staticwire/aurtomator/blob/main/CONTRIBUTING.md) describes |
-| Bots | Dependabot and the `aurtopacker` GitHub App | Dependabot opens pull requests that update dependencies. `aurtopacker` runs release-please, which opens release pull requests and creates the releases, and attaches the signed archive of each release |
+| Bots | Dependabot and the `aurtopacker` GitHub App | Dependabot opens pull requests that update dependencies. `aurtopacker` runs release-please, which opens release pull requests and creates the releases. Job `sign` of the release workflow, which holds no token of the App, signs the archive of each release and attaches it |
 
 ## Decisions
 
-Changes reach `main` only through pull requests, and the maintainer merges them once the required checks `lint`, `test` and `ci-ok` pass. Pull requests are squash-merged and hold one logical change each. The [roadmap](/project/roadmap/) lists what the project plans and what it does not.
+Changes reach `main` only through pull requests, and the maintainer merges them once the required checks `lint`, `test` and `ci-ok` pass. The Dependabot updates of `ci-image/` are the exception: job `merge-image` merges them once their checks and the review of their dependencies pass, see [CI image updates](/develop/ci/#ci-image-updates). Pull requests are squash-merged and hold one logical change each. The [roadmap](/project/roadmap/) lists what the project plans and what it does not.
 
 ## Continuity
 

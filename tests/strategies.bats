@@ -498,6 +498,20 @@ EOF
   [ "$output" = "No tags found at https://git.example.org/~owner/empty" ]
 }
 
+# A host that streams refs would fill the memory of the check, so the listing takes at most
+# MAX_ANSWER_MB, as answers over HTTP do
+@test "git-tag: fails when the tags pass the answer limit" {
+  create_test_package "test-git-tag" "git-tag" "upstream:
+  url: https://git.example.org/~owner/huge"
+
+  run env MAX_ANSWER_MB=1 "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to fetch tags from https://git.example.org/~owner/huge"* ]]
+  run env MAX_ANSWER_MB=3 "$TEST_TMPDIR/strategies/git-tag.sh" "test-git-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.40000" ]
+}
+
 @test "git-tag: refuses a URL other than HTTPS" {
   create_test_package "test-git-tag" "git-tag" "upstream:
   url: http://git.example.org/~owner/repo"

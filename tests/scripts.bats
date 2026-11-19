@@ -4829,6 +4829,39 @@ EOF
   [ "$(grep -c -v -e ' --proto =https --proto-redir =https ' "$TEST_TMPDIR/head-args.log")" -eq 0 ]
 }
 
+# The check job holds the read-only token, and its statuses decide what later jobs do
+@test "check-arch: reads the arches of the AUR without running its PKGBUILD" {
+  create_test_package jdk-temurin-ea-bin webpage-scrape "upstream:
+  url: https://api.adoptium.net/v3/info/release_names
+  pattern: 'jdk-([0-9]+)'
+current: 28+22"
+  arch_pkgbuild "$TEST_TMPDIR/PKGBUILD"
+  add_canary "$TEST_TMPDIR/PKGBUILD"
+  arch_srcinfo "$TEST_TMPDIR/.SRCINFO"
+  make_aur_remote jdk-temurin-ea-bin "$TEST_TMPDIR/PKGBUILD" "$TEST_TMPDIR/.SRCINFO"
+  mock_heads
+  check_arch 28+23
+  [ "$ARCH_RC" -eq 0 ]
+  canary_untouched
+}
+
+# The functions of pkgbuild.sh source the PKGBUILD they get, and makepkg and updpkgsums run it,
+# so the code of verify, publish and the arch check calls none of them
+@test "scripts: verify, publish and the arch check source no PKGBUILD" {
+  local scripts="$BATS_TEST_DIRNAME/../scripts" fns file
+  fns=$(grep -o -E '^[a-z_]+\(\)' "$scripts/lib/pkgbuild.sh" | tr -d '()' | paste -sd '|' -)
+  [[ "$fns" == *audit_pkgbuild* && "$fns" == *arch_answers* && "$fns" == *pkgbuild_checksums* ]]
+  for file in publish-pkg.sh verify-pkg.sh check-arch.sh lib/prepared.sh lib/sums.sh lib/arch.sh lib/aur.sh; do
+    echo "$file"
+    run grep -n -w -E "$fns" "$scripts/$file"
+    [ "$status" -eq 1 ]
+    run grep -n -E '(^|[;&|(]|\$\()[[:space:]]*(makepkg|updpkgsums|source|\.|eval)[[:space:]]|(ba)?sh[[:space:]]+-c' "$scripts/$file"
+    [ "$status" -le 1 ]
+    run grep -v -F 'source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"' <<<"$output"
+    [ -z "$output" ]
+  done
+}
+
 # Lines of git would enter the error text of a failed check
 @test "check-arch: clones the AUR repository with -q" {
   temurin_package "current: 28+22"

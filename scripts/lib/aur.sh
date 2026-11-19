@@ -18,7 +18,7 @@ aur_clone() {
   fi
   git_request_begin "$1" || return 1
   for attempt in 1 2 3; do
-    if git clone "${@:3}" "$1" "$2" 2>&1; then
+    if git clone "${@:3}" "$1" "$2"; then
       request_end
       return 0
     fi
@@ -95,7 +95,7 @@ aur_commit_push() {
   fi
 
   for attempt in 1 2 3; do
-    if git -C "$dir" push 2>&1; then
+    if git -C "$dir" push; then
       return 0
     fi
     if [[ "$attempt" -eq 3 ]]; then

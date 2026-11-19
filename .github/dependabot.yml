@@ -4,16 +4,31 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  # merge-image merges the updates of /ci-image, so a release waits a week for someone to find
+  # and pull a hostile one
   - package-ecosystem: "docker"
     directory: "/ci-image"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "uv"
     directory: "/ci-image"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 7
     groups:
       codecov:
+        patterns: ["*"]
+  - package-ecosystem: "bundler"
+    directory: "/ci-image"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    groups:
+      coverage:
         patterns: ["*"]
   - package-ecosystem: "npm"
     directory: "/site"

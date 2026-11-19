@@ -76,8 +76,20 @@ log_info "Cloning AUR repo: $PKG_NAME"
 aur_clone "ssh://aur@aur.archlinux.org/${PKG_NAME}.git" "$aur_dir" --no-checkout || exit 1
 aur_reanchor "$aur_dir" --no-checkout
 
+# Succeeds when PKGBUILD and .SRCINFO at the head of AUR clone $1 are the prepared files in $2
+# byte for byte, as after the push of an earlier attempt of this job
+head_holds_prepared() {
+  local file head_blob prepared_blob
+  for file in PKGBUILD .SRCINFO; do
+    head_blob=$(git -C "$1" rev-parse --verify --quiet "HEAD:$file") || return 1
+    prepared_blob=$(git -C "$1" hash-object --no-filters -- "$2/$file") || return 1
+    [[ "$head_blob" == "$prepared_blob" ]] || return 1
+  done
+}
+
 head=$(git -C "$aur_dir" rev-parse HEAD)
-if [[ "$head" != "$base" ]]; then
+# Such a head goes on to the path of the version the AUR has, which writes current
+if [[ "$head" != "$base" ]] && ! head_holds_prepared "$aur_dir" "$PREPARED"; then
   log_warn "The AUR repo of $PKG_NAME moved from $base to $head since the update was prepared. The next run prepares it again."
   exit 3
 fi
@@ -125,8 +137,8 @@ fi
 check_prepared_files "$aur_files" "$PREPARED" "$VERSION" "$(pkgver_dash "$PKG_FILE")" \
   "$(pkg_get "$PKG_FILE" '.pkgver_format // ""')" "$ASSET_VAR" "$ASSET" "$arch_words" "${tmp_dir}/ref" || exit 1
 
-# The index takes the tree of HEAD, and the prepared files enter it byte for byte: git add would
-# pass them through the attributes of the AUR repo, where UTF-7 turns a comment into code
+# The index takes the tree of HEAD, and the prepared files enter it byte for byte: git add would pass
+# them through the attributes of the AUR repo or the git config, where UTF-7 turns a comment into code
 git -C "$aur_dir" read-tree HEAD || exit 1
 for file in PKGBUILD .SRCINFO; do
   blob=$(git -C "$aur_dir" hash-object -w --stdin --no-filters <"${PREPARED}/${file}") || exit 1

@@ -1,0 +1,8 @@
+# frozen_string_literal: true
+
+# The coverage tools of the test job. Gemfile.lock holds every gem at its version with its
+# checksum, and bundler stops on a gem whose checksum differs.
+source "https://rubygems.org"
+
+gem "bashcov"
+gem "simplecov-cobertura"

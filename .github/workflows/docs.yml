@@ -20,6 +20,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # withastro/action runs npm install, which goes on when package-lock.json lags package.json,
+      # and npm ci stops there without installing anything in a dry run
+      - name: Check the lock file
+        working-directory: site
+        run: npm ci --dry-run --ignore-scripts
       - name: Build the site
         uses: withastro/action@a8b97df764791eb61fbf3338ef713b0e61ae05c5 # v6.1.4
         with:
