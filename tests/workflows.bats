@@ -338,6 +338,21 @@ secret_lines() {
   done
 }
 
+# Tags and branches move, so a workflow pins each action by its commit and names the version
+@test "workflows: pin every action by a full commit SHA with its version" {
+  local file line bad=0
+  local own='^ +(- )?uses: \./'
+  local pinned='^ +(- )?uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$'
+  for file in "$GITHUB_DIR"/workflows/*.yml "$GITHUB_DIR"/actions/*/action.yml; do
+    while IFS= read -r line; do
+      [[ "$line" =~ $own || "$line" =~ $pinned ]] && continue
+      echo "${file##*/}: $line"
+      bad=$((bad + 1))
+    done < <(grep -E '^ +(- )?uses:' "$file")
+  done
+  [ "$bad" -eq 0 ]
+}
+
 @test "workflows: actionlint ignores only the two job.workflow properties" {
   local config="$GITHUB_DIR/actionlint.yaml" expected key keys
   run yq '. | keys | join(" ")' "$config"
