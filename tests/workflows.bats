@@ -95,7 +95,8 @@ secret_lines() {
     'check-updates.yml publish/Publish updates AUR_GIT_NAME' \
     'check-updates.yml publish/Publish updates AUR_GIT_EMAIL' \
     'check-updates.yml 6' \
-    'ci.yml 0' \
+    'ci.yml merge-image/Merge image update CI_IMAGE_AUTO_MERGE' \
+    'ci.yml 1' \
     'codeql.yml 0' \
     'docs.yml 0' \
     'notify-failure.yml 0' \
@@ -337,6 +338,21 @@ secret_lines() {
   done
 }
 
+# Tags and branches move, so a workflow pins each action by its commit and names the version
+@test "workflows: pin every action by a full commit SHA with its version" {
+  local file line bad=0
+  local own='^ +(- )?uses: \./'
+  local pinned='^ +(- )?uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$'
+  for file in "$GITHUB_DIR"/workflows/*.yml "$GITHUB_DIR"/actions/*/action.yml; do
+    while IFS= read -r line; do
+      [[ "$line" =~ $own || "$line" =~ $pinned ]] && continue
+      echo "${file##*/}: $line"
+      bad=$((bad + 1))
+    done < <(grep -E '^ +(- )?uses:' "$file")
+  done
+  [ "$bad" -eq 0 ]
+}
+
 @test "workflows: actionlint ignores only the two job.workflow properties" {
   local config="$GITHUB_DIR/actionlint.yaml" expected key keys
   run yq '. | keys | join(" ")' "$config"
@@ -509,14 +525,33 @@ step_index_in() {
   [ "$output" = "true" ]
 }
 
-@test "merge-image: off unless the variable is true and Dependabot opened the pull request" {
+@test "merge-image: runs only for pull requests that Dependabot opened and pushed" {
   run yq '.jobs["merge-image"].if' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"vars.CI_IMAGE_AUTO_MERGE == 'true'"* ]]
   [[ "$output" == *"github.event_name == 'pull_request'"* ]]
   [[ "$output" == *"github.actor == 'dependabot[bot]'"* ]]
   [[ "$output" == *"github.event.pull_request.user.login == 'dependabot[bot]'"* ]]
   [[ "$output" != *"||"* ]]
+  [[ "$output" != *"vars."* ]]
+}
+
+# Runs that Dependabot starts read Dependabot secrets and no Actions secrets
+@test "merge-image: takes the switch from the secret CI_IMAGE_AUTO_MERGE" {
+  run yq '.jobs["merge-image"].steps[] | select(.name == "Merge image update") | .env.AUTO_MERGE' \
+    "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ secrets.CI_IMAGE_AUTO_MERGE }}' ]
+}
+
+@test "merge-image: leaves the pull request open unless the switch is true" {
+  local value
+  for value in '' false yes; do
+    echo "[$value]"
+    AUTO_MERGE="$value" GH_FILES="ci-image/Dockerfile" run_merge_step
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"::notice::"* ]]
+    [ ! -s "$GH_LOG" ]
+  done
 }
 
 # Runs the merge step of ci.yml with a gh that prints the files in
@@ -539,7 +574,7 @@ EOF
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   : >"$GH_LOG"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" REPO=owner/repo PR=12 HEAD_SHA=abc123 \
-    GH_MERGE_RC="${GH_MERGE_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    AUTO_MERGE="${AUTO_MERGE-true}" GH_MERGE_RC="${GH_MERGE_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Merges with the workflow token start no workflow, so the merge starts CI on main by dispatch

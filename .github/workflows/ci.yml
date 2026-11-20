@@ -198,11 +198,10 @@ jobs:
 
   # Merges a Dependabot pull request that changes only files of ci-image/: the image, the gems
   # and the Python packages of the CI. It waits for the dependency review, and it is off unless
-  # the repository variable CI_IMAGE_AUTO_MERGE is true.
+  # the Dependabot secret CI_IMAGE_AUTO_MERGE is true.
   merge-image:
     needs: [lint, test, validate, dependency-review, ci-ok]
     if: >-
-      vars.CI_IMAGE_AUTO_MERGE == 'true' &&
       github.event_name == 'pull_request' &&
       github.actor == 'dependabot[bot]' &&
       github.event.pull_request.user.login == 'dependabot[bot]'
@@ -220,7 +219,13 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Runs that Dependabot starts read Dependabot secrets and no Actions secrets
+          AUTO_MERGE: ${{ secrets.CI_IMAGE_AUTO_MERGE }}
         run: |
+          if [[ "$AUTO_MERGE" != true ]]; then
+            echo "::notice::The Dependabot secret CI_IMAGE_AUTO_MERGE is not true, so #$PR stays open"
+            exit 0
+          fi
           files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
           if [[ -z "$files" ]]; then
             echo "::notice::#$PR lists no file and stays open"
