@@ -290,14 +290,14 @@ upstream:
 
 ### gitlab-tag
 
-**Upstream:** the GitLab Tags API, `/api/v4/projects/{id}/repository/tags`, on gitlab.com, invent.kde.org or a self-hosted instance.
+**Upstream:** the GitLab Tags API, `/api/v4/projects/{id}/repository/tags`, on gitlab.com or a self-hosted instance.
 
 **YAML fields:**
 
 | Field | Required | Description |
 |---|---|---|
-| `upstream.host` | yes | GitLab host, such as `invent.kde.org` or `gitlab.com` |
-| `upstream.project` | yes | project path, such as `network/my-kde-app` |
+| `upstream.host` | yes | GitLab host, such as `gitlab.com` or `gitlab.freedesktop.org` |
+| `upstream.project` | yes | project path, such as `group/project` |
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, in place of the default filter, see [github-release](#github-release) |
 | `upstream.tag_version_replace` | no | version built from the groups of `tag_version_regex`, see [github-release](#github-release) |
 
@@ -306,11 +306,11 @@ upstream:
 **Example YAML:**
 
 ```yaml
-name: my-kde-app
+name: my-package
 strategy: gitlab-tag
 upstream:
-  host: invent.kde.org
-  project: network/my-kde-app
+  host: gitlab.com
+  project: group/project
 ```
 
 Mesa names its releases `mesa-26.2.5`:
