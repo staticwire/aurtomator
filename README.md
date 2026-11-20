@@ -137,13 +137,13 @@ Patches in `source=()` get a warning. [Supported packages](https://aurtomator.de
 
 ## Alternatives
 
-| Tool              | Best for                  | Approach                          |
-|-------------------|---------------------------|-----------------------------------|
-| [nvchecker]       | Version detection only    | Python, 40+ sources, no AUR push  |
-| [lilac]           | Large repos (archlinuxcn) | Full build bot, needs own infra   |
-| [aur-auto-update] | Centralized service       | Requires bot co-maintainer on AUR |
-| [Renovate]        | Multi-ecosystem           | Enterprise-grade, heavy config    |
-| **aurtomator**    | Individual maintainers    | Template and a pinned workflow    |
+| Tool              | Best for                                | Approach                                        |
+|-------------------|-----------------------------------------|-------------------------------------------------|
+| [nvchecker]       | Version detection only                  | Python, 40+ sources, no AUR push                |
+| [lilac]           | Large repositories, such as archlinuxcn | Full build bot on a server of your own          |
+| [aur-auto-update] | Centralized service                     | Its bot must be a co-maintainer of each package |
+| [Renovate]        | Many ecosystems                         | Heavy configuration                             |
+| **aurtomator**    | Individual maintainers                  | Template and a pinned workflow                  |
 
 [nvchecker]: https://github.com/lilydjwg/nvchecker
 [lilac]: https://github.com/archlinuxcn/lilac
