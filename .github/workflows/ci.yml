@@ -251,6 +251,7 @@ jobs:
           gh pr merge "$PR" -R "$REPO" --squash --match-head-commit "$HEAD_SHA"
           # The merge with the workflow token starts no workflow, and a dispatch does
           gh workflow run ci.yml -R "$REPO" --ref main
+          gh workflow run release-please.yml -R "$REPO" --ref main
 
   # Required by the ruleset in place of the pipeline checks, which a fork
   # skips. always(): a skipped job counts as passed.

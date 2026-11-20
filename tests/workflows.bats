@@ -123,7 +123,7 @@ secret_lines() {
     'codeql.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"schedule":[{"cron":"41 3 * * 1"}]}' \
     'docs.yml {"push":{"branches":["main"],"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"pull_request":{"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"workflow_dispatch":null}' \
     'notify-failure.yml {"workflow_call":null}' \
-    'release-please.yml {"push":{"branches":["main"]}}' \
+    'release-please.yml {"push":{"branches":["main"]},"workflow_dispatch":null}' \
     'validate.yml {"workflow_call":null}' >"$BATS_TEST_TMPDIR/expected"
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
 }
@@ -591,8 +591,9 @@ EOF
     AUTO_MERGE="${AUTO_MERGE-true}" GH_MERGE_RC="${GH_MERGE_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
-# Merges with the workflow token start no workflow, so the merge starts CI on main by dispatch
-@test "merge-image: merges the tested head when only files of ci-image/ changed, then starts CI on main" {
+# Merges with the workflow token start no workflow, so the job starts CI and release-please on
+# main by dispatch
+@test "merge-image: merges the tested head when only files of ci-image/ changed, then starts ci.yml and release-please.yml on main" {
   local files
   for files in ci-image/Dockerfile $'ci-image/Gemfile\nci-image/Gemfile.lock' ci-image/Gemfile.lock \
     $'ci-image/requirements.in\nci-image/requirements.txt' ci-image/requirements.txt; do
@@ -601,7 +602,8 @@ EOF
     [ "$status" -eq 0 ]
     run cat "$GH_LOG"
     [ "$output" = "$(printf '%s\n' 'api repos/owner/repo/pulls/12/files --paginate --jq .[].filename' \
-      'pr merge 12 -R owner/repo --squash --match-head-commit abc123' 'workflow run ci.yml -R owner/repo --ref main')" ]
+      'pr merge 12 -R owner/repo --squash --match-head-commit abc123' 'workflow run ci.yml -R owner/repo --ref main' \
+      'workflow run release-please.yml -R owner/repo --ref main')" ]
   done
 }
 
@@ -617,7 +619,7 @@ EOF
   done
 }
 
-@test "merge-image: starts no CI when the merge fails" {
+@test "merge-image: starts no workflow when the merge fails" {
   GH_MERGE_RC=1 GH_FILES="ci-image/Dockerfile" run_merge_step
   [ "$status" -ne 0 ]
   run grep -c '^workflow run' "$GH_LOG"
