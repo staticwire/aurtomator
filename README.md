@@ -74,7 +74,7 @@ Your repository holds one YAML per package, which names its upstream source, and
    ./aurtomator.sh validate-pkg <name>
    ```
 
-5. Commit and push. The schedule starts a run a few times a day, and Actions > Check AUR Package Updates > Run workflow starts one at once.
+5. Commit and push. The schedule starts the workflow a few times a day, and Actions > Check AUR Package Updates > Run workflow starts it right away.
 
 `./aurtomator.sh` runs aurtomator scripts at the version your workflows pin, see [The aurtomator.sh script](https://aurtomator.dev/setup/#the-aurtomatorsh-script). Without [gh CLI](https://cli.github.com/), `setup` prints how to set the secrets by hand. GPG signing of AUR commits is optional.
 
@@ -82,24 +82,24 @@ Your repository holds one YAML per package, which names its upstream source, and
 
 16 built-in version detection strategies:
 
-| Strategy           | Source              | Use for                                |
-|--------------------|---------------------|----------------------------------------|
-| `github-release`   | GitHub Releases API | GitHub-hosted projects with releases   |
-| `github-tag`       | `git ls-remote`     | GitHub projects without releases       |
-| `github-nightly`   | GitHub Releases API | Nightly/prerelease builds (4 patterns) |
-| `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag      |
-| `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                    |
-| `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea            |
-| `gitea-release`    | Gitea/Forgejo API   | Releases on Codeberg or a Gitea host   |
-| `git-tag`          | `git ls-remote`     | Any HTTPS git host, such as sourcehut  |
-| `git-latest`       | `git clone --bare`  | `-git` packages, any HTTPS git repo    |
-| `pypi`             | PyPI JSON API       | Python packages                        |
-| `npm`              | npm registry        | Node.js packages                       |
-| `crates`           | crates.io API       | Rust crates                            |
-| `repology`         | Repology API        | Fallback across distribution repos     |
-| `archpkg`          | Arch repos API      | Official package versions              |
-| `webpage-scrape`   | URL + regex         | Anything not covered above             |
-| `kde-tarball`      | download.kde.org    | KDE projects, Plasma and Gear too      |
+| Strategy         | Source                 | Use for                                                 |
+|------------------|------------------------|---------------------------------------------------------|
+| `github-release` | GitHub Releases API    | GitHub projects with releases                           |
+| `github-tag`     | `git ls-remote`        | GitHub projects without releases                        |
+| `github-nightly` | GitHub Releases API    | GitHub nightly and dev builds                           |
+| `github-asset`   | GitHub Releases API    | GitHub release assets replaced on a fixed tag           |
+| `gitlab-tag`     | GitLab Tags API        | GitLab projects on gitlab.com or a self-hosted instance |
+| `gitea-tag`      | Gitea and Forgejo API  | Codeberg, Gitea and Forgejo projects without releases   |
+| `gitea-release`  | Gitea and Forgejo API  | Codeberg, Gitea and Forgejo projects with releases      |
+| `git-tag`        | `git ls-remote`        | Projects on any HTTPS git host, such as sourcehut       |
+| `git-latest`     | `git clone --bare`     | `-git` packages from any HTTPS git host                 |
+| `pypi`           | PyPI JSON API          | Python packages                                         |
+| `npm`            | npm registry           | Node.js packages                                        |
+| `crates`         | crates.io API          | Rust crates                                             |
+| `repology`       | Repology API           | Fallback across distribution repositories               |
+| `archpkg`        | Arch package search    | Official Arch packages                                  |
+| `webpage-scrape` | HTTPS page and a regex | Upstreams without an API                                |
+| `kde-tarball`    | download.kde.org       | KDE projects                                            |
 
 See [Strategies](https://aurtomator.dev/strategies/) for strategy details and YAML examples, and [Custom strategies](https://aurtomator.dev/custom-strategies/) for how to write one.
 
@@ -137,13 +137,13 @@ Patches in `source=()` get a warning. [Supported packages](https://aurtomator.de
 
 ## Alternatives
 
-| Tool              | Best for                  | Approach                          |
-|-------------------|---------------------------|-----------------------------------|
-| [nvchecker]       | Version detection only    | Python, 40+ sources, no AUR push  |
-| [lilac]           | Large repos (archlinuxcn) | Full build bot, needs own infra   |
-| [aur-auto-update] | Centralized service       | Requires bot co-maintainer on AUR |
-| [Renovate]        | Multi-ecosystem           | Enterprise-grade, heavy config    |
-| **aurtomator**    | Individual maintainers    | Template and a pinned workflow    |
+| Tool              | Best for                                | Approach                                        |
+|-------------------|-----------------------------------------|-------------------------------------------------|
+| [nvchecker]       | Version detection only                  | Python, 40+ sources, no AUR push                |
+| [lilac]           | Large repositories, such as archlinuxcn | Full build bot on a server of your own          |
+| [aur-auto-update] | Centralized service                     | Its bot must be a co-maintainer of each package |
+| [Renovate]        | Many ecosystems                         | Heavy configuration                             |
+| **aurtomator**    | Individual maintainers                  | Template and a pinned workflow                  |
 
 [nvchecker]: https://github.com/lilydjwg/nvchecker
 [lilac]: https://github.com/archlinuxcn/lilac
