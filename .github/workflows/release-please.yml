@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     branches: [main]
+  # merge-image of ci.yml starts a run on main after its merge, which starts no workflow by itself
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -53,7 +55,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Only the run of the release commit signs its release, so a later push never signs older code
+      # Only the run of the release commit signs its release, so a later run never signs older code
       # with the provenance of a newer commit; a rerun of that run finds the release again
       - name: Find the release to sign
         id: find
