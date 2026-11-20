@@ -74,7 +74,7 @@ Your repository holds one YAML per package, which names its upstream source, and
    ./aurtomator.sh validate-pkg <name>
    ```
 
-5. Commit and push. The schedule starts a run a few times a day, and Actions > Check AUR Package Updates > Run workflow starts one at once.
+5. Commit and push. The schedule starts the workflow a few times a day, and Actions > Check AUR Package Updates > Run workflow starts it right away.
 
 `./aurtomator.sh` runs aurtomator scripts at the version your workflows pin, see [The aurtomator.sh script](https://aurtomator.dev/setup/#the-aurtomatorsh-script). Without [gh CLI](https://cli.github.com/), `setup` prints how to set the secrets by hand. GPG signing of AUR commits is optional.
 
