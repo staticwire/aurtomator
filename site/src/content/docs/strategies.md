@@ -6,20 +6,20 @@ aurtomator has 16 version detection strategies. Pick the one that reads the sour
 
 | Strategy | Source | Best for | Pre-releases |
 |---|---|---|---|
-| `github-release` | GitHub Releases API | most GitHub projects | left out |
-| `github-tag` | `git ls-remote` | projects without releases | only `v1.2.3` tags by default |
-| `github-nightly` | GitHub Releases API | nightly and dev builds, in 4 patterns | by pattern |
-| `github-asset` | GitHub Releases API | assets replaced on a fixed tag, such as model zoos | fixed tag |
-| `gitlab-tag` | GitLab Tags API | gitlab.com, invent.kde.org, self-hosted | only `v1.2.3` tags by default |
-| `gitea-tag` | Gitea and Forgejo Tags API | Codeberg, self-hosted Gitea | only `v1.2.3` tags by default |
-| `gitea-release` | Gitea and Forgejo Releases API | releases on Codeberg or a self-hosted Gitea | drafts and pre-releases left out |
-| `git-tag` | `git ls-remote` | any HTTPS git host: sourcehut, kernel.org, Savannah | only `v1.2.3` tags by default |
+| `github-release` | GitHub Releases API | GitHub projects with releases | left out |
+| `github-tag` | `git ls-remote` | GitHub projects without releases | only `v1.2.3` tags by default |
+| `github-nightly` | GitHub Releases API | GitHub nightly and dev builds, in 4 patterns | by pattern |
+| `github-asset` | GitHub Releases API | GitHub release assets replaced on a fixed tag, such as model zoos | fixed tag |
+| `gitlab-tag` | GitLab Tags API | GitLab projects on gitlab.com or a self-hosted instance | only `v1.2.3` tags by default |
+| `gitea-tag` | Gitea and Forgejo Tags API | Codeberg, Gitea and Forgejo projects without releases | only `v1.2.3` tags by default |
+| `gitea-release` | Gitea and Forgejo Releases API | Codeberg, Gitea and Forgejo projects with releases | drafts and pre-releases left out |
+| `git-tag` | `git ls-remote` | projects on any HTTPS git host: sourcehut, kernel.org, Savannah | only `v1.2.3` tags by default |
 | `git-latest` | bare git clone | `-git` packages, which follow commits | none |
 | `pypi` | PyPI JSON API | Python packages | stable only |
 | `npm` | npm registry | Node.js packages | `latest` tag |
-| `crates` | crates.io API | Rust packages | stable only, or `prerelease: true` |
+| `crates` | crates.io API | Rust crates | stable only, or `prerelease: true` |
 | `repology` | Repology API | fallback across distribution repositories, the AUR left out | by repository |
-| `archpkg` | Arch package search | version of an official package | none |
+| `archpkg` | Arch package search | official Arch packages | none |
 | `webpage-scrape` | any HTTPS page and a regex | upstreams without an API | as the regex reads |
 | `kde-tarball` | download.kde.org | KDE projects | none |
 

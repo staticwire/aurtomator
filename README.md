@@ -82,24 +82,24 @@ Your repository holds one YAML per package, which names its upstream source, and
 
 16 built-in version detection strategies:
 
-| Strategy           | Source              | Use for                                |
-|--------------------|---------------------|----------------------------------------|
-| `github-release`   | GitHub Releases API | GitHub-hosted projects with releases   |
-| `github-tag`       | `git ls-remote`     | GitHub projects without releases       |
-| `github-nightly`   | GitHub Releases API | Nightly/prerelease builds (4 patterns) |
-| `github-asset`     | GitHub Releases API | Assets re-uploaded on a fixed tag      |
-| `gitlab-tag`       | GitLab Tags API     | Any GitLab instance                    |
-| `gitea-tag`        | Gitea/Forgejo API   | Codeberg, self-hosted Gitea            |
-| `gitea-release`    | Gitea/Forgejo API   | Releases on Codeberg or a Gitea host   |
-| `git-tag`          | `git ls-remote`     | Any HTTPS git host, such as sourcehut  |
-| `git-latest`       | `git clone --bare`  | `-git` packages, any HTTPS git repo    |
-| `pypi`             | PyPI JSON API       | Python packages                        |
-| `npm`              | npm registry        | Node.js packages                       |
-| `crates`           | crates.io API       | Rust crates                            |
-| `repology`         | Repology API        | Fallback across distribution repos     |
-| `archpkg`          | Arch repos API      | Official package versions              |
-| `webpage-scrape`   | URL + regex         | Anything not covered above             |
-| `kde-tarball`      | download.kde.org    | KDE projects, Plasma and Gear too      |
+| Strategy         | Source                 | Use for                                                 |
+|------------------|------------------------|---------------------------------------------------------|
+| `github-release` | GitHub Releases API    | GitHub projects with releases                           |
+| `github-tag`     | `git ls-remote`        | GitHub projects without releases                        |
+| `github-nightly` | GitHub Releases API    | GitHub nightly and dev builds                           |
+| `github-asset`   | GitHub Releases API    | GitHub release assets replaced on a fixed tag           |
+| `gitlab-tag`     | GitLab Tags API        | GitLab projects on gitlab.com or a self-hosted instance |
+| `gitea-tag`      | Gitea and Forgejo API  | Codeberg, Gitea and Forgejo projects without releases   |
+| `gitea-release`  | Gitea and Forgejo API  | Codeberg, Gitea and Forgejo projects with releases      |
+| `git-tag`        | `git ls-remote`        | Projects on any HTTPS git host, such as sourcehut       |
+| `git-latest`     | `git clone --bare`     | `-git` packages from any HTTPS git host                 |
+| `pypi`           | PyPI JSON API          | Python packages                                         |
+| `npm`            | npm registry           | Node.js packages                                        |
+| `crates`         | crates.io API          | Rust crates                                             |
+| `repology`       | Repology API           | Fallback across distribution repositories               |
+| `archpkg`        | Arch package search    | Official Arch packages                                  |
+| `webpage-scrape` | HTTPS page and a regex | Upstreams without an API                                |
+| `kde-tarball`    | download.kde.org       | KDE projects                                            |
 
 See [Strategies](https://aurtomator.dev/strategies/) for strategy details and YAML examples, and [Custom strategies](https://aurtomator.dev/custom-strategies/) for how to write one.
 
