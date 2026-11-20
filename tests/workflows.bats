@@ -525,6 +525,20 @@ step_index_in() {
   [ "$output" = "true" ]
 }
 
+# A skip reaches every later job of the chain unless its if holds a status function, and
+# pipeline before ci-ok skips on Dependabot pull requests
+@test "merge-image: runs after the skipped pipeline once each job it needs passed" {
+  local ci="$GITHUB_DIR/workflows/ci.yml" condition job needs
+  condition=$(yq '.jobs["merge-image"].if' "$ci")
+  [[ "$condition" == '!cancelled() && '* ]]
+  needs=$(yq '.jobs["merge-image"].needs[]' "$ci")
+  [ -n "$needs" ]
+  for job in $needs; do
+    echo "$job"
+    [[ "$condition" == *"needs.$job.result == 'success'"* ]]
+  done
+}
+
 @test "merge-image: runs only for pull requests that Dependabot opened and pushed" {
   run yq '.jobs["merge-image"].if' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]

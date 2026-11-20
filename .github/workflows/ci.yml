@@ -201,7 +201,14 @@ jobs:
   # the Dependabot secret CI_IMAGE_AUTO_MERGE is true.
   merge-image:
     needs: [lint, test, validate, dependency-review, ci-ok]
+    # Without a status function, the skip of pipeline on Dependabot pull requests reaches this job
     if: >-
+      !cancelled() &&
+      needs.lint.result == 'success' &&
+      needs.test.result == 'success' &&
+      needs.validate.result == 'success' &&
+      needs.dependency-review.result == 'success' &&
+      needs.ci-ok.result == 'success' &&
       github.event_name == 'pull_request' &&
       github.actor == 'dependabot[bot]' &&
       github.event.pull_request.user.login == 'dependabot[bot]'
