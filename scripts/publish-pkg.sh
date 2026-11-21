@@ -76,17 +76,6 @@ log_info "Cloning AUR repo: $PKG_NAME"
 aur_clone "ssh://aur@aur.archlinux.org/${PKG_NAME}.git" "$aur_dir" --no-checkout || exit 1
 aur_reanchor "$aur_dir" --no-checkout
 
-# Succeeds when PKGBUILD and .SRCINFO at the head of AUR clone $1 are the prepared files in $2
-# byte for byte, as after the push of an earlier attempt of this job
-head_holds_prepared() {
-  local file head_blob prepared_blob
-  for file in PKGBUILD .SRCINFO; do
-    head_blob=$(git -C "$1" rev-parse --verify --quiet "HEAD:$file") || return 1
-    prepared_blob=$(git -C "$1" hash-object --no-filters -- "$2/$file") || return 1
-    [[ "$head_blob" == "$prepared_blob" ]] || return 1
-  done
-}
-
 head=$(git -C "$aur_dir" rev-parse HEAD)
 # Such a head goes on to the path of the version the AUR has, which writes current
 if [[ "$head" != "$base" ]] && ! head_holds_prepared "$aur_dir" "$PREPARED"; then
