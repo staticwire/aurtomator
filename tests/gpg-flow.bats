@@ -294,7 +294,7 @@ EOF
   git log --oneline -1 | grep -q "update to 3.0.0"
 }
 
-@test "gpg-real: full update-pkg commit + sign + amend flow" {
+@test "git tool: signs a commit with a subkey through --amend" {
   cd "$AUR_DIR"
   sed -i 's/pkgver=1.0.0/pkgver=4.0.0/' PKGBUILD
 
