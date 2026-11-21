@@ -23,6 +23,11 @@ jobs:
     if: github.repository == 'staticwire/aurtomator'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The App key is a secret of environment release, whose branch rule admits runs on main alone,
+    # and deployment: false records no deployment for the job
+    environment:
+      name: release
+      deployment: false
     # Every write to the repository goes through the token of the App
     permissions:
       contents: read

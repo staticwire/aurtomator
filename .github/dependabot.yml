@@ -1,11 +1,13 @@
 version: 2
 updates:
+  # Hostile releases get a week to be found and pulled before Dependabot proposes them, and
+  # merge-image merges the updates of /ci-image without review
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-  # merge-image merges the updates of /ci-image, so a release waits a week for someone to find
-  # and pull a hostile one
+    cooldown:
+      default-days: 7
   - package-ecosystem: "docker"
     directory: "/ci-image"
     schedule:
@@ -34,6 +36,8 @@ updates:
     directory: "/site"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 7
     groups:
       site:
         patterns: ["*"]

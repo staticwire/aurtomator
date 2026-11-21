@@ -49,7 +49,7 @@ jobs:
   packages:
     needs: image
     runs-on: ubuntu-latest
-    container: ${{ needs.image.outputs.ref }}
+    container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
     timeout-minutes: 10
 
     steps:

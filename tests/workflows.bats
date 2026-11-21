@@ -62,8 +62,8 @@ permission_lines() {
     'docs.yml {"contents":"read"}' \
     'docs.yml ["build",null]' \
     'docs.yml ["deploy",{"pages":"write","id-token":"write"}]' \
-    'notify-failure.yml {"actions":"read","issues":"write"}' \
-    'notify-failure.yml ["notify",null]' \
+    'notify-failure.yml {}' \
+    'notify-failure.yml ["notify",{"actions":"read","issues":"write"}]' \
     'release-please.yml {"contents":"read"}' \
     'release-please.yml ["release-please",{"contents":"read"}]' \
     'release-please.yml ["sign",{"contents":"write","id-token":"write","attestations":"write"}]' \
@@ -137,12 +137,12 @@ secret_lines() {
   [ "$output" = '[["github-actions","/"],["docker","/ci-image"],["uv","/ci-image"],["bundler","/ci-image"],["npm","/site"]]' ]
 }
 
-# merge-image merges the updates of ci-image/, and a week gives a hostile release time to be
-# found and pulled before it reaches the CI
-@test "dependabot: proposes versions of ci-image/ a week after their release, the rest after the default" {
+# Hostile releases get a week to be found and pulled before Dependabot proposes them, and
+# merge-image merges the updates of ci-image/ without review
+@test "dependabot: proposes every version a week after its release" {
   run yq -o=json -I=0 '[.updates[] | [.["package-ecosystem"], .cooldown]]' "$GITHUB_DIR/dependabot.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = '[["github-actions",null],["docker",{"default-days":7}],["uv",{"default-days":7}],["bundler",{"default-days":7}],["npm",null]]' ]
+  [ "$output" = '[["github-actions",{"default-days":7}],["docker",{"default-days":7}],["uv",{"default-days":7}],["bundler",{"default-days":7}],["npm",{"default-days":7}]]' ]
 }
 
 # The token a checkout leaves in .git/config would reach builder, which owns the workspace
@@ -384,10 +384,43 @@ secret_lines() {
   [ "$output" = '{"ignore":["unexpected key \"queue\" for \"concurrency\" section"]}' ]
 }
 
+# zizmor skips the findings that a comment in their span names, so ignores stay where its audits
+# misread the workflows: images of the image job, ./ paths and the actor check of merge-image
+@test "workflows: zizmor ignores only job images, ./ paths and the actor of merge-image" {
+  local ci="$GITHUB_DIR/workflows/ci.yml" config file line bad=0
+  local image='^(ci|check-updates|validate)\.yml:    container: [$][{][{] needs\.image\.outputs\.ref [}][}] # zizmor: ignore\[unpinned-images\] '
+  local call='^ci\.yml:    uses: \./\.github/workflows/(validate|check-updates)\.yml # zizmor: ignore\[self-repository\] '
+  local action='^check-updates\.yml:        uses: \./aurtomator/\.github/actions/run-as-builder # zizmor: ignore\[self-repository\] '
+  local actor='^ci\.yml:    if: >- # zizmor: ignore\[bot-conditions\] '
+  for config in "$GITHUB_DIR"/zizmor.y*ml "$GITHUB_DIR"/../zizmor.y*ml; do
+    [ ! -e "$config" ]
+  done
+  for file in "$GITHUB_DIR"/workflows/*.yml "$GITHUB_DIR"/actions/*/action.yml "$GITHUB_DIR/dependabot.yml"; do
+    while IFS= read -r line; do
+      line="${file##*/}:$line"
+      [[ "$line" =~ $image || "$line" =~ $call || "$line" =~ $action || "$line" =~ $actor ]] && continue
+      echo "$line"
+      bad=$((bad + 1))
+    done < <(grep -E 'zizmor: *ignore' "$file")
+  done
+  [ "$bad" -eq 0 ]
+  [ "$(grep -cE 'zizmor: *ignore\[bot-conditions\]' "$ci")" -eq 1 ]
+  run yq '.jobs["merge-image"].if | line_comment' "$ci"
+  [ "$status" -eq 0 ]
+  [[ "$output" == 'zizmor: ignore[bot-conditions] '* ]]
+}
+
 @test "ci: the lint job runs actionlint on the workflows" {
   run yq '[.jobs.lint.steps[] | select(.run == "actionlint")] | length' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
+}
+
+# zizmor-action uploads the findings to code scanning by default and passes the job
+@test "ci: the lint job runs zizmor after actionlint, and its findings fail the job" {
+  run yq -o=json -I=0 '[.jobs.lint.steps[] | select(.run == "actionlint" or ((.uses // "") | test("^zizmorcore/zizmor-action@"))) | .with // .run]' "$GITHUB_DIR/workflows/ci.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '["actionlint",{"advanced-security":false}]' ]
 }
 
 # actionlint runs shellcheck on the run blocks of the workflows only
@@ -838,6 +871,18 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   [ "$output" = '["app-token",{"client-id":"${{ vars.RELEASE_APP_CLIENT_ID }}","private-key":"${{ secrets.RELEASE_APP_PRIVATE_KEY }}","permission-contents":"write","permission-issues":"write","permission-pull-requests":"write"}]' ]
   run yq '.jobs["release-please"].steps[1].with.token' "$RELEASE"
   [ "$output" = '${{ steps.app-token.outputs.token }}' ]
+}
+
+# Secrets of an environment reach only the jobs that name it, on the branches its rule allows
+@test "release-please: takes the App key from environment release, which no other job names" {
+  local workflow
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    yq '.jobs | to_entries | .[] | select(.value.environment != null) | .key + " " + (.value.environment | to_json(0))' "$workflow" | sed "s|^|${workflow##*/} |"
+  done >"$BATS_TEST_TMPDIR/actual"
+  printf '%s\n' \
+    'docs.yml deploy {"name":"github-pages","url":"${{ steps.deployment.outputs.page_url }}"}' \
+    'release-please.yml release-please {"name":"release","deployment":false}' >"$BATS_TEST_TMPDIR/expected"
+  diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
 }
 
 @test "release-please: writes VERSION, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
@@ -4210,6 +4255,8 @@ NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 
 @test "notify-failure: reads the jobs of the run and writes issues, nothing else" {
   run yq -o=json -I=0 '.permissions' "$NOTIFY"
+  [ "$output" = '{}' ]
+  run yq -o=json -I=0 '.jobs.notify.permissions' "$NOTIFY"
   [ "$output" = '{"actions":"read","issues":"write"}' ]
   run yq '[.jobs[].steps[] | select(has("uses"))] | length' "$NOTIFY"
   [ "$output" = "0" ]

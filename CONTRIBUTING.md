@@ -9,7 +9,7 @@ For anything beyond a typo or a one-line fix, open an issue or a draft PR first 
 ## Development setup
 
 ```sh
-sudo pacman -S --needed git bash shellcheck shfmt actionlint bats go-yq jq openssh
+sudo pacman -S --needed git bash shellcheck shfmt actionlint zizmor bats go-yq jq openssh
 git clone https://github.com/staticwire/aurtomator.git
 cd aurtomator
 bats tests/ --recursive
@@ -35,6 +35,7 @@ CI runs these commands:
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 actionlint
+zizmor .
 for action in .github/actions/*/action.yml; do yq '.runs.steps[] | select(has("run")) | .run' "$action" | shellcheck -s bash -; done
 shellcheck aurtomator.sh
 shfmt -d -i 2 -ci aurtomator.sh
@@ -52,7 +53,7 @@ PRs are squash-merged, so the PR title becomes the commit subject on `main` and 
 
 aurtomator follows semantic versioning, and `VERSION` holds the version of the code. After a merge to `main`, release-please (`.github/workflows/release-please.yml`) opens or updates a release PR from the commit types since the last release: `fix` raises the patch number, `feat` the minor one, and before 1.0.0 breaking changes, marked with `!` as in `feat(workflow)!: run as a reusable workflow`, raise the minor one too. `docs`, `ci`, `chore` and `test` commits open no release PR and go out with the next release. The release PR writes `VERSION`, and its merge tags `vX.Y.Z` and publishes the release with the notes GitHub generates. `Release-As: X.Y.Z` lines in the body of a squash commit set another number.
 
-release-please runs with the token of a GitHub App of the repository, which reads and writes contents, issues and pull requests, made from the variable `RELEASE_APP_CLIENT_ID` and the secret `RELEASE_APP_PRIVATE_KEY`. With the workflow token, GitHub would run the CI of the release PR only after an approval.
+release-please runs with the token of a GitHub App of the repository, which reads and writes contents, issues and pull requests, made from the variable `RELEASE_APP_CLIENT_ID` and the secret `RELEASE_APP_PRIVATE_KEY` of environment `release`. The branch rule of the environment lets only runs on `main` read the key, and the job sets `deployment: false`, so its runs add no deployments. With the workflow token, GitHub would run the CI of the release PR only after an approval.
 
 After release-please publishes a release, the workflow attaches `aurtomator-X.Y.Z.tar.gz`, an archive of the release commit that `actions/attest` signs with a Sigstore certificate of the workflow. Only the run of the release commit builds the archive, and a rerun of that run attaches an archive that a failed run left out.
 

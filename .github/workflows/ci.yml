@@ -61,6 +61,12 @@ jobs:
       # Checks the workflows, and the run blocks with shellcheck
       - name: actionlint
         run: actionlint
+      # With advanced-security off, zizmor prints its findings and fails the job; by default the
+      # action uploads them to code scanning and passes
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          advanced-security: false
       # actionlint skips the run blocks of a composite action, and the default severity of
       # shellcheck fails an unquoted variable, as actionlint does in a workflow
       - name: shellcheck the actions
@@ -78,7 +84,7 @@ jobs:
   test:
     needs: image
     runs-on: ubuntu-latest
-    container: ${{ needs.image.outputs.ref }}
+    container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
     timeout-minutes: 45
     # bundler installs the gems of the lock and stops on a gem whose checksum differs from it. The
     # bundler of the image runs, whatever version the lock names.
@@ -136,7 +142,7 @@ jobs:
   # Runs the validator of this commit as a packages repository runs it
   # from its pin
   validate:
-    uses: ./.github/workflows/validate.yml
+    uses: ./.github/workflows/validate.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
     permissions:
       contents: read
 
@@ -144,7 +150,7 @@ jobs:
   # and Dependabot pull requests skip it too, since these permissions would give their code write
   pipeline:
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
-    uses: ./.github/workflows/check-updates.yml
+    uses: ./.github/workflows/check-updates.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
     permissions:
       contents: write
       issues: write
@@ -214,7 +220,7 @@ jobs:
   merge-image:
     needs: [lint, test, validate, dependency-review, ci-ok]
     # Without a status function, the skip of pipeline on Dependabot pull requests reaches this job
-    if: >-
+    if: >- # zizmor: ignore[bot-conditions] user.login checks the author, which cannot be spoofed
       !cancelled() &&
       needs.lint.result == 'success' &&
       needs.test.result == 'success' &&
