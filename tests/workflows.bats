@@ -137,12 +137,12 @@ secret_lines() {
   [ "$output" = '[["github-actions","/"],["docker","/ci-image"],["uv","/ci-image"],["bundler","/ci-image"],["npm","/site"]]' ]
 }
 
-# merge-image merges the updates of ci-image/, and a week gives a hostile release time to be
-# found and pulled before it reaches the CI
-@test "dependabot: proposes versions of ci-image/ a week after their release, the rest after the default" {
+# Hostile releases get a week to be found and pulled before Dependabot proposes them, and
+# merge-image merges the updates of ci-image/ without review
+@test "dependabot: proposes every version a week after its release" {
   run yq -o=json -I=0 '[.updates[] | [.["package-ecosystem"], .cooldown]]' "$GITHUB_DIR/dependabot.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = '[["github-actions",null],["docker",{"default-days":7}],["uv",{"default-days":7}],["bundler",{"default-days":7}],["npm",null]]' ]
+  [ "$output" = '[["github-actions",{"default-days":7}],["docker",{"default-days":7}],["uv",{"default-days":7}],["bundler",{"default-days":7}],["npm",{"default-days":7}]]' ]
 }
 
 # The token a checkout leaves in .git/config would reach builder, which owns the workspace
