@@ -782,12 +782,12 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
   [ "$output" = "5" ]
 }
 
-@test "ci: lint has 10 minutes and test 30" {
+@test "ci: lint has 10 minutes and test 45" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs.lint["timeout-minutes"]' "$ci"
   [ "$output" = "10" ]
   run yq '.jobs.test["timeout-minutes"]' "$ci"
-  [ "$output" = "30" ]
+  [ "$output" = "45" ]
 }
 
 # === release-please.yml ===

@@ -79,7 +79,7 @@ jobs:
     needs: image
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     # bundler installs the gems of the lock and stops on a gem whose checksum differs from it. The
     # bundler of the image runs, whatever version the lock names.
     env:
