@@ -60,7 +60,7 @@ jobs:
   check:
     needs: image
     runs-on: ubuntu-latest
-    container: ${{ needs.image.outputs.ref }}
+    container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
     timeout-minutes: 30
     outputs:
       prepare: ${{ steps.decide.outputs.prepare }}
@@ -390,7 +390,7 @@ jobs:
     needs: [image, check]
     if: needs.check.outputs.prepare == 'true'
     runs-on: ubuntu-latest
-    container: ${{ needs.image.outputs.ref }}
+    container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -473,7 +473,7 @@ jobs:
     # Also after a failed job of prepare, for the packages of the other jobs
     if: "!cancelled() && needs.check.outputs.prepare == 'true'"
     runs-on: ubuntu-latest
-    container: ${{ needs.image.outputs.ref }}
+    container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
     timeout-minutes: 30
     outputs:
       verified-id: ${{ steps.upload.outputs.artifact-id }}
@@ -595,7 +595,7 @@ jobs:
     needs: [image, check, prepare, verify]
     if: "!cancelled() && needs.check.outputs.work == 'true'"
     runs-on: ubuntu-latest
-    container: ${{ needs.image.outputs.ref }}
+    container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
     timeout-minutes: 30
     permissions:
       contents: write
@@ -899,7 +899,7 @@ jobs:
     needs: [image, check, prepare, verify, publish]
     if: "!cancelled() && needs.check.result == 'success'"
     runs-on: ubuntu-latest
-    container: ${{ needs.image.outputs.ref }}
+    container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
     timeout-minutes: 10
     permissions:
       contents: read

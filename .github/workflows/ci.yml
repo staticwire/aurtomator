@@ -78,7 +78,7 @@ jobs:
   test:
     needs: image
     runs-on: ubuntu-latest
-    container: ${{ needs.image.outputs.ref }}
+    container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
     timeout-minutes: 45
     # bundler installs the gems of the lock and stops on a gem whose checksum differs from it. The
     # bundler of the image runs, whatever version the lock names.
