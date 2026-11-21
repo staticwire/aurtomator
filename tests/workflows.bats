@@ -654,8 +654,8 @@ EOF
   [ "$output" = "Open an issue for the vulnerabilities|\${{ needs.dependency-review.outputs.vulnerable-changes }}" ]
 }
 
-# Runs the issue step of vulnerability-issue for the changes in $CHANGES, with a gh that lists
-# the open issues in $GH_TITLES, keeps the body of a new issue and logs every call
+# Runs the issue step of vulnerability-issue for the changes in $CHANGES, with a gh that lists the
+# open issues of label dependency-review in $GH_TITLES and others in $GH_OTHERS, and logs every call
 run_vulnerability_issue_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin" "$BATS_TEST_TMPDIR/temp"
@@ -663,7 +663,13 @@ run_vulnerability_issue_step() {
 #!/usr/bin/env bash
 echo "$*" >>"$GH_LOG"
 case "$1 $2" in
-  "issue list") printf '%s\n' "${GH_TITLES:-}" ;;
+  "issue list")
+    if [[ " $* " == *" --label dependency-review "* ]]; then
+      printf '%s\n' "${GH_TITLES:-}"
+    else
+      printf '%s\n' "${GH_TITLES:-}" "${GH_OTHERS:-}"
+    fi
+    ;;
   "issue create")
     while (($#)); do
       [[ "$1" != --body-file ]] || cp "$2" "$GH_BODY"
@@ -678,23 +684,24 @@ EOF
   GH_LOG="$BATS_TEST_TMPDIR/gh.log" GH_BODY="$BATS_TEST_TMPDIR/body.md"
   : >"$GH_LOG"
   rm -f "$GH_BODY"
-  run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_BODY="$GH_BODY" GH_TITLES="${GH_TITLES:-}" REPO=owner/repo PR=12 \
-    RUNNER_TEMP="$BATS_TEST_TMPDIR/temp" CHANGES="$CHANGES" bash -e "$BATS_TEST_TMPDIR/step.sh"
+  run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_BODY="$GH_BODY" GH_TITLES="${GH_TITLES:-}" GH_OTHERS="${GH_OTHERS:-}" \
+    REPO=owner/repo PR=12 RUNNER_TEMP="$BATS_TEST_TMPDIR/temp" CHANGES="$CHANGES" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","ecosystem":"rubygems","name":"rexml","version":"3.4.5","package_url":"pkg:gem/rexml@3.4.5","license":null,"source_repository_url":null,"vulnerabilities":[{"severity":"high","advisory_ghsa_id":"GHSA-aaaa-bbbb-cccc","advisory_summary":"Denial of service | in the parser","advisory_url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc"}]}]'
 
-@test "dependency-review: opens an issue with a row for each vulnerability" {
+@test "vulnerability-issue: opens an issue with a row for each vulnerability" {
   CHANGES="$VULNERABLE_CHANGES" run_vulnerability_issue_step
   [ "$status" -eq 0 ]
-  grep -qxF -- 'issue create -R owner/repo --title ❌ Dependabot #12: published vulnerabilities --body-file '"$BATS_TEST_TMPDIR"'/temp/vulnerabilities.md' "$GH_LOG"
+  grep -qxF -- 'label create -R owner/repo dependency-review --color d73a4a --description Dependabot update with published vulnerabilities' "$GH_LOG"
+  grep -qxF -- 'issue create -R owner/repo --title ❌ Dependabot #12: published vulnerabilities --label dependency-review --body-file '"$BATS_TEST_TMPDIR"'/temp/vulnerabilities.md' "$GH_LOG"
   run cat "$GH_BODY"
   [ "${lines[0]}" = "Dependabot pull request #12 brings versions with published vulnerabilities, so it is not merged by itself." ]
   [ "${lines[1]}" = "| Package | Version | Severity | Advisory |" ]
   [ "${lines[3]}" = '| `rexml` | `3.4.5` | high | [GHSA-aaaa-bbbb-cccc](https://github.com/advisories/GHSA-aaaa-bbbb-cccc) Denial of service   in the parser |' ]
 }
 
-@test "dependency-review: opens no issue when the review failed without a vulnerable change" {
+@test "vulnerability-issue: opens no issue when the review failed without a vulnerable change" {
   local changes
   for changes in '' '[]' '[{"name":"rexml","version":"3.4.5","vulnerabilities":[]}]'; do
     echo "[$changes]"
@@ -705,12 +712,20 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
 }
 
 # Dependabot rebases its pull requests, and each push reviews them again
-@test "dependency-review: opens no second issue for the same pull request" {
+@test "vulnerability-issue: opens no second issue for the same pull request" {
   GH_TITLES=$'❌ pkg: update failed\n❌ Dependabot #12: published vulnerabilities' CHANGES="$VULNERABLE_CHANGES" \
     run_vulnerability_issue_step
   [ "$status" -eq 0 ]
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# Labels take triage rights, and anyone can open an issue with the title of the next pull request
+@test "vulnerability-issue: counts no issue without its label" {
+  GH_OTHERS='❌ Dependabot #12: published vulnerabilities' CHANGES="$VULNERABLE_CHANGES" run_vulnerability_issue_step
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "1" ]
 }
 
 @test "merge-image: fails when the file list cannot be read" {

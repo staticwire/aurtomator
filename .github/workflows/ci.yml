@@ -189,8 +189,10 @@ jobs:
             exit 0
           fi
           title="❌ Dependabot #$PR: published vulnerabilities"
-          # Dependabot rebases its pull requests, and each push reviews them again
-          titles=$(gh issue list -R "$REPO" --state open --limit 1000 --json title --jq '.[].title')
+          gh label create -R "$REPO" dependency-review --color d73a4a --description "Dependabot update with published vulnerabilities" 2>/dev/null || true
+          # Dependabot rebases its pull requests, and each push reviews them again. Labels take
+          # triage rights, so an issue of another account with this title does not count
+          titles=$(gh issue list -R "$REPO" --label dependency-review --state open --limit 1000 --json title --jq '.[].title')
           if grep -qxF -- "$title" <<<"$titles"; then
             echo "The issue \"$title\" is open already"
             exit 0
@@ -204,7 +206,7 @@ jobs:
             jq -r '.[] | . as $c | .vulnerabilities[] |
               "| `\($c.name | gsub("[`|\n\r]"; " "))` | `\($c.version | gsub("[`|\n\r]"; " "))` | \(.severity) | [\(.advisory_ghsa_id)](\(.advisory_url)) \(.advisory_summary | gsub("[|\n\r]"; " ")) |"' <<<"$CHANGES"
           } >"$body"
-          gh issue create -R "$REPO" --title "$title" --body-file "$body"
+          gh issue create -R "$REPO" --title "$title" --label dependency-review --body-file "$body"
 
   # Merges a Dependabot pull request that changes only files of ci-image/: the image, the gems
   # and the Python packages of the CI. It waits for the dependency review, and it is off unless
