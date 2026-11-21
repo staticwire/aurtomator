@@ -354,23 +354,30 @@ secret_lines() {
   [ "$bad" -eq 0 ]
 }
 
-@test "workflows: actionlint ignores only the two job.workflow properties" {
-  local config="$GITHUB_DIR/actionlint.yaml" expected key keys
+@test "workflows: actionlint ignores only the two job.workflow properties and the queue of concurrency" {
+  local config="$GITHUB_DIR/actionlint.yaml" release=.github/workflows/release-please.yml expected key keys
   run yq '. | keys | join(" ")' "$config"
   [ "$status" -eq 0 ]
   [ "$output" = "paths" ]
-  expected=$(cd "$GITHUB_DIR/.." && grep -lF '${{ job.workflow_' .github/workflows/*.yml | sort)
+  expected=$(cd "$GITHUB_DIR/.." && {
+    grep -lF '${{ job.workflow_' .github/workflows/*.yml
+    echo "$release"
+  } | sort)
   [ -n "$expected" ]
   run yq '.paths | keys | .[]' "$config"
   [ "$status" -eq 0 ]
   [ "$(sort <<<"$output")" = "$expected" ]
   keys=("${lines[@]}")
   for key in "${keys[@]}"; do
+    [[ "$key" != "$release" ]] || continue
     echo "$key"
     run yq -o=json -I=0 ".paths[\"$key\"]" "$config"
     [ "$status" -eq 0 ]
     [ "$output" = '{"ignore":["property \"workflow_(repository|sha)\" is not defined in object type"]}' ]
   done
+  run yq -o=json -I=0 ".paths[\"$release\"]" "$config"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"ignore":["unexpected key \"queue\" for \"concurrency\" section"]}' ]
 }
 
 @test "ci: the lint job runs actionlint on the workflows" {
@@ -793,6 +800,13 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   run yq '.jobs[] | .if' "$RELEASE"
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf '%s\n' "github.repository == 'staticwire/aurtomator'" "github.repository == 'staticwire/aurtomator'")" ]
+}
+
+# release-please fails on a release that another run created first, and that run then signs nothing
+@test "release-please: runs wait for each other, and no waiting run is canceled" {
+  run yq -o=json -I=0 '.concurrency' "$RELEASE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"group":"release-please","cancel-in-progress":false,"queue":"max"}' ]
 }
 
 @test "release-please: pins the action by SHA, reads the config in .github and has a time limit" {

@@ -65,7 +65,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 
 ## Verify a release
 
-Releases after v0.13.0 carry `aurtomator-X.Y.Z.tar.gz`, an archive of the release commit. The release workflow signs it through Sigstore with `actions/attest`: each run gets a short-lived certificate for its own identity, so the project keeps no signing key. Job `sign` of the workflow signs and holds no token of the App, so no step of release-please can ask for the OIDC token that signs. The attestation names the workflow, the branch and the commit of the run, and the GitHub CLI checks all three:
+Releases after v0.13.0 carry `aurtomator-X.Y.Z.tar.gz`, an archive of the release commit. The release workflow signs it through Sigstore with `actions/attest`: each run gets a short-lived certificate for its own identity, so the project keeps no signing key. Job `sign` of the workflow signs and holds no token of the App, so no step of release-please can ask for the OIDC token that signs. Runs of the workflow wait for each other, so two runs never create the same release. The attestation names the workflow, the branch and the commit of the run, and the GitHub CLI checks all three:
 
 ```sh
 gh release download vX.Y.Z -R staticwire/aurtomator -p 'aurtomator-X.Y.Z.tar.gz'
