@@ -1326,7 +1326,7 @@ current: '1.0.0'"
 }
 
 # The clone has no work tree, so the attributes of the AUR repo never reach hash-object, and an
-# attributes file of the git config does; --no-filters keeps both out
+# attributes file of the git config does when a path is hashed, as in the check of a rerun
 @test "publish-pkg: commits the prepared bytes whatever the attributes of the git config say" {
   setup_publish
   write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' # +AAo-)+AAo-echo PWNED+AAo-x=(
@@ -1343,6 +1343,9 @@ current: '1.0.0'"
   [ "$status" -eq 0 ]
   cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:PKGBUILD) "$PREPARED/PKGBUILD"
   cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:.SRCINFO) "$PREPARED/.SRCINFO"
+  yq -i '.current = "1.0.0" | del(.last_updated)' "$TEST_TMPDIR/packages/demo.yml"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 4 ]
 }
 
 @test "publish-pkg: refuses a prepared PKGBUILD that changes other lines" {
