@@ -214,7 +214,7 @@ jobs:
   merge-image:
     needs: [lint, test, validate, dependency-review, ci-ok]
     # Without a status function, the skip of pipeline on Dependabot pull requests reaches this job
-    if: >-
+    if: >- # zizmor: ignore[bot-conditions] user.login checks the author, which cannot be spoofed
       !cancelled() &&
       needs.lint.result == 'success' &&
       needs.test.result == 'success' &&
