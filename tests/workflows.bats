@@ -873,6 +873,18 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   [ "$output" = '${{ steps.app-token.outputs.token }}' ]
 }
 
+# Secrets of an environment reach only the jobs that name it, on the branches its rule allows
+@test "release-please: takes the App key from environment release, which no other job names" {
+  local workflow
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    yq '.jobs | to_entries | .[] | select(.value.environment != null) | .key + " " + (.value.environment | to_json(0))' "$workflow" | sed "s|^|${workflow##*/} |"
+  done >"$BATS_TEST_TMPDIR/actual"
+  printf '%s\n' \
+    'docs.yml deploy {"name":"github-pages","url":"${{ steps.deployment.outputs.page_url }}"}' \
+    'release-please.yml release-please {"name":"release","deployment":false}' >"$BATS_TEST_TMPDIR/expected"
+  diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
+}
+
 @test "release-please: writes VERSION, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
   run yq -o=json -I=0 '.packages["."]' "$RELEASE_CONFIG"
   [ "$status" -eq 0 ]

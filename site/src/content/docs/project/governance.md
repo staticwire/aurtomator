@@ -19,4 +19,4 @@ Changes reach `main` only through pull requests, and the maintainer merges them 
 
 ## Continuity
 
-When the maintainer cannot continue, the second owner can create and close issues, merge pull requests and publish releases within a week. The admin rights for this are already in place. Either owner can replace the secrets of the repository, such as the private key of the `aurtopacker` App. The sources of this site live in `site/` of the repository, and the maintainer holds the domain `aurtomator.dev`.
+When the maintainer cannot continue, the second owner can create and close issues, merge pull requests and publish releases within a week. The admin rights for this are already in place. Either owner can replace the secrets of the repository and of its environment `release`, which holds the private key of the `aurtopacker` App. The sources of this site live in `site/` of the repository, and the maintainer holds the domain `aurtomator.dev`.
