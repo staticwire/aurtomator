@@ -16,6 +16,15 @@ actionlint
 
 `.shellcheckrc` makes shellcheck find `source` files next to the script. `actionlint` checks workflows and their `run:` blocks. `.github/actionlint.yaml` ignores its report on `job.workflow_repository` and `job.workflow_sha`, which actionlint 1.7.12 does not know. Two more steps run `shellcheck -s bash` on the `run:` blocks of every `.github/actions/*/action.yml`, which actionlint skips, and `shellcheck` and `shfmt` on `aurtomator.sh`.
 
+Step `zizmor` runs `zizmorcore/zizmor-action`, pinned like every action. The action installs the zizmor release that its commit names as latest, from a wheel that it checks against the hashes in its own tree, so zizmor moves with the Dependabot updates of the action. zizmor audits the workflows, `.github/actions/*/action.yml` and `.github/dependabot.yml` with its `regular` persona, and its online audits, such as `known-vulnerable-actions` and `impostor-commit`, read GitHub with the token of the job. With `advanced-security: false`, zizmor prints its findings and fails the job, where the default of the action uploads them to code scanning and passes.
+
+Comments `# zizmor: ignore[<audit>]` skip findings on lines that the audits misread, and a test in `tests/workflows.bats` allows them only there:
+
+- `unpinned-images` on `container: ${{ needs.image.outputs.ref }}`: the `image` job accepts only a dated tag pinned by digest.
+- `self-repository` on `uses: ./.github/workflows/<file>` in `ci.yml`: actionlint 1.7.12 rejects the `$/` form.
+- `self-repository` on `uses: ./aurtomator/.github/actions/run-as-builder`: the action finds the scripts next to its own path, in the `aurtomator/` checkout, and through `$/` it would run them from the copy that the runner downloads.
+- `bot-conditions` on the `if` of `merge-image`, which zizmor flags for `github.actor`: the same condition checks the author with `github.event.pull_request.user.login`, the form zizmor recommends, and `github.actor` skips the merge after a push of anyone but Dependabot.
+
 ## Test job
 
 The job runs in the image that the `image` job of `ci.yml` reads, the job of [Permissions and container](/internals/workflow/#permissions-and-container) without its pin check. It installs `bash bats git go-yq jq curl openssh namcap python ruby ruby-erb ruby-bundler`, and after the checkout `bundle install` installs `bashcov` and `simplecov-cobertura` with their dependencies from `ci-image/Gemfile.lock`. The lock holds each gem at its version with its SHA-256, bundler stops on a gem whose checksum differs, and the frozen mode stops on a lock that lags `ci-image/Gemfile`. Then the job runs the suite once, under bashcov:

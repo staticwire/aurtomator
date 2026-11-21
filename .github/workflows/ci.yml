@@ -61,6 +61,12 @@ jobs:
       # Checks the workflows, and the run blocks with shellcheck
       - name: actionlint
         run: actionlint
+      # With advanced-security off, zizmor prints its findings and fails the job; by default the
+      # action uploads them to code scanning and passes
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          advanced-security: false
       # actionlint skips the run blocks of a composite action, and the default severity of
       # shellcheck fails an unquoted variable, as actionlint does in a workflow
       - name: shellcheck the actions

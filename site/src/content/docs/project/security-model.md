@@ -53,7 +53,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 | Weakness | Counter |
 |---|---|
 | CWE-78, OS command injection | Every expansion in double quotes, no `eval`, and ShellCheck on every pull request |
-| CWE-94, code injection in workflows | No `${{ }}` expression in any `run` block, and actionlint and CodeQL check the workflows |
+| CWE-94, code injection in workflows | No `${{ }}` expression in any `run` block, and actionlint, zizmor and CodeQL check the workflows |
 | CWE-94, code in bash arithmetic | Numbers from servers and the environment match a digit pattern before bash arithmetic |
 | CWE-59, link following | Scripts refuse symbolic links in package YAML, prepared AUR files and the cache of `aurtomator.sh` |
 | CWE-22, path traversal | Package names match `^[a-z0-9][a-z0-9.+_-]*$`, so they hold no slash |

@@ -7,7 +7,7 @@ title: Local testing
 ```bash
 sudo pacman -S --needed git curl go-yq pacman-contrib namcap
 # For tests and linting:
-sudo pacman -S --needed bats jq openssh shellcheck shfmt actionlint
+sudo pacman -S --needed bats jq openssh shellcheck shfmt actionlint zizmor
 ```
 
 The commands of the next four sections and of [Draft a package](/add-a-package/#draft-a-package) run in your repository through `aurtomator.sh`, at the commit the calling workflows pin, so local runs use the strategies and checks of CI, see [The aurtomator.sh script](/setup/#the-aurtomatorsh-script).
@@ -85,6 +85,7 @@ bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 actionlint
+zizmor .
 ```
 
-`shfmt -w` in place of `-d` fixes formatting. CI also checks the `run:` blocks of `.github/actions/*/action.yml` and `aurtomator.sh`, see [Lint job](/develop/ci/#lint-job).
+`shfmt -w` in place of `-d` fixes formatting. Without a token in `GH_TOKEN`, `GITHUB_TOKEN` or `ZIZMOR_GITHUB_TOKEN`, zizmor skips the online audits that the lint job runs. CI also checks the `run:` blocks of `.github/actions/*/action.yml` and `aurtomator.sh`, see [Lint job](/develop/ci/#lint-job).
