@@ -3467,10 +3467,11 @@ make_runner_repo() {
   [[ "$output" != *"secrets."* && "$output" != *"sudo"* ]]
 }
 
-@test "check-updates: the issues job reads the statuses of publish when it ran, else those of check" {
+# Publish jobs that fail before the step of builder upload no statuses, and a download of id 0 fails
+@test "check-updates: the issues job reads the statuses of publish when it uploaded them, else those of check" {
   local upload="\${{ steps.decide.outputs.packages == 'true' && 'error' || 'ignore' }}"
   run yq -o=json -I=0 '[.jobs.issues.steps[] | select(.uses | test("^actions/download-artifact@")) | [.with["artifact-ids"], .with.path, .if]]' "$CHECK_UPDATES"
-  [ "$output" = "[[\"$(id_of check checked)\",\".status\",\"needs.publish.result == 'skipped' && needs.check.outputs.checked-id != ''\"],[\"$(id_of publish published)\",\".status\",\"needs.publish.result != 'skipped'\"]]" ]
+  [ "$output" = "[[\"$(id_of check checked)\",\".status\",\"(needs.publish.result == 'skipped' || needs.publish.outputs.published-id == '') && needs.check.outputs.checked-id != ''\"],[\"$(id_of publish published)\",\".status\",\"needs.publish.result != 'skipped' && needs.publish.outputs.published-id != ''\"]]" ]
   run yq -o=json -I=0 '.jobs.publish.steps[] | select(.with.name == "published") | [.with.path, .if, .with["if-no-files-found"]]' "$CHECK_UPDATES"
   [ "$output" = '["/data/statuses/","always()","error"]' ]
   run yq '.jobs.publish.steps[] | select(.name == "Hand over") | .if' "$CHECK_UPDATES"
