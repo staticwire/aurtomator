@@ -62,8 +62,8 @@ permission_lines() {
     'docs.yml {"contents":"read"}' \
     'docs.yml ["build",null]' \
     'docs.yml ["deploy",{"pages":"write","id-token":"write"}]' \
-    'notify-failure.yml {"actions":"read","issues":"write"}' \
-    'notify-failure.yml ["notify",null]' \
+    'notify-failure.yml {}' \
+    'notify-failure.yml ["notify",{"actions":"read","issues":"write"}]' \
     'release-please.yml {"contents":"read"}' \
     'release-please.yml ["release-please",{"contents":"read"}]' \
     'release-please.yml ["sign",{"contents":"write","id-token":"write","attestations":"write"}]' \
@@ -4243,6 +4243,8 @@ NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 
 @test "notify-failure: reads the jobs of the run and writes issues, nothing else" {
   run yq -o=json -I=0 '.permissions' "$NOTIFY"
+  [ "$output" = '{}' ]
+  run yq -o=json -I=0 '.jobs.notify.permissions' "$NOTIFY"
   [ "$output" = '{"actions":"read","issues":"write"}' ]
   run yq '[.jobs[].steps[] | select(has("uses"))] | length' "$NOTIFY"
   [ "$output" = "0" ]

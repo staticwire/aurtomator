@@ -5,14 +5,15 @@ name: Notify Failed Runs
 on:
   workflow_call:
 
-permissions:
-  actions: read
-  issues: write
+permissions: {}
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
     steps:
       - name: Open an issue for the failed run
         shell: bash
