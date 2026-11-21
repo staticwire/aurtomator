@@ -4,7 +4,8 @@
 # files against the AUR copy; it never sources the PKGBUILD or runs makepkg
 #
 # Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]
-# Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version, 3 the AUR moved since the prepare
+# Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version, 3 the AUR moved since the prepare,
+# 4 an earlier attempt of the run pushed the prepared files
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -76,17 +77,6 @@ log_info "Cloning AUR repo: $PKG_NAME"
 aur_clone "ssh://aur@aur.archlinux.org/${PKG_NAME}.git" "$aur_dir" --no-checkout || exit 1
 aur_reanchor "$aur_dir" --no-checkout
 
-# Succeeds when PKGBUILD and .SRCINFO at the head of AUR clone $1 are the prepared files in $2
-# byte for byte, as after the push of an earlier attempt of this job
-head_holds_prepared() {
-  local file head_blob prepared_blob
-  for file in PKGBUILD .SRCINFO; do
-    head_blob=$(git -C "$1" rev-parse --verify --quiet "HEAD:$file") || return 1
-    prepared_blob=$(git -C "$1" hash-object --no-filters -- "$2/$file") || return 1
-    [[ "$head_blob" == "$prepared_blob" ]] || return 1
-  done
-}
-
 head=$(git -C "$aur_dir" rev-parse HEAD)
 # Such a head goes on to the path of the version the AUR has, which writes current
 if [[ "$head" != "$base" ]] && ! head_holds_prepared "$aur_dir" "$PREPARED"; then
@@ -125,6 +115,8 @@ if ((handed_rc == 0)); then
     mapfile -t lost_out < <(wait_out "$PKG_FILE" "$aur_dir" "$final_words" "${PREPARED}/PKGBUILD")
   fi
   arch_state_after "$PKG_FILE" "$final_words" "${lost_out[0]:-}" "${lost_out[1]:-}" "${PREPARED}/PKGBUILD"
+  # Heads past base hold the push of an earlier attempt, whose status job may not have run
+  [[ "$head" == "$base" ]] || exit 4
   exit 2
 fi
 ((handed_rc == 2)) || exit 1

@@ -6,6 +6,13 @@ on:
   # merge-image of ci.yml starts a run on main after its merge, which starts no workflow by itself
   workflow_dispatch:
 
+# release-please fails on a release that another run created first, and that run then signs
+# nothing, so runs wait for each other; queue: max keeps the next run from canceling a waiting one
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+  queue: max
+
 permissions:
   contents: read
 

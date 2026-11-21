@@ -4846,20 +4846,27 @@ current: 28+22"
 }
 
 # The functions of pkgbuild.sh source the PKGBUILD they get, and makepkg and updpkgsums run it,
-# so the code of verify, publish and the arch check calls none of them
-@test "scripts: verify, publish and the arch check source no PKGBUILD" {
-  local scripts="$BATS_TEST_DIRNAME/../scripts" fns file
-  fns=$(grep -o -E '^[a-z_]+\(\)' "$scripts/lib/pkgbuild.sh" | tr -d '()' | paste -sd '|' -)
+# so no script but update-pkg.sh calls them; warn_epoch only logs
+@test "scripts: no script but update-pkg.sh sources a PKGBUILD" {
+  local scripts="$BATS_TEST_DIRNAME/../scripts" fns file count=0 cmd dot
+  fns=$(grep -o -E '^[a-z_]+\(\)' "$scripts/lib/pkgbuild.sh" | tr -d '()' | grep -v -x warn_epoch | paste -sd '|' -)
   [[ "$fns" == *audit_pkgbuild* && "$fns" == *arch_answers* && "$fns" == *pkgbuild_checksums* ]]
-  for file in publish-pkg.sh verify-pkg.sh check-arch.sh lib/prepared.sh lib/sums.sh lib/arch.sh lib/aur.sh; do
-    echo "$file"
-    run grep -n -w -E "$fns" "$scripts/$file"
+  # Commands start a line or follow ; & | $( { ! or a keyword. The yq filter select(. == 1)
+  # holds a dot after a bare parenthesis, and the case label source | source_*) a source
+  cmd='(^|[;&|(]|\$\(|\{[[:space:]]|![[:space:]]|(^|[^[:alnum:]_])(if|then|else|elif|do|while|until)[[:space:]])[[:space:]]*'
+  dot='(^|[;&|]|\$\(|[({][[:space:]]|![[:space:]]|(^|[^[:alnum:]_])(if|then|else|elif|do|while|until)[[:space:]])[[:space:]]*'
+  for file in "$scripts"/*.sh "$scripts"/lib/*.sh; do
+    [[ "$file" != */update-pkg.sh && "$file" != */lib/pkgbuild.sh ]] || continue
+    echo "${file#"$scripts"/}"
+    count=$((count + 1))
+    run grep -n -w -E "$fns" "$file"
     [ "$status" -eq 1 ]
-    run grep -n -E '(^|[;&|(]|\$\()[[:space:]]*(makepkg|updpkgsums|source|\.|eval)[[:space:]]|(ba)?sh[[:space:]]+-c' "$scripts/$file"
+    run grep -n -E "${cmd}(makepkg|updpkgsums|eval)[[:space:]]|${cmd}source[[:space:]]+[^|[:space:]]|${dot}\\.[[:space:]]+[^[:space:]]|(ba)?sh[[:space:]]+-c" "$file"
     [ "$status" -le 1 ]
-    run grep -v -F 'source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"' <<<"$output"
+    run grep -v -E '^[0-9]+:[[:space:]]*source "(\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)|\$SCRIPT_DIR)/lib(/[a-z]+)?\.sh"$|^[0-9]+:[[:space:]]*bounded "\$CHECK_TIMEOUT" bash -c .source "\$1/scripts/lib\.sh" && ' <<<"$output"
     [ -z "$output" ]
   done
+  [ "$count" -gt 20 ]
 }
 
 # Lines of git would enter the error text of a failed check

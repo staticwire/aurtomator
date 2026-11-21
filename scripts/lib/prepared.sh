@@ -941,6 +941,17 @@ prepared_base() {
   echo "$base"
 }
 
+# Succeeds when PKGBUILD and .SRCINFO at the head of AUR clone $1 are the prepared files in $2
+# byte for byte, as after the push of an earlier attempt of the run
+head_holds_prepared() {
+  local file head_blob prepared_blob
+  for file in PKGBUILD .SRCINFO; do
+    head_blob=$(git -C "$1" rev-parse --verify --quiet "HEAD:$file") || return 1
+    prepared_blob=$(git -C "$1" hash-object --no-filters -- "$2/$file") || return 1
+    [[ "$head_blob" == "$prepared_blob" ]] || return 1
+  done
+}
+
 # Check the prepared PKGBUILD and .SRCINFO against the AUR repo at their base; the old asset
 # value and pkgrel come from the AUR PKGBUILD, see _asset_pkgrel
 # Args: $1=AUR repo, $2=prepared dir, $3=version, $4=pkgver_dash character

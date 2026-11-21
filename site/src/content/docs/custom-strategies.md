@@ -70,7 +70,7 @@ echo "$version"
 | `github_api <url>` | `http_get` with the `Authorization` of `GITHUB_TOKEN` when it is set |
 | `github_tags <owner/repo>` | `remote_tags` for GitHub repositories |
 | `github_release_matching <api> <ere> <pages> [stable] [version] [template]` | prints the release whose tag matches the ERE as JSON: the one published last, or with `version` the one with the newest version. `stable` leaves out pre-releases. Arguments keep their place, so calls with `version` and without `stable` pass an empty fourth one |
-| `remote_tags <url>` | prints every tag of a git repository, from `git ls-remote` over `https` |
+| `remote_tags <url>` | prints every tag of a git repository, from `git ls-remote` over `https`, and fails on a listing of more than `MAX_ANSWER_MB` megabytes |
 | `tag_versions <ere> [template]` | prints the version in each tag of stdin: the template filled from the groups of the ERE, `\1` by default, or the tag without a leading `v` for an empty ERE |
 | `latest_tag_version <tags> <ere> [template]` | prints the highest version among the tags, filtered as the tag strategies filter them |
 | `newest_version` | prints the newest version of stdin by `vercmp` |

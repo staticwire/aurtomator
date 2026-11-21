@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  # Reads the pinned Arch image from ci-image/Dockerfile, whose digest Dependabot updates
+  # Reads the pinned Arch image from ci-image/Dockerfile, whose dated tag and digest Dependabot updates
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -49,8 +49,8 @@ jobs:
         id: read
         run: |
           ref=$(sed -n 's/^FROM //p' ci-image/Dockerfile)
-          if [[ ! "$ref" =~ ^archlinux:base-devel@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::ci-image/Dockerfile must pin archlinux:base-devel by digest"
+          if [[ ! "$ref" =~ ^archlinux:base-devel-[0-9]{8}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::ci-image/Dockerfile must pin a dated tag of archlinux:base-devel by digest"
             exit 1
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
@@ -923,22 +923,24 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
+      # Publish jobs that fail before the step of builder upload no statuses, and then those
+      # of check hold every package of the run
       - name: Download statuses of check
-        if: needs.publish.result == 'skipped' && needs.check.outputs.checked-id != ''
+        if: (needs.publish.result == 'skipped' || needs.publish.outputs.published-id == '') && needs.check.outputs.checked-id != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.check.outputs.checked-id || '0' }}
           path: .status
 
       - name: Download statuses of publish
-        if: needs.publish.result != 'skipped'
+        if: needs.publish.result != 'skipped' && needs.publish.outputs.published-id != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.publish.outputs.published-id || '0' }}
           path: .status
 
-      # With publish skipped, the statuses are as builder wrote them in check, so root checks
-      # them as publish does
+      # Without statuses of publish, the statuses are as builder wrote them in check, so root
+      # checks them as publish does
       - name: Check the statuses
         id: clean
         run: bash -c 'source ./aurtomator/scripts/lib.sh && clean_statuses .status'

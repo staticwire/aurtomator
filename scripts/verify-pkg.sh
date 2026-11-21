@@ -67,7 +67,8 @@ aur_clone "https://aur.archlinux.org/${PKG_NAME}.git" "$aur_dir" --no-checkout |
 aur_reanchor "$aur_dir" --no-checkout
 
 head=$(git -C "$aur_dir" rev-parse HEAD)
-if [[ "$head" != "$base" ]]; then
+# Such a head goes on to the path of the version the AUR has, which checks its checksums
+if [[ "$head" != "$base" ]] && ! head_holds_prepared "$aur_dir" "$PREPARED"; then
   log_warn "The AUR repo of $PKG_NAME moved from $base to $head since the update was prepared. The next run prepares it again."
   exit 3
 fi

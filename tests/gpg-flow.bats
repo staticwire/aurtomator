@@ -294,7 +294,7 @@ EOF
   git log --oneline -1 | grep -q "update to 3.0.0"
 }
 
-@test "gpg-real: full update-pkg commit + sign + amend flow" {
+@test "git tool: signs a commit with a subkey through --amend" {
   cd "$AUR_DIR"
   sed -i 's/pkgver=1.0.0/pkgver=4.0.0/' PKGBUILD
 
@@ -391,11 +391,25 @@ stage_aur_update() {
   [[ "$output" == *"nopass@test is no key ID or fingerprint in hex"* ]]
 }
 
+# Runs gpg with the options of the v5 tests, again while it fails with No secret key: gpg 2.4.9
+# with libgcrypt 1.12.4 reads a leading 0x02, 0x03 or 0x40 of a new ed448 point as a prefix
+v5_gpg() {
+  local err="$TEST_TMPDIR/v5-gpg.err"
+  for _ in 1 2 3 4 5; do
+    if env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE gpg --batch --compliance=gnupg \
+      --pinentry-mode loopback --passphrase '' "$@" 2>"$err"; then
+      return 0
+    fi
+    grep -q 'No secret key' "$err" || break
+  done
+  cat "$err" >&2
+  return 1
+}
+
 # gpg makes v5 keys for ed448, and their key IDs are the first 64 bits of the fingerprint
 @test "gpg-real: setup.sh refuses the primary key of a v5 key by its key IDs" {
   local keys fpr id
-  env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE gpg --batch --compliance=gnupg --pinentry-mode loopback \
-    --passphrase '' --quick-gen-key "Test V5 <v5@test>" ed448 sign never 2>/dev/null
+  v5_gpg --quick-gen-key "Test V5 <v5@test>" ed448 sign never
   keys=$(gpg --batch --with-colons --list-secret-keys v5@test)
   fpr=$(awk -F: '$1 == "fpr" { print $10; exit }' <<<"$keys")
   id=$(awk -F: '$1 == "sec" { print $5; exit }' <<<"$keys")
@@ -411,11 +425,9 @@ stage_aur_update() {
 
 @test "gpg-real: setup.sh takes a signing subkey of a v5 key by its key IDs" {
   local fpr id
-  env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE gpg --batch --compliance=gnupg --pinentry-mode loopback \
-    --passphrase '' --quick-gen-key "Test V5 <v5@test>" ed448 cert never 2>/dev/null
+  v5_gpg --quick-gen-key "Test V5 <v5@test>" ed448 cert never
   fpr=$(gpg --batch --with-colons --list-secret-keys v5@test | awk -F: '$1 == "fpr" { print $10; exit }')
-  env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE gpg --batch --compliance=gnupg --pinentry-mode loopback \
-    --passphrase '' --quick-add-key "$fpr" ed448 sign never 2>/dev/null
+  v5_gpg --quick-add-key "$fpr" ed448 sign never
   id=$(gpg --batch --with-colons --list-secret-keys v5@test | awk -F: '$1 == "ssb" { print $5; exit }')
   for id in "$id" "${id:0:8}"; do
     run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE "$TEST_TMPDIR/scripts/setup.sh" gpg \

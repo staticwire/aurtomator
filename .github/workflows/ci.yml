@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  # Reads the pinned Arch image from ci-image/Dockerfile, whose digest Dependabot updates
+  # Reads the pinned Arch image from ci-image/Dockerfile, whose dated tag and digest Dependabot updates
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -30,8 +30,8 @@ jobs:
         id: read
         run: |
           ref=$(sed -n 's/^FROM //p' ci-image/Dockerfile)
-          if [[ ! "$ref" =~ ^archlinux:base-devel@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::ci-image/Dockerfile must pin archlinux:base-devel by digest"
+          if [[ ! "$ref" =~ ^archlinux:base-devel-[0-9]{8}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::ci-image/Dockerfile must pin a dated tag of archlinux:base-devel by digest"
             exit 1
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
@@ -79,7 +79,7 @@ jobs:
     needs: image
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     # bundler installs the gems of the lock and stops on a gem whose checksum differs from it. The
     # bundler of the image runs, whatever version the lock names.
     env:
@@ -150,14 +150,15 @@ jobs:
       issues: write
 
   # Fails a Dependabot pull request that brings a version with a published vulnerability, which
-  # stops merge-image and ci-ok, and opens an issue that lists the vulnerabilities
+  # stops merge-image and ci-ok. The pull request can move the pin of the action, so it only reads
   dependency-review:
     if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
-      issues: write
+    outputs:
+      vulnerable-changes: ${{ steps.review.outputs.vulnerable-changes }}
 
     steps:
       - id: review
@@ -165,13 +166,22 @@ jobs:
         with:
           fail-on-severity: low
 
+  # Opens an issue that lists the vulnerabilities of a failed review, with no action in the job
+  vulnerability-issue:
+    needs: dependency-review
+    if: failure() && needs.dependency-review.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+
+    steps:
       - name: Open an issue for the vulnerabilities
-        if: failure() && steps.review.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          CHANGES: ${{ steps.review.outputs.vulnerable-changes }}
+          CHANGES: ${{ needs.dependency-review.outputs.vulnerable-changes }}
         run: |
           # The review also fails when the API fails, and then the log of the review tells why
           if [[ -z "$CHANGES" ]] || ! jq -e 'any(.[]; (.vulnerabilities | length) > 0)' <<<"$CHANGES" >/dev/null; then
@@ -179,8 +189,10 @@ jobs:
             exit 0
           fi
           title="❌ Dependabot #$PR: published vulnerabilities"
-          # Dependabot rebases its pull requests, and each push reviews them again
-          titles=$(gh issue list -R "$REPO" --state open --limit 1000 --json title --jq '.[].title')
+          gh label create -R "$REPO" dependency-review --color d73a4a --description "Dependabot update with published vulnerabilities" 2>/dev/null || true
+          # Dependabot rebases its pull requests, and each push reviews them again. Labels take
+          # triage rights, so an issue of another account with this title does not count
+          titles=$(gh issue list -R "$REPO" --label dependency-review --state open --limit 1000 --json title --jq '.[].title')
           if grep -qxF -- "$title" <<<"$titles"; then
             echo "The issue \"$title\" is open already"
             exit 0
@@ -194,11 +206,11 @@ jobs:
             jq -r '.[] | . as $c | .vulnerabilities[] |
               "| `\($c.name | gsub("[`|\n\r]"; " "))` | `\($c.version | gsub("[`|\n\r]"; " "))` | \(.severity) | [\(.advisory_ghsa_id)](\(.advisory_url)) \(.advisory_summary | gsub("[|\n\r]"; " ")) |"' <<<"$CHANGES"
           } >"$body"
-          gh issue create -R "$REPO" --title "$title" --body-file "$body"
+          gh issue create -R "$REPO" --title "$title" --label dependency-review --body-file "$body"
 
   # Merges a Dependabot pull request that changes only files of ci-image/: the image, the gems
   # and the Python packages of the CI. It waits for the dependency review, and it is off unless
-  # the Dependabot secret CI_IMAGE_AUTO_MERGE is true.
+  # the Dependabot secret CI_IMAGE_AUTO_MERGE holds auto-merge-ci-image.
   merge-image:
     needs: [lint, test, validate, dependency-review, ci-ok]
     # Without a status function, the skip of pipeline on Dependabot pull requests reaches this job
@@ -226,11 +238,12 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          # Runs that Dependabot starts read Dependabot secrets and no Actions secrets
+          # Runs that Dependabot starts read Dependabot secrets and no Actions secrets. GitHub masks
+          # the value in every line of the log, so the value is a word that the log holds nowhere else.
           AUTO_MERGE: ${{ secrets.CI_IMAGE_AUTO_MERGE }}
         run: |
-          if [[ "$AUTO_MERGE" != true ]]; then
-            echo "::notice::The Dependabot secret CI_IMAGE_AUTO_MERGE is not true, so #$PR stays open"
+          if [[ "$AUTO_MERGE" != auto-merge-ci-image ]]; then
+            echo "::notice::The Dependabot secret CI_IMAGE_AUTO_MERGE does not hold auto-merge-ci-image, so #$PR stays open"
             exit 0
           fi
           files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
@@ -256,7 +269,7 @@ jobs:
   # Required by the ruleset in place of the pipeline checks, which a fork
   # skips. always(): a skipped job counts as passed.
   ci-ok:
-    needs: [image, lint, test, validate, pipeline, dependency-review]
+    needs: [image, lint, test, validate, pipeline, dependency-review, vulnerability-issue]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

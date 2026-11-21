@@ -1,9 +1,12 @@
-# actionlint 1.7.12 does not know job.workflow_repository and job.workflow_sha; the entries go
-# once a release of actionlint knows them
+# actionlint 1.7.12 does not know job.workflow_repository, job.workflow_sha and the queue of
+# concurrency; the entries go once a release of actionlint knows them
 paths:
   .github/workflows/check-updates.yml:
     ignore:
       - 'property "workflow_(repository|sha)" is not defined in object type'
+  .github/workflows/release-please.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'
   .github/workflows/validate.yml:
     ignore:
       - 'property "workflow_(repository|sha)" is not defined in object type'

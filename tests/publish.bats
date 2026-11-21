@@ -1326,7 +1326,7 @@ current: '1.0.0'"
 }
 
 # The clone has no work tree, so the attributes of the AUR repo never reach hash-object, and an
-# attributes file of the git config does; --no-filters keeps both out
+# attributes file of the git config does when a path is hashed, as in the check of a rerun
 @test "publish-pkg: commits the prepared bytes whatever the attributes of the git config say" {
   setup_publish
   write_pkgbuild "$OLD" 1.0.0 2 "sha256sums=('$H1' # +AAo-)+AAo-echo PWNED+AAo-x=(
@@ -1343,6 +1343,9 @@ current: '1.0.0'"
   [ "$status" -eq 0 ]
   cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:PKGBUILD) "$PREPARED/PKGBUILD"
   cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:.SRCINFO) "$PREPARED/.SRCINFO"
+  yq -i '.current = "1.0.0" | del(.last_updated)' "$TEST_TMPDIR/packages/demo.yml"
+  run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 4 ]
 }
 
 @test "publish-pkg: refuses a prepared PKGBUILD that changes other lines" {
@@ -1430,7 +1433,7 @@ current: '1.0.0'"
   [ "$pushed" != "$AUR_BASE" ]
   yq -i '.current = "1.0.0" | del(.last_updated)' "$TEST_TMPDIR/packages/demo.yml"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 4 ]
   [[ "$output" == *"demo already at 1.1.0 on AUR, nothing to do"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$pushed" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
@@ -1499,6 +1502,38 @@ setup_canary_publish() {
   echo "$base" >"$PREPARED/base"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
   [ "$status" -eq 3 ]
+  canary_untouched
+  [ ! -e "$TEST_TMPDIR/curl-calls" ]
+}
+
+# The verify and publish jobs run check-all.sh as builder, and the publish job holds the keys
+@test "check-all --verify: verifies a prepared update without running PKGBUILD code" {
+  setup_verify
+  mkdir -p "$TEST_TMPDIR/out/prepared"
+  mv "$PREPARED" "$TEST_TMPDIR/out/prepared/demo"
+  PREPARED="$TEST_TMPDIR/out/prepared/demo"
+  add_canary "$TEST_TMPDIR/aur-work-demo/PKGBUILD"
+  commit_aur_state canary
+  add_canary "$PREPARED/PKGBUILD"
+  checked_status demo "new_version: 1.1.0"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Checksums of demo 1.1.0 match the sources"* ]]
+  [ -f "$PREPARED/PKGBUILD" ]
+  [ ! -e "$TEST_TMPDIR/out/status/demo" ]
+  canary_untouched
+}
+
+@test "check-all --publish: pushes a prepared update without running PKGBUILD code or asking another host" {
+  setup_canary_publish
+  mkdir -p "$TEST_TMPDIR/out/prepared"
+  mv "$PREPARED" "$TEST_TMPDIR/out/prepared/demo"
+  checked_status demo "new_version: 1.1.0"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/demo")" = "updated: 1.1.0" ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -q '^_canary='
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
   canary_untouched
   [ ! -e "$TEST_TMPDIR/curl-calls" ]
 }
@@ -2454,6 +2489,58 @@ use_source() {
   [ "$status" -eq 3 ]
 }
 
+# Re-run failed jobs runs verify again when a job of the prepare matrix failed, and the AUR then
+# holds the push of the first attempt
+@test "verify-pkg: takes a head with the prepared files as the version the AUR has" {
+  setup_verify
+  cp "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO" "$TEST_TMPDIR/aur-work-demo/"
+  commit_aur_state "1.1.0 release from github-release"
+  echo "$AUR_BASE" >"$PREPARED/base"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"The prepared files of demo are those of the AUR, and their checksums match the sources"* ]]
+}
+
+@test "verify-pkg: defers when the head that moved holds other files than the prepared ones" {
+  setup_verify
+  cp "$PREPARED/PKGBUILD" "$PREPARED/.SRCINFO" "$TEST_TMPDIR/aur-work-demo/"
+  echo "# by hand" >>"$TEST_TMPDIR/aur-work-demo/PKGBUILD"
+  commit_aur_state "change by hand"
+  echo "$AUR_BASE" >"$PREPARED/base"
+  run "$TEST_TMPDIR/scripts/verify-pkg.sh" demo 1.1.0 "$PREPARED"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"The AUR repo of demo moved from $AUR_BASE to"* ]]
+}
+
+# The rerun starts with the statuses of check, the handoff of the first attempt and the checkout
+# of the run, whose YAML still holds the old current
+@test "check-all --verify: keeps an update that an earlier attempt of the run pushed" {
+  local pushed
+  setup_verify
+  mkdir -p "$TEST_TMPDIR/out/prepared"
+  mv "$PREPARED" "$TEST_TMPDIR/out/prepared/demo"
+  PREPARED="$TEST_TMPDIR/out/prepared/demo"
+  checked_status demo "new_version: 1.1.0"
+  cp -r "$TEST_TMPDIR/out" "$TEST_TMPDIR/handoff"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/demo")" = "updated: 1.1.0" ]
+  pushed=$(git -C "$AUR_REMOTE" rev-parse HEAD)
+  yq -i '.current = "1.0.0" | del(.last_updated)' "$TEST_TMPDIR/packages/demo.yml"
+  rm -rf "$TEST_TMPDIR/out"
+  cp -r "$TEST_TMPDIR/handoff" "$TEST_TMPDIR/out"
+  checked_status demo "new_version: 1.1.0"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ -f "$PREPARED/PKGBUILD" ]
+  [ ! -e "$TEST_TMPDIR/out/status/demo" ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$pushed" ]
+  [ "$(cat "$TEST_TMPDIR/.status/demo")" = "updated: 1.1.0" ]
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
+}
+
 @test "verify-pkg: refuses a prepared directory that is a symlink" {
   setup_verify
   mv "$PREPARED" "$TEST_TMPDIR/real-prepared"
@@ -3201,6 +3288,20 @@ current: '2.0.0'"
   [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
   [ "$(cat "$TEST_TMPDIR/.status/other")" = "up_to_date" ]
+}
+
+# The status job of the attempt that pushed may not have run, and the notice of an alert
+# opens for the status of a push
+@test "check-all --publish: reports the push of an earlier attempt of the run as a push" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 4
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
 }
 
 @test "check-all --publish: keeps a failed check" {

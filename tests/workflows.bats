@@ -53,7 +53,8 @@ permission_lines() {
     'ci.yml ["test",null]' \
     'ci.yml ["validate",{"contents":"read"}]' \
     'ci.yml ["pipeline",{"contents":"write","issues":"write"}]' \
-    'ci.yml ["dependency-review",{"contents":"read","issues":"write"}]' \
+    'ci.yml ["dependency-review",{"contents":"read"}]' \
+    'ci.yml ["vulnerability-issue",{"issues":"write"}]' \
     'ci.yml ["merge-image",{"contents":"write","pull-requests":"write","actions":"write"}]' \
     'ci.yml ["ci-ok",{}]' \
     'codeql.yml {"contents":"read"}' \
@@ -188,34 +189,38 @@ secret_lines() {
   [ "$count" -gt 0 ]
 }
 
-@test "ci-image: the Dockerfile pins archlinux:base-devel by digest" {
+# Dependabot dates an image by the push of its tag, and Arch pushes base-devel again about
+# every week but each dated tag once
+@test "ci-image: the Dockerfile pins a dated tag of archlinux:base-devel by digest" {
   run grep -c '^FROM ' "$CI_IMAGE"
   [ "$output" = "1" ]
-  run grep -Ex 'FROM archlinux:base-devel@sha256:[0-9a-f]{64}' "$CI_IMAGE"
+  run grep -Ex 'FROM archlinux:base-devel-[0-9]{8}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}' "$CI_IMAGE"
   [ "$status" -eq 0 ]
 }
 
 # The image job is the same in every workflow, so the step of ci.yml stands
 # for all of them
-@test "ci-image: the image job takes only a digest pin of archlinux:base-devel" {
-  local step="$BATS_TEST_TMPDIR/read-image.sh" work="$BATS_TEST_TMPDIR/work" digest from
+@test "ci-image: the image job takes only a dated tag of archlinux:base-devel pinned by digest" {
+  local step="$BATS_TEST_TMPDIR/read-image.sh" work="$BATS_TEST_TMPDIR/work" digest from tag=base-devel-20261108.0.623074
   digest=$(printf 'a%.0s' {1..64})
   yq '.jobs.image.steps[] | select(.name == "Read image") | .run' "$GITHUB_DIR/workflows/ci.yml" >"$step"
   mkdir -p "$work/ci-image"
-  for from in archlinux:base-devel "archlinux:base-devel@sha256:${digest:1}" "archlinux:base-devel@sha256:${digest}a" \
-    "archlinux:base-devel@sha256:${digest^^}" "archlinux:base@sha256:$digest" "evil/archlinux:base-devel@sha256:$digest"; do
+  for from in "archlinux:$tag" "archlinux:base-devel@sha256:$digest" "archlinux:$tag@sha256:${digest:1}" \
+    "archlinux:$tag@sha256:${digest}a" "archlinux:$tag@sha256:${digest^^}" "archlinux:base-devel-20261108@sha256:$digest" \
+    "archlinux:base-devel-2026110.0.623074@sha256:$digest" "archlinux:base-20261108.0.623074@sha256:$digest" \
+    "evil/archlinux:$tag@sha256:$digest"; do
     echo "FROM $from" >"$work/ci-image/Dockerfile"
     : >"$work/out"
     run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
     echo "$from: $output"
     [ "$status" -eq 1 ]
-    [ "$output" = "::error::ci-image/Dockerfile must pin archlinux:base-devel by digest" ]
+    [ "$output" = "::error::ci-image/Dockerfile must pin a dated tag of archlinux:base-devel by digest" ]
     [ ! -s "$work/out" ]
   done
-  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:base-devel@sha256:$digest" >"$work/ci-image/Dockerfile"
+  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:$tag@sha256:$digest" >"$work/ci-image/Dockerfile"
   run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
   [ "$status" -eq 0 ]
-  [ "$(cat "$work/out")" = "ref=archlinux:base-devel@sha256:$digest" ]
+  [ "$(cat "$work/out")" = "ref=archlinux:$tag@sha256:$digest" ]
 }
 
 @test "ci-image: Dependabot updates the Dockerfile" {
@@ -353,23 +358,30 @@ secret_lines() {
   [ "$bad" -eq 0 ]
 }
 
-@test "workflows: actionlint ignores only the two job.workflow properties" {
-  local config="$GITHUB_DIR/actionlint.yaml" expected key keys
+@test "workflows: actionlint ignores only the two job.workflow properties and the queue of concurrency" {
+  local config="$GITHUB_DIR/actionlint.yaml" release=.github/workflows/release-please.yml expected key keys
   run yq '. | keys | join(" ")' "$config"
   [ "$status" -eq 0 ]
   [ "$output" = "paths" ]
-  expected=$(cd "$GITHUB_DIR/.." && grep -lF '${{ job.workflow_' .github/workflows/*.yml | sort)
+  expected=$(cd "$GITHUB_DIR/.." && {
+    grep -lF '${{ job.workflow_' .github/workflows/*.yml
+    echo "$release"
+  } | sort)
   [ -n "$expected" ]
   run yq '.paths | keys | .[]' "$config"
   [ "$status" -eq 0 ]
   [ "$(sort <<<"$output")" = "$expected" ]
   keys=("${lines[@]}")
   for key in "${keys[@]}"; do
+    [[ "$key" != "$release" ]] || continue
     echo "$key"
     run yq -o=json -I=0 ".paths[\"$key\"]" "$config"
     [ "$status" -eq 0 ]
     [ "$output" = '{"ignore":["property \"workflow_(repository|sha)\" is not defined in object type"]}' ]
   done
+  run yq -o=json -I=0 ".paths[\"$release\"]" "$config"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"ignore":["unexpected key \"queue\" for \"concurrency\" section"]}' ]
 }
 
 @test "ci: the lint job runs actionlint on the workflows" {
@@ -557,9 +569,10 @@ step_index_in() {
   [ "$output" = '${{ secrets.CI_IMAGE_AUTO_MERGE }}' ]
 }
 
-@test "merge-image: leaves the pull request open unless the switch is true" {
+# GitHub masks the value of a secret in every line of the log, and true or merge stand in many
+@test "merge-image: leaves the pull request open unless the switch holds auto-merge-ci-image" {
   local value
-  for value in '' false yes; do
+  for value in '' false yes true merge; do
     echo "[$value]"
     AUTO_MERGE="$value" GH_FILES="ci-image/Dockerfile" run_merge_step
     [ "$status" -eq 0 ]
@@ -588,7 +601,7 @@ EOF
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   : >"$GH_LOG"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" REPO=owner/repo PR=12 HEAD_SHA=abc123 \
-    AUTO_MERGE="${AUTO_MERGE-true}" GH_MERGE_RC="${GH_MERGE_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    AUTO_MERGE="${AUTO_MERGE-auto-merge-ci-image}" GH_MERGE_RC="${GH_MERGE_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Merges with the workflow token start no workflow, so the job starts CI and release-please on
@@ -635,12 +648,26 @@ EOF
   [ "$output" = '["review",{"fail-on-severity":"low"}]' ]
   run grep -E '^ +uses: actions/dependency-review-action@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' "$ci"
   [ "$status" -eq 0 ]
-  run yq -r '.jobs["dependency-review"].steps[1] | .name + "|" + .if + "|" + .env.CHANGES' "$ci"
-  [ "$output" = "Open an issue for the vulnerabilities|failure() && steps.review.outcome == 'failure'|\${{ steps.review.outputs.vulnerable-changes }}" ]
+  run yq '.jobs["dependency-review"].steps | length' "$ci"
+  [ "$output" = "1" ]
+  run yq -o=json -I=0 '.jobs["dependency-review"].outputs' "$ci"
+  [ "$output" = '{"vulnerable-changes":"${{ steps.review.outputs.vulnerable-changes }}"}' ]
 }
 
-# Runs the issue step of dependency-review for the changes in $CHANGES, with a gh that lists
-# the open issues in $GH_TITLES, keeps the body of a new issue and logs every call
+# The update of the action runs before review, so the token that writes issues goes to a job
+# that runs no action
+@test "vulnerability-issue: opens the issue after a failed review and runs no action" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq -o=json -I=0 '.jobs["vulnerability-issue"] | [.needs, .if]' "$ci"
+  [ "$output" = "[\"dependency-review\",\"failure() && needs.dependency-review.result == 'failure'\"]" ]
+  run yq '[.jobs["vulnerability-issue"].steps[] | select(has("uses"))] | length' "$ci"
+  [ "$output" = "0" ]
+  run yq -r '.jobs["vulnerability-issue"].steps[] | .name + "|" + .env.CHANGES' "$ci"
+  [ "$output" = "Open an issue for the vulnerabilities|\${{ needs.dependency-review.outputs.vulnerable-changes }}" ]
+}
+
+# Runs the issue step of vulnerability-issue for the changes in $CHANGES, with a gh that lists the
+# open issues of label dependency-review in $GH_TITLES and others in $GH_OTHERS, and logs every call
 run_vulnerability_issue_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin" "$BATS_TEST_TMPDIR/temp"
@@ -648,7 +675,13 @@ run_vulnerability_issue_step() {
 #!/usr/bin/env bash
 echo "$*" >>"$GH_LOG"
 case "$1 $2" in
-  "issue list") printf '%s\n' "${GH_TITLES:-}" ;;
+  "issue list")
+    if [[ " $* " == *" --label dependency-review "* ]]; then
+      printf '%s\n' "${GH_TITLES:-}"
+    else
+      printf '%s\n' "${GH_TITLES:-}" "${GH_OTHERS:-}"
+    fi
+    ;;
   "issue create")
     while (($#)); do
       [[ "$1" != --body-file ]] || cp "$2" "$GH_BODY"
@@ -658,28 +691,29 @@ case "$1 $2" in
 esac
 EOF
   chmod +x "$bin/gh"
-  yq '.jobs["dependency-review"].steps[] | select(.name == "Open an issue for the vulnerabilities") | .run' \
+  yq '.jobs["vulnerability-issue"].steps[] | select(.name == "Open an issue for the vulnerabilities") | .run' \
     "$GITHUB_DIR/workflows/ci.yml" >"$BATS_TEST_TMPDIR/step.sh"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log" GH_BODY="$BATS_TEST_TMPDIR/body.md"
   : >"$GH_LOG"
   rm -f "$GH_BODY"
-  run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_BODY="$GH_BODY" GH_TITLES="${GH_TITLES:-}" REPO=owner/repo PR=12 \
-    RUNNER_TEMP="$BATS_TEST_TMPDIR/temp" CHANGES="$CHANGES" bash -e "$BATS_TEST_TMPDIR/step.sh"
+  run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_BODY="$GH_BODY" GH_TITLES="${GH_TITLES:-}" GH_OTHERS="${GH_OTHERS:-}" \
+    REPO=owner/repo PR=12 RUNNER_TEMP="$BATS_TEST_TMPDIR/temp" CHANGES="$CHANGES" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","ecosystem":"rubygems","name":"rexml","version":"3.4.5","package_url":"pkg:gem/rexml@3.4.5","license":null,"source_repository_url":null,"vulnerabilities":[{"severity":"high","advisory_ghsa_id":"GHSA-aaaa-bbbb-cccc","advisory_summary":"Denial of service | in the parser","advisory_url":"https://github.com/advisories/GHSA-aaaa-bbbb-cccc"}]}]'
 
-@test "dependency-review: opens an issue with a row for each vulnerability" {
+@test "vulnerability-issue: opens an issue with a row for each vulnerability" {
   CHANGES="$VULNERABLE_CHANGES" run_vulnerability_issue_step
   [ "$status" -eq 0 ]
-  grep -qxF -- 'issue create -R owner/repo --title ❌ Dependabot #12: published vulnerabilities --body-file '"$BATS_TEST_TMPDIR"'/temp/vulnerabilities.md' "$GH_LOG"
+  grep -qxF -- 'label create -R owner/repo dependency-review --color d73a4a --description Dependabot update with published vulnerabilities' "$GH_LOG"
+  grep -qxF -- 'issue create -R owner/repo --title ❌ Dependabot #12: published vulnerabilities --label dependency-review --body-file '"$BATS_TEST_TMPDIR"'/temp/vulnerabilities.md' "$GH_LOG"
   run cat "$GH_BODY"
   [ "${lines[0]}" = "Dependabot pull request #12 brings versions with published vulnerabilities, so it is not merged by itself." ]
   [ "${lines[1]}" = "| Package | Version | Severity | Advisory |" ]
   [ "${lines[3]}" = '| `rexml` | `3.4.5` | high | [GHSA-aaaa-bbbb-cccc](https://github.com/advisories/GHSA-aaaa-bbbb-cccc) Denial of service   in the parser |' ]
 }
 
-@test "dependency-review: opens no issue when the review failed without a vulnerable change" {
+@test "vulnerability-issue: opens no issue when the review failed without a vulnerable change" {
   local changes
   for changes in '' '[]' '[{"name":"rexml","version":"3.4.5","vulnerabilities":[]}]'; do
     echo "[$changes]"
@@ -690,12 +724,20 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
 }
 
 # Dependabot rebases its pull requests, and each push reviews them again
-@test "dependency-review: opens no second issue for the same pull request" {
+@test "vulnerability-issue: opens no second issue for the same pull request" {
   GH_TITLES=$'❌ pkg: update failed\n❌ Dependabot #12: published vulnerabilities' CHANGES="$VULNERABLE_CHANGES" \
     run_vulnerability_issue_step
   [ "$status" -eq 0 ]
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# Labels take triage rights, and anyone can open an issue with the title of the next pull request
+@test "vulnerability-issue: counts no issue without its label" {
+  GH_OTHERS='❌ Dependabot #12: published vulnerabilities' CHANGES="$VULNERABLE_CHANGES" run_vulnerability_issue_step
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "1" ]
 }
 
 @test "merge-image: fails when the file list cannot be read" {
@@ -745,12 +787,12 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
   [ "$output" = "5" ]
 }
 
-@test "ci: lint has 10 minutes and test 30" {
+@test "ci: lint has 10 minutes and test 45" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs.lint["timeout-minutes"]' "$ci"
   [ "$output" = "10" ]
   run yq '.jobs.test["timeout-minutes"]' "$ci"
-  [ "$output" = "30" ]
+  [ "$output" = "45" ]
 }
 
 # === release-please.yml ===
@@ -763,6 +805,13 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   run yq '.jobs[] | .if' "$RELEASE"
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf '%s\n' "github.repository == 'staticwire/aurtomator'" "github.repository == 'staticwire/aurtomator'")" ]
+}
+
+# release-please fails on a release that another run created first, and that run then signs nothing
+@test "release-please: runs wait for each other, and no waiting run is canceled" {
+  run yq -o=json -I=0 '.concurrency' "$RELEASE"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"group":"release-please","cancel-in-progress":false,"queue":"max"}' ]
 }
 
 @test "release-please: pins the action by SHA, reads the config in .github and has a time limit" {
@@ -3437,10 +3486,11 @@ make_runner_repo() {
   [[ "$output" != *"secrets."* && "$output" != *"sudo"* ]]
 }
 
-@test "check-updates: the issues job reads the statuses of publish when it ran, else those of check" {
+# Publish jobs that fail before the step of builder upload no statuses, and a download of id 0 fails
+@test "check-updates: the issues job reads the statuses of publish when it uploaded them, else those of check" {
   local upload="\${{ steps.decide.outputs.packages == 'true' && 'error' || 'ignore' }}"
   run yq -o=json -I=0 '[.jobs.issues.steps[] | select(.uses | test("^actions/download-artifact@")) | [.with["artifact-ids"], .with.path, .if]]' "$CHECK_UPDATES"
-  [ "$output" = "[[\"$(id_of check checked)\",\".status\",\"needs.publish.result == 'skipped' && needs.check.outputs.checked-id != ''\"],[\"$(id_of publish published)\",\".status\",\"needs.publish.result != 'skipped'\"]]" ]
+  [ "$output" = "[[\"$(id_of check checked)\",\".status\",\"(needs.publish.result == 'skipped' || needs.publish.outputs.published-id == '') && needs.check.outputs.checked-id != ''\"],[\"$(id_of publish published)\",\".status\",\"needs.publish.result != 'skipped' && needs.publish.outputs.published-id != ''\"]]" ]
   run yq -o=json -I=0 '.jobs.publish.steps[] | select(.with.name == "published") | [.with.path, .if, .with["if-no-files-found"]]' "$CHECK_UPDATES"
   [ "$output" = '["/data/statuses/","always()","error"]' ]
   run yq '.jobs.publish.steps[] | select(.name == "Hand over") | .if' "$CHECK_UPDATES"

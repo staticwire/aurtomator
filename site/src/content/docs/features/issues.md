@@ -2,7 +2,7 @@
 title: Issues
 ---
 
-Job `issues` of the workflow opens and closes issues in your repository after every run in which `check` succeeded. Run pages list it as `check-updates / status`. It reads the final status of each package: that of `publish` when `publish` ran, and that of `check` otherwise.
+Job `issues` of the workflow opens and closes issues in your repository after every run in which `check` succeeded. Run pages list it as `check-updates / status`. It reads the final status of each package: that of `publish` when `publish` handed over its statuses, and that of `check` otherwise, as after a `publish` job that failed before it reached the packages.
 
 Before it touches issues, the job writes the run summary, which the run page shows under `check-updates / status summary`: counts of all packages and of those up to date, the other packages in a table with their README labels, and errors of failed packages.
 
