@@ -1503,6 +1503,38 @@ setup_canary_publish() {
   [ ! -e "$TEST_TMPDIR/curl-calls" ]
 }
 
+# The verify and publish jobs run check-all.sh as builder, and the publish job holds the keys
+@test "check-all --verify: verifies a prepared update without running PKGBUILD code" {
+  setup_verify
+  mkdir -p "$TEST_TMPDIR/out/prepared"
+  mv "$PREPARED" "$TEST_TMPDIR/out/prepared/demo"
+  PREPARED="$TEST_TMPDIR/out/prepared/demo"
+  add_canary "$TEST_TMPDIR/aur-work-demo/PKGBUILD"
+  commit_aur_state canary
+  add_canary "$PREPARED/PKGBUILD"
+  checked_status demo "new_version: 1.1.0"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --verify "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Checksums of demo 1.1.0 match the sources"* ]]
+  [ -f "$PREPARED/PKGBUILD" ]
+  [ ! -e "$TEST_TMPDIR/out/status/demo" ]
+  canary_untouched
+}
+
+@test "check-all --publish: pushes a prepared update without running PKGBUILD code or asking another host" {
+  setup_canary_publish
+  mkdir -p "$TEST_TMPDIR/out/prepared"
+  mv "$PREPARED" "$TEST_TMPDIR/out/prepared/demo"
+  checked_status demo "new_version: 1.1.0"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/demo")" = "updated: 1.1.0" ]
+  git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -q '^_canary='
+  [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
+  canary_untouched
+  [ ! -e "$TEST_TMPDIR/curl-calls" ]
+}
+
 @test "verify-pkg: checks the sums without running PKGBUILD code" {
   setup_verify
   add_canary "$TEST_TMPDIR/aur-work-demo/PKGBUILD"
