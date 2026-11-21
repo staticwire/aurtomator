@@ -1430,7 +1430,7 @@ current: '1.0.0'"
   [ "$pushed" != "$AUR_BASE" ]
   yq -i '.current = "1.0.0" | del(.last_updated)' "$TEST_TMPDIR/packages/demo.yml"
   run "$TEST_TMPDIR/scripts/publish-pkg.sh" demo 1.1.0 "$PREPARED"
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 4 ]
   [[ "$output" == *"demo already at 1.1.0 on AUR, nothing to do"* ]]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$pushed" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
@@ -2502,7 +2502,7 @@ use_source() {
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(git -C "$AUR_REMOTE" rev-parse HEAD)" = "$pushed" ]
-  [ "$(cat "$TEST_TMPDIR/.status/demo")" = "up_to_date" ]
+  [ "$(cat "$TEST_TMPDIR/.status/demo")" = "updated: 1.1.0" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
 }
 
@@ -3253,6 +3253,20 @@ current: '2.0.0'"
   [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "pkg 2.0.0 $TEST_TMPDIR/out/prepared/pkg" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
   [ "$(cat "$TEST_TMPDIR/.status/other")" = "up_to_date" ]
+}
+
+# The status job of the attempt that pushed may not have run, and the notice of an alert
+# opens for the status of a push
+@test "check-all --publish: reports the push of an earlier attempt of the run as a push" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/prepared/pkg"
+  stub_script publish-pkg.sh 4
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "updated: 2.0.0" ]
 }
 
 @test "check-all --publish: keeps a failed check" {

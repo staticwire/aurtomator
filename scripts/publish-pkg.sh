@@ -4,7 +4,8 @@
 # files against the AUR copy; it never sources the PKGBUILD or runs makepkg
 #
 # Usage: ./scripts/publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]
-# Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version, 3 the AUR moved since the prepare
+# Exit codes: 0 pushed, 1 failed, 2 the AUR already has the version, 3 the AUR moved since the prepare,
+# 4 an earlier attempt of the run pushed the prepared files
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -114,6 +115,8 @@ if ((handed_rc == 0)); then
     mapfile -t lost_out < <(wait_out "$PKG_FILE" "$aur_dir" "$final_words" "${PREPARED}/PKGBUILD")
   fi
   arch_state_after "$PKG_FILE" "$final_words" "${lost_out[0]:-}" "${lost_out[1]:-}" "${PREPARED}/PKGBUILD"
+  # Heads past base hold the push of an earlier attempt, whose status job may not have run
+  [[ "$head" == "$base" ]] || exit 4
   exit 2
 fi
 ((handed_rc == 2)) || exit 1

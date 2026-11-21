@@ -791,6 +791,11 @@ run_package() {
       # AUR already at this version, YAML synced by update-pkg.sh or publish-pkg.sh
       echo "up_to_date" >"${STATUS_DIR}/${pkg_name}"
       ;;
+    publish:4)
+      # Exit code 4: an earlier attempt of the run pushed it, and notices open on the status of a push
+      echo "$pushed" >"${STATUS_DIR}/${pkg_name}"
+      ((updated++)) || true
+      ;;
     # Exit code 3 of publish, an AUR repo that moved after the prepare, takes the update out
     # as in verify, and the next run prepares again
     *)
