@@ -210,7 +210,7 @@ jobs:
 
   # Merges a Dependabot pull request that changes only files of ci-image/: the image, the gems
   # and the Python packages of the CI. It waits for the dependency review, and it is off unless
-  # the Dependabot secret CI_IMAGE_AUTO_MERGE is true.
+  # the Dependabot secret CI_IMAGE_AUTO_MERGE holds auto-merge-ci-image.
   merge-image:
     needs: [lint, test, validate, dependency-review, ci-ok]
     # Without a status function, the skip of pipeline on Dependabot pull requests reaches this job
@@ -238,11 +238,12 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          # Runs that Dependabot starts read Dependabot secrets and no Actions secrets
+          # Runs that Dependabot starts read Dependabot secrets and no Actions secrets. GitHub masks
+          # the value in every line of the log, so the value is a word that the log holds nowhere else.
           AUTO_MERGE: ${{ secrets.CI_IMAGE_AUTO_MERGE }}
         run: |
-          if [[ "$AUTO_MERGE" != true ]]; then
-            echo "::notice::The Dependabot secret CI_IMAGE_AUTO_MERGE is not true, so #$PR stays open"
+          if [[ "$AUTO_MERGE" != auto-merge-ci-image ]]; then
+            echo "::notice::The Dependabot secret CI_IMAGE_AUTO_MERGE does not hold auto-merge-ci-image, so #$PR stays open"
             exit 0
           fi
           files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')

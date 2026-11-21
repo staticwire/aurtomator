@@ -565,9 +565,10 @@ step_index_in() {
   [ "$output" = '${{ secrets.CI_IMAGE_AUTO_MERGE }}' ]
 }
 
-@test "merge-image: leaves the pull request open unless the switch is true" {
+# GitHub masks the value of a secret in every line of the log, and true or merge stand in many
+@test "merge-image: leaves the pull request open unless the switch holds auto-merge-ci-image" {
   local value
-  for value in '' false yes; do
+  for value in '' false yes true merge; do
     echo "[$value]"
     AUTO_MERGE="$value" GH_FILES="ci-image/Dockerfile" run_merge_step
     [ "$status" -eq 0 ]
@@ -596,7 +597,7 @@ EOF
   GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   : >"$GH_LOG"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" REPO=owner/repo PR=12 HEAD_SHA=abc123 \
-    AUTO_MERGE="${AUTO_MERGE-true}" GH_MERGE_RC="${GH_MERGE_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    AUTO_MERGE="${AUTO_MERGE-auto-merge-ci-image}" GH_MERGE_RC="${GH_MERGE_RC:-0}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Merges with the workflow token start no workflow, so the job starts CI and release-please on
