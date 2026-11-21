@@ -53,7 +53,8 @@ permission_lines() {
     'ci.yml ["test",null]' \
     'ci.yml ["validate",{"contents":"read"}]' \
     'ci.yml ["pipeline",{"contents":"write","issues":"write"}]' \
-    'ci.yml ["dependency-review",{"contents":"read","issues":"write"}]' \
+    'ci.yml ["dependency-review",{"contents":"read"}]' \
+    'ci.yml ["vulnerability-issue",{"issues":"write"}]' \
     'ci.yml ["merge-image",{"contents":"write","pull-requests":"write","actions":"write"}]' \
     'ci.yml ["ci-ok",{}]' \
     'codeql.yml {"contents":"read"}' \
@@ -635,11 +636,25 @@ EOF
   [ "$output" = '["review",{"fail-on-severity":"low"}]' ]
   run grep -E '^ +uses: actions/dependency-review-action@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' "$ci"
   [ "$status" -eq 0 ]
-  run yq -r '.jobs["dependency-review"].steps[1] | .name + "|" + .if + "|" + .env.CHANGES' "$ci"
-  [ "$output" = "Open an issue for the vulnerabilities|failure() && steps.review.outcome == 'failure'|\${{ steps.review.outputs.vulnerable-changes }}" ]
+  run yq '.jobs["dependency-review"].steps | length' "$ci"
+  [ "$output" = "1" ]
+  run yq -o=json -I=0 '.jobs["dependency-review"].outputs' "$ci"
+  [ "$output" = '{"vulnerable-changes":"${{ steps.review.outputs.vulnerable-changes }}"}' ]
 }
 
-# Runs the issue step of dependency-review for the changes in $CHANGES, with a gh that lists
+# The update of the action runs before review, so the token that writes issues goes to a job
+# that runs no action
+@test "vulnerability-issue: opens the issue after a failed review and runs no action" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq -o=json -I=0 '.jobs["vulnerability-issue"] | [.needs, .if]' "$ci"
+  [ "$output" = "[\"dependency-review\",\"failure() && needs.dependency-review.result == 'failure'\"]" ]
+  run yq '[.jobs["vulnerability-issue"].steps[] | select(has("uses"))] | length' "$ci"
+  [ "$output" = "0" ]
+  run yq -r '.jobs["vulnerability-issue"].steps[] | .name + "|" + .env.CHANGES' "$ci"
+  [ "$output" = "Open an issue for the vulnerabilities|\${{ needs.dependency-review.outputs.vulnerable-changes }}" ]
+}
+
+# Runs the issue step of vulnerability-issue for the changes in $CHANGES, with a gh that lists
 # the open issues in $GH_TITLES, keeps the body of a new issue and logs every call
 run_vulnerability_issue_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
@@ -658,7 +673,7 @@ case "$1 $2" in
 esac
 EOF
   chmod +x "$bin/gh"
-  yq '.jobs["dependency-review"].steps[] | select(.name == "Open an issue for the vulnerabilities") | .run' \
+  yq '.jobs["vulnerability-issue"].steps[] | select(.name == "Open an issue for the vulnerabilities") | .run' \
     "$GITHUB_DIR/workflows/ci.yml" >"$BATS_TEST_TMPDIR/step.sh"
   GH_LOG="$BATS_TEST_TMPDIR/gh.log" GH_BODY="$BATS_TEST_TMPDIR/body.md"
   : >"$GH_LOG"
