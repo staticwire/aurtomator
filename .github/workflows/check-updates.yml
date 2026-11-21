@@ -186,7 +186,7 @@ jobs:
 
       # builder works in /work, and the workspace and aurtomator/ stay root's
       - name: Check updates
-        uses: ./aurtomator/.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder # zizmor: ignore[self-repository] run-as-builder runs the scripts of the aurtomator/ checkout
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
@@ -435,7 +435,7 @@ jobs:
           path: /data/status
 
       - name: Prepare updates
-        uses: ./aurtomator/.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder # zizmor: ignore[self-repository] run-as-builder runs the scripts of the aurtomator/ checkout
         with:
           args: --prepare handoff
           package: ${{ matrix.package }}
@@ -565,7 +565,7 @@ jobs:
       # git and curl read the AUR repo and the sources as builder, who cannot reach the
       # Docker socket that root has in a job container. The run number moves the start of the loop.
       - name: Verify checksums
-        uses: ./aurtomator/.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder # zizmor: ignore[self-repository] run-as-builder runs the scripts of the aurtomator/ checkout
         with:
           args: --verify handoff
           statuses: /data/status
@@ -720,7 +720,7 @@ jobs:
       # Setup GPG sets GPG_KEY_ID when the secret holds a key. git refuses an empty author name
       # or email in the environment.
       - name: Publish updates
-        uses: ./aurtomator/.github/actions/run-as-builder
+        uses: ./aurtomator/.github/actions/run-as-builder # zizmor: ignore[self-repository] run-as-builder runs the scripts of the aurtomator/ checkout
         env:
           GIT_AUTHOR_NAME: ${{ secrets.AUR_GIT_NAME || 'aurtomator' }}
           GIT_AUTHOR_EMAIL: ${{ secrets.AUR_GIT_EMAIL || 'aurtomator@users.noreply.github.com' }}

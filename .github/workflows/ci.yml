@@ -136,7 +136,7 @@ jobs:
   # Runs the validator of this commit as a packages repository runs it
   # from its pin
   validate:
-    uses: ./.github/workflows/validate.yml
+    uses: ./.github/workflows/validate.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
     permissions:
       contents: read
 
@@ -144,7 +144,7 @@ jobs:
   # and Dependabot pull requests skip it too, since these permissions would give their code write
   pipeline:
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
-    uses: ./.github/workflows/check-updates.yml
+    uses: ./.github/workflows/check-updates.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
     permissions:
       contents: write
       issues: write
