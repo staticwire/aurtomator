@@ -189,34 +189,38 @@ secret_lines() {
   [ "$count" -gt 0 ]
 }
 
-@test "ci-image: the Dockerfile pins archlinux:base-devel by digest" {
+# Dependabot dates an image by the push of its tag, and Arch pushes base-devel again about
+# every week but each dated tag once
+@test "ci-image: the Dockerfile pins a dated tag of archlinux:base-devel by digest" {
   run grep -c '^FROM ' "$CI_IMAGE"
   [ "$output" = "1" ]
-  run grep -Ex 'FROM archlinux:base-devel@sha256:[0-9a-f]{64}' "$CI_IMAGE"
+  run grep -Ex 'FROM archlinux:base-devel-[0-9]{8}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}' "$CI_IMAGE"
   [ "$status" -eq 0 ]
 }
 
 # The image job is the same in every workflow, so the step of ci.yml stands
 # for all of them
-@test "ci-image: the image job takes only a digest pin of archlinux:base-devel" {
-  local step="$BATS_TEST_TMPDIR/read-image.sh" work="$BATS_TEST_TMPDIR/work" digest from
+@test "ci-image: the image job takes only a dated tag of archlinux:base-devel pinned by digest" {
+  local step="$BATS_TEST_TMPDIR/read-image.sh" work="$BATS_TEST_TMPDIR/work" digest from tag=base-devel-20261108.0.623074
   digest=$(printf 'a%.0s' {1..64})
   yq '.jobs.image.steps[] | select(.name == "Read image") | .run' "$GITHUB_DIR/workflows/ci.yml" >"$step"
   mkdir -p "$work/ci-image"
-  for from in archlinux:base-devel "archlinux:base-devel@sha256:${digest:1}" "archlinux:base-devel@sha256:${digest}a" \
-    "archlinux:base-devel@sha256:${digest^^}" "archlinux:base@sha256:$digest" "evil/archlinux:base-devel@sha256:$digest"; do
+  for from in "archlinux:$tag" "archlinux:base-devel@sha256:$digest" "archlinux:$tag@sha256:${digest:1}" \
+    "archlinux:$tag@sha256:${digest}a" "archlinux:$tag@sha256:${digest^^}" "archlinux:base-devel-20261108@sha256:$digest" \
+    "archlinux:base-devel-2026110.0.623074@sha256:$digest" "archlinux:base-20261108.0.623074@sha256:$digest" \
+    "evil/archlinux:$tag@sha256:$digest"; do
     echo "FROM $from" >"$work/ci-image/Dockerfile"
     : >"$work/out"
     run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
     echo "$from: $output"
     [ "$status" -eq 1 ]
-    [ "$output" = "::error::ci-image/Dockerfile must pin archlinux:base-devel by digest" ]
+    [ "$output" = "::error::ci-image/Dockerfile must pin a dated tag of archlinux:base-devel by digest" ]
     [ ! -s "$work/out" ]
   done
-  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:base-devel@sha256:$digest" >"$work/ci-image/Dockerfile"
+  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:$tag@sha256:$digest" >"$work/ci-image/Dockerfile"
   run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
   [ "$status" -eq 0 ]
-  [ "$(cat "$work/out")" = "ref=archlinux:base-devel@sha256:$digest" ]
+  [ "$(cat "$work/out")" = "ref=archlinux:$tag@sha256:$digest" ]
 }
 
 @test "ci-image: Dependabot updates the Dockerfile" {
