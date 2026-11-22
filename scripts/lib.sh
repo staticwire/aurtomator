@@ -8,6 +8,8 @@ set -euo pipefail
 
 # shellcheck source=lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+# shellcheck source=lib/requires.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/requires.sh"
 # shellcheck source=lib/config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/config.sh"
 # shellcheck source=lib/pkgbuild.sh

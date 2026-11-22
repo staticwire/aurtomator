@@ -61,6 +61,19 @@ case "$url" in
   *pypi.org/pypi/null-package/json)
     echo '{"info": {"version": null}}'
     ;;
+  # PyPI releases, with the requires_dist of PyPI on 2026-11-23
+  *pypi.org/pypi/zensical/0.0.74/json)
+    echo '{"info": {"version": "0.0.74", "requires_dist": ["click>=8.1.8", "deepmerge>=2.0", "jinja2>=3.1", "markdown>=3.7", "pathspec>=1.0.4", "pygments>=2.20", "pymdown-extensions>=11.0", "pyyaml>=6.0.2", "tomli>=2.4.0", "zensical-ui==0.0.41"]}}'
+    ;;
+  *pypi.org/pypi/zensical/0.1.3/json)
+    echo '{"info": {"version": "0.1.3", "requires_dist": ["click>=8.1.8", "jinja2>=3.1", "markdown>=3.7", "pathspec>=1.0.4", "pygments>=2.20", "pymdown-extensions>=11.0", "pyyaml>=6.0.2", "tomli>=2.4.0", "zensical-ui==0.0.43"]}}'
+    ;;
+  *pypi.org/pypi/keyring/25.7.0/json)
+    echo '{"info": {"version": "25.7.0", "requires_dist": ["pywin32-ctypes>=0.2.0; sys_platform == \"win32\"", "SecretStorage>=3.2; sys_platform == \"linux\"", "jeepney>=0.4.2; sys_platform == \"linux\"", "importlib_metadata>=4.11.4; python_version < \"3.12\"", "jaraco.classes", "jaraco.functools", "jaraco.context", "pytest!=8.1.*,>=6; extra == \"test\"", "pyfakefs; extra == \"test\"", "sphinx>=3.5; extra == \"doc\"", "jaraco.packaging>=9.3; extra == \"doc\"", "rst.linker>=1.9; extra == \"doc\"", "furo; extra == \"doc\"", "sphinx-lint; extra == \"doc\"", "jaraco.tidelift>=1.4; extra == \"doc\"", "pytest-checkdocs>=2.4; extra == \"check\"", "pytest-ruff>=0.2.1; sys_platform != \"cygwin\" and extra == \"check\"", "pytest-cov; extra == \"cover\"", "pytest-enabler>=3.4; extra == \"enabler\"", "pytest-mypy>=1.0.1; extra == \"type\"", "pygobject-stubs; extra == \"type\"", "shtab; extra == \"type\"", "types-pywin32; extra == \"type\"", "shtab>=1.1.0; extra == \"completion\""]}}'
+    ;;
+  *pypi.org/pypi/black/26.10.1/json)
+    echo '{"info": {"version": "26.10.1", "requires_dist": ["click>=8.0.0", "mypy-extensions>=0.4.3", "packaging>=22.0", "pathspec>=1.0.0", "platformdirs>=2", "pytokens~=0.4.0", "tomli>=1.1.0; python_version < \"3.11\"", "typing-extensions>=4.0.1; python_version < \"3.11\"", "colorama>=0.4.3; extra == \"colorama\"", "aiohttp>=3.10; extra == \"d\"", "ipython>=7.8.0; extra == \"jupyter\"", "tokenize-rt>=3.2.0; extra == \"jupyter\"", "uvloop>=0.15.2; sys_platform != \"win32\" and extra == \"uvloop\"", "winloop>=0.5.0; sys_platform == \"win32\" and extra == \"uvloop\""]}}'
+    ;;
   # npm: null version
   *registry.npmjs.org/null-package/latest)
     echo '{"version": null}'
