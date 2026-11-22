@@ -3694,7 +3694,7 @@ last_updated: '$(date -u +%F)'"
   [ "$(cat "$TEST_TMPDIR/.status/pkg-git")" = "cooldown: $(date -u -d '7 days' +%F)" ]
 }
 
-@test "check-all --publish: keeps a held update and records the notes of its alerts again" {
+@test "check-all --publish: keeps a held update with the alert lines of the check run" {
   create_test_package "held" "github-release" "upstream:
   project: owner/repo
 current: 28+25
@@ -3705,13 +3705,44 @@ alerts:
     hold: true
     note: Raise makedepends java-environment to 28"
   checked_status held "held: 29+1"
-  printf 'held\thold\tstale note\n' >"$TEST_TMPDIR/.status/_alerts"
+  printf '%s\n' $'held\tnotice\tCreate the package for the old major' $'other\thold\tNote of another package' \
+    $'held\thold\tRaise makedepends java-environment to 28' >"$TEST_TMPDIR/.status/_alerts"
   stub_script publish-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
   [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'held\tnotice\tCreate the package for the old major\nheld\thold\tRaise makedepends java-environment to 28' ]
+}
+
+# The job with the AUR key asks upstream nothing, so it evaluates no rule of a held update
+@test "check-all --publish: takes the alert lines of a held update from the check run alone" {
+  create_test_package "held" "github-release" "upstream:
+  project: owner/repo
+current: 28+25"
+  checked_status held "held: 29+1"
+  printf '%s\n' $'held\thold\tadds pathspec; drops deepmerge' >"$TEST_TMPDIR/.status/_alerts"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'held\thold\tadds pathspec; drops deepmerge' ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+@test "check-all --publish: drops alert lines of the check run outside package, action and note" {
+  create_test_package "held" "github-release" "upstream:
+  project: owner/repo
+current: 28+25"
+  checked_status held "held: 29+1"
+  printf '%s\n' $'held\thold' $'held\tbogus\tNote' $'held\thold\tNote\textra' $'held\thold\t' \
+    $'held\tnotice\tRed \e[31mnote' $' held\thold\tNote' $'heldx\thold\tNote' $'held\thold\tKept note' \
+    >"$TEST_TMPDIR/.status/_alerts"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'held\thold\tKept note' ]
 }
 
 @test "check-all --publish: publishes no update an alert with hold: true fires on" {

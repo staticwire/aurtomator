@@ -373,6 +373,17 @@ record_alerts() {
   [[ -z "$2" ]] || awk -v p="$1" '{ print p "\t" $0 }' <<<"$2" >>"${STATUS_DIR}/_alerts"
 }
 
+# Prints the lines of _alerts of the check run for package $1 as fired_alerts prints them.
+# builder of check writes _alerts, so lines of another form and lines with control characters drop.
+checked_alerts() {
+  local line re=$'^([^\t]+)\t(hold|notice)\t([^\t]+)$'
+  while IFS= read -r line; do
+    if [[ "$line" =~ $re && "${BASH_REMATCH[1]}" == "$1" ]] && ! has_control "$line"; then
+      printf '%s\t%s\n' "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+    fi
+  done <<<"${CHECKED[_alerts]:-}"
+}
+
 # Sets ASSET_VALUE from check-asset.sh, or from the check run in --prepare and
 # --publish, and records it in _assets. Fast failures go on the second pass.
 # Args: $1=package file, $2=package name, $3=version, $4=pass, 1 or 2
@@ -572,8 +583,9 @@ run_package() {
           return
         fi
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
-        # The issue of a held update lists the notes of its alerts
-        [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(bounded_alerts "$pkg_file" "$(pkg_get "$pkg_file" '.current // ""')" "${found#held: }" 2>/dev/null)"
+        # The issue of a held update lists the notes of the check run, since rules can read
+        # upstream answers, which the job with the AUR key never asks for
+        [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(checked_alerts "$pkg_name")"
         [[ "$found" != "pending: "* ]] || keep_arch_wait "$pkg_file" "$(arch_record_line "$pkg_name")" "${found#pending: }"
         return
         ;;
