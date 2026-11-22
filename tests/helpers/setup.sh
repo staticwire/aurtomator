@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared BATS test setup
-# Creates temp package dir, injects mock curl into PATH
+# Creates temp package dir, injects mock curl and the mock git of AUR clones into PATH
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$(cd "$TESTS_DIR/.." && pwd)"
@@ -28,12 +28,15 @@ setup_test_env() {
   ln -sf "$PROJECT_DIR/scripts/lib/"*.sh "$TEST_TMPDIR/scripts/lib/"
   ln -sf "$PROJECT_DIR/strategies/"*.sh "$TEST_TMPDIR/strategies/"
 
-  # Put mock curl first in PATH
+  # Mock curl first in PATH, the mock git of AUR clones after MOCK_DIR: git mocks that a test writes
+  # there answer its scripts, and the test's own git commands keep the git bash found first
   MOCK_DIR="$TEST_TMPDIR/mock-bin"
-  mkdir -p "$MOCK_DIR"
+  mkdir -p "$MOCK_DIR" "$TEST_TMPDIR/aur-bin"
   cp "$TESTS_DIR/helpers/mock-curl.sh" "$MOCK_DIR/curl"
   chmod +x "$MOCK_DIR/curl"
-  export PATH="$MOCK_DIR:$PATH"
+  cp "$TESTS_DIR/helpers/mock-aur-git.sh" "$TEST_TMPDIR/aur-bin/git"
+  chmod +x "$TEST_TMPDIR/aur-bin/git"
+  export PATH="$MOCK_DIR:$TEST_TMPDIR/aur-bin:$PATH"
 
   # Override AURTOMATOR_DIR and AURTOMATOR_DATA_DIR so all scripts use our
   # temp workspace

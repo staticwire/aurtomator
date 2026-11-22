@@ -18,6 +18,13 @@ teardown() {
   [ "$(git config -f "$TEST_TMPDIR/gitconfig" aurtomator.probe)" = 1 ]
 }
 
+# The AUR answers a package it lacks with an empty repo, and every check of a new version clones it
+@test "setup_test_env: AUR clones get an empty repo of the test directory" {
+  git clone --no-checkout -q https://aur.archlinux.org/none-such.git "$TEST_TMPDIR/clone"
+  [ "$(git -C "$TEST_TMPDIR/clone" remote get-url origin)" = "file://$TEST_TMPDIR/aur-empty.git" ]
+  run ! git -C "$TEST_TMPDIR/clone" rev-parse -q --verify HEAD
+}
+
 @test "setup.sh: tests run without the GITHUB_EVENT_NAME of CI" {
   GITHUB_EVENT_NAME=pull_request run bash -c 'source "$1"; echo "${GITHUB_EVENT_NAME-unset}"' _ "$TESTS_DIR/helpers/setup.sh"
   [ "$status" -eq 0 ]
