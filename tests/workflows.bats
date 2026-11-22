@@ -67,6 +67,8 @@ permission_lines() {
     'release-please.yml {"contents":"read"}' \
     'release-please.yml ["release-please",{"contents":"read"}]' \
     'release-please.yml ["sign",{"contents":"write","id-token":"write","attestations":"write"}]' \
+    'spec-watch.yml {}' \
+    'spec-watch.yml ["watch",{"contents":"read","issues":"write"}]' \
     'validate.yml {"contents":"read"}' \
     'validate.yml ["image",null]' \
     'validate.yml ["packages",null]' >"$BATS_TEST_TMPDIR/expected"
@@ -103,6 +105,7 @@ secret_lines() {
     'notify-failure.yml 0' \
     'release-please.yml release-please/app-token RELEASE_APP_PRIVATE_KEY' \
     'release-please.yml 1' \
+    'spec-watch.yml 0' \
     'validate.yml 0' >"$BATS_TEST_TMPDIR/expected"
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
   for workflow in "$GITHUB_DIR"/actions/*/action.yml; do
@@ -125,6 +128,7 @@ secret_lines() {
     'docs.yml {"push":{"branches":["main"],"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"pull_request":{"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"workflow_dispatch":null}' \
     'notify-failure.yml {"workflow_call":null}' \
     'release-please.yml {"push":{"branches":["main"]},"workflow_dispatch":null}' \
+    'spec-watch.yml {"schedule":[{"cron":"27 4 * * 2"}],"workflow_dispatch":null}' \
     'validate.yml {"workflow_call":null}' >"$BATS_TEST_TMPDIR/expected"
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
 }
@@ -2750,6 +2754,20 @@ EOF
   grep -qx 'issue create --title ✋ foo: update held --label update-held --body-file -' "$GH_LOG"
 }
 
+@test "check-updates: the issue step opens no issue for a held update that only waits for another" {
+  run_issue_step bar="held: 0.0.43" _alerts=$'bar\twait\tWaits for the held update of foo'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bar waits for a held package and gets no issue"* ]]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step opens an issue for a held update that waits and holds" {
+  run_issue_step bar="held: 0.0.43" _alerts=$'bar\twait\tWaits for the held update of foo\nbar\thold\tOwn note'
+  [ "$status" -eq 0 ]
+  grep -qx 'issue create --title ✋ bar: update held --label update-held --body-file -' "$GH_LOG"
+}
+
 @test "check-updates: an open issue of a held update holds back another one" {
   GH_TITLES=$'❌ bar: check failed\n✋ foo: update held' run_issue_step foo="held: 29+2"
   [ "$status" -eq 0 ]
@@ -4427,6 +4445,110 @@ EOF
   GH_FAIL=1 run_notify_step
   [ "$status" -ne 0 ]
   run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+# === spec-watch.yml ===
+
+SPEC_WATCH="$GITHUB_DIR/workflows/spec-watch.yml"
+
+@test "spec-watch: runs in staticwire/aurtomator alone, reads the tree and writes issues" {
+  run yq -o=json -I=0 '.permissions' "$SPEC_WATCH"
+  [ "$output" = '{}' ]
+  run yq -o=json -I=0 '.jobs.watch | [.if, .permissions, .["timeout-minutes"]]' "$SPEC_WATCH"
+  [ "$output" = "[\"github.repository == 'staticwire/aurtomator'\",{\"contents\":\"read\",\"issues\":\"write\"},5]" ]
+  run yq -o=json -I=0 '[.jobs.watch.steps[] | select(has("uses")) | .with]' "$SPEC_WATCH"
+  [ "$output" = '[{"persist-credentials":false}]' ]
+}
+
+@test "spec-watch: the list names the four specifications with the SHAs of whole commits" {
+  run cut -f 1 "$GITHUB_DIR/spec-watch.tsv"
+  [ "$output" = "$(printf 'source/specifications/%s.rst\n' dependency-specifiers version-specifiers name-normalization core-metadata)" ]
+  run grep -c -v -E $'^source/specifications/[a-z-]+\\.rst\t[0-9a-f]{40}$' "$GITHUB_DIR/spec-watch.tsv"
+  [ "$output" = "0" ]
+}
+
+# Runs the step of spec-watch beside a copy of .github/spec-watch.tsv; gh answers the last commit of
+# a path from $GH_SHAS, lines of path and SHA, or the SHA of the list, lists the open issues of
+# $GH_OPEN, numbers split by spaces, and logs every call to $GH_LOG
+run_spec_step() {
+  local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$bin" "$ws/.github"
+  cp "$GITHUB_DIR/spec-watch.tsv" "$ws/.github/"
+  cat >"$bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GH_LOG"
+cmd="$1 $2" filter=""
+while (($#)); do
+  [[ "$1" != --jq ]] || filter=$2
+  shift
+done
+case "$cmd" in
+  "api repos/pypa/packaging.python.org/commits?path="*)
+    [[ -z "${GH_API_FAIL:-}" ]] || exit 1
+    path=${cmd#api repos/pypa/packaging.python.org/commits?path=}
+    path=${path%&per_page=1}
+    sha=$(awk -v p="$path" '$1 == p { print $2 }' <<<"${GH_SHAS:-}")
+    [[ -n "$sha" ]] || sha=$(awk -F'\t' -v p="$path" '$1 == p { print $2 }' .github/spec-watch.tsv)
+    json="[{\"sha\": \"$sha\"}]"
+    ;;
+  "issue list") json=$(jq -n --arg open "${GH_OPEN:-}" '[$open | split(" ")[] | select(length > 0) | {number: tonumber}]') ;;
+  *) exit 0 ;;
+esac
+jq -r "$filter" <<<"$json"
+EOF
+  chmod +x "$bin/gh"
+  GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  : >"$GH_LOG"
+  yq '.jobs.watch.steps[1].run' "$SPEC_WATCH" >"$BATS_TEST_TMPDIR/step.sh"
+  cd "$ws"
+  run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GH_SHAS="${GH_SHAS:-}" GH_OPEN="${GH_OPEN:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
+    GH_REPO=owner/fork RUN_URL=https://example.invalid/runs/7 bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "spec-watch: opens one issue that names each changed specification" {
+  local path=source/specifications/core-metadata.rst known
+  known=$(awk -F'\t' -v p="$path" '$1 == p { print substr($2, 1, 12) }' "$GITHUB_DIR/spec-watch.tsv")
+  GH_SHAS="$path $(printf 'a%.0s' {1..40})" run_spec_step
+  [ "$status" -eq 0 ]
+  grep -qx 'label create spec-watch --color c5def5 --description Changed PyPA specification' "$GH_LOG"
+  grep -q '^issue create --title 📜 PyPA specifications changed --label spec-watch --body ' "$GH_LOG"
+  grep -qxF -e "- \`$path\`: \`$known\` to \`aaaaaaaaaaaa\`, https://github.com/pypa/packaging.python.org/commits/main/$path" "$GH_LOG"
+  grep -qx 'Run: https://example.invalid/runs/7' "$GH_LOG"
+  run grep -cF 'version-specifiers.rst`' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "spec-watch: opens no second issue while one is open" {
+  GH_OPEN=12 GH_SHAS="source/specifications/core-metadata.rst $(printf 'b%.0s' {1..40})" run_spec_step
+  [ "$status" -eq 0 ]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "spec-watch: closes the open issues once every SHA matches the list" {
+  GH_OPEN="12 15" run_spec_step
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 12 --comment Run https://example.invalid/runs/7 found the last commits that `.github/spec-watch.tsv` lists.' "$GH_LOG"
+  grep -q '^issue close 15 ' "$GH_LOG"
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "spec-watch: writes nothing when every SHA matches and no issue is open" {
+  run_spec_step
+  [ "$status" -eq 0 ]
+  run grep -c -E '^(issue create|issue close|label create)' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "spec-watch: fails on an error of the API and on an answer that is no SHA" {
+  GH_API_FAIL=1 run_spec_step
+  [ "$status" -ne 0 ]
+  GH_SHAS="source/specifications/core-metadata.rst null" run_spec_step
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::GitHub gave no commit SHA for source/specifications/core-metadata.rst: 'null'"* ]]
+  run grep -c '^issue ' "$GH_LOG"
   [ "$output" = "0" ]
 }
 

@@ -5,8 +5,8 @@ bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test_env
-  # Strategies need scripts/lib/common.sh and nothing else of scripts/
-  find "$TEST_TMPDIR/scripts" -type l ! -name common.sh -delete
+  # Strategies need scripts/lib/common.sh, pypi.sh lib/requires.sh too, and nothing else of scripts/
+  find "$TEST_TMPDIR/scripts" -type l ! -name common.sh ! -name requires.sh -delete
   cp "$TESTS_DIR/helpers/mock-git.sh" "$MOCK_DIR/git"
   chmod +x "$MOCK_DIR/git"
 }
@@ -727,6 +727,86 @@ $2}"
   run "$TEST_TMPDIR/strategies/pypi.sh" "test-pypi"
   [ "$status" -eq 0 ]
   [ "$output" = "3.2.1" ]
+}
+
+# Helper: runs pypi.sh for a package of registry $1 and pin_from $2, with the mock pacman
+run_pin() {
+  use_mock_pacman
+  create_test_package "test-pypi" "pypi" "upstream:
+  registry: $1
+  pin_from: $2"
+  run "$TEST_TMPDIR/strategies/pypi.sh" "test-pypi"
+}
+
+@test "pypi: pin_from takes the version that the newest release of the project pins with ==" {
+  run_pin zensical-ui zensical
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.0.43" ]
+  # Names compare in their PEP 503 form
+  run_pin Zensical_UI zensical
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.0.43" ]
+}
+
+@test "pypi: pin_from takes one version that several requirements pin" {
+  run_pin same pin-cases
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0" ]
+}
+
+@test "pypi: pin_from skips pins under markers that are false on Arch" {
+  run_pin py pin-cases
+  [ "$status" -eq 0 ]
+  [ "$output" = "2.0" ]
+  export MOCK_PYTHON_VERSION=3.10.12-1
+  run_pin py pin-cases
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0" ]
+}
+
+@test "pypi: pin_from fails without a requirement on upstream.registry that applies on Arch" {
+  local registry
+  for registry in absent win test; do
+    run_pin "$registry" pin-cases
+    [ "$status" -eq 1 ] || {
+      echo "took: $registry"
+      return 1
+    }
+    [[ "$output" == *"pin-cases lists no requirement on $registry that applies on Arch"* ]]
+  done
+}
+
+@test "pypi: pin_from fails on a requirement that pins no single version" {
+  local entry registry req
+  for entry in 'ranged|ranged>=1.0' 'wild|wild==0.0.*' 'clauses|clauses==1.0,!=1.1' \
+    'url|url @ https://example.org/url.zip'; do
+    IFS='|' read -r registry req <<<"$entry"
+    run_pin "$registry" pin-cases
+    [ "$status" -eq 1 ] || {
+      echo "took: $registry"
+      return 1
+    }
+    [[ "$output" == *"pin-cases requires '$req', which pins no single version of $registry"* ]]
+  done
+}
+
+@test "pypi: pin_from fails on pins of more than one version" {
+  run_pin two pin-cases
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pin-cases pins two to more than one version: 1.0, 2.0"* ]]
+}
+
+@test "pypi: pin_from fails on a registry outside the name rule of PyPI" {
+  run_pin 'foo~bar' pin-cases
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"foo~bar is not a PyPI project name"* ]]
+}
+
+@test "pypi: pin_from fails when PyPI does not answer for the project" {
+  run_pin zensical-ui pin-gone
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://pypi.org/pypi/pin-gone/json: The requested URL returned error: 404"* ]]
+  [[ "$output" == *"Failed to fetch PyPI info for pin-gone"* ]]
 }
 
 # === npm ===

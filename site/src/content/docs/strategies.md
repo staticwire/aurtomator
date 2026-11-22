@@ -423,6 +423,7 @@ current: '1.30.0.r9.g03f21898'
 | Field | Required | Description |
 |---|---|---|
 | `upstream.registry` | yes | PyPI name, such as `requests` |
+| `upstream.pin_from` | no | PyPI name of a project whose newest release pins `upstream.registry` with `==`, such as `zensical` |
 
 ```yaml
 name: python-requests
@@ -430,6 +431,26 @@ strategy: pypi
 upstream:
   registry: requests
 ```
+
+With `upstream.pin_from`, the version is the pin on `upstream.registry` in the requirements of the newest release of that project, from `https://pypi.org/pypi/{pin_from}/json`. zensical 0.1.3 requires `zensical-ui==0.0.43`, so python-zensical-ui gets `0.0.43`:
+
+```yaml
+name: python-zensical-ui
+strategy: pypi
+upstream:
+  registry: zensical-ui
+  pin_from: zensical
+```
+
+Names compare in their PEP 503 form, so `Zensical_UI` and `zensical-ui` are one project. The check skips requirements on `upstream.registry` whose environment markers are false on Arch, and fails with `<pin_from> lists no requirement on <registry> that applies on Arch` when none is left. It fails with `<pin_from> requires '<requirement>', which pins no single version of <registry>` for an operator other than `==`, a wildcard such as `==0.0.*` or a second clause, and with `<pin_from> pins <registry> to more than one version: <versions>` for different pins. Requirement strings outside PEP 508 fail it with `<pin_from>: cannot read the requirement '<requirement>'`.
+
+Packages with `upstream.pin_from` wait for held updates of the project that pins them. When a package with strategy `pypi` whose `upstream.registry` is `pin_from` in PEP 503 form gets `held` in the same run, the waiting package gets `held` with its new version, and the README shows `✋ 0.0.43 held`. The log gets the line below, and the issue of the held package names the wait with `python-zensical-ui waits for this update`, while the waiting package gets no issue of its own. Packages with `pin_from` are checked after the other packages, and after the second check of a package of their project that failed in the first one. The wait applies to updates that no rule of the package holds, and once the held update is published by hand, the next run lets the waiting package through.
+
+```text
+! python-zensical-ui: update 0.0.41 → 0.0.43 waits for the held update of zensical-bin
+```
+
+In environment markers, `os_name` is `posix`, `sys_platform` is `linux`, `platform_system` is `Linux`, `platform_python_implementation` is `CPython` and `implementation_name` is `cpython`. `python_version`, `python_full_version` and `implementation_version` come from the version of the `python` package that `pacman -Si python` prints, and compare as PEP 440 does: `python_version == "3.14.0"` holds for Python 3.14. The check asks for no extras, so `extra == "test"` is false. Comparisons on other fields, such as `platform_machine`, and with versions beyond releases and pre-releases, such as `3.14.post1`, are unknown, and requirements count unless their marker is false.
 
 ### npm
 

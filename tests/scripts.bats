@@ -1886,7 +1886,7 @@ run_alert_fires() {
 
 @test "lib.sh: fired_alerts fails on a rule it cannot evaluate" {
   local rule message
-  for rule in "hold: true|alerts[0] must hold exactly one of when, from, match" \
+  for rule in "hold: true|alerts[0] must hold exactly one of when, from, match, requires" \
     "when: minor|alerts[0].when must be major, got minor" \
     "match: '(?:29)'|alerts[0].match must be a non-empty ERE that bash accepts"; do
     create_test_package "pkg" "github-release" "alerts:
@@ -1921,6 +1921,84 @@ run_alert_fires() {
   done
 }
 
+@test "lib.sh: fired_alerts fires a requires rule with the change of the requirements as its note" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true"
+  run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'hold\tdrops deepmerge' ]
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    note: Check the depends of the PKGBUILD"
+  run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\tCheck the depends of the PKGBUILD: drops deepmerge' ]
+}
+
+@test "lib.sh: fired_alerts leaves a requires rule on matching names and asks nothing without current" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true"
+  run_requires 'fired_alerts "$1" 0.1.2 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_requires 'fired_alerts "$1" "" 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+@test "lib.sh: fired_alerts offline asks PyPI nothing and evaluates the other rules" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true
+  - from: '0.1'
+    note: New minor"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_requires 'fired_alerts "$1" 0.0.74 0.1.3 offline' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\tNew minor' ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+@test "lib.sh: fired_alerts fails when a request of a requires rule fails" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true"
+  run_requires 'fired_alerts "$1" 0.1.3 0.1.4' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://pypi.org/pypi/zensical/0.1.4/json: The requested URL returned error: 404"* ]]
+}
+
+@test "lib.sh: fired_alerts fails on a requires rule other than changed or outside pypi" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: always"
+  run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"alerts[0].requires must be changed, got always"* ]]
+  create_test_package "pkg" "npm" "upstream:
+  registry: express
+alerts:
+  - requires: changed"
+  run_requires 'fired_alerts "$1" 4.0.0 5.0.0' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"alerts[0].requires applies to the pypi strategy only"* ]]
+}
+
 @test "lib.sh: fired_alerts asks for quotes around a note that YAML reads as a number" {
   create_test_package "pkg" "github-release" "alerts:
   - from: '0.4.0'
@@ -1928,6 +2006,389 @@ run_alert_fires() {
   run bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 0.3 29+1' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml"
   [ "$status" -eq 1 ]
   [[ "$output" == *"alerts[0].note must be one line of text: put 2024 in quotes"* ]]
+}
+
+# === requires.sh ===
+
+# Helper: runs bash code $1 with lib.sh sourced and the mock pacman first in PATH; the other
+# arguments become $1 and on. Usage: run_requires <code> [arg]...
+run_requires() {
+  use_mock_pacman
+  run bash -c "source \"\$0/scripts/lib.sh\"; $1" "$TEST_TMPDIR" "${@:2}"
+}
+
+# Helper: checks marker_value on pairs of an expected value and a marker, in one shell
+# Usage: check_markers <value> <marker> [<value> <marker>]...
+check_markers() {
+  local -a want=() markers=() got=()
+  local i
+  while (($# > 1)); do
+    want+=("$1")
+    markers+=("$2")
+    shift 2
+  done
+  run_requires 'for m in "$@"; do marker_value "$m"; done' "${markers[@]}"
+  [ "$status" -eq 0 ]
+  mapfile -t got <<<"$output"
+  for i in "${!markers[@]}"; do
+    [ "${got[i]-}" = "${want[i]}" ] || {
+      echo "${markers[i]}: got ${got[i]-nothing}, want ${want[i]}"
+      return 1
+    }
+  done
+  [ "${#got[@]}" -eq "${#markers[@]}" ]
+}
+
+# Helper: prints the fields that requirement_split sets for requirement $1
+run_split() {
+  run_requires 'requirement_split "$1" && printf "%s\n" "name=$REQ_NAME" "spec=$REQ_SPEC" "marker=$REQ_MARKER"' "$1"
+}
+
+@test "requires.sh: pypi_name gives the PEP 503 form of a name" {
+  local name
+  for name in Friendly-Bard friendly.bard Friendly_Bard FrIeNdLy-._.-bArD friendly--bard; do
+    run_requires 'pypi_name "$1"' "$name"
+    [ "$status" -eq 0 ]
+    [ "$output" = friendly-bard ] || {
+      echo "$name: $output"
+      return 1
+    }
+  done
+  run_requires 'pypi_name "$1"' svg.path
+  [ "$output" = svg-path ]
+  run_requires 'pypi_name "$1"' A
+  [ "$output" = a ]
+}
+
+@test "requires.sh: pypi_name refuses a name outside the name rule of PyPI" {
+  local name
+  for name in -x x- .x x_ "a b" "" zensical/ui "$(printf 'caf\xc3\xa9')"; do
+    run_requires 'pypi_name "$1"' "$name"
+    [ "$status" -eq 1 ] || {
+      echo "took: $name"
+      return 1
+    }
+    [ -z "$output" ]
+  done
+}
+
+@test "requires.sh: requirement_split reads the name, the clauses and the marker" {
+  local -a cases=(
+    'requests [security,tests] >= 2.8.1, == 2.8.* ; python_version < "3.7"|requests|>=2.8.1,==2.8.*|python_version < "3.7"'
+    'zensical-ui==0.0.43|zensical-ui|==0.0.43|'
+    'foo (==1.0)|foo|==1.0|'
+    'Foo.Bar ( >=1.0 , <2 ) ; os_name == "posix"|foo-bar|>=1.0,<2|os_name == "posix"'
+    'pytest!=8.1.*,>=6; extra == "test"|pytest|!=8.1.*,>=6|extra == "test"'
+    'pip @ https://example.org/pip-1.3.1.zip ; os_name == "posix"|pip|@|os_name == "posix"'
+    'pip@https://example.org/pip-1.3.1.zip|pip|@|'
+    'pip @ https://example.org/pip.zip;v=1|pip|@|'
+    'jaraco.classes|jaraco-classes||'
+    'foo[bar] ; sys_platform == "linux"|foo||sys_platform == "linux"'
+    'foo >=1.0,|foo|>=1.0|'
+    '  click>=8.1.8  |click|>=8.1.8|'
+  )
+  local case req name spec marker
+  for case in "${cases[@]}"; do
+    IFS='|' read -r req name spec marker <<<"$case"
+    run_split "$req"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $req"
+      return 1
+    }
+    [ "$output" = "$(printf '%s\n' "name=$name" "spec=$spec" "marker=$marker")" ] || {
+      echo "$req: $output"
+      return 1
+    }
+  done
+}
+
+@test "requires.sh: requirement_split refuses text outside the grammar" {
+  local req
+  for req in "" "==1.0" "-foo" "foo bar" "foo ==" "foo =1.0" "foo >= 1.0 2.0" "foo,>=1" "foo >=1,," \
+    "foo; " "foo ;" "foo (==1.0" "foo ==1.0)" "foo ()" "foo @" "foo @ https://example.org/x.zip ;" \
+    "foo @ https://example.org/x.zip junk"; do
+    run_split "$req"
+    [ "$status" -eq 1 ] || {
+      echo "took: $req"
+      return 1
+    }
+  done
+}
+
+@test "requires.sh: marker_value gives the string fields their values on Arch" {
+  check_markers \
+    1 'os_name == "posix"' 0 'os_name == "nt"' \
+    1 'sys_platform == "linux"' 0 'sys_platform == "win32"' 0 'sys_platform == "Linux"' \
+    1 'platform_system == "Linux"' 0 'platform_system == "Windows"' \
+    1 'platform_python_implementation == "CPython"' 0 'platform_python_implementation == "PyPy"' \
+    1 'implementation_name == "cpython"' 0 'implementation_name == "pypy"' \
+    '?' 'platform_machine == "x86_64"' '?' 'platform_machine != "aarch64"'
+}
+
+@test "requires.sh: marker_value compares string fields as the specification says" {
+  check_markers \
+    1 'sys_platform != "win32"' 0 'sys_platform != "linux"' \
+    1 'sys_platform ~= "linux"' 1 'sys_platform === "linux"' \
+    1 'sys_platform >= "linux"' 1 'sys_platform <= "linux"' 0 'sys_platform >= "a"' \
+    0 'sys_platform > "a"' 0 'sys_platform < "z"' 0 'platform_machine > "a"' 0 'platform_machine < "z"' \
+    1 '"lin" in sys_platform' 1 'sys_platform in "linux darwin"' 0 '"win" in sys_platform' \
+    1 '"win" not in sys_platform' 0 'sys_platform not in "linux darwin"' '?' '"86" in platform_machine'
+}
+
+@test "requires.sh: marker_value compares version fields as PEP 440 does" {
+  check_markers \
+    1 'python_version >= "3.8"' 0 'python_version < "3.11"' 1 'python_version < "3.15"' \
+    1 'python_version == "3.14"' 0 'python_version != "3.14"' 0 'python_version > "3.14"' \
+    1 'python_version <= "3.14"' 1 'python_version == "3.14.0"' 1 'python_version == "03.014"' \
+    1 'python_full_version == "3.14.10"' 1 'python_full_version >= "3.14.2"' \
+    0 'python_full_version < "3.14.9"' 1 'implementation_version == "3.14.10"' \
+    1 'python_full_version >= "3.14.0rc1"' 1 'python_full_version < "3.15.0a1"' \
+    1 'python_full_version > "3.14.10b2"' 0 'python_full_version >= "3.14.11a1"' \
+    1 'python_version < "3.99999999999999999999"' \
+    1 'python_full_version === "3.14.10"' 0 'python_version === "3.14.0"' 1 'python_version === "3.14"' \
+    0 '"3.14" in python_version' 0 'python_version not in "3.14"'
+}
+
+@test "requires.sh: marker_value matches version prefixes and compatible releases" {
+  check_markers \
+    1 'python_version == "3.*"' 1 'python_version == "3.14.*"' 1 'python_full_version == "3.14.*"' \
+    0 'python_version == "3.1.*"' 1 'python_version == "3.14.0.*"' 0 'python_version == "3.14.1.*"' \
+    0 'python_version != "3.14.*"' 1 'python_full_version != "3.13.*"' \
+    1 'python_version ~= "3.10"' 0 'python_version ~= "3.15"' 1 'python_full_version ~= "3.14.0"' \
+    0 'python_full_version ~= "3.13.0"' 1 'python_full_version ~= "3.14.0rc1"' \
+    '?' 'python_version ~= "3"' '?' 'python_version >= "3.*"' '?' 'python_version == "3.14rc1.*"'
+}
+
+@test "requires.sh: marker_value gives unknown for version forms beyond its subset of PEP 440" {
+  check_markers \
+    '?' 'python_version >= "3.14.post1"' '?' 'python_version < "3.15.dev0"' \
+    '?' 'python_version >= "1!3.0"' '?' 'python_version == "3.14+local"' \
+    '?' 'python_version >= "foo"' '?' 'python_version >= ""' '?' 'python_version >= "v3.14"'
+}
+
+@test "requires.sh: marker_value turns the comparison around for a field on the right" {
+  check_markers \
+    0 '"3.11" > python_version' 1 '"3.15" > python_version' 1 '"3.14" <= python_version' \
+    0 '"3.14" < python_version' 1 '"3.14" == python_version' 0 '"3.14" != python_version' \
+    1 '"3.14.10" === python_full_version' '?' '"3.*" == python_version' '?' '"3.10" ~= python_version'
+}
+
+@test "requires.sh: marker_value reads extra as a field with no extras" {
+  check_markers \
+    0 'extra == "test"' 0 '"test" == extra' '?' 'extra != "test"' 0 '"test" in extra' 0 'extra > "a"'
+}
+
+@test "requires.sh: marker_value gives unknown for fields the check does not know" {
+  check_markers \
+    '?' 'platform_release >= "5"' '?' '"SMP" in platform_version' '?' 'platform_version == "1"' \
+    '?' '"toml" in extras' '?' '"dev" not in dependency_groups' '?' 'foo == "bar"' \
+    '?' '"a" == "a"' '?' 'os_name == sys_platform'
+}
+
+@test "requires.sh: marker_value joins true, false and unknown with and and or" {
+  check_markers \
+    1 'sys_platform == "linux" and python_version >= "3.8"' 0 'sys_platform == "linux" and extra == "test"' \
+    1 'sys_platform == "win32" or python_version >= "3.8"' 0 'sys_platform == "win32" or os_name == "nt"' \
+    0 'platform_machine == "x86_64" and sys_platform == "win32"' \
+    '?' 'platform_machine == "x86_64" and sys_platform == "linux"' \
+    1 'platform_machine == "x86_64" or sys_platform == "linux"' \
+    '?' 'platform_machine == "x86_64" or sys_platform == "win32"' \
+    1 'sys_platform == "linux" or sys_platform == "win32" and os_name == "nt"' \
+    0 '(sys_platform == "linux" or sys_platform == "win32") and os_name == "nt"' \
+    1 '((sys_platform == "linux"))' 0 'sys_platform != "cygwin" and extra == "check"'
+}
+
+@test "requires.sh: marker_value reads both quotes and any blanks" {
+  check_markers \
+    1 "sys_platform == 'linux'" 0 "sys_platform == \"it's\"" 0 "sys_platform == 'say \"hi\"'" \
+    1 'sys_platform=="linux"' 1 "$(printf 'sys_platform\t==\t"linux"')" 1 '  sys_platform == "linux"  ' \
+    1 '(sys_platform=="linux")and(os_name=="posix")'
+}
+
+@test "requires.sh: marker_value gives unknown for text outside the grammar" {
+  check_markers \
+    '?' '' '?' 'sys_platform' '?' 'sys_platform == "linux' '?' 'sys_platform = "linux"' \
+    '?' 'sys_platform == "linux" and' '?' '(sys_platform == "linux"' '?' 'sys_platform == "linux")' \
+    '?' 'not sys_platform == "linux"' '?' 'python_version > "3.8" < "3.12"' \
+    '?' 'sys_platform == "linux" sys_platform == "linux"' '?' 'Sys_platform == "linux"' \
+    '?' 'sys_platform2 == "linux"' '?' 'sys_platform == "linux" or or os_name == "posix"' \
+    '?' 'sys_platform notin "linux"'
+}
+
+@test "requires.sh: marker_value gives unknown for long, deep and non-ASCII markers" {
+  local long='sys_platform == "linux"' deep='sys_platform == "linux"' i
+  while ((${#long} + 27 <= 1024)); do long+=' or sys_platform == "linux"'; done
+  for ((i = 0; i < 16; i++)); do deep="($deep)"; done
+  check_markers \
+    1 "$long" '?' "$long or os_name == \"posix\"" 1 "$deep" '?' "($deep)" \
+    '?' "$(printf 'sys_platform == "lin\xc3\xbcx"')" '?' "$(printf 'sys_platform == "lin\x01ux"')"
+}
+
+@test "requires.sh: marker_value gives unknown for the Python fields without an answer of pacman" {
+  export MOCK_PYTHON_FAIL=1
+  check_markers \
+    '?' 'python_version < "3.11"' '?' 'python_full_version >= "3.8"' \
+    0 'python_version < "3.11" and sys_platform == "win32"' 0 '"3" in python_version' 1 'sys_platform == "linux"'
+}
+
+@test "requires.sh: marker_value takes the Python of pacman without epoch and pkgrel" {
+  export MOCK_PYTHON_VERSION=3.14.0-1
+  check_markers 1 'python_full_version == "3.14"' 1 'python_version == "3.14.0"' 0 'python_full_version > "3.14"'
+  export MOCK_PYTHON_VERSION=2:3.15.1-3.1
+  check_markers 1 'python_version == "3.15"' 1 'python_full_version == "3.15.1"'
+  local version
+  for version in 3.15.0rc1-1 3.14-1 3.14.10 x; do
+    export MOCK_PYTHON_VERSION="$version"
+    check_markers '?' 'python_version >= "3"' '?' 'python_full_version >= "3"'
+  done
+}
+
+@test "requires.sh: _pep440_cmp orders the versions of its subset" {
+  local -a pairs=(
+    "3.14.0 3.14 0" "3.14 3.14.0 0" "3.14.10 3.14.9 1" "3.14.9 3.14.10 -1" "3.14.0rc1 3.14.0 -1"
+    "3.14.0 3.14.0rc1 1" "3.14.0a1 3.14.0b1 -1" "3.14.0b2 3.14.0rc1 -1" "3.14.0rc2 3.14.0rc10 -1"
+    "03.014 3.14 0" "1.0a1 1.0.0a01 0" "99999999999999999999 99999999999999999998 1" "1 1.0.0.0 0" "2 10 -1"
+  )
+  local pair a b want
+  for pair in "${pairs[@]}"; do
+    read -r a b want <<<"$pair"
+    run_requires '_pep440_cmp "$1" "$2" && printf "%s\n" "$PEP440_ORDER"' "$a" "$b"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$want" ] || {
+      echo "$pair: $output"
+      return 1
+    }
+  done
+}
+
+@test "requires.sh: requires_names lists the requirements that apply on Arch" {
+  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/zensical/0.1.3/json")" "zensical 0.1.3"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' click jinja2 markdown pathspec pygments pymdown-extensions pyyaml tomli zensical-ui)" ]
+  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/zensical/0.0.74/json")" "zensical 0.0.74"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' click deepmerge jinja2 markdown pathspec pygments pymdown-extensions pyyaml tomli zensical-ui)" ]
+  # SecretStorage and jeepney under sys_platform == "linux" stay, pywin32-ctypes and the extras go
+  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/keyring/25.7.0/json")" "keyring 25.7.0"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' jaraco-classes jaraco-context jaraco-functools jeepney secretstorage)" ]
+  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/black/26.10.1/json")" "black 26.10.1"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' click mypy-extensions packaging pathspec platformdirs pytokens)" ]
+}
+
+@test "requires.sh: requires_names counts the requirements of an older Python of pacman" {
+  export MOCK_PYTHON_VERSION=3.10.12-1
+  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/black/26.10.1/json")" "black 26.10.1"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' click mypy-extensions packaging pathspec platformdirs pytokens tomli typing-extensions)" ]
+}
+
+@test "requires.sh: requires_names asks pacman once, and only for a Python field" {
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
+  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/zensical/0.1.3/json")" "zensical 0.1.3"'
+  [ "$status" -eq 0 ]
+  [ ! -e "$PACMAN_ARGS_LOG" ]
+  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/black/26.10.1/json")" "black 26.10.1"'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$PACMAN_ARGS_LOG")" = "-Si python" ]
+}
+
+@test "requires.sh: requires_names prints nothing for requires_dist null" {
+  run_requires 'requires_names "$1" "zensical-ui 0.0.43"' '{"info": {"version": "0.0.43", "requires_dist": null}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "requires.sh: requires_names fails on a requires_dist it cannot read" {
+  local -a cases=(
+    '{"info": {"version": "1.0"}}|demo 1.0: the PyPI answer holds no info.requires_dist'
+    '[1]|demo 1.0: the PyPI answer holds no info.requires_dist'
+    '{"info": {"requires_dist": "click"}}|demo 1.0: info.requires_dist is !!str, not a list'
+    '{"info": {"requires_dist": ["click", 5]}}|demo 1.0: info.requires_dist holds an item that is not text: 5'
+    '{"info": {"requires_dist": ["click", "jinja2\nmarkdown"]}}|demo 1.0: info.requires_dist holds an item with a line break'
+    '{"info": {"requires_dist": ["click", "jinja2\rmarkdown"]}}|demo 1.0: info.requires_dist holds a control character: $'"'"'jinja2\rmarkdown'"'"
+    '{"info": {"requires_dist": ["click", "foo bar"]}}|demo 1.0: cannot read the requirement '"'"'foo bar'"'"
+    '{"info": {"requires_dist": ["click", ""]}}|demo 1.0: cannot read the requirement '"''"
+  )
+  local case json message
+  for case in "${cases[@]}"; do
+    json=${case%%|*}
+    message=${case#*|}
+    run_requires 'requires_names "$1" "demo 1.0"' "$json"
+    [ "$status" -eq 1 ] || {
+      echo "took: $json"
+      return 1
+    }
+    [[ "$output" == *"$message" ]] || {
+      echo "$json: $output"
+      return 1
+    }
+  done
+}
+
+# Helper: runs requires_change for a pypi package of registry $1 from release $2 to $3, with
+# the upstream lines $4
+run_change() {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: $1${4:+$'\n'$4}"
+  run_requires 'requires_change "$1" "$2" "$3"' "$TEST_TMPDIR/packages/pkg.yml" "$2" "$3"
+}
+
+@test "requires.sh: requires_change names the requirements that the new release adds and drops" {
+  run_change mixer 1.0 2.0
+  [ "$status" -eq 0 ]
+  [ "$output" = "adds new-dep, other-new; drops old-dep" ]
+  run_change zensical 0.0.74 0.1.3
+  [ "$status" -eq 0 ]
+  [ "$output" = "drops deepmerge" ]
+  run_change zensical 0.1.3 0.0.74
+  [ "$status" -eq 0 ]
+  [ "$output" = "adds deepmerge" ]
+}
+
+@test "requires.sh: requires_change prints nothing when the names that apply on Arch match" {
+  local pair registry old new
+  # zensical moves its pin of zensical-ui, keyring drops a requirement for Python below 3.9, and
+  # black adds one for Windows
+  for pair in "zensical 0.1.2 0.1.3" "keyring 25.6.0 25.7.0" "black 26.1.0 26.10.1"; do
+    read -r registry old new <<<"$pair"
+    run_change "$registry" "$old" "$new"
+    [ "$status" -eq 0 ] && [ -z "$output" ] || {
+      echo "$pair: $output"
+      return 1
+    }
+  done
+}
+
+@test "requires.sh: requires_change notes a release of current that PyPI lacks" {
+  run_change gone 0.1.2 0.1.3
+  [ "$status" -eq 0 ]
+  [ "$output" = "PyPI has no release 0.1.2 of gone to compare with" ]
+}
+
+@test "requires.sh: requires_change fails when PyPI lacks the new release or answers with an error" {
+  run_change zensical 0.1.3 0.1.4
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://pypi.org/pypi/zensical/0.1.4/json: The requested URL returned error: 404"* ]]
+  run_change flaky 1.0 2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://pypi.org/pypi/flaky/1.0/json: The requested URL returned error: 503"* ]]
+}
+
+@test "requires.sh: requires_change reads answers within upstream.max_answer_mb" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_change zensical 0.0.74 0.1.3 "  max_answer_mb: 7"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '--max-filesize 7M' "$CURL_ARGS_LOG")" -eq 2 ]
+}
+
+@test "requires.sh: requires_change asks for no version outside the characters of PyPI versions" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_change zensical 0.1.2 '0.1.3/../x'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PyPI versions hold A-Za-z0-9._+!- alone: '0.1.3/../x'"* ]]
+  [ ! -e "$CURL_ARGS_LOG" ]
 }
 
 # === version of aurtomator ===
@@ -4362,6 +4823,177 @@ alerts:
   [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "jump_skipped: 2026102100" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 1.0" ]
   [[ "$output" != *"held:"* ]]
+}
+
+@test "check-all: holds an update that a requires rule fires on" {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+alerts:
+  - requires: changed
+    hold: true"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zensical-bin: update 0.0.74 → 0.1.3 held: drops deepmerge"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge' ]
+}
+
+@test "check-all: holds an update whose release of current PyPI lacks, with a note" {
+  create_test_package "gone-bin" "pypi" "upstream:
+  registry: gone
+current: 0.1.2
+alerts:
+  - requires: changed
+    hold: true"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gone-bin: update 0.1.2 → 3.2.1 held: PyPI has no release 0.1.2 of gone to compare with"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/gone-bin")" = "held: 3.2.1" ]
+  [ ! -e "$TEST_TMPDIR/.status/_hosts" ]
+}
+
+@test "check-all: a requires rule whose request fails fails the check, names the host and runs again" {
+  create_test_package "flaky-bin" "pypi" "upstream:
+  registry: flaky
+current: '1.0'
+alerts:
+  - requires: changed
+    hold: true"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/flaky-bin")" = "check_failed: https://pypi.org/pypi/flaky/1.0/json: The requested URL returned error: 503" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'flaky-bin\tpypi.org' ]
+  [ "$(grep -c 'pypi.org/pypi/flaky/1.0/json' "$CURL_ARGS_LOG")" -eq 2 ]
+}
+
+# Helper: creates zensical-bin at 0.0.74, which the alerts $1 or a requires rule hold at 0.1.3,
+# and python-zensical-ui at 0.0.41 with the YAML lines $2, which zensical pins to 0.0.43
+create_zensical_pair() {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+alerts:
+${1:-  - requires: changed
+    hold: true}"
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41
+${2:-}"
+}
+
+@test "check-all: a package with pin_from waits for the held update of its project" {
+  create_zensical_pair
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python-zensical-ui: update 0.0.41 → 0.0.43 waits for the held update of zensical-bin"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge\npython-zensical-ui\twait\tWaits for the held update of zensical-bin\nzensical-bin\tnotice\tpython-zensical-ui waits for this update' ]
+}
+
+@test "check-all: a package with pin_from goes on when its project is not held or not there" {
+  # zensical-bin is a package of the AUR, so neither asks check-arch.sh for its arches there
+  create_zensical_pair "  - from: '9.0'
+    hold: true
+    note: Not reached
+allow_missing_arch: false" "allow_missing_arch: false"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "new_version: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "new_version: 0.0.43" ]
+  rm "$TEST_TMPDIR/packages/zensical-bin.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "new_version: 0.0.43" ]
+}
+
+@test "check-all: a package with pin_from takes the project of a registry in another spelling" {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: Zensical
+current: 0.0.74
+alerts:
+  - from: '0.1'
+    hold: true
+    note: New minor"
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 3.2.1" ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+}
+
+@test "check-all: checks packages with pin_from after the others, which the run number rotates" {
+  create_zensical_pair
+  create_test_package "aaa" "pypi" "upstream:
+  registry: requests
+current: 3.2.1"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+
+  GITHUB_RUN_NUMBER=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  run grep -o -E 'pypi\.org/pypi/[^ ]+' "$CURL_ARGS_LOG"
+  [ "$output" = $'pypi.org/pypi/zensical/json\npypi.org/pypi/zensical/0.0.74/json\npypi.org/pypi/zensical/0.1.3/json\npypi.org/pypi/requests/json\npypi.org/pypi/zensical/json' ]
+}
+
+@test "check-all: a package with pin_from waits for the second check of its project" {
+  create_zensical_pair "  - from: '0.1'
+    hold: true
+    note: New minor"
+  # zensical-bin fails fast once, so it goes to the second pass
+  rm -f "$TEST_TMPDIR/strategies/pypi.sh"
+  cat >"$TEST_TMPDIR/strategies/pypi.sh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == zensical-bin && ! -e "$TEST_TMPDIR/first-try" ]]; then
+  touch "$TEST_TMPDIR/first-try"
+  echo "upstream did not answer" >&2
+  exit 1
+fi
+[[ "$1" == zensical-bin ]] && echo 0.1.3 || echo 0.0.43
+EOF
+  chmod +x "$TEST_TMPDIR/strategies/pypi.sh"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python-zensical-ui waits for the second check of zensical-bin"* ]]
+  [[ "$output" == *"Checking 2 failed package(s) again"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+}
+
+@test "check-all --update: holds a package with pin_from whose project is held and updates neither" {
+  create_zensical_pair
+  rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/update-pkg.sh.args"\n' "$TEST_TMPDIR" >"$TEST_TMPDIR/scripts/update-pkg.sh"
+  chmod +x "$TEST_TMPDIR/scripts/update-pkg.sh"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+}
+
+@test "check-all: a package with pin_from that a rule of its own holds keeps that hold alone" {
+  create_zensical_pair "" "alerts:
+  - from: '0.0.42'
+    hold: true
+    note: Own note"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  [ "$(grep -c 'python-zensical-ui' "$TEST_TMPDIR/.status/_alerts")" -eq 1 ]
+  grep -qxF $'python-zensical-ui\thold\tOwn note' "$TEST_TMPDIR/.status/_alerts"
 }
 
 @test "check-all: holds nothing for a package without current" {

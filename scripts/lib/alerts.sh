@@ -46,15 +46,15 @@ alert_note_error() {
   printf 'note must be one line of text%s\n' "${value:+: put $value in quotes}"
 }
 
-# Print the alerts of package file $1 that fire from current $2 to version $3, in file order,
-# as hold or notice, a tab and the note; fails on a broken rule or a note of several lines
+# Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as
+# hold or notice, a tab and the note; fail on a broken rule. $4 offline skips the requires rules.
 fired_alerts() {
-  local file="$1" current="$2" latest="$3" count i kind value rc action note
+  local file="$1" current="$2" latest="$3" offline="${4:-}" count i kind value rc action note change
   count=$(pkg_get "$file" '.alerts | length')
   for ((i = 0; i < count; i++)); do
-    kind=$(pkg_get "$file" ".alerts[$i] | [keys[] | select(. == \"when\" or . == \"from\" or . == \"match\")] | join(\" \")")
-    if [[ ! "$kind" =~ ^(when|from|match)$ ]]; then
-      log_err "alerts[$i] must hold exactly one of when, from, match"
+    kind=$(pkg_get "$file" ".alerts[$i] | [keys[] | select(. == \"when\" or . == \"from\" or . == \"match\" or . == \"requires\")] | join(\" \")")
+    if [[ ! "$kind" =~ ^(when|from|match|requires)$ ]]; then
+      log_err "alerts[$i] must hold exactly one of when, from, match, requires"
       return 1
     fi
     value=$(pkg_get "$file" ".alerts[$i].$kind")
@@ -62,17 +62,37 @@ fired_alerts() {
       log_err "alerts[$i].when must be major, got $value"
       return 1
     fi
-    if ! note=$(alert_note "$file" "$i"); then
-      log_err "alerts[$i].$(alert_note_error "$file" "$i")"
-      return 1
+    if [[ "$kind" == requires ]]; then
+      if [[ "$value" != changed ]]; then
+        log_err "alerts[$i].requires must be changed, got $value"
+        return 1
+      fi
+      if [[ $(pkg_get "$file" .strategy) != pypi ]]; then
+        log_err "alerts[$i].requires applies to the pypi strategy only"
+        return 1
+      fi
+      note=""
+      if [[ $(pkg_get "$file" ".alerts[$i] | has(\"note\")") == true ]] && ! note=$(alert_note "$file" "$i"); then
+        log_err "alerts[$i].$(alert_note_error "$file" "$i")"
+        return 1
+      fi
+      [[ -n "$current" && "$offline" != offline ]] || continue
+      change=$(requires_change "$file" "$current" "$latest") || return 1
+      [[ -n "$change" ]] || continue
+      note="${note:+$note: }$change"
+    else
+      if ! note=$(alert_note "$file" "$i"); then
+        log_err "alerts[$i].$(alert_note_error "$file" "$i")"
+        return 1
+      fi
+      rc=0
+      alert_fires "$kind" "$value" "$current" "$latest" || rc=$?
+      if ((rc == 2)); then
+        log_err "alerts[$i].match must be a non-empty ERE that bash accepts: $value"
+        return 1
+      fi
+      ((rc == 0)) || continue
     fi
-    rc=0
-    alert_fires "$kind" "$value" "$current" "$latest" || rc=$?
-    if ((rc == 2)); then
-      log_err "alerts[$i].match must be a non-empty ERE that bash accepts: $value"
-      return 1
-    fi
-    ((rc == 0)) || continue
     action=notice
     [[ $(pkg_get "$file" ".alerts[$i].hold") != true ]] || action=hold
     printf '%s\t%s\n' "$action" "$note"

@@ -36,6 +36,13 @@ alert_issue_body() {
   printf 'Package: `%s`\n%s version: `%s`\nRun: %s\n\n%s\n\nAuto-created by update workflow. %s\n' "$package" "$state" "${status#*: }" "$2" "$notes" "$footer"
 }
 
+# Succeeds when _alerts beside status file $1 holds lines of its package and each of them is a
+# wait for another package, whose own issue names it
+only_waits() {
+  [[ -f "${1%/*}/_alerts" ]] || return 1
+  awk -F'\t' -v p="${1##*/}" '$1 "" == p "" { n++; if ($2 != "wait") other = 1 } END { exit !(n > 0 && !other) }' "${1%/*}/_alerts"
+}
+
 # Print text $1 as a code block, where links, images and mentions do not
 # render. Longer texts keep their last $2 characters, 4000 by default.
 _code_block() {

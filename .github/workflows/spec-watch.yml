@@ -1,0 +1,67 @@
+name: Watch PyPA Specifications
+
+# Opens an issue when a PyPA specification that scripts/lib/requires.sh follows gets commits
+# after the SHA in .github/spec-watch.tsv, and closes it once the SHAs match again
+on:
+  schedule:
+    - cron: "27 4 * * 2"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  watch:
+    if: github.repository == 'staticwire/aurtomator'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare the last commits of the specifications
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          changed=()
+          while IFS=$'\t' read -r path known; do
+            [[ -n "$path" ]] || continue
+            sha=$(gh api "repos/pypa/packaging.python.org/commits?path=${path}&per_page=1" --jq '.[0].sha')
+            if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::GitHub gave no commit SHA for $path: ${sha@Q}"
+              exit 1
+            fi
+            if [[ "$sha" != "$known" ]]; then
+              changed+=("- \`$path\`: \`${known:0:12}\` to \`${sha:0:12}\`, https://github.com/pypa/packaging.python.org/commits/main/$path")
+            fi
+          done <.github/spec-watch.tsv
+
+          open=$(gh issue list --label spec-watch --state open --limit 100 --json number --jq '.[].number')
+          if ((${#changed[@]} == 0)); then
+            while IFS= read -r number; do
+              [[ -z "$number" ]] || gh issue close "$number" --comment "Run $RUN_URL found the last commits that \`.github/spec-watch.tsv\` lists."
+            done <<<"$open"
+            exit 0
+          fi
+          if [[ -n "$open" ]]; then
+            echo "The issue of the changed specifications is open"
+            exit 0
+          fi
+
+          gh label create spec-watch --color c5def5 --description "Changed PyPA specification" 2>/dev/null || true
+          # The backticks are Markdown code
+          # shellcheck disable=SC2016
+          gh issue create --title "📜 PyPA specifications changed" --label spec-watch --body "$(printf '%s\n' \
+            'Specifications that `scripts/lib/requires.sh` follows have commits after the SHAs in `.github/spec-watch.tsv`:' \
+            "" \
+            "${changed[@]}" \
+            "" \
+            'Read the commits. When one changes the meaning of requirements or markers, update `scripts/lib/requires.sh` and its tests. Then set the new SHAs in `.github/spec-watch.tsv`, and the next run closes this issue.' \
+            "" \
+            "Run: $RUN_URL")"

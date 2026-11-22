@@ -178,6 +178,22 @@ $2"
   grep -qx 'pkgver=1.1.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
 }
 
+@test "update-pkg --prepare: fails the step from the AUR pkgver that a requires rule with hold fires on" {
+  create_test_package "demo" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true"
+  write_pkgbuild "$OLD" 0.0.74 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 0.0.74 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 0.1.3 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo has 0.0.74 on the AUR, and an alert holds 0.0.74 to 0.1.3: drops deepmerge"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
 # check-all.sh compares with current, which lags the AUR after a push by hand
 @test "update-pkg --prepare: with current below the AUR, holds a downgrade, a jump and a held alert against the AUR" {
   write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
@@ -3694,7 +3710,7 @@ last_updated: '$(date -u +%F)'"
   [ "$(cat "$TEST_TMPDIR/.status/pkg-git")" = "cooldown: $(date -u -d '7 days' +%F)" ]
 }
 
-@test "check-all --publish: keeps a held update and records the notes of its alerts again" {
+@test "check-all --publish: keeps a held update with the alert lines of the check run" {
   create_test_package "held" "github-release" "upstream:
   project: owner/repo
 current: 28+25
@@ -3705,13 +3721,94 @@ alerts:
     hold: true
     note: Raise makedepends java-environment to 28"
   checked_status held "held: 29+1"
-  printf 'held\thold\tstale note\n' >"$TEST_TMPDIR/.status/_alerts"
+  printf '%s\n' $'held\tnotice\tCreate the package for the old major' $'other\thold\tNote of another package' \
+    $'held\thold\tRaise makedepends java-environment to 28' >"$TEST_TMPDIR/.status/_alerts"
   stub_script publish-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
   [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
   [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'held\tnotice\tCreate the package for the old major\nheld\thold\tRaise makedepends java-environment to 28' ]
+}
+
+# The job with the AUR key asks upstream nothing, so it evaluates no rule of a held update
+@test "check-all --publish: takes the alert lines of a held update from the check run alone" {
+  create_test_package "held" "github-release" "upstream:
+  project: owner/repo
+current: 28+25"
+  checked_status held "held: 29+1"
+  printf '%s\n' $'held\thold\tadds pathspec; drops deepmerge' >"$TEST_TMPDIR/.status/_alerts"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'held\thold\tadds pathspec; drops deepmerge' ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+@test "check-all --publish: asks PyPI nothing for a requires rule and keeps its notice from the check run" {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+alerts:
+  - requires: changed"
+  checked_status zensical-bin "new_version: 0.1.3"
+  printf '%s\n' $'zensical-bin\tnotice\tdrops deepmerge' >"$TEST_TMPDIR/.status/_alerts"
+  mkdir -p "$TEST_TMPDIR/out/prepared/zensical-bin"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "zensical-bin 0.1.3 $TEST_TMPDIR/out/prepared/zensical-bin" ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "updated: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\tnotice\tdrops deepmerge' ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+@test "check-all --publish: holds an update that the check run recorded a hold for" {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+alerts:
+  - requires: changed
+    hold: true"
+  checked_status zensical-bin "new_version: 0.1.3"
+  printf '%s\n' $'zensical-bin\thold\tdrops deepmerge' >"$TEST_TMPDIR/.status/_alerts"
+  mkdir -p "$TEST_TMPDIR/out/prepared/zensical-bin"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+}
+
+@test "check-all --publish: keeps the wait line of a held package with pin_from" {
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41"
+  checked_status python-zensical-ui "held: 0.0.43"
+  printf '%s\n' $'python-zensical-ui\twait\tWaits for the held update of zensical-bin' >"$TEST_TMPDIR/.status/_alerts"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'python-zensical-ui\twait\tWaits for the held update of zensical-bin' ]
+}
+
+@test "check-all --publish: drops alert lines of the check run outside package, action and note" {
+  create_test_package "held" "github-release" "upstream:
+  project: owner/repo
+current: 28+25"
+  checked_status held "held: 29+1"
+  printf '%s\n' $'held\thold' $'held\tbogus\tNote' $'held\thold\tNote\textra' $'held\thold\t' \
+    $'held\tnotice\tRed \e[31mnote' $' held\thold\tNote' $'heldx\thold\tNote' $'held\thold\tKept note' \
+    >"$TEST_TMPDIR/.status/_alerts"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'held\thold\tKept note' ]
 }
 
 @test "check-all --publish: publishes no update an alert with hold: true fires on" {
@@ -4862,6 +4959,22 @@ current: '1.0.0'"
 }
 
 # === alert_issue_body ===
+
+@test "only_waits: succeeds when every alert line of the package waits" {
+  echo "held: 0.0.43" >"$TEST_TMPDIR/demo"
+  printf '%s\t%s\t%s\n' demo wait "Waits for the held update of main" other hold "Not this one" >"$TEST_TMPDIR/_alerts"
+  run only_waits "$TEST_TMPDIR/demo"
+  [ "$status" -eq 0 ]
+  printf '%s\t%s\t%s\n' demo wait "Waits for the held update of main" demo hold "Own note" >"$TEST_TMPDIR/_alerts"
+  run only_waits "$TEST_TMPDIR/demo"
+  [ "$status" -eq 1 ]
+  printf '%s\t%s\t%s\n' other wait "Waits for the held update of main" >"$TEST_TMPDIR/_alerts"
+  run only_waits "$TEST_TMPDIR/demo"
+  [ "$status" -eq 1 ]
+  rm "$TEST_TMPDIR/_alerts"
+  run only_waits "$TEST_TMPDIR/demo"
+  [ "$status" -eq 1 ]
+}
 
 # builder of check writes _alerts, so a mention or a link in it does not
 # render
