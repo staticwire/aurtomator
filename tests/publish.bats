@@ -3783,6 +3783,20 @@ alerts:
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
 }
 
+@test "check-all --publish: keeps the wait line of a held package with pin_from" {
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41"
+  checked_status python-zensical-ui "held: 0.0.43"
+  printf '%s\n' $'python-zensical-ui\twait\tWaits for the held update of zensical-bin' >"$TEST_TMPDIR/.status/_alerts"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'python-zensical-ui\twait\tWaits for the held update of zensical-bin' ]
+}
+
 @test "check-all --publish: drops alert lines of the check run outside package, action and note" {
   create_test_package "held" "github-release" "upstream:
   project: owner/repo
@@ -4945,6 +4959,22 @@ current: '1.0.0'"
 }
 
 # === alert_issue_body ===
+
+@test "only_waits: succeeds when every alert line of the package waits" {
+  echo "held: 0.0.43" >"$TEST_TMPDIR/demo"
+  printf '%s\t%s\t%s\n' demo wait "Waits for the held update of main" other hold "Not this one" >"$TEST_TMPDIR/_alerts"
+  run only_waits "$TEST_TMPDIR/demo"
+  [ "$status" -eq 0 ]
+  printf '%s\t%s\t%s\n' demo wait "Waits for the held update of main" demo hold "Own note" >"$TEST_TMPDIR/_alerts"
+  run only_waits "$TEST_TMPDIR/demo"
+  [ "$status" -eq 1 ]
+  printf '%s\t%s\t%s\n' other wait "Waits for the held update of main" >"$TEST_TMPDIR/_alerts"
+  run only_waits "$TEST_TMPDIR/demo"
+  [ "$status" -eq 1 ]
+  rm "$TEST_TMPDIR/_alerts"
+  run only_waits "$TEST_TMPDIR/demo"
+  [ "$status" -eq 1 ]
+}
 
 # builder of check writes _alerts, so a mention or a link in it does not
 # render

@@ -373,6 +373,59 @@ record_alerts() {
   [[ -z "$2" ]] || awk -v p="$1" '{ print p "\t" $0 }' <<<"$2" >>"${STATUS_DIR}/_alerts"
 }
 
+# The package files of strategy pypi under the PEP 503 name of their upstream.registry, one
+# path a line, which read_projects fills once from the files without pin_from
+declare -A PROJECT_FILES=()
+PROJECTS_READ=""
+
+read_projects() {
+  local file name
+  [[ -z "$PROJECTS_READ" ]] || return 0
+  PROJECTS_READ=1
+  for file in "${plain_files[@]}"; do
+    [[ -f "$file" && ! -L "$file" && "$(pkg_get "$file" '.strategy // ""' 2>/dev/null)" == pypi ]] || continue
+    name=$(pypi_name "$(pkg_get "$file" '.upstream.registry // ""' 2>/dev/null)") || continue
+    PROJECT_FILES[$name]+="$file"$'\n'
+  done
+}
+
+# Succeeds when package file $1 is in RECHECK
+in_recheck() {
+  local file
+  for file in "${RECHECK[@]}"; do
+    [[ "$file" != "$1" ]] || return 0
+  done
+  return 1
+}
+
+# Succeeds when package $2 of file $1, from version $3 to $4 in pass $5, waits for a package of
+# the project of its upstream.pin_from: one held in this run, or in pass 1 one in RECHECK
+companion_waits() {
+  local pin_from name main main_name
+  pin_from=$(pkg_get "$1" '.upstream.pin_from // ""') || return 1
+  [[ -n "$pin_from" ]] || return 1
+  name=$(pypi_name "$pin_from") || return 1
+  read_projects
+  while IFS= read -r main; do
+    [[ -n "$main" ]] || continue
+    main_name=$(package_name "$main" 2>/dev/null) || continue
+    if [[ -f "${STATUS_DIR}/${main_name}" && "$(<"${STATUS_DIR}/${main_name}")" == "held: "* ]]; then
+      log_warn "$2: update ${3:-none} → $4 waits for the held update of $main_name"
+      echo "held: $4" >"${STATUS_DIR}/$2"
+      record_alerts "$2" "wait"$'\t'"Waits for the held update of $main_name"
+      record_alerts "$main_name" "notice"$'\t'"$2 waits for this update"
+      return 0
+    fi
+    if (($5 == 1)) && in_recheck "$main"; then
+      log_info "$2 waits for the second check of $main_name"
+      echo "unchecked: waits for the second check of $main_name" >"${STATUS_DIR}/$2"
+      RECHECK+=("$1")
+      return 0
+    fi
+  done <<<"${PROJECT_FILES[$name]:-}"
+  return 1
+}
+
 # Prints the alert lines of package $1 for --publish, which asks upstream nothing: the lines
 # of the check run, then those of offline rules in $2 that the check run lacks
 publish_alerts() {
@@ -387,7 +440,7 @@ publish_alerts() {
 # Prints the lines of _alerts of the check run for package $1 as fired_alerts prints them.
 # builder of check writes _alerts, so lines of another form and lines with control characters drop.
 checked_alerts() {
-  local line re=$'^([^\t]+)\t(hold|notice)\t([^\t]+)$'
+  local line re=$'^([^\t]+)\t(hold|notice|wait)\t([^\t]+)$'
   while IFS= read -r line; do
     if [[ "$line" =~ $re && "${BASH_REMATCH[1]}" == "$1" ]] && ! has_control "$line"; then
       printf '%s\t%s\n' "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
@@ -735,6 +788,11 @@ run_package() {
     echo "held: ${latest}" >"${STATUS_DIR}/${pkg_name}"
     return
   fi
+  # Pinned versions move with the package of the project that pins them
+  if [[ "$MODE" == check || "$MODE" == update ]] && [[ "$latest" != "$current" ]] &&
+    companion_waits "$pkg_file" "$pkg_name" "$current" "$latest" "$pass"; then
+    return
+  fi
 
   # cooldown_days holds every push back until that many days after the last one
   err_file=$(mktemp)
@@ -863,11 +921,22 @@ check_files=()
 for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   [[ ! -f "$pkg_file" && ! -L "$pkg_file" ]] || check_files+=("$pkg_file")
 done
+# Packages with upstream.pin_from wait for held updates of the project that pins them, so
+# they run after the other packages, whose statuses are known then
+plain_files=()
+companion_files=()
+for pkg_file in "${check_files[@]}"; do
+  if [[ -f "$pkg_file" && ! -L "$pkg_file" && -n "$(pkg_get "$pkg_file" '.upstream.pin_from // ""' 2>/dev/null)" ]]; then
+    companion_files+=("$pkg_file")
+  else
+    plain_files+=("$pkg_file")
+  fi
+done
 # Slow hosts early in the list would take the budget of the same packages in
 # every run, so each run of the workflow starts the loop one package later
 check_start=0
-if [[ "$MODE" == check && ${#check_files[@]} -gt 0 ]] && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
-  check_start=$((GITHUB_RUN_NUMBER % ${#check_files[@]}))
+if [[ "$MODE" == check && ${#plain_files[@]} -gt 0 ]] && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
+  check_start=$((GITHUB_RUN_NUMBER % ${#plain_files[@]}))
 fi
 CHECK_END=$(($(date -u +%s) + CHECK_BUDGET))
 
@@ -885,7 +954,7 @@ if [[ "$MODE" == publish ]]; then
   done | LC_ALL=C sort >"${STATUS_DIR}/_hosts"
   [[ -s "${STATUS_DIR}/_hosts" ]] || rm -f "${STATUS_DIR}/_hosts"
 fi
-for pkg_file in "${check_files[@]:check_start}" "${check_files[@]:0:check_start}"; do
+for pkg_file in "${plain_files[@]:check_start}" "${plain_files[@]:0:check_start}" "${companion_files[@]}"; do
   if check_time_left; then
     run_package "$pkg_file" 1
   elif pkg_name=$(package_name "$pkg_file"); then

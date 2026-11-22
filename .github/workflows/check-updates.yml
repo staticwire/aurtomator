@@ -1212,6 +1212,10 @@ jobs:
                 create_issue auto-update "❌ $pkg_name: ${kind//_/ }" "$body"
                 ;;
               "held: "*)
+                if lib only_waits "$status_file"; then
+                  echo "$pkg_name waits for a held package and gets no issue"
+                  continue
+                fi
                 open_issue update-held fbca04 "Update waits for a hand edit" "✋ $pkg_name: update held" alert_issue_body "$status_file"
                 ;;
               "updated: "* | "downgrade: "*)

@@ -2750,6 +2750,20 @@ EOF
   grep -qx 'issue create --title ✋ foo: update held --label update-held --body-file -' "$GH_LOG"
 }
 
+@test "check-updates: the issue step opens no issue for a held update that only waits for another" {
+  run_issue_step bar="held: 0.0.43" _alerts=$'bar\twait\tWaits for the held update of foo'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bar waits for a held package and gets no issue"* ]]
+  run grep -c '^issue create' "$GH_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "check-updates: the issue step opens an issue for a held update that waits and holds" {
+  run_issue_step bar="held: 0.0.43" _alerts=$'bar\twait\tWaits for the held update of foo\nbar\thold\tOwn note'
+  [ "$status" -eq 0 ]
+  grep -qx 'issue create --title ✋ bar: update held --label update-held --body-file -' "$GH_LOG"
+}
+
 @test "check-updates: an open issue of a held update holds back another one" {
   GH_TITLES=$'❌ bar: check failed\n✋ foo: update held' run_issue_step foo="held: 29+2"
   [ "$status" -eq 0 ]

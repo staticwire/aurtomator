@@ -4870,6 +4870,132 @@ alerts:
   [ "$(grep -c 'pypi.org/pypi/flaky/1.0/json' "$CURL_ARGS_LOG")" -eq 2 ]
 }
 
+# Helper: creates zensical-bin at 0.0.74, which the alerts $1 or a requires rule hold at 0.1.3,
+# and python-zensical-ui at 0.0.41 with the YAML lines $2, which zensical pins to 0.0.43
+create_zensical_pair() {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+alerts:
+${1:-  - requires: changed
+    hold: true}"
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41
+${2:-}"
+}
+
+@test "check-all: a package with pin_from waits for the held update of its project" {
+  create_zensical_pair
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python-zensical-ui: update 0.0.41 → 0.0.43 waits for the held update of zensical-bin"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge\npython-zensical-ui\twait\tWaits for the held update of zensical-bin\nzensical-bin\tnotice\tpython-zensical-ui waits for this update' ]
+}
+
+@test "check-all: a package with pin_from goes on when its project is not held or not there" {
+  # zensical-bin is a package of the AUR, so neither asks check-arch.sh for its arches there
+  create_zensical_pair "  - from: '9.0'
+    hold: true
+    note: Not reached
+allow_missing_arch: false" "allow_missing_arch: false"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "new_version: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "new_version: 0.0.43" ]
+  rm "$TEST_TMPDIR/packages/zensical-bin.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "new_version: 0.0.43" ]
+}
+
+@test "check-all: a package with pin_from takes the project of a registry in another spelling" {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: Zensical
+current: 0.0.74
+alerts:
+  - from: '0.1'
+    hold: true
+    note: New minor"
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 3.2.1" ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+}
+
+@test "check-all: checks packages with pin_from after the others, which the run number rotates" {
+  create_zensical_pair
+  create_test_package "aaa" "pypi" "upstream:
+  registry: requests
+current: 3.2.1"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+
+  GITHUB_RUN_NUMBER=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  run grep -o -E 'pypi\.org/pypi/[^ ]+' "$CURL_ARGS_LOG"
+  [ "$output" = $'pypi.org/pypi/zensical/json\npypi.org/pypi/zensical/0.0.74/json\npypi.org/pypi/zensical/0.1.3/json\npypi.org/pypi/requests/json\npypi.org/pypi/zensical/json' ]
+}
+
+@test "check-all: a package with pin_from waits for the second check of its project" {
+  create_zensical_pair "  - from: '0.1'
+    hold: true
+    note: New minor"
+  # zensical-bin fails fast once, so it goes to the second pass
+  rm -f "$TEST_TMPDIR/strategies/pypi.sh"
+  cat >"$TEST_TMPDIR/strategies/pypi.sh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == zensical-bin && ! -e "$TEST_TMPDIR/first-try" ]]; then
+  touch "$TEST_TMPDIR/first-try"
+  echo "upstream did not answer" >&2
+  exit 1
+fi
+[[ "$1" == zensical-bin ]] && echo 0.1.3 || echo 0.0.43
+EOF
+  chmod +x "$TEST_TMPDIR/strategies/pypi.sh"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python-zensical-ui waits for the second check of zensical-bin"* ]]
+  [[ "$output" == *"Checking 2 failed package(s) again"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+}
+
+@test "check-all --update: holds a package with pin_from whose project is held and updates neither" {
+  create_zensical_pair
+  rm -f "$TEST_TMPDIR/scripts/update-pkg.sh"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/update-pkg.sh.args"\n' "$TEST_TMPDIR" >"$TEST_TMPDIR/scripts/update-pkg.sh"
+  chmod +x "$TEST_TMPDIR/scripts/update-pkg.sh"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  [ ! -e "$TEST_TMPDIR/update-pkg.sh.args" ]
+}
+
+@test "check-all: a package with pin_from that a rule of its own holds keeps that hold alone" {
+  create_zensical_pair "" "alerts:
+  - from: '0.0.42'
+    hold: true
+    note: Own note"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  [ "$(grep -c 'python-zensical-ui' "$TEST_TMPDIR/.status/_alerts")" -eq 1 ]
+  grep -qxF $'python-zensical-ui\thold\tOwn note' "$TEST_TMPDIR/.status/_alerts"
+}
+
 @test "check-all: holds nothing for a package without current" {
   stand_in_strategy step 1.0
   create_test_package "pkg-new" "step" "alerts:
