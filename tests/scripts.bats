@@ -25,6 +25,15 @@ teardown() {
   run ! git -C "$TEST_TMPDIR/clone" rev-parse -q --verify HEAD
 }
 
+@test "setup_test_env: git of the tests reaches no host" {
+  run git ls-remote https://example.invalid/repo.git
+  [ "$status" -eq 128 ]
+  [[ "$output" == *"transport 'https' not allowed"* ]]
+  run git ls-remote ssh://git@example.invalid/repo.git
+  [ "$status" -eq 128 ]
+  [[ "$output" == *"transport 'ssh' not allowed"* ]]
+}
+
 @test "setup.sh: tests run without the GITHUB_EVENT_NAME of CI" {
   GITHUB_EVENT_NAME=pull_request run bash -c 'source "$1"; echo "${GITHUB_EVENT_NAME-unset}"' _ "$TESTS_DIR/helpers/setup.sh"
   [ "$status" -eq 0 ]

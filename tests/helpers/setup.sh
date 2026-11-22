@@ -51,6 +51,9 @@ setup_test_env() {
 
   # git reads and writes no global config of the user running the tests
   export GIT_CONFIG_GLOBAL="$TEST_TMPDIR/gitconfig"
+
+  # git of the tests reaches no host, except where a script sets GIT_ALLOW_PROTOCOL itself
+  export GIT_ALLOW_PROTOCOL=file
 }
 
 # bashcov-bats.sh sets AURTOMATOR_KEEP_TEST_DIRS: bashcov reads the trace
