@@ -71,6 +71,12 @@ ${extra}
 EOF
 }
 
+# Put the mock pacman of tests/helpers first in PATH, for markers on the Python of pacman
+use_mock_pacman() {
+  cp "$TESTS_DIR/helpers/mock-pacman.sh" "$MOCK_DIR/pacman"
+  chmod +x "$MOCK_DIR/pacman"
+}
+
 # Usage: make_aur_remote <pkg> <PKGBUILD> <.SRCINFO> [file]...; sets AUR_REMOTE
 # and AUR_BASE. git clones it for an AUR URL and fetches upstream.git for https.
 # Adds a canary to PKGBUILD $1: top-level code, a pkgver() and a line of package() that each

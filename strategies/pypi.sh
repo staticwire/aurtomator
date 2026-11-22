@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pypi - Print the latest stable version of a package on PyPI, see
-# https://aurtomator.dev/strategies/#pypi
+# pypi - Print the latest stable version of a package on PyPI, or the version that the newest
+# release of upstream.pin_from pins it to, see https://aurtomator.dev/strategies/#pypi
 
 set -euo pipefail
 
@@ -10,9 +10,21 @@ readonly SCRIPT_DIR
 
 # shellcheck source=../scripts/lib/common.sh
 source "${SCRIPT_DIR}/../scripts/lib/common.sh"
+# shellcheck source=../scripts/lib/requires.sh
+source "${SCRIPT_DIR}/../scripts/lib/requires.sh"
 
 pkg_file=$(pkg_file "$NAME")
 registry=$(pkg_get "$pkg_file" .upstream.registry)
+pin_from=$(pkg_get "$pkg_file" '.upstream.pin_from // ""')
+
+if [[ -n "$pin_from" ]]; then
+  json=$(http_get_json "https://pypi.org/pypi/${pin_from}/json") || {
+    echo "Failed to fetch PyPI info for ${pin_from}" >&2
+    exit 1
+  }
+  requires_pin "$json" "$pin_from" "$registry"
+  exit 0
+fi
 
 version=$(http_get_json "https://pypi.org/pypi/${registry}/json" | yq -r '.info.version') || {
   echo "Failed to fetch PyPI info for ${registry}" >&2

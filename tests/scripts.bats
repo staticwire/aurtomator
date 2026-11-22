@@ -1935,8 +1935,7 @@ run_alert_fires() {
 # Helper: runs bash code $1 with lib.sh sourced and the mock pacman first in PATH; the other
 # arguments become $1 and on. Usage: run_requires <code> [arg]...
 run_requires() {
-  cp "$TESTS_DIR/helpers/mock-pacman.sh" "$MOCK_DIR/pacman"
-  chmod +x "$MOCK_DIR/pacman"
+  use_mock_pacman
   run bash -c "source \"\$0/scripts/lib.sh\"; $1" "$TEST_TMPDIR" "${@:2}"
 }
 

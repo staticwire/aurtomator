@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# lib.sh - Sources the files of lib/ for the scripts; a strategy sources lib/common.sh alone
+# lib.sh - Sources the files of lib/ for the scripts; strategies source lib/common.sh, and
+# pypi.sh lib/requires.sh too
 #
 # Usage: source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 

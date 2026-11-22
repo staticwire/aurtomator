@@ -9,6 +9,7 @@ upstream:                 # strategy fields
   # tag_version_regex: '^v([0-9.]+)$'  # ERE whose first group is the version
   # asset_regex: '^app_(.+)_amd64\.deb$'  # github-tag, github-release: value from asset names
   # asset_var: _deb                    # PKGBUILD variable of that value
+  # pin_from: zensical                 # pypi: the version that the newest zensical pins with ==
   # max_answer_mb: 50                  # largest answer of a request, 1 to 500
 
 # allow_downgrade: false     # true publishes versions below current

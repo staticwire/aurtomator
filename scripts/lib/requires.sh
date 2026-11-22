@@ -2,7 +2,7 @@
 #
 # requires.sh - The requirements of PyPI releases and their environment markers on Arch
 #
-# Sourced by lib.sh.
+# Sourced by lib.sh and strategies/pypi.sh.
 
 # Print the PEP 503 form of PyPI project name $1, or fail for a name outside the name rule
 pypi_name() {
@@ -68,7 +68,6 @@ requirement_split() {
     [[ "$spec" =~ ^${clause}(,${clause})*(,[[:blank:]]*)?$ ]] || return 1
   fi
   spec=${spec//[[:blank:]]/}
-  # shellcheck disable=SC2034 # the callers read REQ_SPEC
   REQ_NAME=$PYPI_NORM REQ_SPEC=${spec%,}
 }
 
@@ -367,6 +366,39 @@ requires_names() {
   if ((${#names[@]} > 0)); then
     printf '%s\n' "${names[@]}" | LC_ALL=C sort -u
   fi
+}
+
+# Print the version that PyPI answer $1 of project $2 pins its requirement on project $3 to
+# with ==; fail unless the requirements on $3 that apply on Arch pin one version
+requires_pin() {
+  local req want joined
+  local -a pins=()
+  if ! _pypi_norm "$3"; then
+    log_err "$3 is not a PyPI project name"
+    return 1
+  fi
+  want=$PYPI_NORM
+  _requires_list "$1" "$2" || return 1
+  for req in "${REQUIRES_LIST[@]}"; do
+    _requirement_read "$req" "$2" || return 1
+    [[ "$REQ_NAME" == "$want" && "$MARKER_VALUE" != 0 ]] || continue
+    if [[ ! "$REQ_SPEC" =~ ^==([A-Za-z0-9._+!-]+)$ ]]; then
+      log_err "$2 requires ${req@Q}, which pins no single version of $3"
+      return 1
+    fi
+    pins+=("${BASH_REMATCH[1]}")
+  done
+  if ((${#pins[@]} == 0)); then
+    log_err "$2 lists no requirement on $3 that applies on Arch"
+    return 1
+  fi
+  mapfile -t pins < <(printf '%s\n' "${pins[@]}" | LC_ALL=C sort -u)
+  if ((${#pins[@]} > 1)); then
+    printf -v joined '%s, ' "${pins[@]}"
+    log_err "$2 pins $3 to more than one version: ${joined%, }"
+    return 1
+  fi
+  printf '%s\n' "${pins[0]}"
 }
 
 # Run requirement_split on requirement $1 and set MARKER_VALUE for its marker, 1 without one;

@@ -1435,6 +1435,41 @@ alerts:
   [[ "$output" == *"requires 'upstream.registry'"* ]]
 }
 
+@test "validate: upstream.pin_from takes a PyPI project name" {
+  local value
+  for value in zensical Zensical_UI zope.interface a 0; do
+    create_test_package "mypkg" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: '$value'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $value"
+      echo "$output"
+      return 1
+    }
+  done
+  for value in -x x- .x _x 'a b' zensical/ui 'pkg{a,b}' .. 'x?y'; do
+    create_test_package "mypkg" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: '$value'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"upstream.pin_from must be a PyPI project name of A-Za-z0-9._- that starts and ends with a letter or digit: '$value'"* ]] || {
+      echo "taken: $value"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+@test "validate: upstream.pin_from applies to the pypi strategy only" {
+  create_test_package "mypkg" "npm" "upstream:
+  registry: express
+  pin_from: express"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mypkg.yml: upstream.pin_from applies to the pypi strategy only"* ]]
+}
+
 @test "validate: npm fails without upstream.registry" {
   create_test_package "mypkg" "npm" "upstream:
   foo: bar"

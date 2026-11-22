@@ -34,7 +34,7 @@ readonly UPSTREAM_KEYS=(
   "gitea-release: host project tag_version_regex tag_version_replace max_answer_mb"
   "git-tag: url tag_version_regex tag_version_replace max_answer_mb"
   "git-latest: type url host project branch describe tag_prefix"
-  "pypi: registry max_answer_mb"
+  "pypi: registry pin_from max_answer_mb"
   "npm: registry max_answer_mb"
   "crates: registry prerelease max_answer_mb"
   "repology: repology max_answer_mb"
@@ -567,7 +567,7 @@ validate_pkg() {
   # Strategies put these fields into URL paths, where dot segments and characters such as
   # [ ? # change the request
   local field value bad_ref='[[:space:][:cntrl:]~^:?*[\]'
-  for field in project registry tag nightly_tag repology archpkg; do
+  for field in project registry pin_from tag nightly_tag repology archpkg; do
     value=$(pkg_get "$file" ".upstream.$field // \"\"")
     [[ -n "$value" && "$value" != "null" ]] || continue
     case "$field" in
@@ -582,6 +582,12 @@ validate_pkg() {
       registry)
         if [[ ! "$value" =~ ^(@[A-Za-z0-9._~-]+/)?[A-Za-z0-9._~-]+$ || "/${value#@}/" == */./* || "/${value#@}/" == */../* ]]; then
           log_err "$shown: upstream.registry must be a package name of A-Za-z0-9._~-, after an @scope/ at most, neither of them . or ..: ${value@Q}"
+          ((errors++))
+        fi
+        ;;
+      pin_from)
+        if ! pypi_name "$value" >/dev/null; then
+          log_err "$shown: upstream.pin_from must be a PyPI project name of A-Za-z0-9._- that starts and ends with a letter or digit: ${value@Q}"
           ((errors++))
         fi
         ;;
