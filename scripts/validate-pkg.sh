@@ -86,21 +86,39 @@ key_strategies() {
   esac
 }
 
-# Check entry $2 of the alerts of package file $1, with pkgver_format $3 if any; the errors
-# go to stderr
+# Check entry $2 of the alerts of package file $1, with pkgver_format $3 if any, strategy $4
+# and pkgver_dash set when $5 is true; the errors go to stderr
 validate_alert() {
   local file="$1" i="$2" format="$3" rule="packages/${1##*/}: alerts[$2]" errors=0 unknown tag value
   if [[ $(pkg_get "$file" ".alerts[$i] | tag") != "!!map" ]]; then
-    log_err "$rule must be a map with note and one of when, from, match"
+    log_err "$rule must be a map with note and one of when, from, match, requires"
     return 1
   fi
-  unknown=$(pkg_get "$file" ".alerts[$i] | [keys[] | select(. != \"when\" and . != \"from\" and . != \"match\" and . != \"note\" and . != \"hold\")] | join(\", \")")
+  unknown=$(pkg_get "$file" ".alerts[$i] | [keys[] | select(. != \"when\" and . != \"from\" and . != \"match\" and . != \"requires\" and . != \"note\" and . != \"hold\")] | join(\", \")")
   if [[ -n "$unknown" ]]; then
     log_err "$rule: unknown key: $unknown"
     errors=1
   fi
-  if [[ $(pkg_get "$file" ".alerts[$i] | [keys[] | select(. == \"when\" or . == \"from\" or . == \"match\")] | length") != 1 ]]; then
-    log_err "$rule must hold exactly one of when, from, match"
+  if [[ $(pkg_get "$file" ".alerts[$i] | [keys[] | select(. == \"when\" or . == \"from\" or . == \"match\" or . == \"requires\")] | length") != 1 ]]; then
+    log_err "$rule must hold exactly one of when, from, match, requires"
+    errors=1
+  fi
+
+  # requires compares the releases of current and the new version on PyPI, so current takes
+  # the spelling of PyPI, which pkgver_format and pkgver_dash change
+  tag=$(pkg_get "$file" ".alerts[$i].requires | tag")
+  value=$(pkg_get "$file" ".alerts[$i].requires")
+  if [[ "$tag" != "!!null" && "$value" != changed ]]; then
+    log_err "$rule.requires must be changed, got $value"
+    errors=1
+  elif [[ "$tag" != "!!null" && "$4" != pypi ]]; then
+    log_err "$rule: requires applies to the pypi strategy only"
+    errors=1
+  elif [[ "$tag" != "!!null" && -n "$format" ]]; then
+    log_err "$rule: requires does not apply with pkgver_format"
+    errors=1
+  elif [[ "$tag" != "!!null" && "$5" == true ]]; then
+    log_err "$rule: requires does not apply with pkgver_dash"
     errors=1
   fi
 
@@ -129,7 +147,9 @@ validate_alert() {
     errors=1
   fi
 
-  if ! alert_note "$file" "$i" >/dev/null; then
+  # requires rules note the change of the requirements, and a note of their own is optional
+  if [[ $(pkg_get "$file" ".alerts[$i] | (has(\"note\") or (has(\"requires\") | not))") == true ]] &&
+    ! alert_note "$file" "$i" >/dev/null; then
     log_err "$rule.$(alert_note_error "$file" "$i")"
     errors=1
   fi
@@ -405,8 +425,12 @@ validate_pkg() {
   if [[ "$alerts_tag" == "!!seq" ]]; then
     alert_count=$(pkg_get "$file" '.alerts | length')
     for ((i = 0; i < alert_count; i++)); do
-      validate_alert "$file" "$i" "$pkgver_format" || ((errors++))
+      validate_alert "$file" "$i" "$pkgver_format" "$strategy" "$dash_set" || ((errors++))
     done
+    if (($(pkg_get "$file" '[.alerts[] | select(tag == "!!map" and has("requires"))] | length') > 1)); then
+      log_err "$shown: alerts: one requires rule at most"
+      ((errors++))
+    fi
   elif [[ "$alerts_tag" != "!!null" ]]; then
     log_err "$shown: alerts must be a list"
     ((errors++))

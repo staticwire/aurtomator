@@ -1886,7 +1886,7 @@ run_alert_fires() {
 
 @test "lib.sh: fired_alerts fails on a rule it cannot evaluate" {
   local rule message
-  for rule in "hold: true|alerts[0] must hold exactly one of when, from, match" \
+  for rule in "hold: true|alerts[0] must hold exactly one of when, from, match, requires" \
     "when: minor|alerts[0].when must be major, got minor" \
     "match: '(?:29)'|alerts[0].match must be a non-empty ERE that bash accepts"; do
     create_test_package "pkg" "github-release" "alerts:
@@ -1919,6 +1919,84 @@ run_alert_fires() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"alerts[0].note must be one line of text"* ]]
   done
+}
+
+@test "lib.sh: fired_alerts fires a requires rule with the change of the requirements as its note" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true"
+  run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'hold\tdrops deepmerge' ]
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    note: Check the depends of the PKGBUILD"
+  run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\tCheck the depends of the PKGBUILD: drops deepmerge' ]
+}
+
+@test "lib.sh: fired_alerts leaves a requires rule on matching names and asks nothing without current" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true"
+  run_requires 'fired_alerts "$1" 0.1.2 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_requires 'fired_alerts "$1" "" 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+@test "lib.sh: fired_alerts offline asks PyPI nothing and evaluates the other rules" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true
+  - from: '0.1'
+    note: New minor"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_requires 'fired_alerts "$1" 0.0.74 0.1.3 offline' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\tNew minor' ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+@test "lib.sh: fired_alerts fails when a request of a requires rule fails" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true"
+  run_requires 'fired_alerts "$1" 0.1.3 0.1.4' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://pypi.org/pypi/zensical/0.1.4/json: The requested URL returned error: 404"* ]]
+}
+
+@test "lib.sh: fired_alerts fails on a requires rule other than changed or outside pypi" {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: always"
+  run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"alerts[0].requires must be changed, got always"* ]]
+  create_test_package "pkg" "npm" "upstream:
+  registry: express
+alerts:
+  - requires: changed"
+  run_requires 'fired_alerts "$1" 4.0.0 5.0.0' "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"alerts[0].requires applies to the pypi strategy only"* ]]
 }
 
 @test "lib.sh: fired_alerts asks for quotes around a note that YAML reads as a number" {
@@ -2247,6 +2325,70 @@ run_split() {
       return 1
     }
   done
+}
+
+# Helper: runs requires_change for a pypi package of registry $1 from release $2 to $3, with
+# the upstream lines $4
+run_change() {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: $1${4:+$'\n'$4}"
+  run_requires 'requires_change "$1" "$2" "$3"' "$TEST_TMPDIR/packages/pkg.yml" "$2" "$3"
+}
+
+@test "requires.sh: requires_change names the requirements that the new release adds and drops" {
+  run_change mixer 1.0 2.0
+  [ "$status" -eq 0 ]
+  [ "$output" = "adds new-dep, other-new; drops old-dep" ]
+  run_change zensical 0.0.74 0.1.3
+  [ "$status" -eq 0 ]
+  [ "$output" = "drops deepmerge" ]
+  run_change zensical 0.1.3 0.0.74
+  [ "$status" -eq 0 ]
+  [ "$output" = "adds deepmerge" ]
+}
+
+@test "requires.sh: requires_change prints nothing when the names that apply on Arch match" {
+  local pair registry old new
+  # zensical moves its pin of zensical-ui, keyring drops a requirement for Python below 3.9, and
+  # black adds one for Windows
+  for pair in "zensical 0.1.2 0.1.3" "keyring 25.6.0 25.7.0" "black 26.1.0 26.10.1"; do
+    read -r registry old new <<<"$pair"
+    run_change "$registry" "$old" "$new"
+    [ "$status" -eq 0 ] && [ -z "$output" ] || {
+      echo "$pair: $output"
+      return 1
+    }
+  done
+}
+
+@test "requires.sh: requires_change notes a release of current that PyPI lacks" {
+  run_change gone 0.1.2 0.1.3
+  [ "$status" -eq 0 ]
+  [ "$output" = "PyPI has no release 0.1.2 of gone to compare with" ]
+}
+
+@test "requires.sh: requires_change fails when PyPI lacks the new release or answers with an error" {
+  run_change zensical 0.1.3 0.1.4
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://pypi.org/pypi/zensical/0.1.4/json: The requested URL returned error: 404"* ]]
+  run_change flaky 1.0 2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://pypi.org/pypi/flaky/1.0/json: The requested URL returned error: 503"* ]]
+}
+
+@test "requires.sh: requires_change reads answers within upstream.max_answer_mb" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_change zensical 0.0.74 0.1.3 "  max_answer_mb: 7"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '--max-filesize 7M' "$CURL_ARGS_LOG")" -eq 2 ]
+}
+
+@test "requires.sh: requires_change asks for no version outside the characters of PyPI versions" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_change zensical 0.1.2 '0.1.3/../x'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PyPI versions hold A-Za-z0-9._+!- alone: '0.1.3/../x'"* ]]
+  [ ! -e "$CURL_ARGS_LOG" ]
 }
 
 # === version of aurtomator ===
@@ -4681,6 +4823,51 @@ alerts:
   [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "jump_skipped: 2026102100" ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 1.0" ]
   [[ "$output" != *"held:"* ]]
+}
+
+@test "check-all: holds an update that a requires rule fires on" {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+alerts:
+  - requires: changed
+    hold: true"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zensical-bin: update 0.0.74 → 0.1.3 held: drops deepmerge"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge' ]
+}
+
+@test "check-all: holds an update whose release of current PyPI lacks, with a note" {
+  create_test_package "gone-bin" "pypi" "upstream:
+  registry: gone
+current: 0.1.2
+alerts:
+  - requires: changed
+    hold: true"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gone-bin: update 0.1.2 → 3.2.1 held: PyPI has no release 0.1.2 of gone to compare with"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/gone-bin")" = "held: 3.2.1" ]
+  [ ! -e "$TEST_TMPDIR/.status/_hosts" ]
+}
+
+@test "check-all: a requires rule whose request fails fails the check, names the host and runs again" {
+  create_test_package "flaky-bin" "pypi" "upstream:
+  registry: flaky
+current: '1.0'
+alerts:
+  - requires: changed
+    hold: true"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/flaky-bin")" = "check_failed: https://pypi.org/pypi/flaky/1.0/json: The requested URL returned error: 503" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'flaky-bin\tpypi.org' ]
+  [ "$(grep -c 'pypi.org/pypi/flaky/1.0/json' "$CURL_ARGS_LOG")" -eq 2 ]
 }
 
 @test "check-all: holds nothing for a package without current" {

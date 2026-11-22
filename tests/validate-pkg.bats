@@ -2178,6 +2178,64 @@ alerts:
   [ "$status" -eq 0 ]
 }
 
+@test "validate: an alert requires: changed of pypi passes with or without note" {
+  create_test_package "mypkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true
+  - from: '0.2'
+    note: New minor"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+  create_test_package "mypkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    note: Check the depends of the PKGBUILD"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: an alert requires outside changed, pypi and the spelling of PyPI rejected" {
+  local entry strategy body message
+  for entry in "pypi|  - requires: always|alerts[0].requires must be changed, got always" \
+    "npm|  - requires: changed|alerts[0]: requires applies to the pypi strategy only" \
+    "pypi|  - requires: changed
+    from: '1.0'|alerts[0] must hold exactly one of when, from, match, requires" \
+    "pypi|  - requires: changed
+  - requires: changed
+    hold: true|alerts: one requires rule at most"; do
+    strategy=${entry%%|*}
+    body=${entry#*|}
+    body=${body%|*}
+    message=${entry##*|}
+    create_test_package "mypkg" "$strategy" "upstream:
+  registry: zensical
+alerts:
+$body"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: $message"* ]] || {
+      echo "$entry"
+      echo "$output"
+      return 1
+    }
+  done
+  for entry in "pkgver_format: '4.%s'|pkgver_format" "pkgver_dash: _|pkgver_dash"; do
+    create_test_package "mypkg" "pypi" "upstream:
+  registry: zensical
+${entry%|*}
+alerts:
+  - requires: changed"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: alerts[0]: requires does not apply with ${entry#*|}"* ]] || {
+      echo "$entry"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
 @test "validate: pkgver_dash _, . or '' passes" {
   local value
   for value in _ . ""; do

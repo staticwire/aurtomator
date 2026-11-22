@@ -178,6 +178,22 @@ $2"
   grep -qx 'pkgver=1.1.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
 }
 
+@test "update-pkg --prepare: fails the step from the AUR pkgver that a requires rule with hold fires on" {
+  create_test_package "demo" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+    hold: true"
+  write_pkgbuild "$OLD" 0.0.74 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 0.0.74 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 0.1.3 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo has 0.0.74 on the AUR, and an alert holds 0.0.74 to 0.1.3: drops deepmerge"* ]]
+  [ ! -e "$TEST_TMPDIR/out/demo" ]
+}
+
 # check-all.sh compares with current, which lags the AUR after a push by hand
 @test "update-pkg --prepare: with current below the AUR, holds a downgrade, a jump and a held alert against the AUR" {
   write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
@@ -3729,6 +3745,42 @@ current: 28+25"
   [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
   [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'held\thold\tadds pathspec; drops deepmerge' ]
   [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+@test "check-all --publish: asks PyPI nothing for a requires rule and keeps its notice from the check run" {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+alerts:
+  - requires: changed"
+  checked_status zensical-bin "new_version: 0.1.3"
+  printf '%s\n' $'zensical-bin\tnotice\tdrops deepmerge' >"$TEST_TMPDIR/.status/_alerts"
+  mkdir -p "$TEST_TMPDIR/out/prepared/zensical-bin"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/publish-pkg.sh.args")" = "zensical-bin 0.1.3 $TEST_TMPDIR/out/prepared/zensical-bin" ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "updated: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\tnotice\tdrops deepmerge' ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+@test "check-all --publish: holds an update that the check run recorded a hold for" {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+alerts:
+  - requires: changed
+    hold: true"
+  checked_status zensical-bin "new_version: 0.1.3"
+  printf '%s\n' $'zensical-bin\thold\tdrops deepmerge' >"$TEST_TMPDIR/.status/_alerts"
+  mkdir -p "$TEST_TMPDIR/out/prepared/zensical-bin"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
 }
 
 @test "check-all --publish: drops alert lines of the check run outside package, action and note" {

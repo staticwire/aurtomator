@@ -22,5 +22,7 @@ upstream:                 # strategy fields
 #   - from: '2.0.0'
 #     hold: true
 #     note: Raise makedepends foo to 2
+#   - requires: changed      # pypi: the new version adds or drops a requirement
+#     hold: true
 
 # Runs write current, last_updated, current_asset, arch_wait and arch_out.

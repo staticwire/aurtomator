@@ -401,6 +401,58 @@ requires_pin() {
   printf '%s\n' "${pins[0]}"
 }
 
+# Print how the requirement names that apply on Arch change from release $2 to release $3 of
+# upstream.registry of package file $1, as adds a, b; drops c, and nothing when they match
+requires_change() {
+  local registry err old new name added dropped
+  local -A in_old=() in_new=()
+  local -a adds=() drops=()
+  registry=$(pkg_get "$1" .upstream.registry) || return 1
+  # shellcheck disable=SC2034 # _curl_get of common.sh reads it
+  MAX_ANSWER_MB=$(max_answer_mb "$1") || return 1
+  for name in "$2" "$3"; do
+    if [[ ! "$name" =~ ^[A-Za-z0-9._+!-]+$ ]]; then
+      log_err "PyPI versions hold A-Za-z0-9._+!- alone: ${name@Q}"
+      return 1
+    fi
+  done
+  # Only a publish moves current, so a release of current that PyPI lacks fires the rule
+  err=$(mktemp) || return 1
+  if ! old=$(http_get_json "https://pypi.org/pypi/${registry}/${2}/json" 2>"$err"); then
+    if grep -q ': The requested URL returned error: 404$' "$err"; then
+      rm -f "$err"
+      printf 'PyPI has no release %s of %s to compare with\n' "$2" "$registry"
+      return 0
+    fi
+    cat "$err" >&2
+    rm -f "$err"
+    return 1
+  fi
+  rm -f "$err"
+  new=$(http_get_json "https://pypi.org/pypi/${registry}/${3}/json") || return 1
+  old=$(requires_names "$old" "$registry $2") || return 1
+  new=$(requires_names "$new" "$registry $3") || return 1
+  while IFS= read -r name; do
+    [[ -z "$name" ]] || in_old[$name]=1
+  done <<<"$old"
+  while IFS= read -r name; do
+    [[ -z "$name" ]] || in_new[$name]=1
+    [[ -z "$name" || -n "${in_old[$name]:-}" ]] || adds+=("$name")
+  done <<<"$new"
+  while IFS= read -r name; do
+    [[ -z "$name" || -n "${in_new[$name]:-}" ]] || drops+=("$name")
+  done <<<"$old"
+  printf -v added '%s, ' "${adds[@]}"
+  printf -v dropped '%s, ' "${drops[@]}"
+  if ((${#adds[@]} > 0 && ${#drops[@]} > 0)); then
+    printf 'adds %s; drops %s\n' "${added%, }" "${dropped%, }"
+  elif ((${#adds[@]} > 0)); then
+    printf 'adds %s\n' "${added%, }"
+  elif ((${#drops[@]} > 0)); then
+    printf 'drops %s\n' "${dropped%, }"
+  fi
+}
+
 # Run requirement_split on requirement $1 and set MARKER_VALUE for its marker, 1 without one;
 # fail with an error that names release $2
 _requirement_read() {

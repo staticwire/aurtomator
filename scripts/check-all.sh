@@ -373,6 +373,17 @@ record_alerts() {
   [[ -z "$2" ]] || awk -v p="$1" '{ print p "\t" $0 }' <<<"$2" >>"${STATUS_DIR}/_alerts"
 }
 
+# Prints the alert lines of package $1 for --publish, which asks upstream nothing: the lines
+# of the check run, then those of offline rules in $2 that the check run lacks
+publish_alerts() {
+  local checked line
+  checked=$(checked_alerts "$1")
+  [[ -z "$checked" ]] || printf '%s\n' "$checked"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] || grep -qxF -e "$line" <<<"$checked" || printf '%s\n' "$line"
+  done <<<"$2"
+}
+
 # Prints the lines of _alerts of the check run for package $1 as fired_alerts prints them.
 # builder of check writes _alerts, so lines of another form and lines with control characters drop.
 checked_alerts() {
@@ -689,12 +700,22 @@ run_package() {
   step_time_left "$pkg_name" || return 0
   err_file=$(mktemp)
   check_rc=0
-  alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" 2>"$err_file") || check_rc=$?
-  check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT" alerts)
+  if [[ "$MODE" == publish ]]; then
+    alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" offline 2>"$err_file") || check_rc=$?
+    ((check_rc != 0)) || alerts=$(publish_alerts "$pkg_name" "$alerts")
+  else
+    alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" 2>"$err_file") || check_rc=$?
+  fi
+  in_flight=$(request_done "$check_rc")
+  check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT" "${in_flight:-alerts}")
   rm -f "$err_file"
   if ((check_rc != 0)); then
     log_err "Failed to check $pkg_name: $(status_text "$check_err")"
     status_text "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
+    note_failed_host "$pkg_name" "$in_flight"
+    if ((pass == 1)) && [[ -n "$in_flight" ]] && second_pass "$check_rc" "$in_flight"; then
+      RECHECK+=("$pkg_file")
+    fi
     return
   fi
   record_alerts "$pkg_name" "$alerts"
