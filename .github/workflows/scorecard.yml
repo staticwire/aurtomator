@@ -1,0 +1,34 @@
+name: Scorecard
+
+# The Scorecard API takes results only from a workflow without top-level env, defaults or write
+# permissions, whose job has no env, defaults or container and runs only actions from its list
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "19 5 * * 3"
+
+# Each run scores the newest commit of main, so a newer run cancels the older one
+concurrency:
+  group: scorecard
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  analysis:
+    name: analysis
+    if: github.repository == 'staticwire/aurtomator'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # signs the results that the action publishes
+    steps:
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
+        with:
+          results_file: results.json
+          results_format: json
+          publish_results: true
+          fail_on_publish_error: true
