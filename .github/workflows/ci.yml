@@ -61,12 +61,6 @@ jobs:
       # Checks the workflows, and the run blocks with shellcheck
       - name: actionlint
         run: actionlint
-      # With advanced-security off, zizmor prints its findings and fails the job; by default the
-      # action uploads them to code scanning and passes
-      - name: zizmor
-        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
-        with:
-          advanced-security: false
       # actionlint skips the run blocks of a composite action, and the default severity of
       # shellcheck fails an unquoted variable, as actionlint does in a workflow
       - name: shellcheck the actions
@@ -80,6 +74,21 @@ jobs:
         run: |
           shellcheck aurtomator.sh
           shfmt -d -i 2 -ci aurtomator.sh
+
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # With advanced-security off, zizmor prints its findings and fails the job; by default the
+      # action uploads them to code scanning and passes
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          advanced-security: false
 
   test:
     needs: image
@@ -275,7 +284,7 @@ jobs:
   # Required by the ruleset in place of the pipeline checks, which a fork
   # skips. always(): a skipped job counts as passed.
   ci-ok:
-    needs: [image, lint, test, validate, pipeline, dependency-review, vulnerability-issue]
+    needs: [image, lint, zizmor, test, validate, pipeline, dependency-review, vulnerability-issue]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

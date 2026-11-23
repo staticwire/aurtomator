@@ -88,4 +88,4 @@ actionlint
 zizmor .
 ```
 
-`shfmt -w` in place of `-d` fixes formatting. Without a token in `GH_TOKEN`, `GITHUB_TOKEN` or `ZIZMOR_GITHUB_TOKEN`, zizmor skips the online audits that the lint job runs. CI also checks the `run:` blocks of `.github/actions/*/action.yml` and `aurtomator.sh`, see [Lint job](/develop/ci/#lint-job).
+`shfmt -w` in place of `-d` fixes formatting. Without a token in `GH_TOKEN`, `GITHUB_TOKEN` or `ZIZMOR_GITHUB_TOKEN`, zizmor skips the online audits that the zizmor job runs. CI also checks the `run:` blocks of `.github/actions/*/action.yml` and `aurtomator.sh`, see [Lint job](/develop/ci/#lint-job).

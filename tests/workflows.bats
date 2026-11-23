@@ -50,6 +50,7 @@ permission_lines() {
     'ci.yml {"contents":"read"}' \
     'ci.yml ["image",null]' \
     'ci.yml ["lint",null]' \
+    'ci.yml ["zizmor",null]' \
     'ci.yml ["test",null]' \
     'ci.yml ["validate",{"contents":"read"}]' \
     'ci.yml ["pipeline",{"contents":"write","issues":"write"}]' \
@@ -421,10 +422,17 @@ secret_lines() {
 }
 
 # zizmor-action uploads the findings to code scanning by default and passes the job
-@test "ci: the lint job runs zizmor after actionlint, and its findings fail the job" {
-  run yq -o=json -I=0 '[.jobs.lint.steps[] | select(.run == "actionlint" or ((.uses // "") | test("^zizmorcore/zizmor-action@"))) | .with // .run]' "$GITHUB_DIR/workflows/ci.yml"
+@test "ci: the zizmor job runs zizmor-action after its checkout, and the findings fail the job" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq -o=json -I=0 '[.jobs.zizmor.steps[] | .uses // "" | sub("@.*"; "")]' "$ci"
   [ "$status" -eq 0 ]
-  [ "$output" = '["actionlint",{"advanced-security":false}]' ]
+  [ "$output" = '["actions/checkout","zizmorcore/zizmor-action"]' ]
+  run yq -o=json -I=0 '[.jobs.zizmor.steps[] | select(.uses // "" | test("^zizmorcore/zizmor-action@")) | .with]' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[{"advanced-security":false}]' ]
+  run yq '[.jobs[] | .steps // [] | .[] | select(.uses // "" | test("^zizmorcore/zizmor-action@"))] | length' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
 }
 
 # actionlint runs shellcheck on the run blocks of the workflows only
@@ -824,10 +832,12 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
   [ "$output" = "5" ]
 }
 
-@test "ci: lint has 10 minutes and test 45" {
+@test "ci: lint has 10 minutes, zizmor 5 and test 45" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs.lint["timeout-minutes"]' "$ci"
   [ "$output" = "10" ]
+  run yq '.jobs.zizmor["timeout-minutes"]' "$ci"
+  [ "$output" = "5" ]
   run yq '.jobs.test["timeout-minutes"]' "$ci"
   [ "$output" = "45" ]
 }
