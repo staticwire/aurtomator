@@ -468,14 +468,14 @@ secret_lines() {
 }
 
 # zizmor-action uploads the findings to code scanning by default and passes the job
-@test "ci: the zizmor job runs zizmor-action after its checkout, and the findings fail the job" {
+@test "ci: the zizmor job runs zizmor-action pedantic after its checkout, and the findings fail the job" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq -o=json -I=0 '[.jobs.zizmor.steps[] | .uses // "" | sub("@.*"; "")]' "$ci"
   [ "$status" -eq 0 ]
   [ "$output" = '["actions/checkout","zizmorcore/zizmor-action"]' ]
   run yq -o=json -I=0 '[.jobs.zizmor.steps[] | select(.uses // "" | test("^zizmorcore/zizmor-action@")) | .with]' "$ci"
   [ "$status" -eq 0 ]
-  [ "$output" = '[{"advanced-security":false}]' ]
+  [ "$output" = '[{"persona":"pedantic","advanced-security":false}]' ]
   run yq '[.jobs[] | .steps // [] | .[] | select(.uses // "" | test("^zizmorcore/zizmor-action@"))] | length' "$ci"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]

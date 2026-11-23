@@ -85,7 +85,7 @@ bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 actionlint
-zizmor .
+zizmor --persona pedantic .
 ```
 
 `shfmt -w` in place of `-d` fixes formatting. Without a token in `GH_TOKEN`, `GITHUB_TOKEN` or `ZIZMOR_GITHUB_TOKEN`, zizmor skips the online audits that the zizmor job runs. CI also checks the `run:` blocks of `.github/actions/*/action.yml` and `aurtomator.sh`, see [Lint job](/develop/ci/#lint-job).
