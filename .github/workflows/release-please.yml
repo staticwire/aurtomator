@@ -102,14 +102,23 @@ jobs:
         run: git archive --format=tar.gz --prefix="aurtomator-$VERSION/" -o "aurtomator-$VERSION.tar.gz" HEAD
 
       - if: steps.find.outputs.version != ''
+        id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: aurtomator-${{ steps.find.outputs.version }}.tar.gz
 
-      - name: Attach the archive
+      # The find step skips a release that has its archive, so the archive goes up last,
+      # and --clobber replaces the attestation files that a failed run left
+      - name: Attach the archive and its attestation
         if: steps.find.outputs.version != ''
         env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           VERSION: ${{ steps.find.outputs.version }}
-        run: gh release upload "v$VERSION" "aurtomator-$VERSION.tar.gz" -R "$REPO"
+        run: |
+          archive="aurtomator-$VERSION.tar.gz"
+          cp "$BUNDLE" "$archive.sigstore.json"
+          jq -ce .dsseEnvelope "$BUNDLE" >"$archive.intoto.jsonl"
+          gh release upload "v$VERSION" "$archive.sigstore.json" "$archive.intoto.jsonl" -R "$REPO" --clobber
+          gh release upload "v$VERSION" "$archive" -R "$REPO"

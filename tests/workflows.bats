@@ -970,7 +970,7 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   [ "$output" = "release-please" ]
   run yq -r '.jobs.sign.steps[] | .name // (.uses | sub("@.*"; ""))' "$RELEASE"
   [ "$output" = "$(printf '%s\n' actions/checkout 'Find the release to sign' 'Build the archive' actions/attest \
-    'Attach the archive')" ]
+    'Attach the archive and its attestation')" ]
   run yq '[.jobs.sign | .. | select(tag == "!!str") | select(test("app-token|secrets\."))] | length' "$RELEASE"
   [ "$output" = 0 ]
 }
@@ -988,13 +988,20 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   [ "$output" = '{"persist-credentials":false}' ]
   run yq -r '.jobs[].steps[] | select(.uses // "" | test("^actions/attest@")) | .with["subject-path"]' "$RELEASE"
   [ "$output" = 'aurtomator-${{ steps.find.outputs.version }}.tar.gz' ]
-  run yq -r '.jobs[].steps[] | select(.name == "Build the archive" or .name == "Attach the archive" or
-    (.uses // "" | test("^actions/attest@"))) | .if' "$RELEASE"
+  run yq -r '.jobs[].steps[] | select(.name == "Build the archive" or
+    .name == "Attach the archive and its attestation" or (.uses // "" | test("^actions/attest@"))) | .if' "$RELEASE"
   [ "$output" = "$(printf '%s\n' "steps.find.outputs.version != ''" "steps.find.outputs.version != ''" \
     "steps.find.outputs.version != ''")" ]
-  run yq -r '.jobs[].steps[] | select(.name == "Find the release to sign" or .name == "Attach the archive") |
-    .env.GH_TOKEN' "$RELEASE"
+  run yq -r '.jobs[].steps[] | select(.name == "Find the release to sign" or
+    .name == "Attach the archive and its attestation") | .env.GH_TOKEN' "$RELEASE"
   [ "$output" = "$(printf '%s\n' '${{ github.token }}' '${{ github.token }}')" ]
+}
+
+@test "release-please: the attach step reads the bundle of the attest step" {
+  run yq -r '.jobs.sign.steps[] | select(.uses // "" | test("^actions/attest@")) | .id' "$RELEASE"
+  [ "$output" = attest ]
+  run yq -r '.jobs.sign.steps[] | select(.name == "Attach the archive and its attestation") | .env.BUNDLE' "$RELEASE"
+  [ "$output" = '${{ steps.attest.outputs.bundle-path }}' ]
 }
 
 # Runs step $1 of release-please.yml in a checkout whose manifest holds $MANIFEST, with a gh that
@@ -1021,9 +1028,12 @@ EOF
   : >"$BATS_TEST_TMPDIR/output"
   cd "$ws"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" REPO=owner/repo \
-    SHA=abc123 TAG_SHA="${TAG_SHA:-}" ASSETS="${ASSETS:-}" VERSION="${VERSION:-}" \
+    SHA=abc123 TAG_SHA="${TAG_SHA:-}" ASSETS="${ASSETS:-}" VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" \
     bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
+
+# Sigstore bundles of actions/attest carry the attestation as a DSSE envelope
+SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json","signatures":[{"sig":"c2ln"}]}'
 
 # Reruns of the release job find the release again until it has its archive
 @test "release-please: the find step names the release of the commit of the run without an archive" {
@@ -1055,6 +1065,14 @@ EOF
   [ ! -s "$BATS_TEST_TMPDIR/output" ]
 }
 
+# Runs that fail after the attestation files went up leave the release without its archive
+@test "release-please: the find step names a release that has only the attestation files" {
+  MANIFEST=0.13.1 TAG_SHA=abc123 ASSETS=$'aurtomator-0.13.1.tar.gz.sigstore.json\naurtomator-0.13.1.tar.gz.intoto.jsonl' \
+    run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
+}
+
 @test "release-please: the find step stops on a manifest without a version" {
   MANIFEST='1.0$(touch pwned)' TAG_SHA=abc123 run_release_step "Find the release to sign"
   [ "$status" -ne 0 ]
@@ -1079,10 +1097,27 @@ EOF
   [ "$output" = "$(printf '%s\n' aurtomator-0.13.1/ aurtomator-0.13.1/file)" ]
 }
 
-@test "release-please: attaches the archive to the release of its version" {
-  VERSION=0.13.1 run_release_step "Attach the archive"
+@test "release-please: attaches the attestation files and then the archive to the release of its version" {
+  local bundle="$BATS_TEST_TMPDIR/attestation.json" ws="$BATS_TEST_TMPDIR/ws"
+  printf '%s\n' "{\"mediaType\":\"application/vnd.dev.sigstore.bundle.v0.3+json\",\"dsseEnvelope\":$SAMPLE_ENVELOPE}" >"$bundle"
+  VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and its attestation"
   [ "$status" -eq 0 ]
-  grep -qxF 'release upload v0.13.1 aurtomator-0.13.1.tar.gz -R owner/repo' "$GH_LOG"
+  [ "$(<"$GH_LOG")" = "$(printf '%s\n' \
+    'release upload v0.13.1 aurtomator-0.13.1.tar.gz.sigstore.json aurtomator-0.13.1.tar.gz.intoto.jsonl -R owner/repo --clobber' \
+    'release upload v0.13.1 aurtomator-0.13.1.tar.gz -R owner/repo')" ]
+  cmp "$bundle" "$ws/aurtomator-0.13.1.tar.gz.sigstore.json"
+  run cat "$ws/aurtomator-0.13.1.tar.gz.intoto.jsonl"
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$output" = "$SAMPLE_ENVELOPE" ]
+}
+
+@test "release-please: uploads nothing for a bundle without a DSSE envelope" {
+  local bundle="$BATS_TEST_TMPDIR/attestation.json"
+  printf '%s\n' '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json","messageSignature":{}}' >"$bundle"
+  VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and its attestation"
+  [ "$status" -ne 0 ]
+  run grep -c . "$GH_LOG"
+  [ "$output" = "0" ]
 }
 
 # === check-updates.yml: who decides what ===
