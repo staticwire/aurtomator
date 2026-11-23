@@ -20,6 +20,7 @@ permissions:
 jobs:
   # Reads the pinned Arch image from ci-image/Dockerfile, whose dated tag and digest Dependabot updates
   image:
+    name: image
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -58,6 +59,7 @@ jobs:
   # Runs the strategies with the read-only token and decides what the run does. No PKGBUILD
   # runs here, so the jobs after it trust the statuses this job hands over.
   check:
+    name: check
     needs: image
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
@@ -387,6 +389,7 @@ jobs:
   # Every step that executes a PKGBUILD from the AUR runs here, without secrets or a token.
   # Each package gets a job of its own, so the code of a PKGBUILD reaches only its package.
   prepare:
+    name: prepare
     needs: [image, check]
     if: needs.check.outputs.prepare == 'true'
     runs-on: ubuntu-latest
@@ -469,6 +472,7 @@ jobs:
   # Checks the checksums from prepare against the sources. It runs no PKGBUILD and holds no
   # secret, so the downloads from URLs that the AUR sets stay out of the job with the keys.
   verify:
+    name: verify
     needs: [image, check, prepare]
     # Also after a failed job of prepare, for the packages of the other jobs
     if: "!cancelled() && needs.check.outputs.prepare == 'true'"
@@ -592,6 +596,7 @@ jobs:
   # Pushes what verify passed and records the statuses of check, also after a failed verify.
   # This job holds the keys, so nothing here executes a PKGBUILD.
   publish:
+    name: publish
     needs: [image, check, prepare, verify]
     if: "!cancelled() && needs.check.outputs.work == 'true'"
     runs-on: ubuntu-latest

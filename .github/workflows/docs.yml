@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   build:
+    name: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -31,6 +32,7 @@ jobs:
           path: ./site
 
   deploy:
+    name: deploy
     if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest

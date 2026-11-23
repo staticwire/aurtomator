@@ -76,6 +76,42 @@ permission_lines() {
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
 }
 
+# Checks take the names of their jobs: the ruleset requires lint, test and ci-ok, and
+# notify-failure.yml reads the names of the jobs of check-updates.yml
+@test "workflows: name the jobs as in this table" {
+  local workflow
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    yq -r '.jobs | to_entries | .[] | .key + " " + (.value.name // "-")' "$workflow" | sed "s|^|${workflow##*/} |"
+  done >"$BATS_TEST_TMPDIR/actual"
+  printf '%s\n' \
+    'check-updates.yml image image' \
+    'check-updates.yml check check' \
+    'check-updates.yml prepare prepare' \
+    'check-updates.yml verify verify' \
+    'check-updates.yml publish publish' \
+    'check-updates.yml issues status' \
+    'ci.yml image image' \
+    'ci.yml lint lint' \
+    'ci.yml zizmor zizmor' \
+    'ci.yml test test' \
+    'ci.yml validate -' \
+    'ci.yml pipeline -' \
+    'ci.yml dependency-review dependency-review' \
+    'ci.yml vulnerability-issue vulnerability-issue' \
+    'ci.yml merge-image merge-image' \
+    'ci.yml ci-ok ci-ok' \
+    'codeql.yml analyze Analyze (actions)' \
+    'docs.yml build build' \
+    'docs.yml deploy deploy' \
+    'notify-failure.yml notify notify' \
+    'release-please.yml release-please release-please' \
+    'release-please.yml sign sign' \
+    'spec-watch.yml watch watch' \
+    'validate.yml image image' \
+    'validate.yml packages packages' >"$BATS_TEST_TMPDIR/expected"
+  diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
+}
+
 # Prints workflow $1, job, step and secret for each secrets.<name> in a step, then the
 # count of secrets.<name> in the whole file
 secret_lines() {

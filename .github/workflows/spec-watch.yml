@@ -11,6 +11,7 @@ permissions: {}
 
 jobs:
   watch:
+    name: watch
     if: github.repository == 'staticwire/aurtomator'
     runs-on: ubuntu-latest
     timeout-minutes: 5

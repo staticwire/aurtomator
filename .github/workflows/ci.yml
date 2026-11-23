@@ -14,6 +14,7 @@ permissions:
 jobs:
   # Reads the pinned Arch image from ci-image/Dockerfile, whose dated tag and digest Dependabot updates
   image:
+    name: image
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -37,6 +38,7 @@ jobs:
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
 
   lint:
+    name: lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -76,6 +78,7 @@ jobs:
           shfmt -d -i 2 -ci aurtomator.sh
 
   zizmor:
+    name: zizmor
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -91,6 +94,7 @@ jobs:
           advanced-security: false
 
   test:
+    name: test
     needs: image
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
@@ -167,6 +171,7 @@ jobs:
   # Fails a Dependabot pull request that brings a version with a published vulnerability, which
   # stops merge-image and ci-ok. The pull request can move the pin of the action, so it only reads
   dependency-review:
+    name: dependency-review
     if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -183,6 +188,7 @@ jobs:
 
   # Opens an issue that lists the vulnerabilities of a failed review, with no action in the job
   vulnerability-issue:
+    name: vulnerability-issue
     needs: dependency-review
     if: failure() && needs.dependency-review.result == 'failure'
     runs-on: ubuntu-latest
@@ -227,6 +233,7 @@ jobs:
   # and the Python packages of the CI. It waits for the dependency review, and it is off unless
   # the Dependabot secret CI_IMAGE_AUTO_MERGE holds auto-merge-ci-image.
   merge-image:
+    name: merge-image
     needs: [lint, test, validate, dependency-review, ci-ok]
     # Without a status function, the skip of pipeline on Dependabot pull requests reaches this job
     if: >- # zizmor: ignore[bot-conditions] user.login checks the author, which cannot be spoofed
@@ -284,6 +291,7 @@ jobs:
   # Required by the ruleset in place of the pipeline checks, which a fork
   # skips. always(): a skipped job counts as passed.
   ci-ok:
+    name: ci-ok
     needs: [image, lint, zizmor, test, validate, pipeline, dependency-review, vulnerability-issue]
     if: always()
     runs-on: ubuntu-latest
