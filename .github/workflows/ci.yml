@@ -165,8 +165,8 @@ jobs:
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
     uses: ./.github/workflows/check-updates.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
     permissions:
-      contents: write
-      issues: write
+      contents: write # publish of check-updates.yml commits to the repository
+      issues: write # status of check-updates.yml opens and closes issues
 
   # Fails a Dependabot pull request that brings a version with a published vulnerability, which
   # stops merge-image and ci-ok. The pull request can move the pin of the action, so it only reads
@@ -194,7 +194,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      issues: write
+      issues: write # creates the label and opens the issue
 
     steps:
       - name: Open an issue for the vulnerabilities
@@ -249,9 +249,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write
-      pull-requests: write
-      actions: write
+      contents: write # gh pr merge writes the squash commit to main
+      pull-requests: write # lists the files of the pull request and merges it
+      actions: write # gh workflow run starts ci.yml and release-please.yml
 
     steps:
       - name: Merge image update

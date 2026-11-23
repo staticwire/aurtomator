@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      actions: read
-      issues: write
+      actions: read # lists the jobs of the run
+      issues: write # creates the label and opens the issue of the failed run
     steps:
       - name: Open an issue for the failed run
         shell: bash

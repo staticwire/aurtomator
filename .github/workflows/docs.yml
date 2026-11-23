@@ -41,8 +41,8 @@ jobs:
       group: pages
       cancel-in-progress: false
     permissions:
-      pages: write
-      id-token: write
+      pages: write # deploys the site to GitHub Pages
+      id-token: write # deploy-pages verifies the source of the deployment with an OIDC token
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -60,9 +60,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: write # gh release upload attaches the archive
+      id-token: write # actions/attest gets an OIDC token for the Sigstore certificate
+      attestations: write # actions/attest stores the attestation
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
