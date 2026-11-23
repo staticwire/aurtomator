@@ -68,6 +68,8 @@ permission_lines() {
     'release-please.yml {"contents":"read"}' \
     'release-please.yml ["release-please",{"contents":"read"}]' \
     'release-please.yml ["sign",{"contents":"write","id-token":"write","attestations":"write"}]' \
+    'scorecard.yml {}' \
+    'scorecard.yml ["analysis",{"contents":"read","id-token":"write"}]' \
     'spec-watch.yml {}' \
     'spec-watch.yml ["watch",{"contents":"read","issues":"write"}]' \
     'validate.yml {"contents":"read"}' \
@@ -106,6 +108,7 @@ permission_lines() {
     'notify-failure.yml notify notify' \
     'release-please.yml release-please release-please' \
     'release-please.yml sign sign' \
+    'scorecard.yml analysis analysis' \
     'spec-watch.yml watch watch' \
     'validate.yml image image' \
     'validate.yml packages packages' >"$BATS_TEST_TMPDIR/expected"
@@ -152,6 +155,7 @@ secret_lines() {
     'notify-failure.yml 0' \
     'release-please.yml release-please/app-token RELEASE_APP_PRIVATE_KEY' \
     'release-please.yml 1' \
+    'scorecard.yml 0' \
     'spec-watch.yml 0' \
     'validate.yml 0' >"$BATS_TEST_TMPDIR/expected"
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
@@ -175,6 +179,7 @@ secret_lines() {
     'docs.yml {"push":{"branches":["main"],"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"pull_request":{"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"workflow_dispatch":null}' \
     'notify-failure.yml {"workflow_call":null}' \
     'release-please.yml {"push":{"branches":["main"]},"workflow_dispatch":null}' \
+    'scorecard.yml {"push":{"branches":["main"]},"schedule":[{"cron":"19 5 * * 3"}]}' \
     'spec-watch.yml {"schedule":[{"cron":"27 4 * * 2"}],"workflow_dispatch":null}' \
     'validate.yml {"workflow_call":null}' >"$BATS_TEST_TMPDIR/expected"
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
@@ -4648,6 +4653,39 @@ EOF
   [[ "$output" == *"::error::GitHub gave no commit SHA for source/specifications/core-metadata.rst: 'null'"* ]]
   run grep -c '^issue ' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# === scorecard.yml ===
+
+SCORECARD="$GITHUB_DIR/workflows/scorecard.yml"
+
+# The Scorecard API refuses results from a workflow with top-level env, defaults or write
+# permissions, or from a job with env, defaults, a container or a step outside its list
+@test "scorecard: publishes from a workflow that the Scorecard API accepts" {
+  run yq -o=json -I=0 '[.env, .defaults, .permissions]' "$SCORECARD"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[null,null,{}]' ]
+  run yq -o=json -I=0 '.jobs | keys' "$SCORECARD"
+  [ "$output" = '["analysis"]' ]
+  run yq -o=json -I=0 '.jobs.analysis | [.env, .defaults, .container, .services, .["runs-on"]]' "$SCORECARD"
+  [ "$output" = '[null,null,null,null,"ubuntu-latest"]' ]
+  run yq -o=json -I=0 '[.jobs.analysis.steps[] | .uses // "run" | sub("@.*"; "")]' "$SCORECARD"
+  [ "$output" = '["ossf/scorecard-action"]' ]
+  run yq -o=json -I=0 '.jobs.analysis.steps[0].with' "$SCORECARD"
+  [ "$output" = '{"results_file":"results.json","results_format":"json","publish_results":true,"fail_on_publish_error":true}' ]
+}
+
+@test "scorecard: runs in staticwire/aurtomator alone, for at most 10 minutes" {
+  run yq -o=json -I=0 '.jobs.analysis | [.if, .["timeout-minutes"]]' "$SCORECARD"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[\"github.repository == 'staticwire/aurtomator'\",10]" ]
+}
+
+# Each run scores the newest commit of main, whatever push started it
+@test "scorecard: a newer run cancels the older one" {
+  run yq -o=json -I=0 '.concurrency' "$SCORECARD"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"group":"scorecard","cancel-in-progress":true}' ]
 }
 
 VALIDATE="$GITHUB_DIR/workflows/validate.yml"
