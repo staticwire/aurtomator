@@ -950,10 +950,10 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
 }
 
-@test "release-please: writes VERSION, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
+@test "release-please: writes VERSION and aurtomator.sh, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
   run yq -o=json -I=0 '.packages["."]' "$RELEASE_CONFIG"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"release-type":"simple","version-file":"VERSION","changelog-type":"github","skip-changelog":true,"bump-minor-pre-major":true,"include-component-in-tag":false}' ]
+  [ "$output" = '{"release-type":"simple","version-file":"VERSION","extra-files":["aurtomator.sh"],"changelog-type":"github","skip-changelog":true,"bump-minor-pre-major":true,"include-component-in-tag":false}' ]
 }
 
 # release-please updates VERSION in place and does not create it

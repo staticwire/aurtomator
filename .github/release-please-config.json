@@ -4,6 +4,7 @@
     ".": {
       "release-type": "simple",
       "version-file": "VERSION",
+      "extra-files": ["aurtomator.sh"],
       "changelog-type": "github",
       "skip-changelog": true,
       "bump-minor-pre-major": true,
