@@ -7,6 +7,11 @@ on:
     - cron: "27 4 * * 2"
   workflow_dispatch:
 
+# Runs wait for each other: two at once would both find no open issue and open two
+concurrency:
+  group: spec-watch
+  cancel-in-progress: false
+
 permissions: {}
 
 jobs:

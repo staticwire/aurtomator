@@ -8,6 +8,11 @@ on:
     paths: ["site/**", "assets/**", "VERSION", ".github/workflows/docs.yml"]
   workflow_dispatch:
 
+# Pushes to a pull request cancel its older runs, and every other run has a group of its own
+concurrency:
+  group: docs-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

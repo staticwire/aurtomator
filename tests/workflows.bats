@@ -112,6 +112,16 @@ permission_lines() {
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
 }
 
+# Runs outside pull requests take their run ID as the group, so they never cancel each other
+@test "workflows: new pushes to a pull request cancel its old runs of ci, codeql and docs" {
+  local workflow
+  for workflow in ci codeql docs; do
+    run yq -o=json -I=0 '.concurrency' "$GITHUB_DIR/workflows/$workflow.yml"
+    [ "$status" -eq 0 ]
+    [ "$output" = '{"group":"'"$workflow"'-${{ github.event.pull_request.number || github.run_id }}","cancel-in-progress":true}' ]
+  done
+}
+
 # Prints workflow $1, job, step and secret for each secrets.<name> in a step, then the
 # count of secrets.<name> in the whole file
 secret_lines() {
@@ -4505,6 +4515,13 @@ SPEC_WATCH="$GITHUB_DIR/workflows/spec-watch.yml"
   [ "$output" = "[\"github.repository == 'staticwire/aurtomator'\",{\"contents\":\"read\",\"issues\":\"write\"},5]" ]
   run yq -o=json -I=0 '[.jobs.watch.steps[] | select(has("uses")) | .with]' "$SPEC_WATCH"
   [ "$output" = '[{"persist-credentials":false}]' ]
+}
+
+# Two runs at once would both find no open issue and open two
+@test "spec-watch: runs wait for each other" {
+  run yq -o=json -I=0 '.concurrency' "$SPEC_WATCH"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"group":"spec-watch","cancel-in-progress":false}' ]
 }
 
 @test "spec-watch: the list names the four specifications with the SHAs of whole commits" {

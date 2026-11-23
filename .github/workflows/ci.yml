@@ -8,6 +8,11 @@ on:
   # merge-image starts a run on main after its merge, which starts no workflow by itself
   workflow_dispatch:
 
+# Pushes to a pull request cancel its older runs, and every other run has a group of its own
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
