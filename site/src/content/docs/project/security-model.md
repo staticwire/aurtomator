@@ -75,3 +75,15 @@ gh attestation verify aurtomator-X.Y.Z.tar.gz -R staticwire/aurtomator \
 ```
 
 `gh attestation verify` fails unless `release-please.yml` of `staticwire/aurtomator` signed the archive in a run on `main` at that commit.
+
+Beside the archive, these releases carry the attestation in two files. `aurtomator-X.Y.Z.tar.gz.sigstore.json` is its Sigstore bundle, with the certificate of the run. With `--bundle`, `gh attestation verify` reads the attestation from that file in place of the GitHub API:
+
+```sh
+gh release download vX.Y.Z -R staticwire/aurtomator -p 'aurtomator-X.Y.Z.tar.gz*'
+gh attestation verify aurtomator-X.Y.Z.tar.gz -R staticwire/aurtomator \
+  --bundle aurtomator-X.Y.Z.tar.gz.sigstore.json \
+  --signer-workflow staticwire/aurtomator/.github/workflows/release-please.yml \
+  --source-ref refs/heads/main --source-digest <SHA that your calling workflows pin>
+```
+
+`aurtomator-X.Y.Z.tar.gz.intoto.jsonl` holds the SLSA provenance of the archive as an in-toto bundle: the DSSE envelope of the same attestation, on one line.
