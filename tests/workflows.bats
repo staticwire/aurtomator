@@ -50,6 +50,7 @@ permission_lines() {
     'ci.yml {"contents":"read"}' \
     'ci.yml ["image",null]' \
     'ci.yml ["lint",null]' \
+    'ci.yml ["zizmor",null]' \
     'ci.yml ["test",null]' \
     'ci.yml ["validate",{"contents":"read"}]' \
     'ci.yml ["pipeline",{"contents":"write","issues":"write"}]' \
@@ -73,6 +74,52 @@ permission_lines() {
     'validate.yml ["image",null]' \
     'validate.yml ["packages",null]' >"$BATS_TEST_TMPDIR/expected"
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
+}
+
+# Checks take the names of their jobs: the ruleset requires lint, test and ci-ok, and
+# notify-failure.yml reads the names of the jobs of check-updates.yml
+@test "workflows: name the jobs as in this table" {
+  local workflow
+  for workflow in "$GITHUB_DIR"/workflows/*.yml; do
+    yq -r '.jobs | to_entries | .[] | .key + " " + (.value.name // "-")' "$workflow" | sed "s|^|${workflow##*/} |"
+  done >"$BATS_TEST_TMPDIR/actual"
+  printf '%s\n' \
+    'check-updates.yml image image' \
+    'check-updates.yml check check' \
+    'check-updates.yml prepare prepare' \
+    'check-updates.yml verify verify' \
+    'check-updates.yml publish publish' \
+    'check-updates.yml issues status' \
+    'ci.yml image image' \
+    'ci.yml lint lint' \
+    'ci.yml zizmor zizmor' \
+    'ci.yml test test' \
+    'ci.yml validate -' \
+    'ci.yml pipeline -' \
+    'ci.yml dependency-review dependency-review' \
+    'ci.yml vulnerability-issue vulnerability-issue' \
+    'ci.yml merge-image merge-image' \
+    'ci.yml ci-ok ci-ok' \
+    'codeql.yml analyze Analyze (actions)' \
+    'docs.yml build build' \
+    'docs.yml deploy deploy' \
+    'notify-failure.yml notify notify' \
+    'release-please.yml release-please release-please' \
+    'release-please.yml sign sign' \
+    'spec-watch.yml watch watch' \
+    'validate.yml image image' \
+    'validate.yml packages packages' >"$BATS_TEST_TMPDIR/expected"
+  diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
+}
+
+# Runs outside pull requests take their run ID as the group, so they never cancel each other
+@test "workflows: new pushes to a pull request cancel its old runs of ci, codeql and docs" {
+  local workflow
+  for workflow in ci codeql docs; do
+    run yq -o=json -I=0 '.concurrency' "$GITHUB_DIR/workflows/$workflow.yml"
+    [ "$status" -eq 0 ]
+    [ "$output" = '{"group":"'"$workflow"'-${{ github.event.pull_request.number || github.run_id }}","cancel-in-progress":true}' ]
+  done
 }
 
 # Prints workflow $1, job, step and secret for each secrets.<name> in a step, then the
@@ -421,10 +468,17 @@ secret_lines() {
 }
 
 # zizmor-action uploads the findings to code scanning by default and passes the job
-@test "ci: the lint job runs zizmor after actionlint, and its findings fail the job" {
-  run yq -o=json -I=0 '[.jobs.lint.steps[] | select(.run == "actionlint" or ((.uses // "") | test("^zizmorcore/zizmor-action@"))) | .with // .run]' "$GITHUB_DIR/workflows/ci.yml"
+@test "ci: the zizmor job runs zizmor-action pedantic after its checkout, and the findings fail the job" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq -o=json -I=0 '[.jobs.zizmor.steps[] | .uses // "" | sub("@.*"; "")]' "$ci"
   [ "$status" -eq 0 ]
-  [ "$output" = '["actionlint",{"advanced-security":false}]' ]
+  [ "$output" = '["actions/checkout","zizmorcore/zizmor-action"]' ]
+  run yq -o=json -I=0 '[.jobs.zizmor.steps[] | select(.uses // "" | test("^zizmorcore/zizmor-action@")) | .with]' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[{"persona":"pedantic","advanced-security":false}]' ]
+  run yq '[.jobs[] | .steps // [] | .[] | select(.uses // "" | test("^zizmorcore/zizmor-action@"))] | length' "$ci"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
 }
 
 # actionlint runs shellcheck on the run blocks of the workflows only
@@ -824,10 +878,12 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
   [ "$output" = "5" ]
 }
 
-@test "ci: lint has 10 minutes and test 45" {
+@test "ci: lint has 10 minutes, zizmor 5 and test 45" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs.lint["timeout-minutes"]' "$ci"
   [ "$output" = "10" ]
+  run yq '.jobs.zizmor["timeout-minutes"]' "$ci"
+  [ "$output" = "5" ]
   run yq '.jobs.test["timeout-minutes"]' "$ci"
   [ "$output" = "45" ]
 }
@@ -4459,6 +4515,13 @@ SPEC_WATCH="$GITHUB_DIR/workflows/spec-watch.yml"
   [ "$output" = "[\"github.repository == 'staticwire/aurtomator'\",{\"contents\":\"read\",\"issues\":\"write\"},5]" ]
   run yq -o=json -I=0 '[.jobs.watch.steps[] | select(has("uses")) | .with]' "$SPEC_WATCH"
   [ "$output" = '[{"persist-credentials":false}]' ]
+}
+
+# Two runs at once would both find no open issue and open two
+@test "spec-watch: runs wait for each other" {
+  run yq -o=json -I=0 '.concurrency' "$SPEC_WATCH"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"group":"spec-watch","cancel-in-progress":false}' ]
 }
 
 @test "spec-watch: the list names the four specifications with the SHAs of whole commits" {

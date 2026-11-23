@@ -2,7 +2,7 @@
 title: CI quality gate
 ---
 
-`ci.yml` runs on every push and pull request to `main`.
+`ci.yml` runs on every push and pull request to `main`. Pushes to a pull request cancel its older runs. Runs of pushes to `main` and of `workflow_dispatch` never cancel each other, so every merge gets its whole run with `pipeline` and the upload to Codecov.
 
 ## Lint job
 
@@ -16,7 +16,9 @@ actionlint
 
 `.shellcheckrc` makes shellcheck find `source` files next to the script. `actionlint` checks workflows and their `run:` blocks. `.github/actionlint.yaml` ignores its reports on `job.workflow_repository`, `job.workflow_sha` and the `queue` key of `concurrency` in `release-please.yml`, which actionlint 1.7.12 does not know. Two more steps run `shellcheck -s bash` on the `run:` blocks of every `.github/actions/*/action.yml`, which actionlint skips, and `shellcheck` and `shfmt` on `aurtomator.sh`.
 
-Step `zizmor` runs `zizmorcore/zizmor-action`, pinned like every action. The action installs the zizmor release that its commit names as latest, from a wheel that it checks against the hashes in its own tree, so zizmor moves with the Dependabot updates of the action. zizmor audits the workflows, `.github/actions/*/action.yml` and `.github/dependabot.yml` with its `regular` persona, and its online audits, such as `known-vulnerable-actions` and `impostor-commit`, read GitHub with the token of the job. With `advanced-security: false`, zizmor prints its findings and fails the job, where the default of the action uploads them to code scanning and passes.
+## zizmor job
+
+Job `zizmor` checks out the repository and runs `zizmorcore/zizmor-action`, pinned like every action. The action installs the zizmor release that its commit names as latest, from a wheel that it checks against the hashes in its own tree, so zizmor moves with the Dependabot updates of the action. zizmor audits the workflows, `.github/actions/*/action.yml` and `.github/dependabot.yml` with its `pedantic` persona, and its online audits, such as `known-vulnerable-actions` and `impostor-commit`, read GitHub with the token of the job. `pedantic` reports code smells beside the findings of the default `regular` persona, so every job with steps has a `name`, every permission but `contents: read` has a comment on its line, and every workflow that is not only called sets `concurrency` with `cancel-in-progress`. With `advanced-security: false`, zizmor prints its findings and fails the job, where the default of the action uploads them to code scanning and passes. `ci-ok` needs the job, so a finding blocks the merge.
 
 Comments `# zizmor: ignore[<audit>]` skip findings on lines that the audits misread, and a test in `tests/workflows.bats` allows them only there:
 
@@ -55,10 +57,10 @@ The two jobs call the reusable workflows of the same commit with `uses: ./.githu
 
 ## CodeQL
 
-`codeql.yml` analyzes the workflows of the repository with the `security-extended` queries of CodeQL on pull requests to `main`, on pushes to `main` and on Mondays at 03:41 UTC. Default setup of code scanning skips the pull requests of Dependabot, and those move the pins of actions in the workflows, so the repository runs this workflow in its place. Default setup stays off, since GitHub refuses the results of other CodeQL uploads while it is on.
+`codeql.yml` analyzes the workflows of the repository with the `security-extended` queries of CodeQL on pull requests to `main`, on pushes to `main` and on Mondays at 03:41 UTC, and pushes to a pull request cancel its older runs. Default setup of code scanning skips the pull requests of Dependabot, and those move the pins of actions in the workflows, so the repository runs this workflow in its place. Default setup stays off, since GitHub refuses the results of other CodeQL uploads while it is on.
 
 On Dependabot pull requests its job holds `security-events: write`, unlike the jobs that skip them. That token changes code scanning alerts and analyses and nothing else, CodeQL reads the workflows of the pull request and runs none of them, and the only new code that gets the token is a new version of `actions/checkout` or `github/codeql-action` in `codeql.yml` itself.
 
 ## Spec watch
 
-`scripts/lib/requires.sh` reads the requirements of PyPI releases and their environment markers by four specifications of `pypa/packaging.python.org`: dependency specifiers, version specifiers, name normalization and core metadata. `.github/spec-watch.tsv` lists each file with the SHA of the last commit that the parser follows. `spec-watch.yml` asks the GitHub API for the last commit of each file on Tuesdays at 04:27 UTC and by hand, in `staticwire/aurtomator` alone. When one differs, it opens the issue `📜 PyPA specifications changed` with label `spec-watch`, both SHAs and a link to the history of each changed file, and no second one while that issue is open. Read the commits, update `scripts/lib/requires.sh` and its tests when one changes the meaning of requirements or markers, and set the new SHAs in `.github/spec-watch.tsv`. The next run that finds every SHA of the list closes the issue. The job holds `contents: read` and `issues: write`, and errors of the API fail it.
+`scripts/lib/requires.sh` reads the requirements of PyPI releases and their environment markers by four specifications of `pypa/packaging.python.org`: dependency specifiers, version specifiers, name normalization and core metadata. `.github/spec-watch.tsv` lists each file with the SHA of the last commit that the parser follows. `spec-watch.yml` asks the GitHub API for the last commit of each file on Tuesdays at 04:27 UTC and by hand, in `staticwire/aurtomator` alone. When one differs, it opens the issue `📜 PyPA specifications changed` with label `spec-watch`, both SHAs and a link to the history of each changed file, and no second one while that issue is open. Runs wait for each other, so two runs never open it twice. Read the commits, update `scripts/lib/requires.sh` and its tests when one changes the meaning of requirements or markers, and set the new SHAs in `.github/spec-watch.tsv`. The next run that finds every SHA of the list closes the issue. The job holds `contents: read` and `issues: write`, and errors of the API fail it.

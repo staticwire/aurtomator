@@ -20,6 +20,7 @@ jobs:
   # Opens the release PR, which writes VERSION, and tags the release at its merge; it runs only in
   # the upstream repository, since forks and template copies carry this file too
   release-please:
+    name: release-please
     if: github.repository == 'staticwire/aurtomator'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -53,14 +54,15 @@ jobs:
   # actions/attest signs the archive with a Sigstore certificate for the OIDC token of this job.
   # Every action of a job can ask for that token, so this job holds no App token.
   sign:
+    name: sign
     needs: release-please
     if: github.repository == 'staticwire/aurtomator'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: write # gh release upload attaches the archive
+      id-token: write # actions/attest gets an OIDC token for the Sigstore certificate
+      attestations: write # actions/attest stores the attestation
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

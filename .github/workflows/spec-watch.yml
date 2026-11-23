@@ -7,16 +7,22 @@ on:
     - cron: "27 4 * * 2"
   workflow_dispatch:
 
+# Runs wait for each other: two at once would both find no open issue and open two
+concurrency:
+  group: spec-watch
+  cancel-in-progress: false
+
 permissions: {}
 
 jobs:
   watch:
+    name: watch
     if: github.repository == 'staticwire/aurtomator'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
-      issues: write
+      issues: write # opens and closes the issue of changed specifications
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -8,12 +8,18 @@ on:
   # merge-image starts a run on main after its merge, which starts no workflow by itself
   workflow_dispatch:
 
+# Pushes to a pull request cancel its older runs, and every other run has a group of its own
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   # Reads the pinned Arch image from ci-image/Dockerfile, whose dated tag and digest Dependabot updates
   image:
+    name: image
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -37,6 +43,7 @@ jobs:
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
 
   lint:
+    name: lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -61,12 +68,6 @@ jobs:
       # Checks the workflows, and the run blocks with shellcheck
       - name: actionlint
         run: actionlint
-      # With advanced-security off, zizmor prints its findings and fails the job; by default the
-      # action uploads them to code scanning and passes
-      - name: zizmor
-        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
-        with:
-          advanced-security: false
       # actionlint skips the run blocks of a composite action, and the default severity of
       # shellcheck fails an unquoted variable, as actionlint does in a workflow
       - name: shellcheck the actions
@@ -81,7 +82,25 @@ jobs:
           shellcheck aurtomator.sh
           shfmt -d -i 2 -ci aurtomator.sh
 
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # With advanced-security off, zizmor prints its findings and fails the job; by default the
+      # action uploads them to code scanning and passes
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          persona: pedantic
+          advanced-security: false
+
   test:
+    name: test
     needs: image
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
@@ -152,12 +171,13 @@ jobs:
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
     uses: ./.github/workflows/check-updates.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
     permissions:
-      contents: write
-      issues: write
+      contents: write # publish of check-updates.yml commits to the repository
+      issues: write # status of check-updates.yml opens and closes issues
 
   # Fails a Dependabot pull request that brings a version with a published vulnerability, which
   # stops merge-image and ci-ok. The pull request can move the pin of the action, so it only reads
   dependency-review:
+    name: dependency-review
     if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -174,12 +194,13 @@ jobs:
 
   # Opens an issue that lists the vulnerabilities of a failed review, with no action in the job
   vulnerability-issue:
+    name: vulnerability-issue
     needs: dependency-review
     if: failure() && needs.dependency-review.result == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      issues: write
+      issues: write # creates the label and opens the issue
 
     steps:
       - name: Open an issue for the vulnerabilities
@@ -218,6 +239,7 @@ jobs:
   # and the Python packages of the CI. It waits for the dependency review, and it is off unless
   # the Dependabot secret CI_IMAGE_AUTO_MERGE holds auto-merge-ci-image.
   merge-image:
+    name: merge-image
     needs: [lint, test, validate, dependency-review, ci-ok]
     # Without a status function, the skip of pipeline on Dependabot pull requests reaches this job
     if: >- # zizmor: ignore[bot-conditions] user.login checks the author, which cannot be spoofed
@@ -233,9 +255,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write
-      pull-requests: write
-      actions: write
+      contents: write # gh pr merge writes the squash commit to main
+      pull-requests: write # lists the files of the pull request and merges it
+      actions: write # gh workflow run starts ci.yml and release-please.yml
 
     steps:
       - name: Merge image update
@@ -275,7 +297,8 @@ jobs:
   # Required by the ruleset in place of the pipeline checks, which a fork
   # skips. always(): a skipped job counts as passed.
   ci-ok:
-    needs: [image, lint, test, validate, pipeline, dependency-review, vulnerability-issue]
+    name: ci-ok
+    needs: [image, lint, zizmor, test, validate, pipeline, dependency-review, vulnerability-issue]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

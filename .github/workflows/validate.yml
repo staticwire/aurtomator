@@ -11,6 +11,7 @@ permissions:
 jobs:
   # Reads the pinned Arch image from ci-image/Dockerfile, whose dated tag and digest Dependabot updates
   image:
+    name: image
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -47,6 +48,7 @@ jobs:
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
 
   packages:
+    name: packages
     needs: image
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
