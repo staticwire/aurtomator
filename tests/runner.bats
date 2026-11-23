@@ -86,7 +86,9 @@ setup() {
 
   # aurtomator has two releases, and the calling workflow pins the first
   git init -q "$TEST_TMPDIR/work"
+  echo 1.0.0 >"$TEST_TMPDIR/work/VERSION"
   PINNED=$(commit_aurtomator "$TEST_TMPDIR/work" pinned)
+  echo 1.1.0 >"$TEST_TMPDIR/work/VERSION"
   TIP=$(commit_aurtomator "$TEST_TMPDIR/work" tip)
   git -C "$TEST_TMPDIR/work" tag v1.0.0 "$PINNED"
   git -C "$TEST_TMPDIR/work" tag v1.1.0 "$TIP"
@@ -112,10 +114,28 @@ teardown() {
   grep -qxF 'curl -fsSL -o aurtomator.sh https://raw.githubusercontent.com/staticwire/aurtomator/vX.Y.Z/aurtomator.sh' "$SETUP_DOC"
 }
 
+@test "runner: line 2 holds the release of VERSION" {
+  [ "$(sed -n 2p "$RUNNER")" = "release=$(<"$BATS_TEST_DIRNAME/../VERSION") # x-release-please-version" ]
+}
+
 @test "runner: prints the sample of the pinned commit" {
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 0 ]
   [ "$output" = "name: pinned" ]
+}
+
+@test "runner: version prints the release of aurtomator.sh and the release of the pin" {
+  run "$REPO/aurtomator.sh" version
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "aurtomator.sh $(<"$BATS_TEST_DIRNAME/../VERSION")" ]
+  [ "${lines[1]}" = "check-updates.yml 1.0.0" ]
+  [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "runner: version takes no argument" {
+  run "$REPO/aurtomator.sh" version 1.0.0
+  [ "$status" -eq 1 ]
+  [ "$output" = "Usage: $REPO/aurtomator.sh version" ]
 }
 
 @test "runner: runs a script with the repository as the data directory" {
@@ -502,14 +522,14 @@ shape() {
   run "$REPO/aurtomator.sh"
   [ "$status" -eq 1 ]
   [ "${lines[0]}" = "Usage: $REPO/aurtomator.sh <command> [argument...]" ]
-  [ "${lines[1]}" = "Commands: setup draft sample validate-pkg check-update update-pkg check-all pin check-pins" ]
+  [ "${lines[1]}" = "Commands: setup draft sample validate-pkg check-update update-pkg check-all pin check-pins version" ]
 
   local command
   for command in "" nope lib ../scripts/show-args Show-args show-args.sh show/../show-args show-args/x; do
     run "$REPO/aurtomator.sh" "$command"
     [ "$status" -eq 1 ]
     [ "${lines[0]}" = "Usage: $REPO/aurtomator.sh <command> [argument...]" ]
-    [ "${lines[1]}" = "Commands: setup draft sample validate-pkg check-update update-pkg check-all pin check-pins" ]
+    [ "${lines[1]}" = "Commands: setup draft sample validate-pkg check-update update-pkg check-all pin check-pins version" ]
   done
 }
 

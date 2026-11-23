@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+release=0.14.0 # x-release-please-version
 #
 # Runs a script of aurtomator for this repository, at the commit that
 # .github/workflows/check-updates.yml pins:
@@ -12,6 +13,7 @@
 #   ./aurtomator.sh sample                prints packages/example.yml.sample
 #   ./aurtomator.sh pin vX.Y.Z            pins the calling workflows to a release
 #   ./aurtomator.sh check-pins            checks each pin against its release tag
+#   ./aurtomator.sh version               prints the releases of this file and of the pin
 #
 # The first run of a pin fetches aurtomator at that commit into
 # ~/.cache/aurtomator/<sha>, or $XDG_CACHE_HOME/aurtomator/<sha>.
@@ -427,10 +429,19 @@ touch -c -- "$copy" 2>/dev/null || true
 
 # The documented commands. Another script of scripts/ is a step of the CI
 # jobs and runs after a warning.
-commands=(setup draft sample validate-pkg check-update update-pkg check-all pin check-pins)
+commands=(setup draft sample validate-pkg check-update update-pkg check-all pin check-pins version)
 cmd="${1:-}"
 if [[ "$cmd" == sample ]]; then
   exec cat "$copy/packages/example.yml.sample"
+fi
+if [[ "$cmd" == version ]]; then
+  if [[ $# -ne 1 ]]; then
+    echo "Usage: $0 version" >&2
+    exit 1
+  fi
+  pinned=$(<"$copy/VERSION")
+  printf 'aurtomator.sh %s\ncheck-updates.yml %s\n' "$release" "$pinned"
+  exit 0
 fi
 if [[ ! "$cmd" =~ ^[a-z]+(-[a-z]+)*$ || ! -x "$copy/scripts/$cmd.sh" ]]; then
   echo "Usage: $0 <command> [argument...]" >&2

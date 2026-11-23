@@ -149,9 +149,10 @@ Calling jobs set the token permissions for the whole called workflow, and called
 ./aurtomator.sh sample                 # prints packages/example.yml.sample
 ./aurtomator.sh pin vX.Y.Z             # pins the calling workflows to a release
 ./aurtomator.sh check-pins             # checks each pin against its release tag
+./aurtomator.sh version                # prints the releases of aurtomator.sh and of the pin
 ```
 
-Commands are `sample`, `pin`, `check-pins` or the name of a script of `scripts/` without `.sh`, and the arguments after them go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, from any directory. Scripts of the CI jobs, such as `publish-pkg`, run after a warning.
+Commands are `sample`, `pin`, `check-pins`, `version` or the name of a script of `scripts/` without `.sh`, and the arguments after them go to that script. The script runs with your repository as `AURTOMATOR_DATA_DIR`, from any directory. Scripts of the CI jobs, such as `publish-pkg`, run after a warning.
 
 The pin comes from the one `uses:` line of `.github/workflows/check-updates.yml` that names `check-updates.yml` at a commit SHA, and pins in comments change nothing. The script also reads the file with `yq`, as GitHub does, and stops unless the jobs call `check-updates.yml` once, at the pin of that line: pins in quotes, on the next line or through an alias stop it, and so do `uses:` lines inside a block of text. It stops as well on files with two YAML documents, a merge key `<<` or a key twice in one mapping.
 
@@ -164,6 +165,8 @@ The script needs mikefarah/yq 4.40.1 or newer, and names the version of any othe
 `./aurtomator.sh check-pins` reads every `uses:` line of aurtomator in `.github/workflows/check-updates.yml` and `.github/workflows/validate.yml`, in jobs and steps and with the repository name in any case. It prints these lines when each pin is the commit of the release written after it. It stops at the first pin that is not the commit of its release, at aurtomator `uses:` lines without a commit SHA and, as `pin` does, when `yq` reads a pin outside such a line. It also stops at jobs that call a workflow neither local nor of aurtomator, written in any spelling, since GitHub passes such workflows the secrets the job names, at steps that name a workflow of another repository, at aurtomator pins written with an extra slash or a backslash, which GitHub drops when it reads the name, and at `uses:` values with a YAML tag. It fetches nothing.
 
 In a pull request, `check-pins` also stops at a pin whose release is older than the newest release that the same file pins on the base branch, so pull requests that leave `aurtomator.sh` and the job `pins` as they are cannot move the jobs with the secrets back to a release without the fixes made since. It reads the base branch from the first parent of the merge commit, which the checkout holds with `fetch-depth: 2` in the job `pins`. Without that parent it fetches the merge commit with its parents from `origin`, and stops when the fetch fails. Pushes to the branch can still move a pin back.
+
+The second line of `aurtomator.sh` holds the release that the file comes from, as `release=X.Y.Z`. `./aurtomator.sh version` prints that release on the line `aurtomator.sh X.Y.Z`, and the release in `VERSION` of the copy of the pin on the line `check-updates.yml X.Y.Z`. After a pin moves, the two differ until a run of `check-updates.yml` commits the `aurtomator.sh` of the new release.
 
 `aurtomator.sh` names the aurtomator repository, `staticwire/aurtomator`, and takes no pin of another repository, so pull requests that move a pin to a fork or to a name that looks the same fail `pins`. Forks of aurtomator write their own name in their `aurtomator.sh`, and runs copy that file into the repositories that pin the fork.
 
