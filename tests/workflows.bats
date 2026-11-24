@@ -1256,6 +1256,13 @@ id_of() {
   done
 }
 
+# The statuses of the check run carry the error texts of upstream hosts
+@test "check-updates: the artifact checked lives for one day" {
+  run yq '.jobs.check.steps[] | select(.id == "upload") | .with.name + " " + (.with["retention-days"] | tostring)' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = "checked 1" ]
+}
+
 # Downloads by name take any artifact of that name in the run and empty ids take them all,
 # so 0 stands in for no id; verify takes the handoffs of prepare by a pattern only they upload
 @test "check-updates: each job downloads an artifact by the id the job of its upload gave" {
