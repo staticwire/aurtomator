@@ -325,8 +325,8 @@ handed_failure() {
   echo "update_failed: prepare and verify handed over no update"
 }
 
-# Succeeds when verify ran out of its time before package $1, as status/_unverified of the
-# handoff lists, which the jobs take from verify alone
+# Succeeds when status/_unverified of the handoff lists package $1: verify lists the packages it
+# had no time for, and the publish job lists every package after a failed verify
 unverified() {
   local file="${WORK_DIR}/status/_unverified"
   [[ -d "${WORK_DIR}/status" && ! -L "${WORK_DIR}/status" && -f "$file" && ! -L "$file" ]] &&
@@ -378,14 +378,25 @@ record_alerts() {
 # The package files of strategy pypi under the PEP 503 name of their upstream.registry, one
 # path a line, which read_projects fills once from the files without pin_from
 declare -A PROJECT_FILES=()
+# The package files that are links, which the runs never read, so they count for every project
+LINKED_FILES=""
 PROJECTS_READ=""
 
 read_projects() {
-  local file name
+  local file name stem
   [[ -z "$PROJECTS_READ" ]] || return 0
   PROJECTS_READ=1
   for file in "${plain_files[@]}"; do
-    [[ -f "$file" && ! -L "$file" && "$(pkg_get "$file" '.strategy // ""' 2>/dev/null)" == pypi ]] || continue
+    if [[ -L "$file" ]]; then
+      stem=${file##*/}
+      stem=${stem%.yml}
+      # run_package writes a status only for links with a valid package name
+      if (LC_ALL=C && [[ "$stem" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
+        LINKED_FILES+="$file"$'\n'
+      fi
+      continue
+    fi
+    [[ -f "$file" && "$(pkg_get "$file" '.strategy // ""' 2>/dev/null)" == pypi ]] || continue
     name=$(pypi_name "$(pkg_get "$file" '.upstream.registry // ""' 2>/dev/null)") || continue
     PROJECT_FILES[$name]+="$file"$'\n'
   done
@@ -420,7 +431,12 @@ companion_waits() {
   read_projects
   while IFS= read -r main; do
     [[ -n "$main" ]] || continue
-    main_name=$(package_name "$main" 2>/dev/null) || continue
+    if [[ -L "$main" ]]; then
+      main_name=${main##*/}
+      main_name=${main_name%.yml}
+    else
+      main_name=$(package_name "$main" 2>/dev/null) || continue
+    fi
     status=""
     [[ ! -f "${STATUS_DIR}/${main_name}" ]] || status=$(<"${STATUS_DIR}/${main_name}")
     if [[ "$status" == "held: "* ]]; then
@@ -447,12 +463,12 @@ companion_waits() {
       fi
       return 0
     fi
-  done <<<"${PROJECT_FILES[$name]:-}"
+  done <<<"${PROJECT_FILES[$name]:-}$LINKED_FILES"
   return 1
 }
 
-# Prints the alert lines of package $1 for --publish, which asks upstream nothing: the lines
-# of the check run, then those of offline rules in $2 that the check run lacks
+# Prints the alert lines of package $1 for --prepare and --publish: the lines of the check run,
+# then those of offline rules in $2 that the check run lacks
 publish_alerts() {
   local checked line
   checked=$(checked_alerts "$1")
@@ -758,7 +774,7 @@ run_package() {
   # The latest release of a GitHub project can be a maintenance release of an
   # older line, so a lower version needs allow_downgrade
   if [[ "$is_downgrade" == "true" ]] &&
-    [[ "$(pkg_get "$pkg_file" '.allow_downgrade // false')" != "true" ]]; then
+    [[ "$(pkg_bool "$pkg_file" .allow_downgrade)" != true ]]; then
     log_warn "$pkg_name: DOWNGRADE detected $current → $latest, skipped: allow_downgrade is not set"
     echo "downgrade_skipped: ${latest}" >"${STATUS_DIR}/${pkg_name}"
     return
@@ -767,7 +783,7 @@ run_package() {
   # First numbers that grow by two digits or more can be another version scheme,
   # such as build tags beside release tags, so they need allow_version_jump
   if version_jump "$current" "$latest" &&
-    [[ "$(pkg_get "$pkg_file" '.allow_version_jump // false')" != "true" ]]; then
+    [[ "$(pkg_bool "$pkg_file" .allow_version_jump)" != true ]]; then
     log_warn "$pkg_name: version jump $current → $latest, skipped: allow_version_jump is not set"
     echo "jump_skipped: ${latest}" >"${STATUS_DIR}/${pkg_name}"
     return

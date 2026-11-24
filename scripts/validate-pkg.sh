@@ -54,6 +54,11 @@ in_words() {
   return 1
 }
 
+# Succeeds when field $2 of package file $1 is missing or a boolean that pkg_bool reads
+flag_ok() {
+  [[ $(pkg_get "$1" "$2 | tag") == "!!null" || -n $(pkg_bool "$1" "$2") ]]
+}
+
 # Print the upstream keys of strategy $1, or fail when UPSTREAM_KEYS has no line for it
 upstream_keys() {
   local line
@@ -154,8 +159,7 @@ validate_alert() {
     errors=1
   fi
 
-  tag=$(pkg_get "$file" ".alerts[$i].hold | tag")
-  if [[ "$tag" != "!!null" && "$tag" != "!!bool" ]]; then
+  if ! flag_ok "$file" ".alerts[$i].hold"; then
     log_err "$rule.hold must be true or false"
     errors=1
   fi
@@ -294,10 +298,9 @@ validate_pkg() {
 
   # --- Optional fields ---
 
-  local flag flag_tag
+  local flag
   for flag in allow_downgrade allow_version_jump allow_missing_arch; do
-    flag_tag=$(pkg_get "$file" ".${flag} | tag")
-    if [[ "$flag_tag" != "!!null" && "$flag_tag" != "!!bool" ]]; then
+    if ! flag_ok "$file" ".$flag"; then
       log_err "$shown: $flag must be true or false"
       ((errors++))
     fi
@@ -479,22 +482,16 @@ validate_pkg() {
     fi
   fi
 
-  local prerelease
-  prerelease=$(pkg_get "$file" '.upstream.prerelease | tag')
-  if [[ "$prerelease" != "!!null" ]]; then
-    if [[ "$prerelease" != "!!bool" ]]; then
-      log_err "$shown: upstream.prerelease must be true or false"
-      ((errors++))
-    # Semver pre-releases always hold a dash
-    elif [[ $(pkg_get "$file" '.upstream.prerelease') == true && "$dash_set" == false ]]; then
-      log_err "$shown: upstream.prerelease needs pkgver_dash"
-      ((errors++))
-    fi
+  if ! flag_ok "$file" .upstream.prerelease; then
+    log_err "$shown: upstream.prerelease must be true or false"
+    ((errors++))
+  # Semver pre-releases always hold a dash
+  elif [[ $(pkg_bool "$file" .upstream.prerelease) == true && "$dash_set" == false ]]; then
+    log_err "$shown: upstream.prerelease needs pkgver_dash"
+    ((errors++))
   fi
 
-  local testing
-  testing=$(pkg_get "$file" '.upstream.testing | tag')
-  if [[ "$testing" != "!!null" && "$testing" != "!!bool" ]]; then
+  if ! flag_ok "$file" .upstream.testing; then
     log_err "$shown: upstream.testing must be true or false"
     ((errors++))
   fi

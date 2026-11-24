@@ -119,6 +119,25 @@ teardown() {
   [ "$output" = "owner/repo" ]
 }
 
+@test "lib.sh: pkg_bool reads true and false in any case, and nothing else" {
+  local entry
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  for entry in true:true True:true TRUE:true false:false False:false FALSE:false \
+    '"true"': yes: '!!bool yes': '!!bool 1': '~': 'tRUE':; do
+    printf 'flag: %s\n' "${entry%:*}" >"$TEST_TMPDIR/flag.yml"
+    run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
+    [ "$status" -eq 0 ]
+    [ "$output" = "${entry##*:}" ] || {
+      echo "${entry%:*} read as $output"
+      return 1
+    }
+  done
+  printf 'other: true\n' >"$TEST_TMPDIR/flag.yml"
+  run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 # vercmp puts an empty string above a version of letters only
 @test "lib.sh: newest_version skips an empty line" {
   source "$TEST_TMPDIR/scripts/lib.sh"
@@ -4585,16 +4604,22 @@ current: '1.0.0'"
 }
 
 @test "check-all: writes 'available_downgrade:' for a package that allows downgrades" {
+  local value
   # Mock returns v2.0.0. Current 3.0.0 > 2.0.0 = downgrade.
-  create_test_package "pkg-down" "github-release" "upstream:
+  for value in true True TRUE; do
+    create_test_package "pkg-down" "github-release" "upstream:
   type: github
   project: owner/repo
 current: '3.0.0'
-allow_downgrade: true"
+allow_downgrade: $value"
 
-  "$TEST_TMPDIR/scripts/check-all.sh" 2>/dev/null || true
-  [ -f "$TEST_TMPDIR/.status/pkg-down" ]
-  [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "available_downgrade: 2.0.0" ]
+    "$TEST_TMPDIR/scripts/check-all.sh" 2>/dev/null || true
+    [ -f "$TEST_TMPDIR/.status/pkg-down" ]
+    [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "available_downgrade: 2.0.0" ] || {
+      echo "allow_downgrade: $value gave $(cat "$TEST_TMPDIR/.status/pkg-down")"
+      return 1
+    }
+  done
 }
 
 @test "check-all: skips a downgrade without allow_downgrade" {
@@ -4722,13 +4747,19 @@ stand_in_strategy() {
 }
 
 @test "check-all: writes 'new_version:' for a version jump the package allows" {
+  local value
   stand_in_strategy jump 2026102100
-  create_test_package "pkg-jump" "jump" "current: '13'
-allow_version_jump: true"
+  for value in true True TRUE; do
+    create_test_package "pkg-jump" "jump" "current: '13'
+allow_version_jump: $value"
 
-  run "$TEST_TMPDIR/scripts/check-all.sh"
-  [ "$status" -eq 0 ]
-  [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "new_version: 2026102100" ]
+    run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TMPDIR/.status/pkg-jump")" = "new_version: 2026102100" ] || {
+      echo "allow_version_jump: $value gave $(cat "$TEST_TMPDIR/.status/pkg-jump")"
+      return 1
+    }
+  done
 }
 
 @test "check-all: writes 'new_version:' for a usual step" {
@@ -4757,19 +4788,25 @@ EOF
   grep -q "🔺 2026102100 skipped (version jump)" "$TEST_TMPDIR/README.md"
 }
 
-@test "check-all: holds an update an alert with hold: true fires on" {
+@test "check-all: holds an update an alert with hold: true in any case fires on" {
+  local value
   stand_in_strategy step 29+1
-  create_test_package "pkg-hold" "step" "current: 28+25
+  for value in true True TRUE; do
+    create_test_package "pkg-hold" "step" "current: 28+25
 alerts:
   - when: major
-    hold: true
+    hold: $value
     note: Raise makedepends java-environment to 28"
 
-  run "$TEST_TMPDIR/scripts/check-all.sh"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"pkg-hold: update 28+25 → 29+1 held: Raise makedepends java-environment to 28"* ]]
-  [ "$(cat "$TEST_TMPDIR/.status/pkg-hold")" = "held: 29+1" ]
-  [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+    run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"pkg-hold: update 28+25 → 29+1 held: Raise makedepends java-environment to 28"* ]]
+    [ "$(cat "$TEST_TMPDIR/.status/pkg-hold")" = "held: 29+1" ] || {
+      echo "hold: $value gave $(cat "$TEST_TMPDIR/.status/pkg-hold")"
+      return 1
+    }
+    [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+  done
 }
 
 @test "check-all: logs the note of an alert without hold and keeps the update" {
@@ -4983,6 +5020,32 @@ allow_missing_arch: false" "allow_missing_arch: false"
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "new_version: 0.0.43" ]
+}
+
+# The runs read no linked package file, so it can be the package of any project. The jobs hand
+# a link to builder as a link to itself.
+@test "check-all: a package with pin_from waits while a package file is a link" {
+  local link
+  create_zensical_pair "  - from: '9.0'
+    hold: true
+    note: Not reached
+allow_missing_arch: false" "allow_missing_arch: false"
+  cp "$TEST_TMPDIR/packages/zensical-bin.yml" "$TEST_TMPDIR/project.yml"
+  for link in zensical-bin other; do
+    rm -f "$TEST_TMPDIR/packages/$link.yml"
+    ln -s "$link.yml" "$TEST_TMPDIR/packages/$link.yml"
+    run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TMPDIR/.status/$link")" = "check_failed: packages/$link.yml is a link, and the runs read regular files alone" ]
+    [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ] || {
+      echo "$link: $(cat "$TEST_TMPDIR/.status/python-zensical-ui")"
+      return 1
+    }
+    [[ "$output" == *"python-zensical-ui: update 0.0.41 → 0.0.43 waits for the update of $link"* ]]
+    [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = "python-zensical-ui"$'\t'"wait"$'\t'"Waits for the update of $link" ]
+    rm "$TEST_TMPDIR/packages/$link.yml"
+    cp "$TEST_TMPDIR/project.yml" "$TEST_TMPDIR/packages/zensical-bin.yml"
+  done
 }
 
 @test "check-all: a package with pin_from takes the project of a registry in another spelling" {
@@ -5590,9 +5653,9 @@ current: 28+22"
   [ "$(sort "$TEST_TMPDIR/heads.log")" = "$(for arch in "${ARCH_ALL[@]}"; do arch_source_url "$arch" 28+23; done | sort)" ]
 }
 
-@test "check-arch: asks nothing with allow_missing_arch: false or pkgver_dash: ''" {
+@test "check-arch: asks nothing with allow_missing_arch: false in any case or pkgver_dash: ''" {
   local line
-  for line in "allow_missing_arch: false" "pkgver_dash: ''"; do
+  for line in "allow_missing_arch: false" "allow_missing_arch: False" "allow_missing_arch: FALSE" "pkgver_dash: ''"; do
     temurin_package "current: 28+22
 $line"
     archive_missing aarch64 28+23
@@ -6298,9 +6361,9 @@ STUB
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "check_failed: https://aur.archlinux.org/pkg.git: timed out after 1 s" ]
 }
 
-@test "check-all: asks no arch check with allow_missing_arch: false or pkgver_dash: ''" {
+@test "check-all: asks no arch check with allow_missing_arch: false in any case or pkgver_dash: ''" {
   local line version
-  for line in "allow_missing_arch: false" "pkgver_dash: ''"; do
+  for line in "allow_missing_arch: false" "allow_missing_arch: False" "allow_missing_arch: FALSE" "pkgver_dash: ''"; do
     for version in 2.0.0 1.0.0; do
       stand_in_strategy step "$version"
       create_test_package "pkg" "step" "current: '1.0.0'

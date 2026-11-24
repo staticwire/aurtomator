@@ -38,7 +38,7 @@ The jobs run on `ubuntu-latest` in the image of `ci-image/Dockerfile` of aurtoma
 
 `verify` runs after `prepare`, failed `prepare` jobs included, takes the newest attempt of each package, and checks the checksums of every prepared update against its sources as `builder`, without secrets and without running PKGBUILDs. Job containers have the Docker socket of the runner, which root can use and `builder` cannot.
 
-`publish` runs for new versions, a changed README or `aurtomator.sh`, and new statistics, also after a failed `prepare` or `verify`. After a failed `verify` it pushes nothing, and every package with a new version gets `update_failed`. It holds the SSH key, the GPG key and the write token, runs no PKGBUILD and no strategy, checks the prepared files, pushes to the AUR, records the statistics and commits to your repository, see [Verified commit](#verified-commit). It sets up the keys only when some prepared update passed `verify`, so runs that change only the package table need no key.
+`publish` runs for new versions, a changed README or `aurtomator.sh`, and new statistics, also after a failed `prepare` or `verify`. After a failed `verify` it pushes nothing, every package keeps the status of the check run for the next run, and the run gets one issue, see [Failed runs](/features/issues/#failed-runs). It holds the SSH key, the GPG key and the write token, runs no PKGBUILD and no strategy, checks the prepared files, pushes to the AUR, records the statistics and commits to your repository, see [Verified commit](#verified-commit). It sets up the keys only when some prepared update passed `verify`, so runs that change only the package table need no key.
 
 `issues` runs in every run in which `check` succeeded, after `publish` when `publish` runs, and opens and closes the issues, see [Issues](/features/issues/). It checks each status as `--publish` does first, since with `publish` skipped the statuses come as `builder` of `check` wrote them.
 
@@ -98,7 +98,7 @@ While `packages/` holds no package, the script writes nothing, so repositories f
 | `.status/<name>` | `arch_added: 28+23 aarch64` | arches put back at the AUR version, pushed |
 | `.status/<name>` | `check_failed: <error>` | check failed |
 | `.status/<name>` | `update_failed: <error>` | update failed |
-| `.status/_alerts` | package, `hold`, `notice` or `wait`, note | one line for each alert that fired, and `wait` for packages with `upstream.pin_from` that wait for a held update; `--publish` copies the lines of the check run |
+| `.status/_alerts` | package, `hold`, `notice` or `wait`, note | one line for each alert that fired, and `wait` for packages with `upstream.pin_from` that wait for the package of their project, with the note `Waits for the held update of <name>` or `Waits for the update of <name>`; `--publish` copies the lines of the check run |
 | `.status/_assets` | package, asset value | one line for each value found |
 | `.status/_arches` | package, version, arches out or those a wait waits for, start of the wait, and for waits the AUR commit that builds them | see [Versions without some arches](/features/missing-arches/) |
 | `.status/_hosts` | package, host | one line for each check that failed on a request, with the host of that request |

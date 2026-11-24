@@ -1026,7 +1026,10 @@ case "$1 $2" in
     [[ -n "${TAG_SHA:-}" ]] || exit 1
     printf '%s %s\n' "${TAG_TYPE:-commit}" "$TAG_SHA"
     ;;
-  "api repos/owner/repo/git/tags/"*) printf '%s\n' "${PEELED:-}" ;;
+  "api repos/owner/repo/git/tags/"*)
+    [[ -n "${PEELED:-}" ]] || exit 1
+    printf '%s\n' "$PEELED"
+    ;;
   "release view") printf '%s\n' "${DRAFT:-true}" ;;
 esac
 EOF
@@ -1075,10 +1078,19 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   [ "$output" = "0" ]
 }
 
-@test "release-please: the find step leaves a version without a tag" {
+# The tag of the manifest version exists in every run, and a skipped sign leaves the release a draft
+@test "release-please: the find step fails when a tag lookup fails" {
   MANIFEST=0.13.1 TAG_SHA='' run_release_step "Find the release to sign"
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
   [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  run grep -c '^release ' "$GH_LOG"
+  [ "$output" = "0" ]
+  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=fff999 PEELED='' run_release_step "Find the release to sign"
+  [ "$status" -ne 0 ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  grep -qxF 'api repos/owner/repo/git/tags/fff999 --jq .object.sha' "$GH_LOG"
+  run grep -c '^release ' "$GH_LOG"
+  [ "$output" = "0" ]
 }
 
 # GitHub locks the files of a published immutable release
@@ -1242,6 +1254,13 @@ id_of() {
     run yq ".jobs.$job.outputs[\"$artifact-id\"]" "$CHECK_UPDATES"
     [ "$output" = '${{ steps.upload.outputs.artifact-id }}' ]
   done
+}
+
+# The statuses of the check run carry the error texts of upstream hosts
+@test "check-updates: the artifact checked lives for one day" {
+  run yq '.jobs.check.steps[] | select(.id == "upload") | .with.name + " " + (.with["retention-days"] | tostring)' "$CHECK_UPDATES"
+  [ "$status" -eq 0 ]
+  [ "$output" = "checked 1" ]
 }
 
 # Downloads by name take any artifact of that name in the run and empty ids take them all,
@@ -2071,21 +2090,24 @@ make_builder_inputs() {
   PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step prepare "Prepare updates"
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
-  [ "$output" = "$(printf '%s\n' ./.status ./.status/_arches ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
+  [ "$output" = "$(printf '%s\n' ./.status ./.status/_alerts ./.status/_arches ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
+  [ ! -s "$work/.status/_alerts" ]
 }
 
 # PKGBUILD code of the package runs as builder in prepare
-@test "run-as-builder: gives builder only the lines of its package in _arches and _assets" {
+@test "run-as-builder: gives builder only the lines of its package in _arches, _assets and _alerts" {
   local work="$BATS_TEST_TMPDIR/work"
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   make_builder_inputs
   printf 'foo\t2.0-x\nbar\t3.0-x\nfoo2\t4.0-x\n' >"$BATS_TEST_TMPDIR/data/status/_assets"
   printf 'bar\t3.0\t\t\nfoo\t2.0\taarch64\t\n' >"$BATS_TEST_TMPDIR/data/status/_arches"
+  printf 'bar\thold\tSplit package\nfoo\tnotice\tRead the notes\nfoo2\tnotice\tOther\n' >"$BATS_TEST_TMPDIR/data/status/_alerts"
   PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step prepare "Prepare updates"
   [ "$status" -eq 0 ]
   [ "$(cat "$work/.status/_assets")" = $'foo\t2.0-x' ]
   [ "$(cat "$work/.status/_arches")" = $'foo\t2.0\taarch64\t' ]
-  [ "$(stat -c %a "$work/.status/_assets" "$work/.status/_arches")" = $'644\n644' ]
+  [ "$(cat "$work/.status/_alerts")" = $'foo\tnotice\tRead the notes' ]
+  [ "$(stat -c %a "$work/.status/_assets" "$work/.status/_arches" "$work/.status/_alerts")" = $'644\n644\n644' ]
 }
 
 # awk compares two fields that look like numbers as numbers, and 1e2 and 100 are both 100
@@ -4026,6 +4048,27 @@ run_bare_issues_step() {
   [ "$output" = "$(id_of check checked) /data/status" ]
   run yq '.jobs.publish.steps[] | select(.name == "Download verified handoff") | .if' "$CHECK_UPDATES"
   [ "$output" = "needs.verify.result == 'success'" ]
+}
+
+# Verify jobs that fail as a job hand over nothing, and the failed run gets one issue
+@test "check-updates: publish keeps every status of the check run after a failed verify" {
+  local keep ws="$BATS_TEST_TMPDIR/ws" list="$BATS_TEST_TMPDIR/data/handoff/status/_unverified"
+  keep=$(step_index publish "Keep the statuses after a failed verify")
+  [ "$keep" -gt "$(step_index publish "Download verified handoff")" ]
+  [ "$keep" -lt "$(step_index publish "Find packages to push")" ]
+  run yq '.jobs.publish.steps[] | select(.name == "Keep the statuses after a failed verify") | .if' "$CHECK_UPDATES"
+  [ "$output" = "needs.check.outputs.prepare == 'true' && needs.verify.result != 'success'" ]
+  step_run publish "Keep the statuses after a failed verify" >"$BATS_TEST_TMPDIR/step.sh"
+  mkdir -p "$ws/packages"
+  run sh -e -c 'cd "$1" && DATA="$2" sh -e "$3"' _ "$ws" "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ -f "$list" ] && [ ! -s "$list" ]
+  touch "$ws/packages/foo.yml" "$ws/packages/bar.yml" "$ws/packages/notes.txt"
+  run sh -e -c 'cd "$1" && DATA="$2" sh -e "$3"' _ "$ws" "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ "$(<"$list")" = $'bar\nfoo' ]
+  run run_find_packages_step
+  [ "$output" = "packages=false" ]
 }
 
 @test "check-updates: Setup AUR SSH fails on an empty key" {

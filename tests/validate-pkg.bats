@@ -744,7 +744,7 @@ alerts:
 
 @test "validate: testing that is not a boolean rejected" {
   local value
-  for value in yes '"true"' 1; do
+  for value in yes '"true"' 1 '!!bool yes'; do
     create_test_package "mypkg" "archpkg" "upstream:
   testing: $value"
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
@@ -1027,7 +1027,7 @@ alerts:
 # starts to read cannot be refused
 @test "validate: every top-level key a script reads passes" {
   local keys key extra=""
-  keys=$(cd "$PROJECT_DIR" && grep -rhoE "pkg_get [^ ]+ '?\"?\.[a-z_]+" scripts strategies | grep -oE '[a-z_]+$' | sort -u)
+  keys=$(cd "$PROJECT_DIR" && grep -rhoE "pkg_(get|bool) [^ ]+ '?\"?\.[a-z_]+" scripts strategies | grep -oE '[a-z_]+$' | sort -u)
   [[ $'\n'"$keys"$'\n' == *$'\nallow_downgrade\n'* ]]
   for key in $keys; do
     case "$key" in
@@ -1660,7 +1660,7 @@ allow_downgrade: true"
 
 @test "validate: allow_downgrade that is not a boolean rejected" {
   local value
-  for value in yes '"true"' 1; do
+  for value in yes '"true"' 1 '!!bool yes'; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 allow_downgrade: $value"
@@ -1680,7 +1680,7 @@ allow_version_jump: true"
 
 @test "validate: allow_version_jump that is not a boolean rejected" {
   local value
-  for value in yes '"true"' 1; do
+  for value in yes '"true"' 1 '!!bool yes'; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 allow_version_jump: $value"
@@ -1824,7 +1824,7 @@ allow_missing_arch: $value"
 
 @test "validate: allow_missing_arch that is not a boolean rejected" {
   local value
-  for value in no yes '"false"' 0; do
+  for value in no yes '"false"' 0 '!!bool no'; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 allow_missing_arch: $value"
@@ -2139,7 +2139,7 @@ alerts:
 
 @test "validate: an alert hold that is not a boolean rejected" {
   local value
-  for value in yes '"true"' 1; do
+  for value in yes '"true"' 1 '!!bool yes'; do
     create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo
 alerts:
@@ -2149,6 +2149,35 @@ alerts:
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
     [ "$status" -ne 0 ]
     [[ "$output" == *"alerts[0].hold must be true or false"* ]]
+  done
+}
+
+@test "validate: every flag takes true and false in any case" {
+  local value
+  for value in true True TRUE false False FALSE; do
+    create_test_package "mypkg" "crates" "upstream:
+  registry: pijul
+  prerelease: $value
+pkgver_dash: _
+allow_downgrade: $value
+allow_version_jump: $value
+allow_missing_arch: $value
+alerts:
+  - when: major
+    hold: $value
+    note: New major"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused: $value"
+      return 1
+    }
+    create_test_package "mypkg" "archpkg" "upstream:
+  testing: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "refused testing: $value"
+      return 1
+    }
   done
 }
 
@@ -2313,20 +2342,29 @@ pkgver_dash: $value"
 
 # Semver pre-releases always hold a dash
 @test "validate: crates prerelease without pkgver_dash rejected" {
-  create_test_package "mypkg" "crates" "upstream:
+  local value
+  for value in true True TRUE; do
+    create_test_package "mypkg" "crates" "upstream:
   registry: pijul
-  prerelease: true"
-  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"upstream.prerelease needs pkgver_dash"* ]]
+  prerelease: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"upstream.prerelease needs pkgver_dash"* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
 }
 
 @test "validate: crates prerelease false without pkgver_dash passes" {
-  create_test_package "mypkg" "crates" "upstream:
+  local value
+  for value in false False FALSE; do
+    create_test_package "mypkg" "crates" "upstream:
   registry: serde
-  prerelease: false"
-  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
-  [ "$status" -eq 0 ]
+  prerelease: $value"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ]
+  done
 }
 
 @test "validate: prerelease for another strategy rejected" {
@@ -2341,7 +2379,7 @@ pkgver_dash: _"
 
 @test "validate: prerelease that is not a boolean rejected" {
   local value
-  for value in yes '"true"' 1; do
+  for value in yes '"true"' 1 '!!bool yes'; do
     create_test_package "mypkg" "crates" "upstream:
   registry: pijul
   prerelease: $value

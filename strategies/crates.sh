@@ -14,7 +14,7 @@ source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 pkg_file=$(pkg_file "$NAME")
 registry=$(pkg_get "$pkg_file" .upstream.registry)
 field=max_stable_version
-if [[ $(pkg_get "$pkg_file" '.upstream.prerelease') == true ]]; then
+if [[ $(pkg_bool "$pkg_file" .upstream.prerelease) == true ]]; then
   field=max_version
 fi
 
