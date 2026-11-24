@@ -2090,21 +2090,24 @@ make_builder_inputs() {
   PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step prepare "Prepare updates"
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
-  [ "$output" = "$(printf '%s\n' ./.status ./.status/_arches ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
+  [ "$output" = "$(printf '%s\n' ./.status ./.status/_alerts ./.status/_arches ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
+  [ ! -s "$work/.status/_alerts" ]
 }
 
 # PKGBUILD code of the package runs as builder in prepare
-@test "run-as-builder: gives builder only the lines of its package in _arches and _assets" {
+@test "run-as-builder: gives builder only the lines of its package in _arches, _assets and _alerts" {
   local work="$BATS_TEST_TMPDIR/work"
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   make_builder_inputs
   printf 'foo\t2.0-x\nbar\t3.0-x\nfoo2\t4.0-x\n' >"$BATS_TEST_TMPDIR/data/status/_assets"
   printf 'bar\t3.0\t\t\nfoo\t2.0\taarch64\t\n' >"$BATS_TEST_TMPDIR/data/status/_arches"
+  printf 'bar\thold\tSplit package\nfoo\tnotice\tRead the notes\nfoo2\tnotice\tOther\n' >"$BATS_TEST_TMPDIR/data/status/_alerts"
   PACKAGE_INPUT=foo SUDO_OUT=ok run_builder_step prepare "Prepare updates"
   [ "$status" -eq 0 ]
   [ "$(cat "$work/.status/_assets")" = $'foo\t2.0-x' ]
   [ "$(cat "$work/.status/_arches")" = $'foo\t2.0\taarch64\t' ]
-  [ "$(stat -c %a "$work/.status/_assets" "$work/.status/_arches")" = $'644\n644' ]
+  [ "$(cat "$work/.status/_alerts")" = $'foo\tnotice\tRead the notes' ]
+  [ "$(stat -c %a "$work/.status/_assets" "$work/.status/_arches" "$work/.status/_alerts")" = $'644\n644\n644' ]
 }
 
 # awk compares two fields that look like numbers as numbers, and 1e2 and 100 are both 100

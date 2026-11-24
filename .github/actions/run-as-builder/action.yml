@@ -95,7 +95,7 @@ runs:
               take "$STATUSES/$name" ".status/$name" "$results_max"
             done
             # These records hold a line for each package, and PKGBUILD code of this one reads them
-            for name in _arches _assets; do
+            for name in _arches _assets _alerts; do
               [[ -f "$STATUSES/$name" && ! -L "$STATUSES/$name" ]] || continue
               install -d "$WORK/.status"
               awk -F'\t' -v p="$PACKAGE" '$1 "" == p ""' "$STATUSES/$name" >"$WORK/.status/$name"

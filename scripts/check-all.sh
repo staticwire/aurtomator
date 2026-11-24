@@ -467,8 +467,8 @@ companion_waits() {
   return 1
 }
 
-# Prints the alert lines of package $1 for --publish, which asks upstream nothing: the lines
-# of the check run, then those of offline rules in $2 that the check run lacks
+# Prints the alert lines of package $1 for --prepare and --publish: the lines of the check run,
+# then those of offline rules in $2 that the check run lacks
 publish_alerts() {
   local checked line
   checked=$(checked_alerts "$1")
