@@ -24,5 +24,10 @@ upstream:                 # strategy fields
 #     note: Raise makedepends foo to 2
 #   - requires: changed      # pypi: the new version adds or drops a requirement
 #     hold: true
+#   - requires: unmet        # pypi: depends of the AUR miss a requirement of the new version
+#     hold: true
+# python:
+#   map:                     # PyPI name: the Arch package that meets it
+#     svg-path: python-svg.path
 
 # Runs write current, last_updated, current_asset, arch_wait and arch_out.

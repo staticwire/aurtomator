@@ -20,7 +20,7 @@ done
 readonly VALID_STRATEGIES
 
 # The top-level keys that the scripts read
-readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump allow_missing_arch arch_wait arch_out cooldown_days alerts upstream"
+readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump allow_missing_arch arch_wait arch_out cooldown_days alerts upstream python"
 
 # The upstream keys that each strategy reads, in the order of the strategy
 # table of README.md. One test compares them with the keys the scripts name.
@@ -91,6 +91,43 @@ key_strategies() {
   esac
 }
 
+# Check the python key of package file $1: a map with map, from PyPI names to package names
+validate_python() {
+  local file="$1" shown="packages/${1##*/}" errors=0 key value unknown
+  case $(pkg_get "$file" '.python | tag') in
+    "!!null") return 0 ;;
+    "!!map") ;;
+    *)
+      log_err "$shown: python must be a map"
+      return 1
+      ;;
+  esac
+  unknown=$(pkg_get "$file" '.python | [keys[] | select(. != "map")] | join(", ")')
+  if [[ -n "$unknown" ]]; then
+    log_err "$shown: python: unknown key: $unknown"
+    errors=1
+  fi
+  case $(pkg_get "$file" '.python.map | tag') in
+    "!!null") ;;
+    "!!map")
+      while IFS=$'\t' read -r key value; do
+        if ! pypi_name "$key" >/dev/null; then
+          log_err "$shown: python.map: ${key@Q} is not a PyPI name"
+          errors=1
+        elif ! (LC_ALL=C && [[ "$value" =~ ^[a-z0-9@_+][a-z0-9@._+-]*$ ]]); then
+          log_err "$shown: python.map.$key must be a package name of a-z, 0-9 and @ . _ + -: ${value@Q}"
+          errors=1
+        fi
+      done < <(pkg_get "$file" '.python.map | to_entries[] | [.key, ((.value | select(tag == "!!str")) // (.value | to_json(0)))] | join("\t")')
+      ;;
+    *)
+      log_err "$shown: python.map must be a map of PyPI names to package names"
+      errors=1
+      ;;
+  esac
+  return "$errors"
+}
+
 # Check entry $2 of the alerts of package file $1, with pkgver_format $3 if any, strategy $4
 # and pkgver_dash set when $5 is true; the errors go to stderr
 validate_alert() {
@@ -109,20 +146,20 @@ validate_alert() {
     errors=1
   fi
 
-  # requires compares the releases of current and the new version on PyPI, so current takes
+  # changed compares the releases of current and the new version on PyPI, so current takes
   # the spelling of PyPI, which pkgver_format and pkgver_dash change
   tag=$(pkg_get "$file" ".alerts[$i].requires | tag")
   value=$(pkg_get "$file" ".alerts[$i].requires")
-  if [[ "$tag" != "!!null" && "$value" != changed ]]; then
-    log_err "$rule.requires must be changed, got $value"
+  if [[ "$tag" != "!!null" && "$value" != changed && "$value" != unmet ]]; then
+    log_err "$rule.requires must be changed or unmet, got $value"
     errors=1
   elif [[ "$tag" != "!!null" && "$4" != pypi ]]; then
     log_err "$rule: requires applies to the pypi strategy only"
     errors=1
-  elif [[ "$tag" != "!!null" && -n "$format" ]]; then
+  elif [[ "$value" == changed && -n "$format" ]]; then
     log_err "$rule: requires does not apply with pkgver_format"
     errors=1
-  elif [[ "$tag" != "!!null" && "$5" == true ]]; then
+  elif [[ "$value" == changed && "$5" == true ]]; then
     log_err "$rule: requires does not apply with pkgver_dash"
     errors=1
   fi
@@ -430,14 +467,22 @@ validate_pkg() {
     for ((i = 0; i < alert_count; i++)); do
       validate_alert "$file" "$i" "$pkgver_format" "$strategy" "$dash_set" || ((errors++))
     done
-    if (($(pkg_get "$file" '[.alerts[] | select(tag == "!!map" and has("requires"))] | length') > 1)); then
-      log_err "$shown: alerts: one requires rule at most"
-      ((errors++))
-    fi
+    local -A requires_seen=()
+    local value
+    while IFS=$'\t' read -r i value; do
+      [[ -n "$value" ]] || continue
+      if [[ -n "${requires_seen[$value]:-}" ]]; then
+        log_err "$shown: alerts[$i].requires: $value is set twice"
+        ((errors++))
+      fi
+      requires_seen[$value]=1
+    done < <(pkg_get "$file" '.alerts | to_entries[] | select((.value | tag) == "!!map" and (.value | has("requires")) and (.value.requires | tag) == "!!str") | [(.key | tostring), .value.requires] | join("\t")')
   elif [[ "$alerts_tag" != "!!null" ]]; then
     log_err "$shown: alerts must be a list"
     ((errors++))
   fi
+
+  validate_python "$file" || ((errors++))
 
   local branch
   if [[ $(pkg_get "$file" '.upstream.branch | tag') != "!!null" ]]; then

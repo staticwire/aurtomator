@@ -2156,7 +2156,7 @@ alerts:
   - requires: always"
   run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"alerts[0].requires must be changed, got always"* ]]
+  [[ "$output" == *"alerts[0].requires must be changed or unmet, got always"* ]]
   create_test_package "pkg" "npm" "upstream:
   registry: express
 alerts:
@@ -2363,6 +2363,29 @@ run_split() {
       return 1
     }
   done
+}
+
+@test "requires.sh: requirement_split reads the extras in PEP 503 form" {
+  local -a cases=('requests [security,tests] >= 2.8.1|security,tests' 'httpx[http2]<1.0,>=0.28.0|http2'
+    'botocore[CRT] (<2.0a0,>=1.21.0) ; extra == "crt"|crt' 'foo[ a_b , C.d ]|a-b,c-d' 'foo[]|' 'foo|')
+  local case req extras
+  for case in "${cases[@]}"; do
+    IFS='|' read -r req extras <<<"$case"
+    run_requires 'requirement_split "$1" && echo "$REQ_EXTRAS"' "$req"
+    [ "$status" -eq 0 ] && [ "$output" = "$extras" ] || {
+      echo "$req: $status $output"
+      return 1
+    }
+  done
+  run_requires 'requirement_split "foo[a b]"'
+  [ "$status" -eq 1 ]
+}
+
+@test "requires.sh: marker_value takes the extras of MARKER_EXTRAS" {
+  export MARKER_EXTRAS=http2,socks
+  check_markers \
+    1 'extra == "http2"' 1 'extra == "HTTP2"' 0 'extra == "cli"' 1 '"socks" == extra' 0 'extra != "http2"' \
+    1 'extra != "cli"' 0 '(platform_python_implementation != "CPython") and extra == "http2"'
 }
 
 @test "requires.sh: requirement_split refuses text outside the grammar" {
@@ -2937,6 +2960,251 @@ python_files_db() {
   run_archdb 'for n in python-rich python-svg.path none-such; do arch_package "$n" && echo "$PKG_NAME $PKG_VERSION $PKG_REPO" || echo "$n: none"; done'
   [ "$status" -eq 0 ]
   [ "$output" = $'python-rich 14.2.0 extra\npython-svg.path 6.3 aur\nnone-such: none' ]
+}
+
+# === pyrules.sh ===
+
+# Helper: the mock pacman with the repository packages of the tests, a files database with their
+# Python distributions, the AUR packages of tests/fixtures and a run cache in the test directory
+unmet_env() {
+  use_mock_pacman
+  export AURTOMATOR_RUN_CACHE="$TEST_TMPDIR/run-cache" MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync" \
+    MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
+  mkdir -p "$AURTOMATOR_RUN_CACHE"
+  printf '%s\n' 'python 3.14.10-1 core python3' 'python-typer 0.20.0-1 extra' 'python-yaml 6.0.4-1 extra python-pyyaml' \
+    'python-requests 2.32.5-1 extra' 'python-rich 14.2.0-1 extra' 'python-urllib3 2.5.0-1 extra' \
+    'python-tqdm 4.67.1-2 extra' 'python-botocore 1.43.108-1 extra' 'python-jmespath 1.0.1-4 extra' \
+    'python-s3transfer 0.19.0-1 extra' 'python-mpmath 1.4.1-1 extra' 'python-httpx 0.28.1-3 extra' \
+    'python-protobuf 36.1-1 extra' 'python-puremagic 1.30-1 extra' 'python-pygraphviz 1.14-3 extra' \
+    'python-numpy 2.3.4-1 extra' >"$MOCK_PACMAN_SYNC"
+  local line
+  for line in 'python-yaml PyYAML-6.0.2' 'python-botocore botocore-1.43.108' 'python-httpx httpx-0.28.1' \
+    'python-protobuf protobuf-6.33.5' 'python-mpmath mpmath-1.4.1' 'python-requests requests-2.32.5'; do
+    printf 'extra\t%s\t1-1\tusr/lib/python3.14/site-packages/%s.dist-info/METADATA\n' "${line% *}" "${line#* }"
+  done >"$MOCK_PACMAN_FILES"
+  cp "$FIXTURES_DIR/aur/rpc.json" "$MOCK_FILES_DIR/aur-rpc.json"
+}
+
+# Helper: writes .SRCINFO $1 of a package of one pkgname, $2, whose depends are the other arguments
+unmet_srcinfo() {
+  {
+    printf 'pkgbase = %s\n\tpkgver = 1.0\n\tpkgrel = 1\n' "$2"
+    printf '\tdepends = %s\n' "${@:3}"
+    printf '\npkgname = %s\n' "$2"
+  } >"$1"
+}
+
+# Helper: runs python_unmet for package pkg of registry $2 at version $3 with .SRCINFO $1, and the
+# lines $4 in the YAML
+run_unmet() {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: $2
+${4:-}"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; python_unmet "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml" "$1" "$2" "$3"
+}
+
+@test "pyrules.sh: python_unmet holds a requirement that no entry of depends meets" {
+  unmet_env
+  grep -v 'python-rich$' "$FIXTURES_DIR/aur/ydiskarc.SRCINFO" | sed 's/pkgrel = 2/pkgrel = 1/' >"$TEST_TMPDIR/rel1.SRCINFO"
+  run_unmet "$TEST_TMPDIR/rel1.SRCINFO" ydiskarc 1.1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'hold\trich: not in depends' ]
+  run_unmet "$FIXTURES_DIR/aur/ydiskarc.SRCINFO" ydiskarc 1.1.0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "pyrules.sh: python_unmet holds a lower bound that the version of the distribution fails" {
+  unmet_env
+  unmet_srcinfo "$TEST_TMPDIR/boto3.SRCINFO" python-boto3 python python-botocore python-jmespath python-s3transfer
+  run_unmet "$TEST_TMPDIR/boto3.SRCINFO" boto3 1.44.10
+  [ "$status" -eq 0 ]
+  [ "$output" = $'hold\tbotocore<1.45.0,>=1.44.10: python-botocore has 1.43.108' ]
+}
+
+@test "pyrules.sh: python_unmet gives a notice for an upper cap and names a version of pkgver" {
+  unmet_env
+  pypi_fake sympy 1.14.0 'mpmath<1.4,>=1.1.0'
+  unmet_srcinfo "$TEST_TMPDIR/sympy.SRCINFO" python-sympy python python-mpmath
+  run_unmet "$TEST_TMPDIR/sympy.SRCINFO" sympy 1.14.0
+  [ "$output" = $'notice\tmpmath<1.4,>=1.1.0: python-mpmath has 1.4.1' ]
+  : >"$MOCK_PACMAN_FILES"
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  run_unmet "$TEST_TMPDIR/sympy.SRCINFO" sympy 1.14.0
+  [ "$output" = $'notice\tmpmath<1.4,>=1.1.0: python-mpmath has 1.4.1 (pkgver)' ]
+}
+
+@test "pyrules.sh: python_unmet holds the requirements of an extra that depends lacks" {
+  unmet_env
+  pypi_fake litellm 1.80.0 'httpx[http2]<1.0,>=0.28.0' 'h11; extra == "proxy"'
+  unmet_srcinfo "$TEST_TMPDIR/litellm.SRCINFO" python-litellm python python-httpx
+  run_unmet "$TEST_TMPDIR/litellm.SRCINFO" litellm 1.80.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'hold\thttpx[http2]: h2 not in depends' ]
+  printf '%s\n' 'python-h2 4.3.0-2 extra' >>"$MOCK_PACMAN_SYNC"
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  unmet_srcinfo "$TEST_TMPDIR/litellm.SRCINFO" python-litellm python python-httpx python-h2
+  run_unmet "$TEST_TMPDIR/litellm.SRCINFO" litellm 1.80.0
+  [ -z "$output" ]
+}
+
+@test "pyrules.sh: python_unmet gives a notice when it cannot read the metadata of an extra" {
+  unmet_env
+  pypi_fake demo 1.0 'zensical[x]>=0.1'
+  printf '%s\n' 'python-zensical 0.0.9-1 extra' >>"$MOCK_PACMAN_SYNC"
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python python-zensical
+  run_unmet "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$output" = $'hold\tzensical>=0.1: python-zensical has 0.0.9 (pkgver)\nnotice\tzensical[x]: cannot read the metadata of zensical 0.0.9' ]
+}
+
+@test "pyrules.sh: python_unmet holds a Requires-Python that the python of Arch fails" {
+  unmet_env
+  pypi_fake_metadata demo 1.0 $'Metadata-Version: 2.4\nName: demo\nRequires-Python: < 3.14\n'
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  run_unmet "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$output" = $'hold\tRequires-Python <3.14: python has 3.14.10' ]
+}
+
+@test "pyrules.sh: python_match counts a package whose provides hold the name of the requirement" {
+  unmet_env
+  : >"$MOCK_PACMAN_FILES"
+  printf '[{"Name": "python-svg-path-git", "Version": "r9.abc-1", "Provides": ["python-svg-path=6.3"]}]\n' \
+    >"$MOCK_FILES_DIR/aur-rpc.json"
+  create_test_package "pkg" "pypi" "upstream:
+  registry: demo"
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python python-yaml python-svg-path-git
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"
+    python_match "$1" "$2" python-demo pyyaml PyYAML && echo "$MATCH_PKG $MATCH_VERSION $MATCH_FROM"
+    python_match "$1" "$2" python-demo svg-path svg-path && echo "$MATCH_PKG $MATCH_VERSION $MATCH_FROM"
+    python_match "$1" "$2" python-demo rich rich || echo none' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml" "$TEST_TMPDIR/demo.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'python-yaml 6.0.4 pkgver\npython-svg-path-git r9.abc aur\nnone' ]
+}
+
+@test "pyrules.sh: python_unmet compares the version of the distribution, not pkgver" {
+  unmet_env
+  pypi_fake demo 1.0 'protobuf<8.0.0,>=6.33.5'
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python python-protobuf
+  run_unmet "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "pyrules.sh: python_unmet matches an AUR package through python.map" {
+  unmet_env
+  unmet_srcinfo "$TEST_TMPDIR/g.SRCINFO" graphviz2drawio python python-puremagic python-pygraphviz python-svg.path
+  run_unmet "$TEST_TMPDIR/g.SRCINFO" graphviz2drawio 1.2.0 "python:
+  map:
+    svg-path: python-svg.path"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run_unmet "$TEST_TMPDIR/g.SRCINFO" graphviz2drawio 1.2.0
+  [ "$output" = $'hold\tsvg-path: not in depends' ]
+}
+
+@test "pyrules.sh: python_unmet gives a notice for a version outside PEP 440 and a URL" {
+  unmet_env
+  pypi_fake demo 1.0 'kubediagrams>=0.9' 'pip @ https://example.org/pip.zip'
+  printf '%s\n' 'python-pip 25.3-1 extra' >>"$MOCK_PACMAN_SYNC"
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python kube-diagrams-git python-pip
+  run_unmet "$TEST_TMPDIR/demo.SRCINFO" demo 1.0 "python:
+  map:
+    KubeDiagrams: kube-diagrams-git"
+  [ "$output" = $'notice\tkubediagrams>=0.9: kube-diagrams-git has r675.70e1dda, which PEP 440 cannot compare\nnotice\tpip @ URL: cannot compare' ]
+}
+
+@test "pyrules.sh: python_unmet takes the pin of this release for a package of the repository with pin_from" {
+  unmet_env
+  pypi_fake zenlike 1.0 'zensical-ui==0.0.43'
+  unmet_srcinfo "$TEST_TMPDIR/z.SRCINFO" zenlike python python-zensical-ui
+  run_unmet "$TEST_TMPDIR/z.SRCINFO" zenlike 1.0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  sed -i 's/"0.0.43-1"/"0.0.41-1"/' "$MOCK_FILES_DIR/aur-rpc.json"
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  run_unmet "$TEST_TMPDIR/z.SRCINFO" zenlike 1.0
+  [ "$output" = $'hold\tzensical-ui==0.0.43: python-zensical-ui has 0.0.41 (AUR pkgver)' ]
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: ZenLike"
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  run_unmet "$TEST_TMPDIR/z.SRCINFO" zenlike 1.0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "pyrules.sh: python_unmet names the pkgname in the notes of a split package" {
+  unmet_env
+  pypi_fake liblinear-official 2.50.0 scipy 'numpy>=3'
+  printf '%s\n' 'python-scipy 1.16.3-1 extra' >>"$MOCK_PACMAN_SYNC"
+  run_unmet "$FIXTURES_DIR/aur/liblinear.SRCINFO" liblinear-official 2.50.0
+  [ "$output" = $'hold\tpython-liblinear: numpy>=3: python-numpy has 2.3.4 (pkgver)' ]
+}
+
+@test "pyrules.sh: python_unmet checks nothing for a package without Python in depends" {
+  unmet_env
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  unmet_srcinfo "$TEST_TMPDIR/c.SRCINFO" tool glibc
+  run_unmet "$TEST_TMPDIR/c.SRCINFO" ydiskarc 1.1.0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+# Helper: a pypi package ydiskarc with .SRCINFO $1 on the AUR and the alerts $2
+unmet_package() {
+  unmet_env
+  aur_srcinfo_remote ydiskarc "$1"
+  create_test_package "ydiskarc" "pypi" "upstream:
+  registry: ydiskarc
+alerts:
+$2"
+}
+
+@test "lib.sh: fired_alerts fires requires: unmet with its notes, hold only for holding notes" {
+  grep -v 'python-rich$' "$FIXTURES_DIR/aur/ydiskarc.SRCINFO" >"$TEST_TMPDIR/rel1.SRCINFO"
+  unmet_package "$TEST_TMPDIR/rel1.SRCINFO" "  - requires: unmet
+    hold: true
+    note: Check depends"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.0.1 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'hold\tCheck depends: rich: not in depends' ]
+  export MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync"
+  sed -i 's/^python-requests .*/python-requests 2.20.0-1 extra/' "$MOCK_PACMAN_SYNC"
+  : >"$MOCK_PACMAN_FILES"
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.0.1 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
+  [ "$output" = $'hold\tCheck depends: requests>=2.31.0: python-requests has 2.20.0 (pkgver); rich: not in depends' ]
+}
+
+@test "lib.sh: fired_alerts fires requires: unmet as a notice under hold for notices alone" {
+  pypi_fake ydiskarc 1.2.0 'requests<2' 'rich'
+  unmet_package "$FIXTURES_DIR/aur/ydiskarc.SRCINFO" "  - requires: unmet
+    hold: true"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.1.0 1.2.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequests<2: python-requests has 2.32.5' ]
+}
+
+@test "lib.sh: fired_alerts fires no requires: unmet without notes, for a new package or offline" {
+  unmet_package "$FIXTURES_DIR/aur/ydiskarc.SRCINFO" "  - requires: unmet
+    hold: true"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.0.1 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  local mode
+  for mode in offline held; do
+    run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.0.1 1.1.0 "$2"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml" "$mode"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+  [ ! -e "$CURL_ARGS_LOG" ]
+  rm -rf "$TEST_TMPDIR/aur-remote" "$AURTOMATOR_RUN_CACHE"/*
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # === version of aurtomator ===

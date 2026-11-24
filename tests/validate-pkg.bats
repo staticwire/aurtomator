@@ -2239,15 +2239,66 @@ alerts:
   [ "$status" -eq 0 ]
 }
 
+@test "validate: requires: changed and unmet pass side by side, unmet also with pkgver_format" {
+  create_test_package "mypkg" "pypi" "upstream:
+  registry: zensical
+pkgver_format: '4.%s'
+alerts:
+  - requires: unmet
+    hold: true"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+  create_test_package "mypkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: changed
+  - requires: unmet
+    note: Check depends"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: python.map maps PyPI names to package names" {
+  create_test_package "mypkg" "pypi" "upstream:
+  registry: graphviz2drawio
+python:
+  map:
+    svg-path: python-svg.path
+    opencv_python: python-opencv
+    Foo.Bar: lib32-c++lib"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+  local entry body message
+  for entry in "python: none|python must be a map" "python: {map: [a]}|python.map must be a map of PyPI names to package names" \
+    "python: {map: {-x: python-x}}|python.map: '-x' is not a PyPI name" \
+    "python: {map: {x: Python-X}}|python.map.x must be a package name of a-z, 0-9 and @ . _ + -: 'Python-X'" \
+    "python: {map: {x: [a]}}|python.map.x must be a package name of a-z, 0-9 and @ . _ + -: '[\"a\"]'" \
+    "python: {skip: [docs]}|python: unknown key: skip"; do
+    body=${entry%%|*}
+    message=${entry#*|}
+    create_test_package "mypkg" "pypi" "upstream:
+  registry: graphviz2drawio
+$body"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: $message"* ]] || {
+      echo "$entry"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
 @test "validate: an alert requires outside changed, pypi and the spelling of PyPI rejected" {
   local entry strategy body message
-  for entry in "pypi|  - requires: always|alerts[0].requires must be changed, got always" \
+  for entry in "pypi|  - requires: always|alerts[0].requires must be changed or unmet, got always" \
     "npm|  - requires: changed|alerts[0]: requires applies to the pypi strategy only" \
     "pypi|  - requires: changed
     from: '1.0'|alerts[0] must hold exactly one of when, from, match, requires" \
     "pypi|  - requires: changed
+  - requires: unmet
   - requires: changed
-    hold: true|alerts: one requires rule at most"; do
+    hold: true|alerts[2].requires: changed is set twice" \
+    "npm|  - requires: unmet|alerts[0]: requires applies to the pypi strategy only"; do
     strategy=${entry%%|*}
     body=${entry#*|}
     body=${body%|*}

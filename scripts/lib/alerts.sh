@@ -50,10 +50,29 @@ alert_note_error() {
   printf 'note must be one line of text%s\n' "${value:+: put $value in quotes}"
 }
 
+# Print the notes of rule unmet for version $2 of package file $1, as python_unmet does, nothing for
+# a package the AUR lacks; without a run cache, one of its own
+alert_unmet() {
+  local name srcinfo rc=0 out
+  name=$(package_name "$1") || return 1
+  if [[ -z "${AURTOMATOR_RUN_CACHE:-}" ]]; then
+    local -x AURTOMATOR_RUN_CACHE
+    AURTOMATOR_RUN_CACHE=$(mktemp -d) || return 1
+    out=$(alert_unmet "$@") || rc=$?
+    rm -rf "$AURTOMATOR_RUN_CACHE"
+    [[ -z "$out" ]] || printf '%s\n' "$out"
+    return "$rc"
+  fi
+  srcinfo=$(aur_srcinfo "$name") || rc=$?
+  ((rc != 3)) || return 0
+  ((rc == 0)) || return 1
+  python_unmet "$1" "$srcinfo" "$(pkg_get "$1" .upstream.registry)" "$2"
+}
+
 # Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as hold or
 # notice, a tab and the note; fail on a broken rule. $4 offline skips requires rules, held those without hold
 fired_alerts() {
-  local file="$1" current="$2" latest="$3" offline="${4:-}" count i kind value rc action note change hold
+  local file="$1" current="$2" latest="$3" offline="${4:-}" count i kind value rc action note change hold joined
   count=$(pkg_get "$file" '.alerts | length')
   for ((i = 0; i < count; i++)); do
     kind=$(pkg_get "$file" ".alerts[$i] | [keys[] | select(. == \"when\" or . == \"from\" or . == \"match\" or . == \"requires\")] | join(\" \")")
@@ -68,8 +87,8 @@ fired_alerts() {
       return 1
     fi
     if [[ "$kind" == requires ]]; then
-      if [[ "$value" != changed ]]; then
-        log_err "alerts[$i].requires must be changed, got $value"
+      if [[ "$value" != changed && "$value" != unmet ]]; then
+        log_err "alerts[$i].requires must be changed or unmet, got $value"
         return 1
       fi
       if [[ $(pkg_get "$file" .strategy) != pypi ]]; then
@@ -80,6 +99,20 @@ fired_alerts() {
       if [[ $(pkg_get "$file" ".alerts[$i] | has(\"note\")") == true ]] && ! note=$(alert_note "$file" "$i"); then
         log_err "alerts[$i].$(alert_note_error "$file" "$i")"
         return 1
+      fi
+      # unmet reads no current, so prepare and publish take its lines from the check run
+      if [[ "$value" == unmet ]]; then
+        [[ -z "$offline" ]] || continue
+        change=$(alert_unmet "$file" "$latest") || return 1
+        [[ -n "$change" ]] || continue
+        action=notice
+        [[ "$hold" != true || $'\n'"$change" != *$'\nhold\t'* ]] || action=hold
+        joined=""
+        while IFS=$'\t' read -r _ change; do
+          joined+="${joined:+; }$change"
+        done <<<"$change"
+        printf '%s\t%s\n' "$action" "${note:+$note: }$joined"
+        continue
       fi
       [[ -n "$current" && "$offline" != offline ]] || continue
       [[ "$offline" != held || "$hold" == true ]] || continue

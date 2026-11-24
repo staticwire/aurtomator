@@ -25,6 +25,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/prepared.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/arch.sh"
 # shellcheck source=lib/archdb.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/archdb.sh"
+# shellcheck source=lib/pyrules.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pyrules.sh"
 # shellcheck source=lib/sums.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/sums.sh"
 # shellcheck source=lib/issue.sh

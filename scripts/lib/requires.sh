@@ -39,18 +39,26 @@ _requires_python() {
   done <<<"$info"
 }
 
-# Set REQ_NAME to the PEP 503 name of requirement $1, REQ_SPEC to its version clauses joined
-# by commas without blanks, or @ for a URL, and REQ_MARKER to its marker; fail outside PEP 508
+# Set REQ_NAME to the PEP 503 name of requirement $1, REQ_EXTRAS to its extras in that form, joined by
+# commas, REQ_SPEC to its clauses joined by commas without blanks, or @ for a URL, and REQ_MARKER
 requirement_split() {
-  local LC_ALL=C rest spec
+  local LC_ALL=C rest spec extras name extra
+  local -a list
   local head='^[[:blank:]]*([A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?)[[:blank:]]*(\[[^][]*\])?(.*)$'
   local url='^[[:blank:]]*@[[:blank:]]*[^[:blank:]]+([[:blank:]]+;[[:blank:]]*([^[:blank:]](.*[^[:blank:]])?))?[[:blank:]]*$'
   local clause='[[:blank:]]*(<=|<|!=|===|==|>=|>|~=)[[:blank:]]*[A-Za-z0-9._*+!-]+[[:blank:]]*'
   local parens='^[[:blank:]]*\((.*)\)[[:blank:]]*$' trimmed='^[[:blank:]]*([^[:blank:]](.*[^[:blank:]])?)[[:blank:]]*$'
-  REQ_NAME="" REQ_SPEC="" REQ_MARKER=""
+  REQ_NAME="" REQ_EXTRAS="" REQ_SPEC="" REQ_MARKER=""
   [[ "$1" =~ $head ]] || return 1
-  rest=${BASH_REMATCH[4]}
-  _pypi_norm "${BASH_REMATCH[1]}" || return 1
+  rest=${BASH_REMATCH[4]} extras=${BASH_REMATCH[3]} name=${BASH_REMATCH[1]}
+  extras=${extras#[}
+  IFS=, read -ra list <<<"${extras%]}"
+  for extra in "${list[@]}"; do
+    [[ "$extra" =~ $trimmed ]] || continue
+    _pypi_norm "${BASH_REMATCH[1]}" || return 1
+    REQ_EXTRAS+="${REQ_EXTRAS:+,}$PYPI_NORM"
+  done
+  _pypi_norm "$name" || return 1
   if [[ "$rest" =~ ^[[:blank:]]*@ ]]; then
     [[ "$rest" =~ $url ]] || return 1
     REQ_NAME=$PYPI_NORM REQ_SPEC=@ REQ_MARKER=${BASH_REMATCH[2]}
@@ -206,10 +214,26 @@ _marker_compare() {
       _requires_python
       _marker_version "$3" "$const" "$swapped" "$REQUIRES_PY_FULL"
       ;;
-    # The check asks for no extras, and the specification lets a tool reject extra !=
-    extra) if [[ "$3" == "!=" ]]; then _MK_VAL='?'; else _MK_VAL=0; fi ;;
+    extra) _marker_extra "$3" "$const" ;;
     *) _MK_VAL='?' ;;
   esac
+}
+
+# Set _MK_VAL for operator $1 between field extra and constant $2: the check asks for the extras of
+# MARKER_EXTRAS, none by default, and the specification lets a tool reject extra != without extras
+_marker_extra() {
+  local extra
+  if [[ -z "${MARKER_EXTRAS:-}" || ("$1" != "==" && "$1" != "!=") ]]; then
+    if [[ "$1" == "!=" ]]; then _MK_VAL='?'; else _MK_VAL=0; fi
+    return 0
+  fi
+  _MK_VAL=0
+  if _pypi_norm "$2"; then
+    for extra in ${MARKER_EXTRAS//,/ }; do
+      [[ "$extra" != "$PYPI_NORM" ]] || _MK_VAL=1
+    done
+  fi
+  [[ "$1" == "==" ]] || _MK_VAL=$((1 - _MK_VAL))
 }
 
 # Set _MK_VAL for operator $1 between a string field of value $4 and constant $2, where $3 is
