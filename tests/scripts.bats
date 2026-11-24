@@ -2088,39 +2088,48 @@ run_alert_fires() {
   done
 }
 
+# Helper: runs fired_alerts with the arguments $@ and the mock pacman, stderr apart
+run_alerts() {
+  use_mock_pacman
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$@"' "$TEST_TMPDIR" "$@"
+}
+
+# The rules unmet and imports run by default after the listed ones and print lines of their own
 @test "lib.sh: fired_alerts fires a requires rule with the change of the requirements as its note" {
+  python_aur pkg
   create_test_package "pkg" "pypi" "upstream:
   registry: zensical
 alerts:
   - requires: changed
     hold: true"
-  run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  run_alerts "$TEST_TMPDIR/packages/pkg.yml" 0.0.74 0.1.3
   [ "$status" -eq 0 ]
-  [ "$output" = $'hold\tdrops deepmerge' ]
+  [ "${lines[0]}" = $'hold\tdrops deepmerge' ]
   create_test_package "pkg" "pypi" "upstream:
   registry: zensical
 alerts:
   - requires: changed
     note: Check the depends of the PKGBUILD"
-  run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  run_alerts "$TEST_TMPDIR/packages/pkg.yml" 0.0.74 0.1.3
   [ "$status" -eq 0 ]
-  [ "$output" = $'notice\tCheck the depends of the PKGBUILD: drops deepmerge' ]
+  [ "${lines[0]}" = $'notice\tCheck the depends of the PKGBUILD: drops deepmerge' ]
 }
 
-@test "lib.sh: fired_alerts leaves a requires rule on matching names and asks nothing without current" {
+@test "lib.sh: fired_alerts leaves a requires rule on matching names and runs it with current alone" {
+  python_aur pkg
   create_test_package "pkg" "pypi" "upstream:
   registry: zensical
 alerts:
   - requires: changed
     hold: true"
-  run_requires 'fired_alerts "$1" 0.1.2 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  run_alerts "$TEST_TMPDIR/packages/pkg.yml" 0.1.2 0.1.3
   [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [[ "$output" != *adds* && "$output" != *drops* && "$output" != hold* ]]
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
-  run_requires 'fired_alerts "$1" "" 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
+  run_alerts "$TEST_TMPDIR/packages/pkg.yml" "" 0.1.3
   [ "$status" -eq 0 ]
-  [ -z "$output" ]
-  [ ! -e "$CURL_ARGS_LOG" ]
+  [[ "$output" != *adds* && "$output" != *drops* && "$output" != hold* ]]
+  ! grep -q 'zensical-0.1.2' "$CURL_ARGS_LOG"
 }
 
 @test "lib.sh: fired_alerts offline asks PyPI nothing and evaluates the other rules" {
@@ -2139,6 +2148,7 @@ alerts:
 }
 
 @test "lib.sh: fired_alerts fails when a request of a requires rule fails" {
+  python_aur pkg
   create_test_package "pkg" "pypi" "upstream:
   registry: zensical
 alerts:
@@ -2149,7 +2159,7 @@ alerts:
   [[ "$output" == *"zensical: PyPI has no release 0.1.4"* ]]
 }
 
-@test "lib.sh: fired_alerts fails on a requires rule other than changed or outside pypi" {
+@test "lib.sh: fired_alerts fails on a requires rule other than its values or without a source" {
   create_test_package "pkg" "pypi" "upstream:
   registry: zensical
 alerts:
@@ -2163,7 +2173,7 @@ alerts:
   - requires: changed"
   run_requires 'fired_alerts "$1" 4.0.0 5.0.0' "$TEST_TMPDIR/packages/pkg.yml"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"alerts[0].requires applies to the pypi strategy only"* ]]
+  [[ "$output" == *"alerts[0].requires needs strategy pypi, python.pypi or python.pyproject"* ]]
 }
 
 @test "lib.sh: fired_alerts asks for quotes around a note that YAML reads as a number" {
@@ -3082,7 +3092,7 @@ unmet_env() {
 # Helper: writes .SRCINFO $1 of a package of one pkgname, $2, whose depends are the other arguments
 unmet_srcinfo() {
   {
-    printf 'pkgbase = %s\n\tpkgver = 1.0\n\tpkgrel = 1\n' "$2"
+    printf 'pkgbase = %s\n\tpkgver = 1.0\n\tpkgrel = 1\n\tarch = any\n' "$2"
     printf '\tdepends = %s\n' "${@:3}"
     printf '\npkgname = %s\n' "$2"
   } >"$1"
@@ -3250,6 +3260,8 @@ ${4:-}"
 unmet_package() {
   unmet_env
   aur_srcinfo_remote ydiskarc "$1"
+  # The rule imports reads the wheel, which the fixture does not hold
+  pypi_fake_metadata ydiskarc 1.1.0 "$(<"$FIXTURES_DIR/pypi/metadata/ydiskarc-1.1.0-py2.py3-none-any.whl.metadata")"
   create_test_package "ydiskarc" "pypi" "upstream:
   registry: ydiskarc
 alerts:
@@ -3261,22 +3273,22 @@ $2"
   unmet_package "$TEST_TMPDIR/rel1.SRCINFO" "  - requires: unmet
     hold: true
     note: Check depends"
-  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.0.1 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
   [ "$status" -eq 0 ]
   [ "$output" = $'hold\tCheck depends: rich: not in depends' ]
   export MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync"
   sed -i 's/^python-requests .*/python-requests 2.20.0-1 extra/' "$MOCK_PACMAN_SYNC"
   : >"$MOCK_PACMAN_FILES"
   rm -rf "$AURTOMATOR_RUN_CACHE"/*
-  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.0.1 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
-  [ "$output" = $'hold\tCheck depends: requests>=2.31.0: python-requests has 2.20.0 (pkgver); rich: not in depends' ]
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
+  [ "${lines[0]}" = $'hold\tCheck depends: requests>=2.31.0: python-requests has 2.20.0 (pkgver); rich: not in depends' ]
 }
 
 @test "lib.sh: fired_alerts fires requires: unmet as a notice under hold for notices alone" {
   pypi_fake ydiskarc 1.2.0 'requests<2' 'rich'
   unmet_package "$FIXTURES_DIR/aur/ydiskarc.SRCINFO" "  - requires: unmet
     hold: true"
-  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.1.0 1.2.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.2.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\trequests<2: python-requests has 2.32.5' ]
 }
@@ -3284,7 +3296,7 @@ $2"
 @test "lib.sh: fired_alerts fires no requires: unmet without notes, for a new package or offline" {
   unmet_package "$FIXTURES_DIR/aur/ydiskarc.SRCINFO" "  - requires: unmet
     hold: true"
-  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.0.1 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
@@ -3435,6 +3447,58 @@ ${4:-}"
   [ "$output" = $'notice\timports: the release holds more than 20 MB of Python files, not read' ]
 }
 
+# The count takes every member that the extraction takes
+@test "pyrules.sh: python_imports counts entry_points.txt and top-level scripts toward the 20 MB" {
+  imports_env
+  local name
+  for name in demo/big_entry_points.txt scripts/huge; do
+    rm -rf "$TEST_TMPDIR/wheel" "$MOCK_FILES_DIR"/* "$AURTOMATOR_RUN_CACHE"/*
+    cp "$FIXTURES_DIR/aur/rpc.json" "$MOCK_FILES_DIR/aur-rpc.json"
+    mkdir -p "$TEST_TMPDIR/wheel/${name%/*}"
+    printf 'import os\n' >"$TEST_TMPDIR/wheel/demo.py"
+    truncate -s 21M "$TEST_TMPDIR/wheel/$name"
+    pypi_fake_wheel demo 1.0 "$TEST_TMPDIR/wheel"
+    unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+    run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+    [ "$output" = $'notice\timports: the release holds more than 20 MB of Python files, not read' ] || {
+      echo "$name: $output"
+      return 1
+    }
+  done
+}
+
+# Owner names with spaces shift the columns of bsdtar -tv
+@test "pyrules.sh: python_imports reads no sdist past 20 MB of Python files, whatever the owner names of its files" {
+  imports_env
+  local s="$TEST_TMPDIR/sdist" stem=demo-2.0 owner
+  for owner in builder 'a b c'; do
+    rm -rf "$s" "$MOCK_FILES_DIR"/* "$AURTOMATOR_RUN_CACHE"/*
+    cp "$FIXTURES_DIR/aur/rpc.json" "$MOCK_FILES_DIR/aur-rpc.json"
+    mkdir -p "$s/$stem/demo"
+    printf 'Metadata-Version: 2.4\nName: demo\n' >"$s/$stem/PKG-INFO"
+    truncate -s 21M "$s/$stem/demo/__init__.py"
+    bsdtar --uname "$owner" --gname "$owner" -czf "$MOCK_FILES_DIR/$stem.tar.gz" -C "$s" "$stem"
+    pypi_fake_file demo 2.0 "$MOCK_FILES_DIR/$stem.tar.gz" false
+    unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+    run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0
+    [ "$output" = $'notice\timports: the release holds more than 20 MB of Python files, not read' ] || {
+      echo "$owner: $output"
+      return 1
+    }
+  done
+}
+
+@test "pyrules.sh: python_imports reads no release of more than 20000 Python files" {
+  imports_env
+  mkdir -p "$TEST_TMPDIR/wheel/demo"
+  (cd "$TEST_TMPDIR/wheel/demo" && touch m{1..20001}.py)
+  pypi_fake_wheel demo 1.0 "$TEST_TMPDIR/wheel"
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timports: the release holds more than 20000 Python files and scripts, not read' ]
+}
+
 @test "pyrules.sh: python_imports gives one note without python3, within 60 s or without a files database" {
   imports_env
   demo_wheel
@@ -3457,6 +3521,10 @@ ${4:-}"
 @test "lib.sh: fired_alerts fires requires: imports as a notice" {
   imports_env
   demo_wheel
+  # The rule unmet reads the metadata of the wheel, which lists no requirement
+  printf 'Metadata-Version: 2.4\nName: demo\n' >"$MOCK_FILES_DIR/demo-1.0-py3-none-any.whl.metadata"
+  S="$(sha256sum "$MOCK_FILES_DIR/demo-1.0-py3-none-any.whl.metadata" | cut -d" " -f1)" \
+    yq -i -o json '.files[0]."core-metadata" = {"sha256": strenv(S)}' "$MOCK_FILES_DIR/simple/demo.json"
   {
     printf 'pkgbase = demo\n\tpkgver = 1.0\n\tpkgrel = 1\n\tdepends = python\n\tdepends = python-yaml\n'
     printf '\toptdepends = python-numba: faster\n\npkgname = demo\n'
@@ -3467,12 +3535,215 @@ ${4:-}"
 alerts:
   - requires: imports
     note: Check the imports"
-  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 0.9 1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\tCheck the imports: import pandas (optional): python-pandas in neither depends nor optdepends; import tqdm: python-tqdm not in depends' ]
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
   run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 0.9 1.0 offline' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
   [ -z "$output" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+# === python sources ===
+
+# Helper: an sdist demo-1.1.0.tar.gz in MOCK_FILES_DIR whose pyproject.toml, at path $2 under its top
+# directory, holds text $1, and the .SRCINFO of demo at 1.0.0 whose first source is source $3
+pyproject_env() {
+  local dir="$TEST_TMPDIR/src/demo-1.1.0"
+  unmet_env
+  mkdir -p "$dir/$(dirname "$2")"
+  printf '%s' "$1" >"$dir/$2"
+  printf 'import click\n' >"$dir/demo.py"
+  bsdtar -czf "$MOCK_FILES_DIR/demo-1.1.0.tar.gz" -C "$TEST_TMPDIR/src" demo-1.1.0
+  {
+    printf 'pkgbase = demo\n\tpkgver = 1.0.0\n\tpkgrel = 1\n\tarch = any\n\tdepends = python\n\tdepends = python-click\n'
+    printf '\tsource = %s\n\tsource = local.patch\n\npkgname = demo\n' "${3:-demo-1.0.0.tar.gz::https://files.pythonhosted.org/packages/src/demo-1.0.0.tar.gz}"
+  } >"$TEST_TMPDIR/demo.SRCINFO"
+}
+
+# Helper: runs python_source for package demo with the YAML lines $1, version 1.1.0 and
+# $TEST_TMPDIR/demo.SRCINFO, and prints the source, project, version and headers
+run_source() {
+  create_test_package "demo" "github-release" "upstream:
+  project: o/demo
+$1"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; python_source "$1" 1.1.0 "$2" &&
+    printf "%s\n" "$PY_SOURCE $PY_PROJECT $PY_VERSION" "$PY_HEADERS"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" \
+    "$TEST_TMPDIR/demo.SRCINFO"
+}
+
+TOML=$'[build-system]\nrequires = ["setuptools"]\n\n[project]\nname = "demo"\ndescription = """A demo with [brackets],\n"quotes" and # signs."""\nrequires-python = ">=3.10"  # comment\nauthors = [{name = "A", email = "a@example.org"}]\nkeywords = ["a", "b"]\ndependencies = [\n  "click>=8",  # the CLI\n  \'rich\',\n  # a comment line\n]\ndynamic = ["version"]\n\n[project.optional-dependencies]\ndocs = ["sphinx"]\n'
+
+@test "pyrules.sh: python_source reads the static dependencies of pyproject.toml in the source archive" {
+  pyproject_env "$TOML" pyproject.toml
+  run_source "python:
+  pyproject: pyproject.toml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pyproject demo 1.1.0\nName: demo\nRequires-Python: >=3.10\nRequires-Dist: click>=8\nRequires-Dist: rich' ]
+}
+
+@test "pyrules.sh: python_source reads the archive of the new upstream version for a package with pkgver_format" {
+  pyproject_env "$TOML" pyproject.toml
+  sed -i 's/^\tpkgver = 1\.0\.0$/\tpkgver = 4.1.0.0/' "$TEST_TMPDIR/demo.SRCINFO"
+  run_source $'python:\n  pyproject: pyproject.toml\npkgver_format: \'4.%s\''
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pyproject demo 1.1.0\nName: demo\nRequires-Python: >=3.10\nRequires-Dist: click>=8\nRequires-Dist: rich' ]
+}
+
+@test "pyrules.sh: python_source reads a pyproject.toml below the top directory" {
+  pyproject_env "$TOML" python/pyproject.toml
+  run_source "python:
+  pyproject: python/pyproject.toml"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "pyproject demo 1.1.0" ]
+}
+
+@test "pyrules.sh: python_source fails on dynamic or missing dependencies and on a source of git" {
+  local message="packages/demo.yml: python.pyproject reads no static dependencies from pyproject.toml"
+  pyproject_env $'[project]\nname = "demo"\ndynamic = ["version", "dependencies"]\ndependencies = ["x"]\n' pyproject.toml
+  run_source $'python:\n  pyproject: pyproject.toml'
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$message"* ]]
+  pyproject_env $'[project]\nname = "demo"\n[tool.x]\ndependencies = ["x"]\n' pyproject.toml
+  run_source $'python:\n  pyproject: pyproject.toml'
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$message"* ]]
+  pyproject_env "$TOML" pyproject.toml 'demo::git+https://github.com/o/demo.git#tag=v1.0.0'
+  run_source $'python:\n  pyproject: pyproject.toml'
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"$message"* ]]
+}
+
+@test "pyrules.sh: python_source refuses a pyproject.toml past 256 KiB or nested past 32 levels" {
+  local deep big
+  deep=$(printf '[project]\nname = "demo"\ndependencies = []\nx = %s1%s\n' "$(printf '[%.0s' {1..40})" "$(printf ']%.0s' {1..40})")
+  pyproject_env "$deep" pyproject.toml
+  run_source $'python:\n  pyproject: pyproject.toml'
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"python.pyproject reads no static dependencies from pyproject.toml: values nest deeper than 32 levels"* ]]
+  big=$(printf '[project]\nname = "demo"\ndependencies = []\ndescription = "%s"\n' "$(head -c 270000 /dev/zero | tr '\0' x)")
+  pyproject_env "$big" pyproject.toml
+  run_source $'python:\n  pyproject: pyproject.toml'
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"python.pyproject reads no static dependencies from pyproject.toml: demo-1.1.0/pyproject.toml holds more than 256 KiB"* ]]
+}
+
+@test "pyrules.sh: python_source takes upstream.registry, python.pypi with its release, or none" {
+  unmet_env
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" demo python
+  run_source $'python:\n  pypi: KubeDiagrams'
+  [ "$output" = "pypi KubeDiagrams 1.1.0" ]
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_source $'python:\n  pypi: KubeDiagrams\n  release: newest'
+  [ "$output" = "pypi KubeDiagrams 3.2.1" ]
+  grep -q 'pypi.org/pypi/KubeDiagrams/json$' "$CURL_ARGS_LOG"
+  run_source 'python: none'
+  [ "$output" = "none  " ]
+  run_source ''
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"packages/demo.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]]
+  create_test_package "demo" "pypi" "upstream:
+  registry: zensical"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; python_source "$1" 0.1.3 "$2" && echo "$PY_SOURCE $PY_PROJECT $PY_VERSION"' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" "$TEST_TMPDIR/demo.SRCINFO"
+  [ "$output" = "pypi zensical 0.1.3" ]
+}
+
+# Helper: package kube-diagrams of a strategy that finds 1.1.0, at current 1.0.0 with the YAML lines
+# $1, whose AUR .SRCINFO has the depends after it
+python_package() {
+  unmet_env
+  printf 'python-diagrams 0.25.1-1 extra\n' >>"$MOCK_PACMAN_SYNC"
+  stand_in_strategy step 1.1.0
+  unmet_srcinfo "$TEST_TMPDIR/k.SRCINFO" kube-diagrams "${@:2}"
+  aur_srcinfo_remote kube-diagrams "$TEST_TMPDIR/k.SRCINFO"
+  create_test_package "kube-diagrams" "step" "current: '1.0.0'
+allow_missing_arch: false
+$1"
+}
+
+@test "check-all: fails the check of a package whose depends hold Python and that names no source" {
+  python_package "" bash python python-yaml
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" == "check_failed: "*"packages/kube-diagrams.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]]
+}
+
+@test "check-all: runs no requires rule for python: none or without Python in depends" {
+  python_package "python: none" bash python python-yaml
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 1.1.0" ]
+  [ ! -e "$TEST_TMPDIR/.status/_alerts" ]
+  python_package "" bash glibc
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 1.1.0" ]
+  ! grep -q pypi.org "$CURL_ARGS_LOG"
+}
+
+@test "check-all: runs every requires rule as a notice for a package with python.pypi" {
+  python_package $'python:\n  pypi: KubeDiagrams' bash python python-yaml python-diagrams
+  pypi_fake KubeDiagrams 1.0.0 PyYAML diagrams
+  pypi_fake KubeDiagrams 1.1.0 PyYAML diagrams graphviz2drawio
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 1.1.0" ]
+  grep -qxF $'kube-diagrams\tnotice\tadds graphviz2drawio' "$TEST_TMPDIR/.status/_alerts"
+  grep -qxF $'kube-diagrams\tnotice\tgraphviz2drawio: not in depends' "$TEST_TMPDIR/.status/_alerts"
+  [[ "$output" == *"kube-diagrams: update 1.0.0 → 1.1.0 notice: graphviz2drawio: not in depends"* ]]
+}
+
+@test "check-all: runs the requires rules on the upstream version of a package with pkgver_format" {
+  python_package $'python:\n  pypi: KubeDiagrams\npkgver_format: \'4.%s\'' bash python python-yaml python-diagrams
+  sed -i "s/^current: '1.0.0'\$/current: '4.1.0.0'/" "$TEST_TMPDIR/packages/kube-diagrams.yml"
+  pypi_fake KubeDiagrams 1.1.0 PyYAML diagrams graphviz2drawio
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 4.1.1.0" ]
+  grep -qxF $'kube-diagrams\tnotice\tgraphviz2drawio: not in depends' "$TEST_TMPDIR/.status/_alerts"
+}
+
+@test "lib.sh: fired_alerts fails on a version that does not fit pkgver_format" {
+  python_package $'python:\n  pypi: KubeDiagrams\npkgver_format: \'4.%s\'' bash python python-yaml python-diagrams
+  pypi_fake KubeDiagrams 1.1.0 PyYAML diagrams graphviz2drawio
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 4.1.0.0 1.1.0' "$TEST_TMPDIR" \
+    "$TEST_TMPDIR/packages/kube-diagrams.yml"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"packages/kube-diagrams.yml: version 1.1.0 does not fit pkgver_format 4.%s"* ]]
+}
+
+@test "check-all: holds the update that a listed rule with hold fires on" {
+  python_package $'python:\n  pypi: KubeDiagrams\nalerts:\n  - requires: unmet\n    hold: true' bash python python-yaml python-diagrams
+  pypi_fake KubeDiagrams 1.0.0 PyYAML diagrams
+  pypi_fake KubeDiagrams 1.1.0 PyYAML diagrams graphviz2drawio
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "held: 1.1.0" ]
+  [[ "$output" == *"kube-diagrams: update 1.0.0 → 1.1.0 held: graphviz2drawio: not in depends"* ]]
+}
+
+@test "check-all: python.release newest reads the newest release on PyPI and runs no changed" {
+  python_package $'python:\n  pypi: KubeDiagrams\n  release: newest' bash python python-yaml
+  pypi_fake KubeDiagrams 3.2.1 PyYAML diagrams
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  grep -qxF $'kube-diagrams\tnotice\tdiagrams: not in depends' "$TEST_TMPDIR/.status/_alerts"
+  ! grep -q -e adds -e drops -e 'has no release' "$TEST_TMPDIR/.status/_alerts"
+  grep -q 'pypi.org/pypi/KubeDiagrams/json$' "$CURL_ARGS_LOG"
+}
+
+@test "lib.sh: fired_alerts runs no default rule in prepare and publish" {
+  python_package $'python:\n  pypi: KubeDiagrams' bash python python-yaml
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  local mode
+  for mode in held offline; do
+    run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 1.0.0 1.1.0 "$2"' "$TEST_TMPDIR" \
+      "$TEST_TMPDIR/packages/kube-diagrams.yml" "$mode"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
   [ ! -e "$CURL_ARGS_LOG" ]
 }
 
@@ -5929,6 +6200,7 @@ alerts:
 }
 
 @test "check-all: holds an update that a requires rule fires on" {
+  python_aur zensical-bin
   create_test_package "zensical-bin" "pypi" "upstream:
   registry: zensical
 current: 0.0.74
@@ -5940,10 +6212,11 @@ alerts:
   [ "$status" -eq 0 ]
   [[ "$output" == *"zensical-bin: update 0.0.74 → 0.1.3 held: drops deepmerge"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge' ]
+  [ "$(head -n 1 "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge' ]
 }
 
 @test "check-all: holds an update whose release of current PyPI lacks, with a note" {
+  python_aur gone-bin
   create_test_package "gone-bin" "pypi" "upstream:
   registry: gone
 current: 0.1.2
@@ -5960,6 +6233,7 @@ alerts:
 }
 
 @test "check-all: a requires rule fires nothing between releases without requirements" {
+  python_aur plain
   create_test_package "plain" "pypi" "upstream:
   registry: plain
 current: 3.2.0
@@ -5975,6 +6249,7 @@ alerts:
 }
 
 @test "check-all: a requires rule whose request fails fails the check, names the host and runs again" {
+  python_aur flaky-bin
   create_test_package "flaky-bin" "pypi" "upstream:
   registry: flaky
 current: '1.0'
@@ -6003,6 +6278,7 @@ ${1:-  - requires: changed
   pin_from: zensical
 current: 0.0.41
 ${2:-}"
+  [[ -n "${1:-}" ]] || python_aur zensical-bin
 }
 
 @test "check-all: a package with pin_from waits for the held update of its project" {
@@ -6013,7 +6289,8 @@ ${2:-}"
   [[ "$output" == *"python-zensical-ui: update 0.0.41 → 0.0.43 waits for the held update of zensical-bin"* ]]
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
   [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
-  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge\npython-zensical-ui\twait\tWaits for the held update of zensical-bin\nzensical-bin\tnotice\tpython-zensical-ui waits for this update' ]
+  [ "$(head -n 1 "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge' ]
+  [ "$(tail -n 2 "$TEST_TMPDIR/.status/_alerts")" = $'python-zensical-ui\twait\tWaits for the held update of zensical-bin\nzensical-bin\tnotice\tpython-zensical-ui waits for this update' ]
 }
 
 # The pin comes from the newest release of the project, which fits the companion only once the
@@ -6117,7 +6394,7 @@ current: 3.2.1"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
   run grep -o -E 'pypi\.org/(pypi|simple)/[^ ]+' "$CURL_ARGS_LOG"
-  [ "$output" = $'pypi.org/pypi/zensical/json\npypi.org/simple/zensical/\npypi.org/pypi/requests/json\npypi.org/pypi/zensical/json\npypi.org/simple/zensical/' ]
+  [ "$output" = $'pypi.org/pypi/zensical/json\npypi.org/simple/zensical/\npypi.org/simple/zensical/\npypi.org/pypi/requests/json\npypi.org/pypi/zensical/json\npypi.org/simple/zensical/' ]
 }
 
 @test "check-all: a package with pin_from waits for the second check of its project" {

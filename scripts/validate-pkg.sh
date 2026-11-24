@@ -91,19 +91,47 @@ key_strategies() {
   esac
 }
 
-# Check the python key of package file $1: a map with map, from PyPI names to package names, and
-# skip, the relative paths that the rule imports leaves out
+# Check the python key of package file $1 of strategy $2: none, or a map of the source keys pypi,
+# release and pyproject, map, from PyPI names to package names, and skip, paths that imports leaves out
 validate_python() {
-  local file="$1" shown="packages/${1##*/}" errors=0 key value unknown path
+  local file="$1" shown="packages/${1##*/}" errors=0 key value unknown path pypi pyproject
   case $(pkg_get "$file" '.python | tag') in
     "!!null") return 0 ;;
     "!!map") ;;
     *)
-      log_err "$shown: python must be a map"
+      [[ "$(pkg_get "$file" '.python | select(tag == "!!str")')" != none ]] || return 0
+      log_err "$shown: python must be none or a map"
       return 1
       ;;
   esac
-  unknown=$(pkg_get "$file" '.python | [keys[] | select(. != "map" and . != "skip")] | join(", ")')
+  pypi=$(pkg_get "$file" '.python.pypi // ""')
+  pyproject=$(pkg_get "$file" '.python.pyproject // ""')
+  if [[ -n "$pypi" ]] && ! pypi_name "$pypi" >/dev/null; then
+    log_err "$shown: python.pypi must be a PyPI project name of A-Za-z0-9._- that starts and ends with a letter or digit: ${pypi@Q}"
+    errors=1
+  fi
+  value=$(pkg_get "$file" '.python.release // ""')
+  if [[ -n "$value" && "$value" != newest ]]; then
+    log_err "$shown: python.release must be newest: ${value@Q}"
+    errors=1
+  elif [[ -n "$value" && -z "$pypi" ]]; then
+    log_err "$shown: python.release applies with python.pypi alone"
+    errors=1
+  fi
+  if [[ -n "$pyproject" ]] && { ! (LC_ALL=C && [[ "$pyproject" =~ ^[A-Za-z0-9._/-]+\.toml$ ]]) ||
+    [[ "$pyproject" == /* || "/$pyproject/" == */../* ]]; }; then
+    log_err "$shown: python.pyproject must be a relative path to a .toml file without ..: ${pyproject@Q}"
+    errors=1
+  fi
+  if [[ -n "$pypi" && -n "$pyproject" ]]; then
+    log_err "$shown: python.pypi and python.pyproject exclude each other"
+    errors=1
+  fi
+  if [[ "$2" == pypi && -n "$pypi$pyproject$value" ]]; then
+    log_err "$shown: python.pypi, python.release and python.pyproject do not apply to the pypi strategy, which reads upstream.registry"
+    errors=1
+  fi
+  unknown=$(pkg_get "$file" '.python | [keys[] | select(. != "map" and . != "skip" and . != "pypi" and . != "release" and . != "pyproject")] | join(", ")')
   if [[ -n "$unknown" ]]; then
     log_err "$shown: python: unknown key: $unknown"
     errors=1
@@ -170,8 +198,11 @@ validate_alert() {
   if [[ "$tag" != "!!null" && "$value" != changed && "$value" != unmet && "$value" != imports ]]; then
     log_err "$rule.requires must be changed, unmet or imports, got $value"
     errors=1
-  elif [[ "$tag" != "!!null" && "$4" != pypi ]]; then
-    log_err "$rule: requires applies to the pypi strategy only"
+  elif [[ "$tag" != "!!null" && "$4" != pypi && -z "$(pkg_get "$file" '.python | select(tag == "!!map") | .pypi // .pyproject // ""')" ]]; then
+    log_err "$rule: requires needs strategy pypi, python.pypi or python.pyproject"
+    errors=1
+  elif [[ "$value" == changed && -n "$(pkg_get "$file" '.python | select(tag == "!!map") | .release // .pyproject // ""')" ]]; then
+    log_err "$rule: requires: changed does not apply with python.release or python.pyproject"
     errors=1
   elif [[ "$value" == changed && -n "$format" ]]; then
     log_err "$rule: requires does not apply with pkgver_format"
@@ -502,7 +533,7 @@ validate_pkg() {
     ((errors++))
   fi
 
-  validate_python "$file" || ((errors++))
+  validate_python "$file" "$strategy" || ((errors++))
 
   local branch
   if [[ $(pkg_get "$file" '.upstream.branch | tag') != "!!null" ]]; then

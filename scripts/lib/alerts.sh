@@ -50,29 +50,26 @@ alert_note_error() {
   printf 'note must be one line of text%s\n' "${value:+: put $value in quotes}"
 }
 
-# Print the notes of rule $1, unmet or imports, for version $3 of package file $2, as python_unmet
-# and python_imports do, nothing for a package the AUR lacks; without a run cache, one of its own
-alert_python() {
-  local name srcinfo rc=0 out
-  name=$(package_name "$2") || return 1
-  if [[ -z "${AURTOMATOR_RUN_CACHE:-}" ]]; then
-    local -x AURTOMATOR_RUN_CACHE
-    AURTOMATOR_RUN_CACHE=$(mktemp -d) || return 1
-    out=$(alert_python "$@") || rc=$?
-    rm -rf "$AURTOMATOR_RUN_CACHE"
-    [[ -z "$out" ]] || printf '%s\n' "$out"
-    return "$rc"
+# Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as hold or
+# notice, a tab and the note; fail on a broken rule. $4 offline skips requires rules, held those without hold.
+# The requires rules run for each package whose AUR depends hold Python, as notices unless the file lists them.
+fired_alerts() {
+  local rc=0
+  if [[ -n "${AURTOMATOR_RUN_CACHE:-}" ]]; then
+    _fired_alerts "$@"
+    return
   fi
-  srcinfo=$(aur_srcinfo "$name") || rc=$?
-  ((rc != 3)) || return 0
-  ((rc == 0)) || return 1
-  "python_$1" "$2" "$srcinfo" "$(pkg_get "$2" .upstream.registry)" "$3"
+  local -x AURTOMATOR_RUN_CACHE
+  AURTOMATOR_RUN_CACHE=$(mktemp -d) || return 1
+  _fired_alerts "$@" || rc=$?
+  rm -rf "$AURTOMATOR_RUN_CACHE"
+  return "$rc"
 }
 
-# Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as hold or
-# notice, a tab and the note; fail on a broken rule. $4 offline skips requires rules, held those without hold
-fired_alerts() {
-  local file="$1" current="$2" latest="$3" offline="${4:-}" count i kind value rc action note change hold joined
+_fired_alerts() {
+  local file="$1" current="$2" latest="$3" offline="${4:-}" count i kind value rc action note change hold
+  local -A listed=()
+  PY_STATE=""
   count=$(pkg_get "$file" '.alerts | length')
   for ((i = 0; i < count; i++)); do
     kind=$(pkg_get "$file" ".alerts[$i] | [keys[] | select(. == \"when\" or . == \"from\" or . == \"match\" or . == \"requires\")] | join(\" \")")
@@ -91,8 +88,8 @@ fired_alerts() {
         log_err "alerts[$i].requires must be changed, unmet or imports, got $value"
         return 1
       fi
-      if [[ $(pkg_get "$file" .strategy) != pypi ]]; then
-        log_err "alerts[$i].requires applies to the pypi strategy only"
+      if [[ $(pkg_get "$file" .strategy) != pypi && -z "$(pkg_get "$file" '.python.pypi // .python.pyproject // ""' 2>/dev/null)" ]]; then
+        log_err "alerts[$i].requires needs strategy pypi, python.pypi or python.pyproject"
         return 1
       fi
       note=""
@@ -100,41 +97,86 @@ fired_alerts() {
         log_err "alerts[$i].$(alert_note_error "$file" "$i")"
         return 1
       fi
-      # unmet and imports read no current, so prepare and publish take their lines from the check run
-      if [[ "$value" != changed ]]; then
-        [[ -z "$offline" ]] || continue
-        change=$(alert_python "$value" "$file" "$latest") || return 1
-        [[ -n "$change" ]] || continue
-        action=notice
-        [[ "$hold" != true || $'\n'"$change" != *$'\nhold\t'* ]] || action=hold
-        joined=""
-        while IFS=$'\t' read -r _ change; do
-          joined+="${joined:+; }$change"
-        done <<<"$change"
-        printf '%s\t%s\n' "$action" "${note:+$note: }$joined"
-        continue
-      fi
-      [[ -n "$current" && "$offline" != offline ]] || continue
-      [[ "$offline" != held || "$hold" == true ]] || continue
-      change=$(requires_change "$file" "$current" "$latest") || return 1
-      [[ -n "$change" ]] || continue
-      note="${note:+$note: }$change"
-    else
-      if ! note=$(alert_note "$file" "$i"); then
-        log_err "alerts[$i].$(alert_note_error "$file" "$i")"
-        return 1
-      fi
-      rc=0
-      alert_fires "$kind" "$value" "$current" "$latest" || rc=$?
-      if ((rc == 2)); then
-        log_err "alerts[$i].match must be a non-empty ERE that bash accepts: $value"
-        return 1
-      fi
-      ((rc == 0)) || continue
+      listed[$value]=1
+      _fired_python "$value" "$hold" "$note" || return 1
+      continue
     fi
+    if ! note=$(alert_note "$file" "$i"); then
+      log_err "alerts[$i].$(alert_note_error "$file" "$i")"
+      return 1
+    fi
+    rc=0
+    alert_fires "$kind" "$value" "$current" "$latest" || rc=$?
+    if ((rc == 2)); then
+      log_err "alerts[$i].match must be a non-empty ERE that bash accepts: $value"
+      return 1
+    fi
+    ((rc == 0)) || continue
     action=notice
     [[ "$hold" != true ]] || action=hold
     [[ "$offline" != held || "$action" == hold ]] || continue
     printf '%s\t%s\n' "$action" "$note"
   done
+  for value in changed unmet imports; do
+    [[ -n "${listed[$value]:-}" ]] || _fired_python "$value" "" "" || return 1
+  done
+}
+
+# Print the line of requires rule $1, with hold $2 and note $3, for the call of _fired_alerts that
+# runs it: changed reads current, so prepare runs it with hold alone; unmet and imports run in the check
+_fired_python() {
+  local value=$1 hold=$2 note=$3 change action joined
+  [[ "$offline" != offline ]] || return 0
+  [[ "$offline" != held || ("$value" == changed && "$hold" == true) ]] || return 0
+  _python_state || return 1
+  [[ "$PY_STATE" == ready ]] || return 0
+  if [[ "$value" == changed ]]; then
+    # changed compares the release of current, which pkgver_format, pkgver_dash and newest change
+    [[ -n "$current" && "$PY_SOURCE" == pypi && -z "${PY_NEWEST:-}" ]] || return 0
+    [[ -z "$(pkg_get "$file" '.pkgver_format // ""')" && -z "$(pkgver_dash "$file")" ]] || return 0
+    change=$(requires_change "$file" "$current" "$latest" "$PY_PROJECT") || return 1
+    [[ -n "$change" ]] || return 0
+    action=notice
+    [[ "$hold" != true ]] || action=hold
+    printf '%s\t%s\n' "$action" "${note:+$note: }$change"
+    return 0
+  fi
+  change=$("python_$value" "$file" "$PY_SRCINFO" "$PY_PROJECT" "$PY_VERSION") || return 1
+  [[ -n "$change" ]] || return 0
+  action=notice
+  [[ "$hold" != true || $'\n'"$change" != *$'\nhold\t'* ]] || action=hold
+  joined=""
+  while IFS=$'\t' read -r _ change; do
+    joined+="${joined:+; }$change"
+  done <<<"$change"
+  printf '%s\t%s\n' "$action" "${note:+$note: }$joined"
+}
+
+# Set PY_STATE once per call of _fired_alerts: ready when the AUR .SRCINFO, PY_SRCINFO, has a pkgname
+# with Python in depends and python_source names a source, none otherwise; fail when it cannot tell
+_python_state() {
+  local name rc=0 pkgname format version
+  [[ -z "$PY_STATE" ]] || return 0
+  PY_STATE=none
+  name=$(package_name "$file") || return 1
+  PY_SRCINFO=$(aur_srcinfo "$name") || rc=$?
+  ((rc != 3)) || return 0
+  ((rc == 0)) || return 1
+  while IFS= read -r pkgname; do
+    if pkgname_has_python "$PY_SRCINFO" "$pkgname"; then
+      # The check gives the version after pkgver_format, and the sources take the upstream version
+      version=$latest
+      format=$(pkg_get "$file" '.pkgver_format // ""')
+      if [[ -n "$format" ]]; then
+        version=$(_unformat_version "$latest" "$format")
+        if [[ -z "$version" ]]; then
+          log_err "packages/${file##*/}: version $latest does not fit pkgver_format $format"
+          return 1
+        fi
+      fi
+      python_source "$file" "$version" "$PY_SRCINFO" || return 1
+      [[ "$PY_SOURCE" == none ]] || PY_STATE=ready
+      return 0
+    fi
+  done < <(srcinfo_pkgnames "$PY_SRCINFO")
 }

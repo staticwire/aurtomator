@@ -27,7 +27,10 @@ upstream:                 # strategy fields
 #   - requires: unmet        # pypi: depends of the AUR miss a requirement of the new version
 #     hold: true
 #   - requires: imports      # pypi: the new version imports a module that depends miss
-# python:
+# python:                    # Python in depends: none, or where the requirements come from
+#   pypi: KubeDiagrams       # the PyPI project of a package of another strategy
+#   release: newest          # with pypi: its newest release, as for -git packages
+#   pyproject: pyproject.toml  # without pypi: [project] of the source archive
 #   map:                     # PyPI name: the Arch package that meets it
 #     svg-path: python-svg.path
 #   skip: [tools]            # paths of the release that requires: imports leaves out

@@ -21,7 +21,7 @@ alerts:
 | `when` | one of `when`, `from`, `match`, `requires` | `major`: the first number of the new version is greater than that of `current`, as in `28+25 → 29+1` |
 | `from` | one of `when`, `from`, `match`, `requires` | version: the new version is at or above it, and `current` is below it |
 | `match` | one of `when`, `from`, `match`, `requires` | ERE: the new version matches it, and `current` does not |
-| `requires` | one of `when`, `from`, `match`, `requires` | `changed`: the names of the requirements that apply on Arch differ between the release in `current` and the new version. `unmet`: the `depends` of the AUR package do not meet a requirement of the new version. `imports`: the files of the new version import modules that `depends` and `optdepends` do not hold. `pypi` only |
+| `requires` | one of `when`, `from`, `match`, `requires` | `changed`: the names of the requirements that apply on Arch differ between the release in `current` and the new version. `unmet`: the `depends` of the AUR package do not meet a requirement of the new version. `imports`: the files of the new version import modules that `depends` and `optdepends` do not hold. Strategy `pypi`, `python.pypi` or `python.pyproject`, see [Python packages](#python-packages) |
 | `note` | yes, optional with `requires` | one line of text without tabs for the maintainer. Numbers, booleans and dates go in quotes, as in `note: '2024'` |
 | `hold` | no | `true` holds the update. Default `false` |
 
@@ -35,6 +35,22 @@ With `hold: true`, `check-all.sh` writes `held: <version>`, logs the first line 
 ```
 
 Held updates get the issue `✋ <package>: update held` with the notes of every rule that fired, since rules without `hold` no longer fire after the hand publish. The run closes it once the version is in the AUR. Published updates with notes get the issue `🔔 <package>: <version> notice`, and the maintainer closes it after the edit, see [Issues](/features/issues/). Held updates do not count as failures on the [statistics](/features/statistics/) card.
+
+## Python packages
+
+Packages whose `.SRCINFO` on the AUR has a pkgname with `python` or `python-*` in `depends` run the three `requires` rules in every check, listed or not. Entries of `alerts` set `hold` and `note` of their rule, and the rules that `alerts` does not list fire as notices. The check reads the `.SRCINFO` of HEAD from a shallow clone of the AUR repository, once per run, and packages that the AUR lacks run no rule. The requirements come from the release that the package names:
+
+| Package | Key | Source |
+|---|---|---|
+| strategy `pypi` | none | `upstream.registry` at the new version |
+| other strategies, project on PyPI | `python: {pypi: KubeDiagrams}` | that project at the new version |
+| `-git` package of a project on PyPI | `python: {pypi: KubeDiagrams, release: newest}` | the newest release on PyPI, also for `imports` |
+| no release on PyPI | `python: {pyproject: pyproject.toml}` | the `[project]` table of that file in the first https archive among the sources of the `.SRCINFO`, at the new version |
+| Python in `depends`, no project | `python: none` | no rule |
+
+`python.pyproject` reads `name`, `requires-python` and `dependencies` of the `[project]` table, and `imports` reads the files of the same archive. It fails the check with `packages/<name>.yml: python.pyproject reads no static dependencies from <file>` when `dynamic` names `dependencies`, when the table has no `dependencies`, and when the sources hold no https archive, as with a git source. Packages with Python in `depends` and none of these keys fail their check with `packages/<name>.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none`. `changed` runs where it can compare the release of `current` with the new version: not with `python.release`, `python.pyproject`, `pkgver_format` or `pkgver_dash`.
+
+## The requires rules
 
 `requires: changed` reads the requirements of both releases from their metadata on PyPI and compares their names in PEP 503 form. Requirements whose environment markers are false on Arch do not count, as the [pypi strategy](/strategies/#pypi) describes along with the metadata it reads, and neither do version clauses: black 26.1.0 to 26.10.1 turns `pytokens>=0.3.0` into `pytokens~=0.4.0` and adds `winloop` for Windows, and fires nothing. The rule notes the change as `adds <names>; drops <names>`, after its own note and a colon when it has one:
 
@@ -84,6 +100,6 @@ Archives within `upstream.max_answer_mb` have to match their sha256, and release
 
 Required imports whose package is not in `depends` note `import tqdm: python-tqdm not in depends`, optional ones whose package is in neither `depends` nor `optdepends` note `import numba (optional): python-numba in neither depends nor optdepends`, and required imports of a module that no package holds note `import foo: no package owns it`. Files that do not parse note `imports: <file> does not parse: <message>`. The rule gives notices alone, and `validate-pkg.sh` refuses `hold: true` on it. Without a files database, which local runs lack until `pacman -Fy`, and without `python3`, the rule notes that it read nothing.
 
-Releases of `current` that PyPI lacks fire the rule with `PyPI has no release <version> of <registry> to compare with`, and releases of `current` without metadata that lists their requirements fire it with `<registry> <version>: PyPI holds no metadata that lists the requirements without running code`, since only a publish moves `current`. New versions without such metadata fail the check. Other failed requests fail the check of the package with their URL, as failed strategies do. `--prepare` and `--publish` take the notes of these rules from the check run. `--prepare` asks PyPI again only for rules with `hold: true`, which it fires from the `pkgver` of the AUR, and `--publish` asks PyPI nothing. `requires` reads `current` as a version of PyPI, so it does not apply with `pkgver_format` or `pkgver_dash`.
+Releases of `current` that PyPI lacks fire the rule with `PyPI has no release <version> of <registry> to compare with`, and releases of `current` without metadata that lists their requirements fire it with `<registry> <version>: PyPI holds no metadata that lists the requirements without running code`, since only a publish moves `current`. New versions without such metadata fail the check. Other failed requests fail the check of the package with their URL, as failed strategies do. `--prepare` and `--publish` take the notes of these rules from the check run. `--prepare` asks PyPI again only for `changed` rules with `hold: true`, which it fires from the `pkgver` of the AUR, and `--publish` asks PyPI nothing.
 
-`validate-pkg.sh` refuses entries that break the table: other keys, not exactly one of `when`, `from`, `match` and `requires`, or values of the wrong kind. It also refuses `when: major` together with `pkgver_format`, because the fixed text of formats such as `4.%s` holds the first number of every version. Packages take one `requires` rule of each value. Rules that the check cannot evaluate fail the check of the package, so broken rules never let a held update through. The rules of one package run under the time limit of its check, 120 seconds by default, and rules that take longer fail the check as well.
+`validate-pkg.sh` refuses entries that break the table: other keys, not exactly one of `when`, `from`, `match` and `requires`, or values of the wrong kind. It also refuses `when: major` together with `pkgver_format`, because the fixed text of formats such as `4.%s` holds the first number of every version. Packages take one `requires` rule of each value, and `requires` rules need strategy `pypi`, `python.pypi` or `python.pyproject`. `changed` does not apply with `python.release` or `python.pyproject`, and `hold: true` does not apply to `imports`. Rules that the check cannot evaluate fail the check of the package, so broken rules never let a held update through. The rules of one package run under the time limit of its check, 120 seconds by default, and rules that take longer fail the check as well.

@@ -164,6 +164,15 @@ pypi_fake_sdist() {
   pypi_fake_file "$1" "$2" "$MOCK_FILES_DIR/$stem.tar.gz" false
 }
 
+# Usage: python_aur <pkgbase>. The AUR serves the package with python in depends, so the requires rules
+# run for it, and the mock pacman answers with no files database and no package but python
+python_aur() {
+  use_mock_pacman
+  printf 'pkgbase = %s\n\tpkgver = 1.0\n\tpkgrel = 1\n\tarch = any\n\tdepends = python\n\npkgname = %s\n' "$1" "$1" \
+    >"$TEST_TMPDIR/aur-$1.SRCINFO"
+  aur_srcinfo_remote "$1" "$TEST_TMPDIR/aur-$1.SRCINFO"
+}
+
 # Usage: aur_srcinfo_remote <pkgbase> <.SRCINFO>. The mock git of AUR clones then serves a repo
 # with that .SRCINFO and a stub PKGBUILD for <pkgbase>; MOCK_DIR keeps its git.
 aur_srcinfo_remote() {

@@ -30,7 +30,11 @@ aur_srcinfo() {
   if [[ ! -f "$srcinfo" ]]; then
     mkdir -p "$AURTOMATOR_RUN_CACHE/aur" || return 1
     rm -rf "$dir"
-    aur_clone "https://aur.archlinux.org/$1.git" "$dir" --depth 1 --no-checkout -q >&2 || return 1
+    # git warns of every empty repository, which the AUR serves for a new package
+    if ! aur_clone "https://aur.archlinux.org/$1.git" "$dir" --depth 1 --no-checkout -q >"$dir.log" 2>&1; then
+      cat "$dir.log" >&2
+      return 1
+    fi
     if ! git -C "$dir" rev-parse -q --verify HEAD >/dev/null; then
       : >"$dir.new"
       return 3

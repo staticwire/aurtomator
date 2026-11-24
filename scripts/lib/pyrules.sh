@@ -99,7 +99,11 @@ python_unmet() {
     pkgname_has_python "$srcinfo" "$pkgname" || continue
     if [[ -z "$read" ]]; then
       read=1
-      headers=$(pypi_metadata "$project" "$version") || return 1
+      if [[ -n "${PY_HEADERS:-}" ]]; then
+        headers=$PY_HEADERS
+      else
+        headers=$(pypi_metadata "$project" "$version") || return 1
+      fi
       _requires_list "$headers" "$project $version" || return 1
       reqs=("${REQUIRES_LIST[@]}")
       python=${REQUIRES_PYTHON//[[:blank:]]/}
@@ -220,45 +224,57 @@ python_imports() {
 # python_imports for package file $1, .SRCINFO $2, project $3, release $4, work directory $5 and
 # the pkgnames after it: reads the files of the release and prints the notes of each pkgname
 _python_imports_read() {
-  local LC_ALL=C file=$1 srcinfo=$2 work=$5 name url sha kind top root size rc=0 helper entry pkgname
+  local LC_ALL=C file=$1 srcinfo=$2 work=$5 name url sha kind top root size count rc=0 helper entry pkgname
   local -a pkgnames=("${@:6}") files skip
-  _python_imports_archive "$3" "$4" || return 1
-  if [[ -z "${PY_ARCHIVE:-}" ]]; then
-    printf 'notice\timports: PyPI holds no wheel or sdist of %s %s, not read\n' "$3" "$4"
-    return 0
+  local -a include=(--include '*.py' --include '*/scripts/*' --include 'scripts/*' --include '*/bin/*' --include 'bin/*'
+    --include '*entry_points.txt')
+  # python.pyproject reads the tree of the source archive that python_source fetched
+  if [[ "${PY_SOURCE:-}" == pyproject ]]; then
+    name=${PY_TREE_ARCHIVE##*/} kind=tree
+    cp "$PY_TREE_ARCHIVE" "$work/archive" || return 1
+  else
+    _python_imports_archive "$3" "$4" || return 1
+    if [[ -z "${PY_ARCHIVE:-}" ]]; then
+      printf 'notice\timports: PyPI holds no wheel or sdist of %s %s, not read\n' "$3" "$4"
+      return 0
+    fi
+    IFS=$'\t' read -r name url sha kind <<<"$PY_ARCHIVE"
+    http_get "$url" -o "$work/archive" || return 1
+    if [[ "$(sha256sum "$work/archive")" != "$sha "* ]]; then
+      log_err "$name does not match its sha256"
+      return 1
+    fi
   fi
-  IFS=$'\t' read -r name url sha kind <<<"$PY_ARCHIVE"
-  http_get "$url" -o "$work/archive" || return 1
-  if [[ "$(sha256sum "$work/archive")" != "$sha "* ]]; then
-    log_err "$name does not match its sha256"
-    return 1
-  fi
-  # The listing takes at most 16 MiB, and an ignored SIGXFSZ makes a write past it fail
-  if ! (trap '' XFSZ && ulimit -f 16384 && bsdtar -tvf "$work/archive" >"$work/list" 2>/dev/null); then
+  # The listing takes the members that the extraction takes, within 16 MiB, where an ignored SIGXFSZ
+  # makes a write past it fail; numeric owners keep names with spaces from shifting the size column
+  (trap '' XFSZ && ulimit -f 16384 && bsdtar -tvf "$work/archive" --numeric-owner "${include[@]}" >"$work/list" 2>"$work/errors")
+  if _bsdtar_failed "$work/errors" || (($(stat -c %s "$work/list") >= 16384 * 1024)); then
     printf 'notice\timports: bsdtar cannot list %s, not read\n' "$name"
     return 0
   fi
-  size=$(awk '/^-/ { path = $0; sub(/^([^ ]+ +){8}/, "", path)
-    if (path ~ /\.py$|\/scripts\/|(^|\/)bin\//) sum += $5 } END { printf "%d\n", sum }' "$work/list")
+  read -r count size < <(awk '{ n++ } /^-/ { sum += $5 } END { printf "%d %d\n", n, sum }' "$work/list")
+  if ((count > 20000)); then
+    printf 'notice\timports: the release holds more than 20000 Python files and scripts, not read\n'
+    return 0
+  fi
   if ((size > 20 * 1024 * 1024)); then
     printf 'notice\timports: the release holds more than 20 MB of Python files, not read\n'
     return 0
   fi
   mkdir "$work/tree" || return 1
-  # bsdtar fails for each pattern that matches nothing, which is no failure here
   (trap '' XFSZ && ulimit -f $((20 * 1024)) && bsdtar -xf "$work/archive" -C "$work/tree" --no-same-owner \
-    --include '*.py' --include '*/scripts/*' --include 'scripts/*' --include '*/bin/*' --include 'bin/*' \
-    --include '*entry_points.txt' 2>"$work/errors")
-  if grep -qv -e ': Not found in archive$' -e '^bsdtar: Error exit delayed from previous errors' "$work/errors"; then
+    "${include[@]}" 2>"$work/errors")
+  if _bsdtar_failed "$work/errors"; then
     printf 'notice\timports: bsdtar cannot extract %s, not read\n' "$name"
     return 0
   fi
   # Links of the archive could point at any file of the runner
   find "$work/tree" -type l -delete
   top="$work/tree"
-  if [[ "$kind" == sdist ]]; then
+  if [[ "$kind" != wheel ]]; then
     top="$work/tree/${name%.tar.gz}"
     top=${top%.zip}
+    [[ "$kind" != tree ]] || top="$work/tree/$PY_TREE_TOP"
     [[ -d "$top" ]] || return 0
     for entry in tests test docs doc examples; do
       rm -rf "${top:?}/$entry"
@@ -270,7 +286,7 @@ _python_imports_read() {
     rm -rf "${top:?}/$entry"
   done
   root=$top
-  [[ "$kind" != sdist || ! -d "$top/src" ]] || root="$top/src"
+  [[ "$kind" == wheel || ! -d "$top/src" ]] || root="$top/src"
   _python_imports_files "$top" "$root" "$kind"
   files=("${PY_FILES[@]}")
   ((${#files[@]} > 0)) || return 0
@@ -297,6 +313,11 @@ _python_imports_read() {
     pkgname_has_python "$srcinfo" "$pkgname" || continue
     _python_imports_notes "$file" "$srcinfo" "$pkgname" "${#pkgnames[@]}" || return 1
   done
+}
+
+# Succeed when bsdtar error file $1 holds an error other than a pattern that matched nothing
+_bsdtar_failed() {
+  grep -qv -e ': Not found in archive$' -e '^bsdtar: Error exit delayed from previous errors' "$1"
 }
 
 # Set PY_ARCHIVE to name, URL, sha256 and wheel or sdist of the file of release $2 of project $1
@@ -579,4 +600,219 @@ _python_join() {
   local out
   printf -v out '%s or ' "$@"
   printf '%s\n' "${out% or }"
+}
+
+# Set the source of the requirements of version $2 of package file $1, whose AUR .SRCINFO is $3:
+# PY_SOURCE (pypi, pyproject or none), PY_PROJECT, PY_VERSION, and PY_HEADERS for pyproject
+python_source() {
+  local tag value json
+  PY_SOURCE="" PY_PROJECT="" PY_VERSION="" PY_HEADERS="" PY_NEWEST="" PY_TREE_ARCHIVE="" PY_TREE_TOP=""
+  if [[ "$(pkg_get "$1" .strategy)" == pypi ]]; then
+    PY_SOURCE=pypi PY_PROJECT=$(pkg_get "$1" .upstream.registry) PY_VERSION=$2
+    return 0
+  fi
+  tag=$(pkg_get "$1" '.python | tag')
+  if [[ "$tag" == "!!str" && "$(pkg_get "$1" .python)" == none ]]; then
+    PY_SOURCE=none
+    return 0
+  fi
+  if [[ "$tag" == "!!map" ]]; then
+    value=$(pkg_get "$1" '.python.pypi // ""')
+    if [[ -n "$value" ]]; then
+      PY_SOURCE=pypi PY_PROJECT=$value PY_VERSION=$2
+      [[ "$(pkg_get "$1" '.python.release // ""')" == newest ]] || return 0
+      # shellcheck disable=SC2034 # fired_alerts reads it
+      PY_NEWEST=1
+      json=$(http_get_json "https://pypi.org/pypi/$value/json") || return 1
+      PY_VERSION=$(yq -r '.info.version // ""' <<<"$json")
+      if [[ ! "$PY_VERSION" =~ ^[A-Za-z0-9._+!-]+$ ]]; then
+        log_err "https://pypi.org/pypi/$value/json names no version"
+        return 1
+      fi
+      return 0
+    fi
+    value=$(pkg_get "$1" '.python.pyproject // ""')
+    if [[ -n "$value" ]]; then
+      _python_pyproject "$1" "$2" "$3" "$value"
+      return
+    fi
+  fi
+  log_err "packages/${1##*/}: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"
+  return 1
+}
+
+# python_source for python.pyproject $4 of package file $1 at version $2 with .SRCINFO $3: the
+# [project] table of that file in the first https archive of the sources, at the new version
+_python_pyproject() {
+  local LC_ALL=C file=$1 path=$4 url="" line old new format dir top kind value name="" python="" has="" dynamic=""
+  local fail="packages/${1##*/}: python.pyproject reads no static dependencies from $4"
+  local -a deps=()
+  while IFS= read -r line; do
+    line=${line#*::}
+    if [[ "$line" == https://* && "$line" =~ \.(tar\.gz|tgz|tar\.xz|tar\.bz2|tar\.zst|zip)$ ]]; then
+      url=$line
+      break
+    fi
+  done < <(awk '/^\t(source|source_x86_64) = / { sub(/^\t[a-z0-9_]+ = /, ""); print }' "$3")
+  if [[ -z "$url" ]]; then
+    log_err "$fail: the .SRCINFO has no https archive among its sources"
+    return 1
+  fi
+  old=$(srcinfo_pkgver "$3")
+  format=$(pkg_get "$file" '.pkgver_format // ""')
+  new=$(to_pkgver "$2" "$(pkgver_dash "$file")" "$format")
+  url=$(_bump_version "$url" "$old" "$new" "$(_unformat_version "$old" "$format")" "$(_unformat_version "$new" "$format")" \
+    "$(_srcinfo_arch_words "$3")")
+  archdb_cache || return 1
+  dir=$(mktemp -d "$AURTOMATOR_RUN_CACHE/pyproject.XXXXXX") || return 1
+  # shellcheck disable=SC2034 # _curl_get of common.sh reads it
+  MAX_ANSWER_MB=$(max_answer_mb "$file") || return 1
+  http_get "$url" -o "$dir/archive" || return 1
+  # The listing takes at most 16 MiB, and an ignored SIGXFSZ makes a write past it fail
+  if ! (trap '' XFSZ && ulimit -f 16384 && bsdtar -tf "$dir/archive" >"$dir/list" 2>/dev/null) ||
+    ! IFS= read -r top <"$dir/list"; then
+    log_err "$fail: bsdtar cannot list $url"
+    return 1
+  fi
+  top=${top%%/*}
+  if [[ ! "$top" =~ ^[A-Za-z0-9._+-]+$ || "$top" == . || "$top" == .. ]]; then
+    log_err "$fail: $url holds no top directory"
+    return 1
+  fi
+  # pyproject.toml takes at most 256 KiB, and an ignored SIGXFSZ makes a write past it fail
+  (trap '' XFSZ && ulimit -f 257 && bsdtar -xqOf "$dir/archive" -- "$top/$path" >"$dir/pyproject.toml" 2>/dev/null)
+  if [[ ! -s "$dir/pyproject.toml" ]]; then
+    log_err "$fail: $url holds no $top/$path"
+    return 1
+  fi
+  if (($(stat -c %s "$dir/pyproject.toml") > 256 * 1024)); then
+    log_err "$fail: $top/$path holds more than 256 KiB"
+    return 1
+  fi
+  while IFS=$'\t' read -r kind value; do
+    if [[ "$value" == *\\* ]] || has_control "$value"; then
+      log_err "$fail: a value holds an escape or a control character: ${value@Q}"
+      return 1
+    fi
+    case $kind in
+      name) name=$value ;;
+      python) python=$value ;;
+      has) has=1 ;;
+      dep) deps+=("$value") ;;
+      dynamic) [[ "$value" != dependencies ]] || dynamic=1 ;;
+      error)
+        log_err "$fail: $value"
+        return 1
+        ;;
+    esac
+  done < <(_toml_project "$dir/pyproject.toml")
+  if [[ -z "$has" || -n "$dynamic" ]]; then
+    log_err "$fail"
+    return 1
+  fi
+  PY_SOURCE=pyproject PY_PROJECT=${name:-$(package_name "$file")} PY_VERSION=$2
+  PY_HEADERS="Name: $PY_PROJECT"
+  [[ -z "$python" ]] || PY_HEADERS+=$'\n'"Requires-Python: $python"
+  for value in "${deps[@]}"; do
+    PY_HEADERS+=$'\n'"Requires-Dist: $value"
+  done
+  PY_TREE_ARCHIVE="$dir/archive"
+  PY_TREE_TOP=$top
+  [[ "$path" != */* ]] || PY_TREE_TOP+="/${path%/*}"
+}
+
+# Print the values of the [project] table of TOML file $1 that the rules read, lines of name,
+# python, dep and dynamic, a tab and the value, has for a dependencies key, or error and the reason
+_toml_project() {
+  LC_ALL=C awk '
+    function fail(m) { print "error\t" m; failed = 1; exit }
+    function blank() { while (pos <= n && substr(t, pos, 1) ~ /[ \t]/) pos++ }
+    function space(  c) {
+      while (pos <= n) {
+        c = substr(t, pos, 1)
+        if (c ~ /[ \t\r\n]/) pos++
+        else if (c == "#") { while (pos <= n && substr(t, pos, 1) != "\n") pos++ }
+        else break
+      }
+    }
+    # Escapes stay as written, and the caller refuses the values that hold one
+    function text(  q, c, start, triple) {
+      q = substr(t, pos, 1)
+      triple = (substr(t, pos, 3) == q q q)
+      pos += triple ? 3 : 1
+      start = pos
+      while (pos <= n) {
+        c = substr(t, pos, 1)
+        if (triple && substr(t, pos, 3) == q q q) { pos += 3; return substr(t, start, pos - 3 - start) }
+        if (!triple && c == q) { pos++; return substr(t, start, pos - 1 - start) }
+        if (!triple && c == "\n") fail("a string holds a line break")
+        pos += (q == "\"" && c == "\\") ? 2 : 1
+      }
+      fail("a string has no end")
+    }
+    function key(  c, start) {
+      c = substr(t, pos, 1)
+      if (c == "\"" || c == "\047") return text()
+      start = pos
+      while (pos <= n && substr(t, pos, 1) ~ /[A-Za-z0-9_.-]/) pos++
+      if (pos == start) fail("a key holds an unknown character")
+      return substr(t, start, pos - start)
+    }
+    function value(name, depth,  c, s) {
+      if (depth > 32) fail("values nest deeper than 32 levels")
+      c = substr(t, pos, 1)
+      if (c == "\"" || c == "\047") {
+        s = text()
+        if (name != "") print name "\t" s
+        return
+      }
+      if (c == "[") {
+        pos++
+        for (;;) {
+          space()
+          if (substr(t, pos, 1) == "]") { pos++; return }
+          value(name, depth + 1)
+          space()
+          c = substr(t, pos, 1)
+          if (c == ",") { pos++; continue }
+          if (c == "]") { pos++; return }
+          fail("an array holds an unknown character")
+        }
+      }
+      if (c == "{") {
+        pos++
+        for (;;) {
+          blank()
+          if (substr(t, pos, 1) == "}") { pos++; return }
+          key(); blank()
+          if (substr(t, pos, 1) != "=") fail("an inline table holds a key without =")
+          pos++; blank(); value("", depth + 1); blank()
+          c = substr(t, pos, 1)
+          if (c == ",") { pos++; continue }
+          if (c == "}") { pos++; return }
+          fail("an inline table holds an unknown character")
+        }
+      }
+      if (name == "dep" || name == "dynamic") fail("dependencies and dynamic hold strings alone")
+      while (pos <= n && substr(t, pos, 1) !~ /[,\]}\n#]/) pos++
+    }
+    /^[ \t]*\[/ { table = $0; sub(/[ \t]*(#.*)?$/, "", table); gsub(/[ \t]/, "", table); inside = (table == "[project]"); next }
+    inside { t = t $0 "\n" }
+    END {
+      if (failed) exit
+      n = length(t); pos = 1
+      for (;;) {
+        space()
+        if (pos > n) break
+        k = key(); blank()
+        if (substr(t, pos, 1) != "=") fail("a line holds a key without =")
+        pos++; blank()
+        if (k == "dependencies") { print "has\t"; value("dep", 1) }
+        else if (k == "dynamic") value("dynamic", 1)
+        else if (k == "name") value("name", 1)
+        else if (k == "requires-python") value("python", 1)
+        else value("", 1)
+        if (failed) exit
+      }
+    }' "$1"
 }

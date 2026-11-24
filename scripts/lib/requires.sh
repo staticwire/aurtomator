@@ -502,13 +502,13 @@ requires_pin() {
   printf '%s\n' "${pins[0]}"
 }
 
-# Print how the requirement names that apply on Arch change from release $2 to release $3 of
-# upstream.registry of package file $1, as adds a, b; drops c, and nothing when they match
+# Print how the requirement names that apply on Arch change from release $2 to release $3 of PyPI
+# project $4, upstream.registry of package file $1 by default, as adds a, b; drops c, or nothing
 requires_change() {
   local registry err old new name added dropped rc=0
   local -A in_old=() in_new=()
   local -a adds=() drops=()
-  registry=$(pkg_get "$1" .upstream.registry) || return 1
+  registry=${4:-$(pkg_get "$1" .upstream.registry)} || return 1
   # shellcheck disable=SC2034 # _curl_get of common.sh reads it
   MAX_ANSWER_MB=$(max_answer_mb "$1") || return 1
   for name in "$2" "$3"; do
