@@ -2110,6 +2110,19 @@ alerts:
   done
 }
 
+# _alerts separates its fields with tabs
+@test "validate: an alert note with a tab rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    hold: true
+    note: \"Raise foo\\tto 2\""
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"alerts[0].note must be one line of text without tabs"* ]]
+}
+
 @test "validate: an alert note that YAML reads as a number, a boolean or a date asks for quotes" {
   local value
   for value in 2024 1.5 true 2024-10-30; do

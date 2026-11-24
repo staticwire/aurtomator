@@ -29,12 +29,12 @@ alert_fires() {
   esac
 }
 
-# Print the note of alert $2 of package file $1; fails when it is not one line of text, since
-# it goes into one log line and one line of _alerts
+# Print the note of alert $2 of package file $1; fails when it is not one line of text without tabs,
+# since it goes into one log line and one line of _alerts, whose fields tabs separate
 alert_note() {
   local note
   note=$(pkg_get "$1" ".alerts[$2].note | select(tag == \"!!str\")")
-  [[ -n "$note" && "$note" != *[$'\n\r']* ]] || return 1
+  [[ -n "$note" && "$note" != *$'\t'* ]] && ! has_control "$note" || return 1
   printf '%s\n' "$note"
 }
 
@@ -42,6 +42,10 @@ alert_note() {
 # a bare number, boolean or date as another type than text
 alert_note_error() {
   local value
+  if [[ "$(pkg_get "$1" ".alerts[$2].note | select(tag == \"!!str\")")" == *$'\t'* ]]; then
+    echo 'note must be one line of text without tabs'
+    return
+  fi
   value=$(pkg_get "$1" ".alerts[$2].note | select(tag == \"!!int\" or tag == \"!!float\" or tag == \"!!bool\" or tag == \"!!timestamp\")")
   printf 'note must be one line of text%s\n' "${value:+: put $value in quotes}"
 }

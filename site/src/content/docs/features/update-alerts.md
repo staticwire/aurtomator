@@ -22,7 +22,7 @@ alerts:
 | `from` | one of `when`, `from`, `match`, `requires` | version: the new version is at or above it, and `current` is below it |
 | `match` | one of `when`, `from`, `match`, `requires` | ERE: the new version matches it, and `current` does not |
 | `requires` | one of `when`, `from`, `match`, `requires` | `changed`: the names of the requirements that apply on Arch differ between the release in `current` and the new version, `pypi` only |
-| `note` | yes, optional with `requires` | one line of text for the maintainer. Numbers, booleans and dates go in quotes, as in `note: '2024'` |
+| `note` | yes, optional with `requires` | one line of text without tabs for the maintainer. Numbers, booleans and dates go in quotes, as in `note: '2024'` |
 | `hold` | no | `true` holds the update. Default `false` |
 
 Rules fire once at each crossing, when the new version meets their condition and `current` does not. `from` rules can stay in the file after their release, and `when: major` rules fire again at the next major. Versions are compared in `pkgver` form, as `current` holds them, with `vercmp` for `from` and by the first number for `when: major`, so `9 → 10` is a new major. Packages without `current` fire no rule in the check. The update itself applies the rules with `hold: true` to the step from `pkgver` of the AUR `.SRCINFO`, and such a rule that fires there fails the update with its note, so the package gets `update_failed` and no `held`. Downgrades and version jumps that the package does not allow are skipped first, see [Downgrades and version jumps](/features/downgrades/).
