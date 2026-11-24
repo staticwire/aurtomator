@@ -14,6 +14,7 @@ The job installs `shellcheck` from apt, and `shfmt` v3.14.1 and `actionlint` v1.
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 python3 -m py_compile scripts/lib/*.py
+ruby -wc scripts/lib/*.rb
 actionlint
 ```
 
@@ -38,9 +39,9 @@ The job runs in the image that the `image` job of `ci.yml` reads, the job of [Pe
 bundle exec bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 ```
 
-Failing tests fail the job, and the upload of `coverage/coverage.xml` and `coverage/python.xml` to Codecov never does. The upload runs the Codecov CLI that `ci-image/requirements.txt` pins with hashes, installed into `/opt/codecov`, and Dependabot updates those pins. bashcov exports `SHELLOPTS`, so every script the tests start, mocks included, runs with `errexit`, `nounset` and `pipefail`. bashcov alone loses trace lines: it resolves the path of a script when it reads a trace line, after the test may have removed its link to the script. `tests/helpers/bashcov-bats.sh` keeps the test directories until bashcov exits and passes on the lines of `.sh` files alone, and `tests/coverage.bats` checks the exact count of one line. bashcov measures no Python, so `bashcov-bats.sh` puts `tests/helpers/cov-shims` first in `PATH`, whose `python3` runs `scripts/lib/py_imports.py` under coverage.py and every other call as given, and after bats it writes `coverage/python.xml` from the data of these runs.
+Failing tests fail the job, and the upload of `coverage/coverage.xml`, `coverage/python.xml` and `coverage/ruby.xml` to Codecov never does. The upload runs the Codecov CLI that `ci-image/requirements.txt` pins with hashes, installed into `/opt/codecov`, and Dependabot updates those pins. bashcov exports `SHELLOPTS`, so every script the tests start, mocks included, runs with `errexit`, `nounset` and `pipefail`. bashcov alone loses trace lines: it resolves the path of a script when it reads a trace line, after the test may have removed its link to the script. `tests/helpers/bashcov-bats.sh` keeps the test directories until bashcov exits and passes on the lines of `.sh` files alone, and `tests/coverage.bats` checks the exact count of one line. bashcov measures no Python, so `bashcov-bats.sh` puts `tests/helpers/cov-shims` first in `PATH`, whose `python3` runs `scripts/lib/py_imports.py` under coverage.py and every other call as given, and after bats it writes `coverage/python.xml` from the data of these runs. Its `ruby` runs `scripts/lib/rb_requires.rb` under SimpleCov with `tests/helpers/simplecov-helper.rb`, into `coverage/ruby/`, apart from the results of bashcov, and after bats `bashcov-bats.sh` collates them into `coverage/ruby.xml`.
 
-The two tests of the `namcap` check run the real `namcap`, and `tests/coverage.bats` runs the real `bashcov` and coverage.py. Without them the tests skip, and with `CI` set they fail.
+The two tests of the `namcap` check run the real `namcap`, and `tests/coverage.bats` runs the real `bashcov`, coverage.py and SimpleCov. Without them the tests skip, and with `CI` set they fail.
 
 ## CI image updates
 

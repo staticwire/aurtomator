@@ -300,10 +300,10 @@ secret_lines() {
 }
 
 # The search of the CLI takes tests/coverage.bats for a report, by its name
-@test "ci: Codecov uploads the reports of bashcov and coverage.py alone" {
+@test "ci: Codecov uploads the reports of bashcov, coverage.py and SimpleCov alone" {
   run yq -o=json -I=0 '.jobs.test.steps[] | select(.name == "Upload coverage to Codecov") | .with | [.files, .disable_search]' \
     "$GITHUB_DIR/workflows/ci.yml"
-  [ "$output" = '["coverage/coverage.xml,coverage/python.xml",true]' ]
+  [ "$output" = '["coverage/coverage.xml,coverage/python.xml,coverage/ruby.xml",true]' ]
 }
 
 # bashcov-bats.sh measures scripts/lib/py_imports.py with coverage.py of the image
@@ -313,6 +313,8 @@ secret_lines() {
   [[ "$output" == *" python-coverage"* ]]
   run yq '.jobs.lint.steps[] | select(.name == "Compile the Python helpers") | .run' "$ci"
   [ "$output" = "python3 -m py_compile scripts/lib/*.py" ]
+  run yq '.jobs.lint.steps[] | select(.name == "Check the Ruby helpers") | .run' "$ci"
+  [ "$output" = "ruby -wc scripts/lib/*.rb" ]
 }
 
 # Default setup of code scanning skips the pull requests of Dependabot, which move the pins of
@@ -4282,9 +4284,9 @@ close_files_step() {
 }
 
 # The requires rule imports parses the files of a release with scripts/lib/py_imports.py
-@test "check-updates: check installs python" {
+@test "check-updates: check installs python and ruby" {
   run step_run check "Install dependencies"
-  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq python"* ]]
+  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq python ruby"* ]]
 }
 
 # The requires rules of the check read the Python distributions and modules of the repositories

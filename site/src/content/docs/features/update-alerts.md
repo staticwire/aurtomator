@@ -110,6 +110,8 @@ Packages of strategy `rubygems` whose `.SRCINFO` on the AUR has a pkgname with `
 ! bashcov: update 3.3.0 → 4.0.3 held: simplecov ~> 1.1: ruby-simplecov has 0.22.0
 ```
 
+`imports` reads the `.gem` of the new version from its `gem_uri`, within `upstream.max_answer_mb` and after its sha256 matches, and takes `bindir`, `executables` and `require_paths` from its `metadata.gz`. `scripts/lib/rb_requires.rb` parses the `.rb` files of the require paths and the executables with Prism, which the `check` job installs with `ruby`, and prints each `require`, `require_relative` and `load` of a string. Requires at file level and in class and module bodies are required when they run from `lib/<gem>.rb` or an executable through the files of the gem; requires inside methods and blocks of `define_method`, in `begin` blocks that rescue `LoadError`, `ScriptError` or `Exception`, and at file level of the other files are optional. Bare `rescue` catches `StandardError` alone, and `LoadError` descends from `ScriptError`, so requires under it stay required. Each require path belongs to `ruby`, to the package that holds it in `lib/` of an installed gem by the files database of pacman, to an entry of `depends` or `optdepends` named `ruby-<first part of the path>`, or to the package that `ruby.map` names, and features built into the interpreter, such as `enumerator`, need none. Notes follow those of Python, as `require simplecov: ruby-simplecov not in depends`.
+
 `ruby.skip` lists gems that the rules leave out, such as gems for Windows. `ruby.relax: true` marks a PKGBUILD that turns `~>` into `>=`, and upper bounds of `~>` that Arch exceeds then give notices. Versions outside the grammar of RubyGems give notices as well.
 
 ```yaml

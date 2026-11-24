@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# ruby of the tests under bashcov-bats.sh: with SIMPLECOV_HELPER_DIR set, scripts/lib/rb_requires.rb runs under
+# SimpleCov, without --disable-gems, which hides it; other calls run as given
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+helper=0
+if [[ -n "${SIMPLECOV_HELPER_DIR:-}" ]]; then
+  for ((i = 1; i <= $#; i++)); do
+    if [[ "${!i}" == */scripts/lib/rb_requires.rb ]]; then
+      helper=$i
+      break
+    fi
+  done
+fi
+if ((helper == 0)); then
+  exec /usr/bin/ruby "$@"
+fi
+exec /usr/bin/ruby -r"$root/tests/helpers/simplecov-helper.rb" "$root/scripts/lib/rb_requires.rb" "${@:helper+1}"

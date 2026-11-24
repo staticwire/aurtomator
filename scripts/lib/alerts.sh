@@ -172,6 +172,7 @@ _ruby_rule() {
       [[ -z "$change" ]] || printf 'hold\t%s\n' "$change"
       ;;
     unmet) ruby_unmet "$file" "$REQ_SRCINFO" "$RB_GEM" "$RB_VERSION" ;;
+    imports) ruby_imports "$file" "$REQ_SRCINFO" "$RB_GEM" "$RB_VERSION" ;;
   esac
 }
 

@@ -72,6 +72,16 @@ require_coverage_py() {
   skip "coverage.py not installed"
 }
 
+# Helper: skip without SimpleCov and its Cobertura formatter, except in CI, whose bundle holds both
+require_simplecov() {
+  ruby -e 'require "simplecov"; require "simplecov-cobertura"' &>/dev/null && return 0
+  if [[ -n "${CI:-}" ]]; then
+    echo "simplecov-cobertura is not installed, and the bundle of CI holds it" >&2
+    return 1
+  fi
+  skip "simplecov-cobertura not installed"
+}
+
 @test "teardown_test_env keeps the directory while AURTOMATOR_KEEP_TEST_DIRS is set" {
   AURTOMATOR_KEEP_TEST_DIRS=1 teardown_test_env
   [ -d "$TEST_TMPDIR/scripts" ]
@@ -168,4 +178,25 @@ require_coverage_py() {
   run env -u COVERAGE_FILE "$shim" -I -S "$PROJECT_DIR/scripts/lib/py_imports.py" "$TEST_TMPDIR" m.py
   [ "$status" -eq 0 ]
   [ "$output" = import$'\t'm.py$'\t'json$'\t'module ]
+}
+
+@test "bashcov-bats.sh: measures scripts/lib/rb_requires.rb with SimpleCov into coverage/ruby.xml" {
+  require_bashcov
+  require_simplecov
+  make_fixture 'printf "require \\"json\\"\\n" >"$TEST_TMPDIR/m.rb" && ruby --disable-gems "$PROJECT_DIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR" m.rb'
+  run_bashcov
+  [ "$status" -eq 0 ]
+  grep -q 'filename="scripts/lib/rb_requires.rb"' "$FIXTURE/coverage/ruby.xml"
+  grep -Eq '<line number="[0-9]+" hits="[1-9]' "$FIXTURE/coverage/ruby.xml"
+}
+
+@test "cov-shims/ruby: runs every call as ruby without SIMPLECOV_HELPER_DIR" {
+  local shim="$PROJECT_DIR/tests/helpers/cov-shims/ruby"
+  run env -u SIMPLECOV_HELPER_DIR "$shim" --disable-gems -e 'puts defined?(Gem).inspect'
+  [ "$status" -eq 0 ]
+  [ "$output" = nil ]
+  printf 'require "json"\n' >"$TEST_TMPDIR/m.rb"
+  run env -u SIMPLECOV_HELPER_DIR "$shim" --disable-gems "$PROJECT_DIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR" m.rb
+  [ "$status" -eq 0 ]
+  [ "$output" = require$'\t'm.rb$'\t'require$'\t'json$'\t'module ]
 }

@@ -3840,6 +3840,61 @@ $1"
   [ ! -e "$CURL_ARGS_LOG" ]
 }
 
+# === rb_requires.rb ===
+
+# Helper: writes file $1 under $TEST_TMPDIR/rb with the lines after it
+rb_file() {
+  mkdir -p "$(dirname "$TEST_TMPDIR/rb/$1")"
+  printf '%s\n' "${@:2}" >"$TEST_TMPDIR/rb/$1"
+}
+
+# Helper: runs rb_requires.rb on the files $@ of $TEST_TMPDIR/rb as the rules run it
+run_rb_requires() {
+  run --separate-stderr ruby --disable-gems "$TEST_TMPDIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR/rb" "$@"
+}
+
+@test "rb_requires.rb: prints the requires of a file with their kind and scope" {
+  rb_file lib/demo.rb 'require "optparse"' "require_relative 'demo/x'" 'load "tasks.rb"' 'Kernel.require "pathname"' \
+    'class Demo' '  require "set"' '  def run' '    require "json"' '  end' '  define_method(:go) { require "csv" }' 'end' \
+    'require "#{name}"' "text = <<~RUBY" "  require 'fake'" 'RUBY' "list = %w[require nope]" 'other.require "skip"'
+  run_rb_requires lib/demo.rb
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'require\tlib/demo.rb\t%s\n' 'require	optparse	module' 'relative	lib/demo/x.rb	module' \
+    'load	tasks.rb	module' 'require	pathname	module' 'require	set	module' 'require	json	method' 'require	csv	method')" ]
+}
+
+# LoadError descends from ScriptError, so a bare rescue or StandardError leaves the require required
+@test "rb_requires.rb: reads requires under a rescue of LoadError as optional" {
+  rb_file lib/demo.rb 'begin' '  require "fast"' 'rescue LoadError' '  require "slow"' 'end' 'begin' '  require "a"' \
+    'rescue ::ScriptError, Exception' 'end' 'begin' '  require "b"' 'rescue' 'end' 'begin' '  require "c"' 'rescue StandardError' \
+    'end' 'def m' '  require "d"' 'rescue LoadError' 'end' 'if ENV["X"]' '  require "e"' 'end'
+  run_rb_requires lib/demo.rb
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'require\tlib/demo.rb\trequire\t%s\n' 'fast	optional' 'slow	optional' 'a	optional' 'b	module' \
+    'c	module' 'd	method' 'e	module')" ]
+}
+
+@test "rb_requires.rb: prints an error line for a file it cannot read and goes on" {
+  rb_file bad.rb 'def x(' 'end end'
+  rb_file good.rb 'require "json"'
+  run_rb_requires bad.rb missing.rb good.rb
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 3 ]
+  [[ "${lines[0]}" == error$'\t'bad.rb$'\t'* ]]
+  [[ "${lines[1]}" == error$'\t'missing.rb$'\t'* ]]
+  [ "${lines[2]}" = require$'\t'good.rb$'\t'require$'\t'json$'\t'module ]
+}
+
+# enumerator, thread and fiber live in the interpreter, so no file of the files database names them
+@test "rb_requires.rb: --builtin prints the features without a file, and no root exits 2" {
+  run --separate-stderr ruby --disable-gems "$TEST_TMPDIR/scripts/lib/rb_requires.rb" --builtin
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output"$'\n' == *$'\nenumerator\n'* && $'\n'"$output"$'\n' == *$'\nthread\n'* ]]
+  [[ "$output" != *prism* && "$output" != */* ]]
+  run --separate-stderr ruby --disable-gems "$TEST_TMPDIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR/none-such"
+  [ "$status" -eq 2 ]
+}
+
 # === rbrules.sh ===
 
 # Helper: the mock pacman with the gems of the tests in the files database and the repositories,
@@ -3972,6 +4027,166 @@ alerts:
   run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 3.3.0 4.0.3' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/bashcov.yml"
   [ "$status" -eq 0 ]
   [ "$output" = $'hold\tsimplecov ~> 1.1: ruby-simplecov has 0.22.0' ]
+}
+
+# Helper: builds the .gem of gem $1 at version $2 in MOCK_FILES_DIR from the files of directory $3, tarred
+# with the options in GEM_TAR_ARGS, and the spec YAML $4, with its v2 answer and the requirements after them
+gem_build() {
+  local work="$TEST_TMPDIR/gem-$1-$2" sha
+  local -a entries
+  mkdir -p "$work"
+  mapfile -t entries < <(ls -A "$3")
+  bsdtar -czf "$work/data.tar.gz" ${GEM_TAR_ARGS[@]+"${GEM_TAR_ARGS[@]}"} -C "$3" "${entries[@]}"
+  printf '%s' "$4" | gzip -c >"$work/metadata.gz"
+  bsdtar -cf "$MOCK_FILES_DIR/$1-$2.gem" -C "$work" metadata.gz data.tar.gz
+  gem_v2 "$1" "$2" '>= 3.2' "${@:5}"
+  sha=$(sha256sum "$MOCK_FILES_DIR/$1-$2.gem" | cut -d' ' -f1)
+  S=$sha yq -i -o json '.sha = strenv(S)' "$MOCK_FILES_DIR/rubygems/v2/$1-$2.json"
+}
+
+# Helper: a gem shaped as bashcov 4.0.3, with a feature file that nothing requires, and the owners of
+# its requires in the files database
+bashcov_gem() {
+  local g="$TEST_TMPDIR/gemsrc"
+  mkdir -p "$g/lib/bashcov" "$g/bin" "$g/spec"
+  printf '%s\n' 'require "optparse"' 'require "pathname"' 'require "bashcov/runner"' 'require "simplecov"' \
+    'require "enumerator"' >"$g/lib/bashcov.rb"
+  printf '%s\n' 'require "io/nonblock"' 'require_relative "lexer"' >"$g/lib/bashcov/runner.rb"
+  printf '%s\n' 'module Lexer; end' >"$g/lib/bashcov/lexer.rb"
+  printf '%s\n' 'require "erb"' >"$g/lib/bashcov/report.rb"
+  printf '%s\n' '#!/usr/bin/env ruby' 'require "bashcov"' >"$g/bin/bashcov"
+  printf '%s\n' 'require "rspec"' >"$g/spec/spec_helper.rb"
+  gem_build bashcov 4.0.3 "$g" $'--- !ruby/object:Gem::Specification\nname: bashcov\nversion: !ruby/object:Gem::Version\n  version: 4.0.3\nbindir: bin\nexecutables:\n- bashcov\nrequire_paths:\n- lib\n' \
+    'simplecov|~> 1.1'
+  printf 'extra\truby\t3.4.13-1\tusr/lib/ruby/3.4.0/%s\n' optparse.rb pathname.rb x86_64-linux/io/nonblock.so >>"$MOCK_PACMAN_FILES"
+  printf 'extra\t%s\t1-1\tusr/lib/ruby/gems/3.4.0/gems/%s\n' ruby-simplecov simplecov-1.3.2/lib/simplecov.rb \
+    ruby-erb erb-4.0.4/lib/erb.rb >>"$MOCK_PACMAN_FILES"
+}
+
+# Helper: runs ruby_imports for package bashcov at 4.0.3 with .SRCINFO $1
+run_ruby_imports() {
+  create_test_package "bashcov" "rubygems" "upstream:
+  registry: bashcov"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_imports "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/bashcov.yml" "$1" bashcov 4.0.3
+}
+
+@test "rbrules.sh: ruby_imports notes the requires of a gem that depends and optdepends miss" {
+  gems_env 1.3.2
+  bashcov_gem
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire erb (optional): ruby-erb in neither depends nor optdepends' ]
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-erb
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$output" = $'notice\trequire simplecov: ruby-simplecov not in depends' ]
+}
+
+@test "rbrules.sh: ruby_imports fails on a gem that does not match its sha256, and notes without ruby" {
+  gems_env 1.3.2
+  bashcov_gem
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  printf '#!/usr/bin/env bash\nexit 127\n' >"$MOCK_DIR/ruby"
+  chmod +x "$MOCK_DIR/ruby"
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$output" = $'notice\timports: ruby is not installed, not read' ]
+  rm "$MOCK_DIR/ruby"
+  printf 'x' >>"$MOCK_FILES_DIR/bashcov-4.0.3.gem"
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"bashcov-4.0.3.gem does not match its sha256"* ]]
+}
+
+# Owner names with spaces shift the columns of bsdtar -tv
+@test "rbrules.sh: ruby_imports reads no release past 20 MB of Ruby files, whatever the owner names of its files" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/big" owner
+  for owner in builder 'a b c'; do
+    rm -rf "$g" "${AURTOMATOR_RUN_CACHE:?}"/*
+    mkdir -p "$g/lib"
+    printf '%s\n' 'require "erb"' >"$g/lib/bashcov.rb"
+    truncate -s 21M "$g/lib/big.rb"
+    GEM_TAR_ARGS=(--uname "$owner" --gname "$owner")
+    gem_build bashcov 4.0.3 "$g" $'name: bashcov\nrequire_paths:\n- lib\n' 'simplecov|~> 1.1'
+    unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+    run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+    [ "$output" = $'notice\timports: the release holds more than 20 MB of Ruby files, not read' ] || {
+      echo "$owner: $output"
+      return 1
+    }
+  done
+}
+
+@test "rbrules.sh: ruby_imports reads no release of more than 20000 Ruby files" {
+  gems_env 1.3.2
+  mkdir -p "$TEST_TMPDIR/many/lib"
+  (cd "$TEST_TMPDIR/many/lib" && touch m{1..20001}.rb)
+  gem_build bashcov 4.0.3 "$TEST_TMPDIR/many" $'name: bashcov\nrequire_paths:\n- lib\n' 'simplecov|~> 1.1'
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timports: the release holds more than 20000 Ruby files and executables, not read' ]
+}
+
+# The spec of the gem names require_paths and bindir, and .. there leads out of the extracted files
+@test "rbrules.sh: ruby_imports reads no file outside the gem through .. in require_paths and bindir" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/dots"
+  mkdir -p "$g/lib" "$TEST_TMPDIR/outside"
+  printf '%s\n' 'require "erb"' >"$g/lib/bashcov.rb"
+  printf '%s\n' 'require "leakedlib"' >"$TEST_TMPDIR/outside/bashcov.rb"
+  printf '%s\n' '#!/usr/bin/env ruby' 'require "leakedexe"' >"$TEST_TMPDIR/outside/evil"
+  gem_build bashcov 4.0.3 "$g" $'name: bashcov\nbindir: ../../../outside\nexecutables:\n- evil\nrequire_paths:\n- lib\n- ../../../outside\n' \
+    'simplecov|~> 1.1'
+  printf 'extra\t%s\t1-1\tusr/lib/ruby/gems/3.4.0/gems/%s\n' ruby-erb erb-4.0.4/lib/erb.rb >>"$MOCK_PACMAN_FILES"
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire erb: ruby-erb not in depends' ]
+}
+
+# ruby.map takes the first part of a require path that no package owns, and a yq expression built
+# from it would read the environment of the runner
+@test "rbrules.sh: ruby_imports leaves out requires of strings outside the form of a feature path" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/inject"
+  mkdir -p "$g/lib"
+  printf '%s\n' 'require "erb"' "require 'z\"], strenv(RB_PROBE), .[\"z'" 'require "two words"' >"$g/lib/bashcov.rb"
+  gem_build bashcov 4.0.3 "$g" $'name: bashcov\nrequire_paths:\n- lib\n' 'simplecov|~> 1.1'
+  printf 'extra\t%s\t1-1\tusr/lib/ruby/gems/3.4.0/gems/%s\n' ruby-erb erb-4.0.4/lib/erb.rb >>"$MOCK_PACMAN_FILES"
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  export RB_PROBE=leaked
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire erb: ruby-erb not in depends' ]
+}
+
+@test "rbrules.sh: ruby_map compares the keys of ruby.map with a gem name as written" {
+  create_test_package "pkg" "rubygems" 'upstream:
+  registry: demo
+ruby:
+  map:
+    rubyXL: ruby-rubyxl
+    other: [x]'
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; for key in "${@:2}"; do printf "[%s]\n" "$(ruby_map "$1" "$key")"; done' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml" rubyXL rubyxl other 'z"], strenv(HOME), .["z'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'[ruby-rubyxl]\n[]\n[]\n[]' ]
+}
+
+@test "lib.sh: fired_alerts runs requires: imports on the gem of a package of strategy rubygems" {
+  gems_env 1.3.2
+  bashcov_gem
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  aur_srcinfo_remote bashcov "$TEST_TMPDIR/b.SRCINFO"
+  create_test_package "bashcov" "rubygems" "upstream:
+  registry: bashcov
+alerts:
+  - requires: imports"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 4.0.3' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/bashcov.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire erb (optional): ruby-erb in neither depends nor optdepends' ]
 }
 
 # === version of aurtomator ===
