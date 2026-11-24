@@ -4622,9 +4622,14 @@ EOF
   [ "$output" = "0" ]
 }
 
-@test "spec-watch: opens no second issue while one is open" {
-  GH_OPEN=12 GH_SHAS="source/specifications/core-metadata.rst $(printf 'b%.0s' {1..40})" run_spec_step
+# Specifications that change while the issue is open reach its text
+@test "spec-watch: writes the changed specifications into the open issue and opens no second one" {
+  local path=source/specifications/core-metadata.rst
+  GH_OPEN=12 GH_SHAS="$path $(printf 'b%.0s' {1..40})" run_spec_step
   [ "$status" -eq 0 ]
+  grep -q '^issue edit 12 --body Specifications that ' "$GH_LOG"
+  grep -qF -e "\`: \`" "$GH_LOG"
+  grep -qF -e "to \`bbbbbbbbbbbb\`, https://github.com/pypa/packaging.python.org/commits/main/$path" "$GH_LOG"
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
 }
