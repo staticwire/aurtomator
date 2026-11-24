@@ -695,12 +695,19 @@ EOF
   local copy="$XDG_CACHE_HOME/aurtomator/$PINNED" arg
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 0 ]
-  # Files deleted by a cleaner, CRLF line ends, and a regular file in place of the copy
-  for arg in missing crlf file; do
+  # Files deleted by a cleaner, CRLF line ends, a regular file in place of the copy, edits that
+  # git status skips under the assume-unchanged and skip-worktree bits, and files git does not track
+  for arg in missing crlf file assumed skipped untracked ignored; do
     case "$arg" in
       missing) rm "$copy/scripts/setup.sh" ;;
       crlf) sed -i 's/$/\r/' "$copy/scripts/setup.sh" ;;
       file) rm -rf "$copy" && echo junk >"$copy" ;;
+      assumed | skipped)
+        echo 'echo edited' >>"$copy/scripts/setup.sh"
+        git -C "$copy" update-index "--$([[ "$arg" == assumed ]] && echo assume-unchanged || echo skip-worktree)" scripts/setup.sh
+        ;;
+      untracked) cp -p "$copy/scripts/setup.sh" "$copy/scripts/extra.sh" ;;
+      ignored) echo /extra.log >>"$copy/.git/info/exclude" && echo junk >"$copy/extra.log" ;;
     esac
     run "$REPO/aurtomator.sh" setup "$arg"
     [ "$status" -eq 0 ] && [[ "$output" == *"The copy of aurtomator in $copy is damaged or writable by others, so it is fetched again"* ]] &&
@@ -821,6 +828,40 @@ machine $(</proc/sys/kernel/overflowuid)
 65533 65533
 fail 65534
 EOF
+}
+
+# Helper: an id that prints the overflow uid of this machine for id -u, as a user namespace
+# that maps no uid does for every account
+mock_unmapped_user() {
+  local real
+  real=$(type -a -P id | grep -vF -m 1 "$MOCK_DIR/")
+  cat >"$MOCK_DIR/id" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == -u ]]; then
+  echo $(</proc/sys/kernel/overflowuid)
+  exit 0
+fi
+exec "$real" "\$@"
+EOF
+  chmod +x "$MOCK_DIR/id"
+}
+
+# Every file shows the overflow uid there, so the owner checks would pass for files of any account
+@test "runner: stops when the uid of the user is the owner of a user namespace" {
+  local message
+  message="Your uid is $(</proc/sys/kernel/overflowuid), which a user namespace gives the accounts it does not map, so the script cannot tell whether another account could swap the copy of aurtomator; run the script outside the namespace, or in one that maps your uid"
+  mock_unmapped_user
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$message" ]
+  [ ! -e "$XDG_CACHE_HOME" ]
+  rm "$MOCK_DIR/id"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  mock_unmapped_user
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "$message" ]
 }
 
 @test "runner: runs no copy below a directory above the home directory that shows the owner of a user namespace and others can write" {
