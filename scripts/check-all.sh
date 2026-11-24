@@ -304,17 +304,19 @@ elif [[ -n "$AURTOMATOR_VERSION" ]]; then
   fi
 fi
 
-# Prints the update_failed status that prepare or verify wrote for package $1,
-# or one of its own when there is none; it ignores any other status there
+# Prints the update_failed status that prepare or verify wrote for package $1, with the reason of
+# a check_failed of prepare, or one of its own when there is none; it ignores any other status
 handed_failure() {
   local status_dir="${WORK_DIR}/status"
   local file="${status_dir}/$1"
   if [[ -d "$status_dir" && ! -L "$status_dir" && -f "$file" && ! -L "$file" ]] &&
     ! _has_nul "$file"; then
-    local handed
+    local handed head
     # PKGBUILD code of prepare can write this file
-    if [[ "$(head -c 14 -- "$file")" == update_failed: ]]; then
+    head=$(head -c 14 -- "$file")
+    if [[ "$head" == update_failed: || "$head" == "check_failed: " ]]; then
       handed=$(last_bytes "$file")
+      handed=${handed#check_failed: }
       [[ "$handed" == update_failed:* ]] || handed="update_failed: $handed"
       status_text "$handed"
       return
@@ -776,7 +778,7 @@ run_package() {
   step_time_left "$pkg_name" || return 0
   err_file=$(mktemp)
   check_rc=0
-  if [[ "$MODE" == publish ]]; then
+  if [[ "$MODE" == prepare || "$MODE" == publish ]]; then
     alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" offline 2>"$err_file") || check_rc=$?
     ((check_rc != 0)) || alerts=$(publish_alerts "$pkg_name" "$alerts")
   else

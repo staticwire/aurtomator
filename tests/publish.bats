@@ -194,6 +194,26 @@ alerts:
   [ ! -e "$TEST_TMPDIR/out/demo" ]
 }
 
+# Only rules with hold: true keep the update back here
+@test "update-pkg --prepare: asks PyPI nothing for a requires rule without hold" {
+  create_test_package "demo" "pypi" "upstream:
+  registry: flaky
+alerts:
+  - requires: changed"
+  write_pkgbuild "$OLD" 1.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  : >"$CURL_ARGS_LOG"
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 3.2.1 --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  grep -qx 'pkgver=3.2.1' "$TEST_TMPDIR/out/demo/PKGBUILD"
+  run grep -c pypi.org "$CURL_ARGS_LOG"
+  [ "$output" = 0 ]
+}
+
 # check-all.sh compares with current, which lags the AUR after a push by hand
 @test "update-pkg --prepare: with current below the AUR, holds a downgrade, a jump and a held alert against the AUR" {
   write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
@@ -3450,6 +3470,37 @@ current: '1.0.0'"
   [ "$status" -eq 0 ]
   [ "$(head -n 1 "$TEST_TMPDIR/.status/pkg")" = "update_failed: [first 6119 bytes cut]" ]
   [ "$(tail -n 1 "$TEST_TMPDIR/.status/pkg")" = "${long:0:3896}END" ]
+}
+
+@test "check-all --publish: takes the reason of a check that failed in prepare" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  checked_status pkg "new_version: 2.0.0"
+  mkdir -p "$TEST_TMPDIR/out/status"
+  echo "check_failed: https://pypi.org/pypi/flaky/1.0/json: The requested URL returned error: 503" >"$TEST_TMPDIR/out/status/pkg"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "update_failed: https://pypi.org/pypi/flaky/1.0/json: The requested URL returned error: 503" ]
+}
+
+# The check run fired the rules on the same versions, so prepare takes its lines
+@test "check-all --prepare: asks PyPI nothing for the alert rules of the check run" {
+  create_test_package "flaky-bin" "pypi" "upstream:
+  registry: flaky
+current: '1.0'
+alerts:
+  - requires: changed"
+  checked_status flaky-bin "new_version: 3.2.1"
+  stub_script update-pkg.sh 0
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  : >"$CURL_ARGS_LOG"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/flaky-bin")" = "new_version: 3.2.1" ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.sh.args")" = "flaky-bin 3.2.1 --prepare $TEST_TMPDIR/out/prepared" ]
+  run grep -c pypi.org "$CURL_ARGS_LOG"
+  [ "$output" = 0 ]
 }
 
 @test "check-all --publish: prints the error of publish-pkg.sh without control characters" {
