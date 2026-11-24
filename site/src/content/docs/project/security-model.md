@@ -30,7 +30,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 | Crafted package YAML | Pull requests to a user repository | `validate-pkg.sh` with allow lists of keys and values |
 | Tampered downloads | Network attackers | `verify` downloads every source again over HTTPS and refuses checksums that do not match |
 | Theft of secrets | Code that runs in a job | Secrets only in `publish`, which runs no PKGBUILD code, and workflow commands stopped in the output of `builder` |
-| Changed dependencies | Actions and the base image | Actions pinned by commit SHA, the base image pinned by digest, and Dependabot pull requests that bring each version a week after its release |
+| Changed dependencies | Actions and the base image | Actions pinned by commit SHA, the base image pinned by digest, and Dependabot pull requests that bring each version a week after its release. The Scorecard action pulls its image by tag, see [Scorecard](/develop/ci/#scorecard) |
 
 ## Trust boundaries
 
