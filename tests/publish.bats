@@ -3646,6 +3646,41 @@ current: '13'"
   done
 }
 
+# The pin of a package with pin_from fits the release that the package of its project pushes
+@test "check-all --publish: publishes a package with pin_from only after the push of its project" {
+  local rc
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74"
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41"
+  mkdir -p "$TEST_TMPDIR/out/prepared/zensical-bin" "$TEST_TMPDIR/out/prepared/python-zensical-ui"
+  for rc in 1 0; do
+    checked_status zensical-bin "new_version: 0.1.3"
+    checked_status python-zensical-ui "new_version: 0.0.43"
+    rm -f "$TEST_TMPDIR/published" "$TEST_TMPDIR/scripts/publish-pkg.sh"
+    cat >"$TEST_TMPDIR/scripts/publish-pkg.sh" <<EOF
+#!/usr/bin/env bash
+echo "\$1" >>"$TEST_TMPDIR/published"
+[[ "\$1" != zensical-bin ]] || exit $rc
+EOF
+    chmod +x "$TEST_TMPDIR/scripts/publish-pkg.sh"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    if ((rc == 1)); then
+      [ "$(cat "$TEST_TMPDIR/published")" = zensical-bin ]
+      [[ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" == update_failed:* ]]
+      [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "new_version: 0.0.43" ]
+      [[ "$output" == *"python-zensical-ui: update 0.0.41 → 0.0.43 waits for the update of zensical-bin"* ]]
+    else
+      [ "$(cat "$TEST_TMPDIR/published")" = $'zensical-bin\npython-zensical-ui' ]
+      [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "updated: 0.0.43" ]
+    fi
+  done
+}
+
 @test "check-all --publish: keeps a held update and publishes nothing" {
   create_test_package "held" "github-release" "upstream:
   project: owner/repo

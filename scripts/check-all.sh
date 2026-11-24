@@ -398,10 +398,20 @@ in_recheck() {
   return 1
 }
 
-# Succeeds when package $2 of file $1, from version $3 to $4 in pass $5, waits for a package of
-# the project of its upstream.pin_from: one held in this run, or in pass 1 one in RECHECK
+# Succeeds for status $1 of a package of a project after its check, or in --publish after its
+# push, when its version in the AUR is the newest release of the project or goes there in this run
+project_at_newest() {
+  case "$1" in
+    up_to_date | "updated: "* | "downgrade: "* | "rebuilt: "* | "arch_added: "* | "new_build: "* | "arch_back: "*) return 0 ;;
+    "new_version: "* | "available_downgrade: "*) [[ "$MODE" == check || -n "$DRY_RUN" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+# Succeeds when package $2 of file $1, from version $3 to $4 in pass $5, waits for a package of the
+# project of its upstream.pin_from: held, in RECHECK in pass 1, or short of the release that pins $4
 companion_waits() {
-  local pin_from name main main_name
+  local pin_from name main main_name status
   pin_from=$(pkg_get "$1" '.upstream.pin_from // ""') || return 1
   [[ -n "$pin_from" ]] || return 1
   name=$(pypi_name "$pin_from") || return 1
@@ -409,7 +419,9 @@ companion_waits() {
   while IFS= read -r main; do
     [[ -n "$main" ]] || continue
     main_name=$(package_name "$main" 2>/dev/null) || continue
-    if [[ -f "${STATUS_DIR}/${main_name}" && "$(<"${STATUS_DIR}/${main_name}")" == "held: "* ]]; then
+    status=""
+    [[ ! -f "${STATUS_DIR}/${main_name}" ]] || status=$(<"${STATUS_DIR}/${main_name}")
+    if [[ "$status" == "held: "* ]]; then
       log_warn "$2: update ${3:-none} → $4 waits for the held update of $main_name"
       echo "held: $4" >"${STATUS_DIR}/$2"
       record_alerts "$2" "wait"$'\t'"Waits for the held update of $main_name"
@@ -420,6 +432,17 @@ companion_waits() {
       log_info "$2 waits for the second check of $main_name"
       echo "unchecked: waits for the second check of $main_name" >"${STATUS_DIR}/$2"
       RECHECK+=("$1")
+      return 0
+    fi
+    if ! project_at_newest "$status"; then
+      log_warn "$2: update ${3:-none} → $4 waits for the update of $main_name"
+      # --publish keeps the status of the check run, so the next run publishes the update
+      if [[ "$MODE" == publish ]]; then
+        printf '%s\n' "${CHECKED[$2]:-}" >"${STATUS_DIR}/$2"
+      else
+        echo "held: $4" >"${STATUS_DIR}/$2"
+        record_alerts "$2" "wait"$'\t'"Waits for the update of $main_name"
+      fi
       return 0
     fi
   done <<<"${PROJECT_FILES[$name]:-}"
@@ -789,7 +812,7 @@ run_package() {
     return
   fi
   # Pinned versions move with the package of the project that pins them
-  if [[ "$MODE" == check || "$MODE" == update ]] && [[ "$latest" != "$current" ]] &&
+  if [[ "$MODE" != prepare ]] && [[ "$latest" != "$current" ]] &&
     companion_waits "$pkg_file" "$pkg_name" "$current" "$latest" "$pass"; then
     return
   fi
