@@ -1026,7 +1026,10 @@ case "$1 $2" in
     [[ -n "${TAG_SHA:-}" ]] || exit 1
     printf '%s %s\n' "${TAG_TYPE:-commit}" "$TAG_SHA"
     ;;
-  "api repos/owner/repo/git/tags/"*) printf '%s\n' "${PEELED:-}" ;;
+  "api repos/owner/repo/git/tags/"*)
+    [[ -n "${PEELED:-}" ]] || exit 1
+    printf '%s\n' "$PEELED"
+    ;;
   "release view") printf '%s\n' "${DRAFT:-true}" ;;
 esac
 EOF
@@ -1075,10 +1078,19 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   [ "$output" = "0" ]
 }
 
-@test "release-please: the find step leaves a version without a tag" {
+# The tag of the manifest version exists in every run, and a skipped sign leaves the release a draft
+@test "release-please: the find step fails when a tag lookup fails" {
   MANIFEST=0.13.1 TAG_SHA='' run_release_step "Find the release to sign"
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
   [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  run grep -c '^release ' "$GH_LOG"
+  [ "$output" = "0" ]
+  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=fff999 PEELED='' run_release_step "Find the release to sign"
+  [ "$status" -ne 0 ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  grep -qxF 'api repos/owner/repo/git/tags/fff999 --jq .object.sha' "$GH_LOG"
+  run grep -c '^release ' "$GH_LOG"
+  [ "$output" = "0" ]
 }
 
 # GitHub locks the files of a published immutable release

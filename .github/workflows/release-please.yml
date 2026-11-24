@@ -84,10 +84,10 @@ jobs:
             exit 1
           fi
           # commits/<ref> would also take a branch of that name; annotated tags point at a tag object
-          ref=$(gh api "repos/$REPO/git/ref/tags/v$version" --jq '.object.type + " " + .object.sha') || ref=""
+          ref=$(gh api "repos/$REPO/git/ref/tags/v$version" --jq '.object.type + " " + .object.sha')
           read -r type tag_sha <<<"$ref"
           if [[ "$type" == tag ]]; then
-            tag_sha=$(gh api "repos/$REPO/git/tags/$tag_sha" --jq .object.sha) || tag_sha=""
+            tag_sha=$(gh api "repos/$REPO/git/tags/$tag_sha" --jq .object.sha)
           fi
           if [[ "$tag_sha" != "$SHA" ]]; then
             echo "v$version is no release of this commit"
