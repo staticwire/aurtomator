@@ -378,14 +378,25 @@ record_alerts() {
 # The package files of strategy pypi under the PEP 503 name of their upstream.registry, one
 # path a line, which read_projects fills once from the files without pin_from
 declare -A PROJECT_FILES=()
+# The package files that are links, which the runs never read, so they count for every project
+LINKED_FILES=""
 PROJECTS_READ=""
 
 read_projects() {
-  local file name
+  local file name stem
   [[ -z "$PROJECTS_READ" ]] || return 0
   PROJECTS_READ=1
   for file in "${plain_files[@]}"; do
-    [[ -f "$file" && ! -L "$file" && "$(pkg_get "$file" '.strategy // ""' 2>/dev/null)" == pypi ]] || continue
+    if [[ -L "$file" ]]; then
+      stem=${file##*/}
+      stem=${stem%.yml}
+      # run_package writes a status only for links with a valid package name
+      if (LC_ALL=C && [[ "$stem" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]); then
+        LINKED_FILES+="$file"$'\n'
+      fi
+      continue
+    fi
+    [[ -f "$file" && "$(pkg_get "$file" '.strategy // ""' 2>/dev/null)" == pypi ]] || continue
     name=$(pypi_name "$(pkg_get "$file" '.upstream.registry // ""' 2>/dev/null)") || continue
     PROJECT_FILES[$name]+="$file"$'\n'
   done
@@ -420,7 +431,12 @@ companion_waits() {
   read_projects
   while IFS= read -r main; do
     [[ -n "$main" ]] || continue
-    main_name=$(package_name "$main" 2>/dev/null) || continue
+    if [[ -L "$main" ]]; then
+      main_name=${main##*/}
+      main_name=${main_name%.yml}
+    else
+      main_name=$(package_name "$main" 2>/dev/null) || continue
+    fi
     status=""
     [[ ! -f "${STATUS_DIR}/${main_name}" ]] || status=$(<"${STATUS_DIR}/${main_name}")
     if [[ "$status" == "held: "* ]]; then
@@ -447,7 +463,7 @@ companion_waits() {
       fi
       return 0
     fi
-  done <<<"${PROJECT_FILES[$name]:-}"
+  done <<<"${PROJECT_FILES[$name]:-}$LINKED_FILES"
   return 1
 }
 

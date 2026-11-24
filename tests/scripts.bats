@@ -5022,6 +5022,32 @@ allow_missing_arch: false" "allow_missing_arch: false"
   [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "new_version: 0.0.43" ]
 }
 
+# The runs read no linked package file, so it can be the package of any project. The jobs hand
+# a link to builder as a link to itself.
+@test "check-all: a package with pin_from waits while a package file is a link" {
+  local link
+  create_zensical_pair "  - from: '9.0'
+    hold: true
+    note: Not reached
+allow_missing_arch: false" "allow_missing_arch: false"
+  cp "$TEST_TMPDIR/packages/zensical-bin.yml" "$TEST_TMPDIR/project.yml"
+  for link in zensical-bin other; do
+    rm -f "$TEST_TMPDIR/packages/$link.yml"
+    ln -s "$link.yml" "$TEST_TMPDIR/packages/$link.yml"
+    run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TMPDIR/.status/$link")" = "check_failed: packages/$link.yml is a link, and the runs read regular files alone" ]
+    [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ] || {
+      echo "$link: $(cat "$TEST_TMPDIR/.status/python-zensical-ui")"
+      return 1
+    }
+    [[ "$output" == *"python-zensical-ui: update 0.0.41 → 0.0.43 waits for the update of $link"* ]]
+    [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = "python-zensical-ui"$'\t'"wait"$'\t'"Waits for the update of $link" ]
+    rm "$TEST_TMPDIR/packages/$link.yml"
+    cp "$TEST_TMPDIR/project.yml" "$TEST_TMPDIR/packages/zensical-bin.yml"
+  done
+}
+
 @test "check-all: a package with pin_from takes the project of a registry in another spelling" {
   create_test_package "zensical-bin" "pypi" "upstream:
   registry: Zensical
