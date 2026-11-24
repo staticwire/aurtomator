@@ -23,11 +23,11 @@ upstream:                 # strategy fields
 #   - from: '2.0.0'
 #     hold: true
 #     note: Raise makedepends foo to 2
-#   - requires: changed      # pypi: the new version adds or drops a requirement
+#   - requires: changed      # the new version adds or drops a requirement
 #     hold: true
-#   - requires: unmet        # pypi: depends of the AUR miss a requirement of the new version
+#   - requires: unmet        # depends of the AUR miss a requirement of the new version
 #     hold: true
-#   - requires: imports      # pypi: the new version imports a module that depends miss
+#   - requires: imports      # the new version imports or requires what depends miss
 # python:                    # Python in depends: none, or where the requirements come from
 #   pypi: KubeDiagrams       # the PyPI project of a package of another strategy
 #   release: newest          # with pypi: its newest release, as for -git packages
@@ -35,7 +35,8 @@ upstream:                 # strategy fields
 #   map:                     # PyPI name: the Arch package that meets it
 #     svg-path: python-svg.path
 #   skip: [tools]            # paths of the release that requires: imports leaves out
-# ruby:                      # rubygems: gems in depends
+# ruby:                      # Ruby in depends: none, or the gem of the requirements
+#   gem: simplecov-cobertura  # the gem of a package of another strategy
 #   map:                     # gem name: the Arch package that meets it
 #     simplecov: ruby-simplecov
 #   skip: [win32ole]         # gems that the requires rules leave out

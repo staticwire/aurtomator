@@ -2294,6 +2294,44 @@ alerts:
   [[ "$output" == *"packages/mypkg.yml: alerts[0].hold does not apply to requires: imports"* ]]
 }
 
+@test "validate: ruby takes none or gem, and requires runs with ruby.gem" {
+  local body
+  for body in "ruby: none" $'ruby:\n  gem: simplecov-cobertura\nalerts:\n  - requires: unmet\n    hold: true'; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+$body"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 0 ] || {
+      echo "$body"
+      echo "$output"
+      return 1
+    }
+  done
+  local entry strategy message
+  for entry in "github-release|ruby: other|ruby must be none or a map" \
+    "github-release|ruby: {gem: ../x}|ruby.gem must be a gem name of A-Za-z0-9._- that starts with a letter or digit: '../x'" \
+    "rubygems|ruby: {gem: x}|ruby.gem does not apply to the rubygems strategy, which reads upstream.registry" \
+    "github-release|ruby: none
+alerts: [{requires: unmet}]|alerts[0]: requires needs strategy pypi or rubygems, python.pypi, python.pyproject or ruby.gem"; do
+    strategy=${entry%%|*}
+    body=${entry#*|}
+    message=${body#*|}
+    body=${body%|*}
+    create_test_package "mypkg" "$strategy" "upstream:
+  project: owner/repo
+  registry: bashcov
+$body"
+    [[ "$strategy" == rubygems ]] || yq -i 'del(.upstream.registry)' "$TEST_TMPDIR/packages/mypkg.yml"
+    [[ "$strategy" != rubygems ]] || yq -i 'del(.upstream.project)' "$TEST_TMPDIR/packages/mypkg.yml"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -eq 1 ] && [[ "$output" == *"packages/mypkg.yml: $message"* ]] || {
+      echo "$entry"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
 @test "validate: ruby takes map, skip and relax, and requires runs with strategy rubygems" {
   create_test_package "mypkg" "rubygems" "upstream:
   registry: bashcov
@@ -2309,7 +2347,7 @@ alerts:
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -eq 0 ]
   local entry body message
-  for entry in "ruby: [x]|ruby must be a map" "ruby: {map: [a]}|ruby.map must be a map of gem names to package names" \
+  for entry in "ruby: [x]|ruby must be none or a map" "ruby: {map: [a]}|ruby.map must be a map of gem names to package names" \
     "ruby: {map: {-x: ruby-x}}|ruby.map: '-x' is not a gem name" \
     "ruby: {map: {x: Ruby-X}}|ruby.map.x must be a package name of a-z, 0-9 and @ . _ + -: 'Ruby-X'" \
     "ruby: {skip: x}|ruby.skip must be a list of gem names" "ruby: {skip: [../x]}|ruby.skip: '../x' is not a gem name" \
@@ -2358,9 +2396,9 @@ $body"
     "github-release|python: {pyproject: setup.cfg}|python.pyproject must be a relative path to a .toml file without ..: 'setup.cfg'" \
     "github-release|python: {pypi: x, pyproject: pyproject.toml}|python.pypi and python.pyproject exclude each other" \
     "pypi|python: {pypi: x}|python.pypi, python.release and python.pyproject do not apply to the pypi strategy, which reads upstream.registry" \
-    "github-release|alerts: [{requires: unmet}]|alerts[0]: requires needs strategy pypi or rubygems, python.pypi or python.pyproject" \
+    "github-release|alerts: [{requires: unmet}]|alerts[0]: requires needs strategy pypi or rubygems, python.pypi, python.pyproject or ruby.gem" \
     "github-release|python: none
-alerts: [{requires: imports}]|alerts[0]: requires needs strategy pypi or rubygems, python.pypi or python.pyproject" \
+alerts: [{requires: imports}]|alerts[0]: requires needs strategy pypi or rubygems, python.pypi, python.pyproject or ruby.gem" \
     "github-release|python: {pypi: x, release: newest}
 alerts: [{requires: changed}]|alerts[0]: requires: changed does not apply with python.release or python.pyproject" \
     "github-release|python: {pyproject: pyproject.toml}
@@ -2421,14 +2459,14 @@ $body"
 @test "validate: an alert requires outside changed, pypi and the spelling of PyPI rejected" {
   local entry strategy body message
   for entry in "pypi|  - requires: always|alerts[0].requires must be changed, unmet or imports, got always" \
-    "npm|  - requires: changed|alerts[0]: requires needs strategy pypi or rubygems, python.pypi or python.pyproject" \
+    "npm|  - requires: changed|alerts[0]: requires needs strategy pypi or rubygems, python.pypi, python.pyproject or ruby.gem" \
     "pypi|  - requires: changed
     from: '1.0'|alerts[0] must hold exactly one of when, from, match, requires" \
     "pypi|  - requires: changed
   - requires: unmet
   - requires: changed
     hold: true|alerts[2].requires: changed is set twice" \
-    "npm|  - requires: unmet|alerts[0]: requires needs strategy pypi or rubygems, python.pypi or python.pyproject"; do
+    "npm|  - requires: unmet|alerts[0]: requires needs strategy pypi or rubygems, python.pypi, python.pyproject or ruby.gem"; do
     strategy=${entry%%|*}
     body=${entry#*|}
     body=${body%|*}

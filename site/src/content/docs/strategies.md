@@ -515,6 +515,8 @@ upstream:
   registry: bashcov
 ```
 
+Packages of this strategy with Ruby in their AUR `depends` run the requires rules `changed`, `unmet` and `imports` on `upstream.registry`, see [Gems](/features/update-alerts/#gems).
+
 Gems list each release once per platform, so nokogiri 1.19.7 appears eleven times in the answer and the strategy reads the entry for `ruby`. RubyGems puts letters before numbers: `4.0.0.rc1` of simplecov-cobertura sorts below `4.0.0`, where `vercmp` puts it above, and rubygems.org marks it as a pre-release.
 
 ### repology

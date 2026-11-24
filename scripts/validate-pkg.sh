@@ -173,19 +173,28 @@ validate_python() {
   return "$errors"
 }
 
-# Check the ruby key of package file $1: a map of map, from gem names to package names, skip, the gems
-# that the rules leave out, and relax, true when the PKGBUILD turns ~> into >=
+# Check the ruby key of package file $1 of strategy $2: none, or a map of gem, the source of the
+# requirements, map, skip and relax, true when the PKGBUILD turns ~> into >=
 validate_ruby() {
   local file="$1" shown="packages/${1##*/}" errors=0 key value unknown
   case $(pkg_get "$file" '.ruby | tag') in
     "!!null") return 0 ;;
     "!!map") ;;
     *)
-      log_err "$shown: ruby must be a map"
+      [[ "$(pkg_get "$file" '.ruby | select(tag == "!!str")')" != none ]] || return 0
+      log_err "$shown: ruby must be none or a map"
       return 1
       ;;
   esac
-  unknown=$(pkg_get "$file" '.ruby | [keys[] | select(. != "map" and . != "skip" and . != "relax")] | join(", ")')
+  value=$(pkg_get "$file" '.ruby.gem // ""')
+  if [[ -n "$value" ]] && ! (LC_ALL=C && [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]); then
+    log_err "$shown: ruby.gem must be a gem name of A-Za-z0-9._- that starts with a letter or digit: ${value@Q}"
+    errors=1
+  elif [[ -n "$value" && "$2" == rubygems ]]; then
+    log_err "$shown: ruby.gem does not apply to the rubygems strategy, which reads upstream.registry"
+    errors=1
+  fi
+  unknown=$(pkg_get "$file" '.ruby | [keys[] | select(. != "gem" and . != "map" and . != "skip" and . != "relax")] | join(", ")')
   if [[ -n "$unknown" ]]; then
     log_err "$shown: ruby: unknown key: $unknown"
     errors=1
@@ -257,8 +266,8 @@ validate_alert() {
     log_err "$rule.requires must be changed, unmet or imports, got $value"
     errors=1
   elif [[ "$tag" != "!!null" && "$4" != pypi && "$4" != rubygems &&
-    -z "$(pkg_get "$file" '.python | select(tag == "!!map") | .pypi // .pyproject // ""')" ]]; then
-    log_err "$rule: requires needs strategy pypi or rubygems, python.pypi or python.pyproject"
+    -z "$(pkg_get "$file" '(.python | select(tag == "!!map") | .pypi // .pyproject) // (.ruby | select(tag == "!!map") | .gem) // ""')" ]]; then
+    log_err "$rule: requires needs strategy pypi or rubygems, python.pypi, python.pyproject or ruby.gem"
     errors=1
   elif [[ "$value" == changed && -n "$(pkg_get "$file" '.python | select(tag == "!!map") | .release // .pyproject // ""')" ]]; then
     log_err "$rule: requires: changed does not apply with python.release or python.pyproject"
@@ -593,7 +602,7 @@ validate_pkg() {
   fi
 
   validate_python "$file" "$strategy" || ((errors++))
-  validate_ruby "$file" || ((errors++))
+  validate_ruby "$file" "$strategy" || ((errors++))
 
   local branch
   if [[ $(pkg_get "$file" '.upstream.branch | tag') != "!!null" ]]; then

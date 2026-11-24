@@ -2199,7 +2199,7 @@ alerts:
   - requires: changed"
   run_requires 'fired_alerts "$1" 4.0.0 5.0.0' "$TEST_TMPDIR/packages/pkg.yml"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"alerts[0].requires needs strategy pypi or rubygems, python.pypi or python.pyproject"* ]]
+  [[ "$output" == *"alerts[0].requires needs strategy pypi or rubygems, python.pypi, python.pyproject or ruby.gem"* ]]
 }
 
 @test "lib.sh: fired_alerts asks for quotes around a note that YAML reads as a number" {
@@ -4017,6 +4017,7 @@ ${4:-}"
 
 @test "lib.sh: fired_alerts runs listed requires rules on the gems of a package of strategy rubygems" {
   gems_env
+  bashcov_gem
   aur_srcinfo_remote bashcov "$FIXTURES_DIR/aur/bashcov.SRCINFO"
   create_test_package "bashcov" "rubygems" "upstream:
   registry: bashcov
@@ -4026,7 +4027,7 @@ alerts:
   - requires: changed"
   run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 3.3.0 4.0.3' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/bashcov.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = $'hold\tsimplecov ~> 1.1: ruby-simplecov has 0.22.0' ]
+  [ "$output" = $'hold\tsimplecov ~> 1.1: ruby-simplecov has 0.22.0\nnotice\trequire erb (optional): ruby-erb in neither depends nor optdepends' ]
 }
 
 # Helper: builds the .gem of gem $1 at version $2 in MOCK_FILES_DIR from the files of directory $3, tarred
@@ -4187,6 +4188,96 @@ alerts:
   run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 4.0.3' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/bashcov.yml"
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\trequire erb (optional): ruby-erb in neither depends nor optdepends' ]
+}
+
+# === ruby sources ===
+
+# Helper: package ruby-simplecov-cobertura of a strategy that finds 4.0.0, at current 3.2.0 with the YAML
+# lines $1, whose AUR .SRCINFO has the depends after it, and its .gem of 4.0.0 on rubygems.org
+ruby_package() {
+  gems_env 1.3.2
+  stand_in_strategy step 4.0.0
+  local g="$TEST_TMPDIR/cobertura"
+  mkdir -p "$g/lib"
+  printf '%s\n' 'require "simplecov"' 'require "rexml/document"' >"$g/lib/simplecov-cobertura.rb"
+  gem_build simplecov-cobertura 4.0.0 "$g" $'name: simplecov-cobertura\nrequire_paths:\n- lib\n' 'rexml|>= 0' 'simplecov|~> 1.0'
+  printf 'extra\t%s\t1-1\tusr/lib/ruby/gems/3.4.0/gems/%s\n' ruby-simplecov simplecov-1.3.2/lib/simplecov.rb \
+    ruby-rexml rexml-3.4.4/lib/rexml/document.rb >>"$MOCK_PACMAN_FILES"
+  unmet_srcinfo "$TEST_TMPDIR/r.SRCINFO" ruby-simplecov-cobertura "${@:2}"
+  aur_srcinfo_remote ruby-simplecov-cobertura "$TEST_TMPDIR/r.SRCINFO"
+  create_test_package "ruby-simplecov-cobertura" "step" "current: '3.2.0'
+allow_missing_arch: false
+$1"
+}
+
+@test "check-all: fails the check of a package whose depends hold Ruby and that names no gem" {
+  ruby_package "" ruby ruby-simplecov
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TEST_TMPDIR/.status/ruby-simplecov-cobertura")" == "check_failed: "*"packages/ruby-simplecov-cobertura.yml: its depends hold Ruby packages, so set ruby.gem or ruby: none"* ]]
+}
+
+@test "check-all: runs no requires rule for ruby: none or without Ruby in depends" {
+  ruby_package "ruby: none" ruby ruby-simplecov
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/ruby-simplecov-cobertura")" = "new_version: 4.0.0" ]
+  [ ! -e "$TEST_TMPDIR/.status/_alerts" ]
+  ruby_package "" bash glibc
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/ruby-simplecov-cobertura")" = "new_version: 4.0.0" ]
+  ! grep -q rubygems.org "$CURL_ARGS_LOG"
+}
+
+@test "check-all: runs every requires rule as a notice for a package with ruby.gem" {
+  ruby_package $'ruby:\n  gem: simplecov-cobertura' ruby ruby-simplecov
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/ruby-simplecov-cobertura")" = "new_version: 4.0.0" ]
+  grep -qxF $'ruby-simplecov-cobertura\tnotice\trubygems.org has no release 3.2.0 of simplecov-cobertura to compare with' \
+    "$TEST_TMPDIR/.status/_alerts"
+  grep -qxF $'ruby-simplecov-cobertura\tnotice\trexml: not in depends' "$TEST_TMPDIR/.status/_alerts"
+  grep -qxF $'ruby-simplecov-cobertura\tnotice\trequire rexml/document: ruby-rexml not in depends' "$TEST_TMPDIR/.status/_alerts"
+}
+
+@test "check-all: runs no changed rule on gems for a package with pkgver_dash" {
+  ruby_package $'ruby:\n  gem: simplecov-cobertura\npkgver_dash: _' ruby ruby-simplecov
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/ruby-simplecov-cobertura")" = "new_version: 4.0.0" ]
+  grep -qxF $'ruby-simplecov-cobertura\tnotice\trexml: not in depends' "$TEST_TMPDIR/.status/_alerts"
+  ! grep -qF 'to compare with' "$TEST_TMPDIR/.status/_alerts"
+}
+
+@test "check-all: runs the requires rules on the upstream version of a gem package with pkgver_format" {
+  ruby_package $'ruby:\n  gem: simplecov-cobertura\npkgver_format: \'4.%s\'' ruby ruby-simplecov
+  sed -i "s/^current: '3.2.0'\$/current: '4.3.2.0'/" "$TEST_TMPDIR/packages/ruby-simplecov-cobertura.yml"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/ruby-simplecov-cobertura")" = "new_version: 4.4.0.0" ]
+  grep -qxF $'ruby-simplecov-cobertura\tnotice\trexml: not in depends' "$TEST_TMPDIR/.status/_alerts"
+}
+
+@test "check-all: holds the update that a listed rule on a gem fires on" {
+  ruby_package $'ruby:\n  gem: simplecov-cobertura\nalerts:\n  - requires: unmet\n    hold: true' ruby ruby-simplecov
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/ruby-simplecov-cobertura")" = "held: 4.0.0" ]
+  [[ "$output" == *"ruby-simplecov-cobertura: update 3.2.0 → 4.0.0 held: rexml: not in depends"* ]]
+}
+
+@test "lib.sh: fired_alerts runs no default rule on gems in prepare and publish" {
+  ruby_package $'ruby:\n  gem: simplecov-cobertura' ruby ruby-simplecov
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  local mode
+  for mode in held offline; do
+    run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 3.2.0 4.0.0 "$2"' "$TEST_TMPDIR" \
+      "$TEST_TMPDIR/packages/ruby-simplecov-cobertura.yml" "$mode"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+  [ ! -e "$CURL_ARGS_LOG" ]
 }
 
 # === version of aurtomator ===

@@ -52,7 +52,7 @@ alert_note_error() {
 
 # Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as hold or
 # notice, a tab and the note; fail on a broken rule. $4 offline skips requires rules, held those without hold.
-# The requires rules run for each package whose AUR depends hold Python, as notices unless the file lists them.
+# The requires rules run for each package whose AUR depends hold Python or Ruby, as notices unless listed.
 fired_alerts() {
   local rc=0
   if [[ -n "${AURTOMATOR_RUN_CACHE:-}" ]]; then
@@ -88,8 +88,9 @@ _fired_alerts() {
         log_err "alerts[$i].requires must be changed, unmet or imports, got $value"
         return 1
       fi
-      if [[ ! $(pkg_get "$file" .strategy) =~ ^(pypi|rubygems)$ && -z "$(pkg_get "$file" '.python.pypi // .python.pyproject // ""' 2>/dev/null)" ]]; then
-        log_err "alerts[$i].requires needs strategy pypi or rubygems, python.pypi or python.pyproject"
+      if [[ ! $(pkg_get "$file" .strategy) =~ ^(pypi|rubygems)$ &&
+      -z "$(pkg_get "$file" '(.python | select(tag == "!!map") | .pypi // .pyproject) // (.ruby | select(tag == "!!map") | .gem) // ""' 2>/dev/null)" ]]; then
+        log_err "alerts[$i].requires needs strategy pypi or rubygems, python.pypi, python.pyproject or ruby.gem"
         return 1
       fi
       note=""
@@ -98,7 +99,7 @@ _fired_alerts() {
         return 1
       fi
       listed[$value]=1
-      _fired_requires "$value" "$hold" "$note" 1 || return 1
+      _fired_requires "$value" "$hold" "$note" || return 1
       continue
     fi
     if ! note=$(alert_note "$file" "$i"); then
@@ -118,14 +119,14 @@ _fired_alerts() {
     printf '%s\t%s\n' "$action" "$note"
   done
   for value in changed unmet imports; do
-    [[ -n "${listed[$value]:-}" ]] || _fired_requires "$value" "" "" "" || return 1
+    [[ -n "${listed[$value]:-}" ]] || _fired_requires "$value" "" "" || return 1
   done
 }
 
-# Print the line of requires rule $1, with hold $2 and note $3 and set $4 when alerts lists it, for the
-# call of _fired_alerts: prepare runs changed with hold alone, and unmet and imports run in the check
+# Print the line of requires rule $1, with hold $2 and note $3, for the call of _fired_alerts: prepare runs
+# changed with hold alone, and unmet and imports run in the check
 _fired_requires() {
-  local value=$1 hold=$2 note=$3 listed=$4 lines="" part action joined line
+  local value=$1 hold=$2 note=$3 lines="" part action joined line
   [[ "$offline" != offline ]] || return 0
   [[ "$offline" != held || ("$value" == changed && "$hold" == true) ]] || return 0
   _requires_state || return 1
@@ -133,7 +134,7 @@ _fired_requires() {
     part=$(_python_rule "$value") || return 1
     lines+="${part:+$part$'\n'}"
   fi
-  if [[ "$RB_STATE" == ready && -n "$listed" ]]; then
+  if [[ "$RB_STATE" == ready ]]; then
     part=$(_ruby_rule "$value") || return 1
     lines+="${part:+$part$'\n'}"
   fi
@@ -205,7 +206,8 @@ _requires_state() {
     python_source "$file" "$version" "$REQ_SRCINFO" || return 1
     [[ "$PY_SOURCE" == none ]] || PY_STATE=ready
   fi
-  if [[ -n "$ruby" && "$(pkg_get "$file" .strategy)" == rubygems ]]; then
-    RB_STATE=ready RB_GEM=$(pkg_get "$file" .upstream.registry) RB_VERSION=$version
+  if [[ -n "$ruby" ]]; then
+    ruby_source "$file" "$version" || return 1
+    [[ "$RB_SOURCE" == none ]] || RB_STATE=ready
   fi
 }

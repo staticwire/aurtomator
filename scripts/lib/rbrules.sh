@@ -100,6 +100,33 @@ gem_release() {
   fi
 }
 
+# Set the gem whose release $2 gives the requirements of package file $1: RB_SOURCE (gem or none), RB_GEM
+# and RB_VERSION; fail for a package with Ruby in depends that names none
+ruby_source() {
+  RB_SOURCE="" RB_GEM="" RB_VERSION=$2
+  if [[ "$(pkg_get "$1" .strategy)" == rubygems ]]; then
+    RB_SOURCE=gem RB_GEM=$(pkg_get "$1" .upstream.registry)
+    return 0
+  fi
+  case $(pkg_get "$1" '.ruby | tag') in
+    "!!str")
+      if [[ "$(pkg_get "$1" .ruby)" == none ]]; then
+        RB_SOURCE=none
+        return 0
+      fi
+      ;;
+    "!!map")
+      RB_GEM=$(pkg_get "$1" '.ruby.gem // ""')
+      if [[ -n "$RB_GEM" ]]; then
+        RB_SOURCE=gem
+        return 0
+      fi
+      ;;
+  esac
+  log_err "packages/${1##*/}: its depends hold Ruby packages, so set ruby.gem or ruby: none"
+  return 1
+}
+
 # Succeed when depends of pkgname $2 of .SRCINFO $1 hold ruby or ruby-*
 pkgname_has_ruby() {
   local dep
