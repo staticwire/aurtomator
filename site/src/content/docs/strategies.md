@@ -432,7 +432,7 @@ upstream:
   registry: requests
 ```
 
-With `upstream.pin_from`, the version is the pin on `upstream.registry` in the requirements of the newest release of that project, from `https://pypi.org/pypi/{pin_from}/json`. zensical 0.1.3 requires `zensical-ui==0.0.43`, so python-zensical-ui gets `0.0.43`:
+With `upstream.pin_from`, the version is the pin on `upstream.registry` in the requirements of the newest release of that project, the release that `.info.version` of `https://pypi.org/pypi/{pin_from}/json` names. zensical 0.1.3 requires `zensical-ui==0.0.43`, so python-zensical-ui gets `0.0.43`:
 
 ```yaml
 name: python-zensical-ui
@@ -441,6 +441,8 @@ upstream:
   registry: zensical-ui
   pin_from: zensical
 ```
+
+The requirements of a release come from its metadata on PyPI. The check reads `https://pypi.org/simple/{project}/` with `Accept: application/vnd.pypi.simple.v1+json` once per project, takes the release whose version equals the wanted one under PEP 440, so `2.50` finds `2.50.0`, and leaves yanked files out. Wheels give their metadata as `<wheel URL>.metadata`, which has to match the sha256 that the page lists for it: wheels for any platform (`-none-any.whl`) first, then wheels for Linux on x86_64, then any other wheel. Releases without such a wheel give the `PKG-INFO` of their sdist, read from the archive within `upstream.max_answer_mb` after its sha256 matches, from `Metadata-Version: 2.2` on and unless `Dynamic` names `Requires-Dist`. Releases with neither fail the check with `<project> <version>: PyPI holds no metadata that lists the requirements without running code`.
 
 Names compare in their PEP 503 form, so `Zensical_UI` and `zensical-ui` are one project. The check skips requirements on `upstream.registry` whose environment markers are false on Arch, and fails with `<pin_from> lists no requirement on <registry> that applies on Arch` when none is left. It fails with `<pin_from> requires '<requirement>', which pins no single version of <registry>` for an operator other than `==`, a wildcard such as `==0.0.*` or a second clause, and with `<pin_from> pins <registry> to more than one version: <versions>` for different pins. Requirement strings outside PEP 508 fail it with `<pin_from>: cannot read the requirement '<requirement>'`.
 
@@ -451,7 +453,7 @@ Packages with `upstream.pin_from` wait for the package of the project that pins 
 ! python-zensical-ui: update 0.0.41 → 0.0.43 waits for the update of zensical-bin
 ```
 
-In environment markers, `os_name` is `posix`, `sys_platform` is `linux`, `platform_system` is `Linux`, `platform_python_implementation` is `CPython` and `implementation_name` is `cpython`. `python_version`, `python_full_version` and `implementation_version` come from the version of the `python` package that `pacman -Si python` prints, and compare as PEP 440 does: `python_version == "3.14.0"` holds for Python 3.14. The check asks for no extras, so `extra == "test"` is false. Comparisons on other fields, such as `platform_machine`, and with versions beyond releases and pre-releases, such as `3.14.post1`, are unknown, and requirements count unless their marker is false.
+In environment markers, `os_name` is `posix`, `sys_platform` is `linux`, `platform_system` is `Linux`, `platform_python_implementation` is `CPython` and `implementation_name` is `cpython`. `python_version`, `python_full_version` and `implementation_version` come from the version of the `python` package that `pacman -Si python` prints, and compare as PEP 440 does: `python_version == "3.14.0"` holds for Python 3.14. The check asks for no extras, so `extra == "test"` is false. Comparisons on other fields, such as `platform_machine`, and with text outside PEP 440 are unknown, and requirements count unless their marker is false.
 
 ### npm
 

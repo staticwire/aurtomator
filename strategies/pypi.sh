@@ -20,11 +20,16 @@ registry=$(pkg_get "$pkg_file" .upstream.registry)
 pin_from=$(pkg_get "$pkg_file" '.upstream.pin_from // ""')
 
 if [[ -n "$pin_from" ]]; then
-  json=$(http_get_json "https://pypi.org/pypi/${pin_from}/json") || {
+  newest=$(http_get_json "https://pypi.org/pypi/${pin_from}/json" | yq -r '.info.version') || {
     echo "Failed to fetch PyPI info for ${pin_from}" >&2
     exit 1
   }
-  requires_pin "$json" "$pin_from" "$registry"
+  if [[ ! "$newest" =~ ^[A-Za-z0-9._+!-]+$ ]]; then
+    echo "No version found on PyPI for ${pin_from}" >&2
+    exit 1
+  fi
+  headers=$(pypi_metadata "$pin_from" "$newest") || exit 1
+  requires_pin "$headers" "$pin_from" "$registry"
   exit 0
 fi
 

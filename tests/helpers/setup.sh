@@ -118,6 +118,51 @@ canary_untouched() {
   [ -d "$TEST_TMPDIR/canary" ] && [ -z "$(ls -A "$TEST_TMPDIR/canary")" ]
 }
 
+# Usage: pypi_fake_file <project> <version> <file> <core-metadata sha256 or false>. Adds a release of
+# file <file> of MOCK_FILES_DIR to the simple page of the project in MOCK_FILES_DIR.
+pypi_fake_file() {
+  local page norm=${1,,}
+  norm=$(sed -E 's/[-_.]+/-/g' <<<"$norm")
+  page="$MOCK_FILES_DIR/simple/$norm.json"
+  mkdir -p "$MOCK_FILES_DIR/simple"
+  [[ -f "$page" ]] || printf '{"meta": {"api-version": "1.4"}, "name": "%s", "versions": [], "files": []}\n' "$norm" >"$page"
+  V="$2" F="${3##*/}" S="$(sha256sum "$3" | cut -d' ' -f1)" C="$4" yq -i -o json '
+    .versions = (.versions + [strenv(V)] | unique) |
+    .files += [{"filename": strenv(F), "url": "https://files.pythonhosted.org/packages/fake/" + strenv(F),
+      "hashes": {"sha256": strenv(S)}, "core-metadata": (strenv(C) | select(. != "false") | {"sha256": .}) // false,
+      "size": 1, "yanked": false}]' "$page"
+}
+
+# Usage: pypi_fake_metadata <project> <version> <METADATA text>. Writes a wheel entry of the release
+# whose .metadata holds the text, served by mock curl from MOCK_FILES_DIR
+pypi_fake_metadata() {
+  local wheel="${1//-/_}-$2-py3-none-any.whl"
+  printf '%s' "$3" >"$MOCK_FILES_DIR/$wheel.metadata"
+  : >"$MOCK_FILES_DIR/$wheel"
+  pypi_fake_file "$1" "$2" "$MOCK_FILES_DIR/$wheel" "$(sha256sum "$MOCK_FILES_DIR/$wheel.metadata" | cut -d' ' -f1)"
+}
+
+# Usage: pypi_fake <project> <version> [Requires-Dist value]...
+pypi_fake() {
+  local text req
+  text=$(printf 'Metadata-Version: 2.4\nName: %s\nVersion: %s\n' "$1" "$2")$'\n'
+  for req in "${@:3}"; do
+    text+="Requires-Dist: $req"$'\n'
+  done
+  pypi_fake_metadata "$1" "$2" "$text"$'\nThe body of the description.\n'
+}
+
+# Usage: pypi_fake_sdist <project> <version> <PKG-INFO text>. Writes an sdist of the release that
+# holds <name>-<version>/PKG-INFO, with no metadata file of its own
+pypi_fake_sdist() {
+  local dir="$TEST_TMPDIR/sdist-$1-$2" stem="${1//-/_}-$2"
+  mkdir -p "$dir/$stem"
+  printf '%s' "$3" >"$dir/$stem/PKG-INFO"
+  printf 'print("setup")\n' >"$dir/$stem/setup.py"
+  bsdtar -czf "$MOCK_FILES_DIR/$stem.tar.gz" -C "$dir" "$stem"
+  pypi_fake_file "$1" "$2" "$MOCK_FILES_DIR/$stem.tar.gz" false
+}
+
 # Usage: aur_srcinfo_remote <pkgbase> <.SRCINFO>. The mock git of AUR clones then serves a repo
 # with that .SRCINFO and a stub PKGBUILD for <pkgbase>; MOCK_DIR keeps its git.
 aur_srcinfo_remote() {

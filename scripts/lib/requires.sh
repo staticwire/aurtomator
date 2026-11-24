@@ -261,8 +261,189 @@ _marker_version() {
   esac
 }
 
-# Print the PEP 503 names of the requirements in PyPI answer $1 whose markers are not false on
-# Arch, sorted; fail on requirements it cannot read, with errors that name release $2
+# The simple pages of PyPI projects that this process read, by PEP 503 name
+declare -gA _PYPI_SIMPLE
+
+# Set PYPI_RELEASE to the version PyPI lists for release $2 of project $1 under PEP 440, PYPI_FILES to its
+# files not yanked (name, URL, sha256, metadata sha256 or -, size); return 3 when PyPI lists no such release
+pypi_release() {
+  local LC_ALL=C norm page version found="" line name url sha core size stem
+  local -a versions rows
+  PYPI_RELEASE="" PYPI_FILES=""
+  if ! _pypi_norm "$1"; then
+    log_err "$1 is not a PyPI project name"
+    return 1
+  fi
+  norm=$PYPI_NORM
+  if [[ -z "${_PYPI_SIMPLE[$norm]+set}" ]]; then
+    page=$(http_get_json "https://pypi.org/simple/$norm/" -H 'Accept: application/vnd.pypi.simple.v1+json') || return 1
+    _PYPI_SIMPLE[$norm]=$page
+  fi
+  page=${_PYPI_SIMPLE[$norm]}
+  if [[ "$(yq '.versions | tag' <<<"$page")" != '!!seq' ]]; then
+    log_err "https://pypi.org/simple/$norm/: the answer lists no versions"
+    return 1
+  fi
+  mapfile -t versions < <(yq -r '.versions[] | select(tag == "!!str")' <<<"$page")
+  for version in "${versions[@]}"; do
+    if [[ "$version" == "$2" ]]; then
+      found=$version
+      break
+    fi
+  done
+  if [[ -z "$found" ]]; then
+    for version in "${versions[@]}"; do
+      if pep440_cmp "$version" "$2" && ((PEP440_ORDER == 0)); then
+        found=$version
+        break
+      fi
+    done
+  fi
+  if [[ -z "$found" ]]; then
+    log_err "$1: PyPI has no release $2"
+    return 3
+  fi
+  # shellcheck disable=SC2034 # callers read it
+  PYPI_RELEASE=$found
+  mapfile -t rows < <(yq -r '.files[] | select((.yanked // false) == false) | [.filename, .url, (.hashes.sha256 // "-"),
+    ((."core-metadata" | select(tag == "!!map") | .sha256) // "-"), (.size // 0 | tostring)] | join("\t")' <<<"$page")
+  for line in "${rows[@]}"; do
+    IFS=$'\t' read -r name url sha core size <<<"$line"
+    [[ "$name" =~ ^[A-Za-z0-9._+!-]+$ && "$url" =~ ^https://[!-~]+$ && "$sha" =~ ^[0-9a-f]{64}$ &&
+      "$core" =~ ^([0-9a-f]{64}|-)$ && "$size" =~ ^[0-9]+$ ]] || continue
+    case $name in
+      *.whl) [[ "$name" == *"-$found-"* || "$name" == *"-${found//-/_}-"* ]] || continue ;;
+      *.tar.gz | *.zip)
+        stem=${name%.tar.gz}
+        stem=${stem%.zip}
+        [[ "$stem" == *"-$found" || "$stem" == *"-${found//-/_}" ]] || continue
+        ;;
+      *) continue ;;
+    esac
+    PYPI_FILES+="$name"$'\t'"$url"$'\t'"$sha"$'\t'"$core"$'\t'"$size"$'\n'
+  done
+  PYPI_FILES=${PYPI_FILES%$'\n'}
+}
+
+# Print the metadata headers of release $2 of project $1: .metadata of a wheel (none-any, linux x86_64, any),
+# else PKG-INFO of the sdist; return 3 without the release, 4 without metadata that lists the requirements
+pypi_metadata() {
+  local LC_ALL=C name url sha core size pick="" tmp rc=0
+  local -a linux=() other=() sdists=()
+  pypi_release "$1" "$2" || return
+  while IFS=$'\t' read -r name url sha core size; do
+    case $name in
+      "") ;;
+      *.whl)
+        [[ "$core" != - ]] || continue
+        if [[ "$name" == *-none-any.whl ]]; then
+          pick=${pick:-$name$'\t'$url.metadata$'\t'$core}
+        elif [[ "$name" == *linux* && "$name" == *x86_64* ]]; then
+          linux+=("$name.metadata"$'\t'"$url.metadata"$'\t'"$core")
+        else
+          other+=("$name.metadata"$'\t'"$url.metadata"$'\t'"$core")
+        fi
+        ;;
+      *) sdists+=("$name"$'\t'"$url"$'\t'"$sha") ;;
+    esac
+  done <<<"$PYPI_FILES"
+  if [[ -n "$pick" ]]; then
+    pick=${pick/$'\t'/.metadata$'\t'}
+  else
+    pick=${linux[0]:-${other[0]:-${sdists[0]:-}}}
+  fi
+  if [[ -z "$pick" ]]; then
+    log_err "$1 $2: PyPI holds no metadata that lists the requirements without running code"
+    return 4
+  fi
+  IFS=$'\t' read -r name url sha <<<"$pick"
+  tmp=$(mktemp) || return 1
+  http_get "$url" -o "$tmp" || rc=1
+  if ((rc == 0)) && [[ "$(sha256sum "$tmp")" != "$sha "* ]]; then
+    log_err "$name does not match its sha256"
+    rc=1
+  fi
+  if ((rc == 0)); then
+    if [[ "$name" == *.metadata ]]; then
+      _metadata_headers "$tmp" "$name" || rc=1
+    else
+      _sdist_headers "$tmp" "$name" "$1 $2" || rc=$?
+    fi
+  fi
+  rm -f "$tmp"
+  return "$rc"
+}
+
+# Print the headers of the PKG-INFO of the top directory of sdist $1, file name $2, when they
+# list the requirements; return 4 with an error that names release $3 when they cannot
+_sdist_headers() {
+  local LC_ALL=C member="" line out headers version dynamic rc=0
+  local re_member='^[A-Za-z0-9._+-]+/PKG-INFO$'
+  if ! out=$(bsdtar -tf "$1" 2>/dev/null); then
+    log_err "$2 is no archive that bsdtar reads"
+    return 1
+  fi
+  while IFS= read -r line; do
+    if [[ "$line" =~ $re_member ]]; then
+      member=$line
+      break
+    fi
+  done <<<"$out"
+  out=$(mktemp) || return 1
+  if [[ -n "$member" ]]; then
+    # PKG-INFO takes at most MAX_ANSWER_MB, and an ignored SIGXFSZ makes a write past it fail
+    if ! (trap '' XFSZ && ulimit -f $((${MAX_ANSWER_MB:-50} * 1024)) && bsdtar -xOf "$1" -- "$member" >"$out" 2>/dev/null); then
+      log_err "$2: bsdtar cannot read $member"
+      rm -f "$out"
+      return 1
+    fi
+    headers=$(_metadata_headers "$out" "$2/$member") || rc=1
+  fi
+  rm -f "$out"
+  ((rc == 0)) || return 1
+  version=$(metadata_field "$headers" Metadata-Version)
+  dynamic=$(metadata_field "$headers" Dynamic)
+  if [[ -z "$member" ]] || ! pep440_cmp "${version:-0}" 2.2 2>/dev/null || ((PEP440_ORDER < 0)) ||
+    [[ $'\n'"${dynamic,,}"$'\n' == *$'\nrequires-dist\n'* ]]; then
+    log_err "$3: PyPI holds no metadata that lists the requirements without running code"
+    return 4
+  fi
+  printf '%s\n' "$headers"
+}
+
+# Print the headers of metadata file $1, named $2 in errors: up to the first empty line, folded
+# lines joined with one space, CR at line ends dropped; fail on any other control character
+_metadata_headers() {
+  local LC_ALL=C line out=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=${line%$'\r'}
+    [[ -n "$line" ]] || break
+    if has_control "$line"; then
+      log_err "$2 holds a control character"
+      return 1
+    fi
+    if [[ "$line" == [[:blank:]]* && -n "$out" ]]; then
+      out+=" ${line#"${line%%[![:blank:]]*}"}"
+    else
+      out+=$'\n'"$line"
+    fi
+  done <"$1"
+  printf '%s\n' "${out#$'\n'}"
+}
+
+# Print the values of field $2 in metadata headers $1, one per line; field names match in any case
+metadata_field() {
+  local LC_ALL=C line name=${2,,}
+  while IFS= read -r line; do
+    [[ "${line,,}" == "$name:"* ]] || continue
+    line=${line:${#name}+1}
+    line=${line#"${line%%[![:blank:]]*}"}
+    printf '%s\n' "${line%"${line##*[![:blank:]]}"}"
+  done <<<"$1"
+}
+
+# Print the PEP 503 names of the requirements in metadata headers $1 whose markers are not false
+# on Arch, sorted; fail on requirements it cannot read, with errors that name release $2
 requires_names() {
   local req
   local -a names=()
@@ -276,7 +457,7 @@ requires_names() {
   fi
 }
 
-# Print the version that PyPI answer $1 of project $2 pins its requirement on project $3 to
+# Print the version that metadata headers $1 of project $2 pin its requirement on project $3 to
 # with ==; fail unless the requirements on $3 that apply on Arch pin one version
 requires_pin() {
   local req want joined
@@ -312,7 +493,7 @@ requires_pin() {
 # Print how the requirement names that apply on Arch change from release $2 to release $3 of
 # upstream.registry of package file $1, as adds a, b; drops c, and nothing when they match
 requires_change() {
-  local registry err old new name added dropped
+  local registry err old new name added dropped rc=0
   local -A in_old=() in_new=()
   local -a adds=() drops=()
   registry=$(pkg_get "$1" .upstream.registry) || return 1
@@ -324,20 +505,24 @@ requires_change() {
       return 1
     fi
   done
-  # Only a publish moves current, so a release of current that PyPI lacks fires the rule
+  # Reads the simple page once for both releases
+  pypi_release "$registry" "$3" || return 1
+  # Only a publish moves current, so a release of current that PyPI cannot read fires the rule
   err=$(mktemp) || return 1
-  if ! old=$(http_get_json "https://pypi.org/pypi/${registry}/${2}/json" 2>"$err"); then
-    if grep -q ': The requested URL returned error: 404$' "$err"; then
-      rm -f "$err"
-      printf 'PyPI has no release %s of %s to compare with\n' "$2" "$registry"
-      return 0
-    fi
-    cat "$err" >&2
-    rm -f "$err"
-    return 1
-  fi
+  old=$(pypi_metadata "$registry" "$2" 2>"$err") || rc=$?
+  case $rc in
+    0) ;;
+    3) printf 'PyPI has no release %s of %s to compare with\n' "$2" "$registry" ;;
+    4) printf '%s %s: PyPI holds no metadata that lists the requirements without running code\n' "$registry" "$2" ;;
+    *) cat "$err" >&2 ;;
+  esac
   rm -f "$err"
-  new=$(http_get_json "https://pypi.org/pypi/${registry}/${3}/json") || return 1
+  case $rc in
+    0) ;;
+    3 | 4) return 0 ;;
+    *) return 1 ;;
+  esac
+  new=$(pypi_metadata "$registry" "$3") || return 1
   old=$(requires_names "$old" "$registry $2") || return 1
   new=$(requires_names "$new" "$registry $3") || return 1
   while IFS= read -r name; do
@@ -372,40 +557,18 @@ _requirement_read() {
   [[ -z "$REQ_MARKER" ]] || _marker_eval "$REQ_MARKER"
 }
 
-# Set REQUIRES_LIST to the items of info.requires_dist of PyPI answer $1, none for null; fail
-# with an error that names release $2 unless that list holds lines of text
+# Set REQUIRES_LIST to the Requires-Dist values of metadata headers $1 and REQUIRES_PYTHON to its
+# Requires-Python; fail with an error that names release $2 on a control character
 _requires_list() {
-  local tag dist counts count other req
-  REQUIRES_LIST=()
-  tag=$(yq -r 'if (.info | tag) == "!!map" and (.info | has("requires_dist")) then (.info.requires_dist | tag) else "none" end' <<<"$1" 2>/dev/null) || tag=none
-  case $tag in
-    "!!null") return 0 ;;
-    "!!seq") ;;
-    none)
-      log_err "$2: the PyPI answer holds no info.requires_dist"
-      return 1
-      ;;
-    *)
-      log_err "$2: info.requires_dist is $tag, not a list"
-      return 1
-      ;;
-  esac
-  dist=$(yq -o json -I0 '.info.requires_dist' <<<"$1") || return 1
-  counts=$(yq -r '(length | tostring) + " " + ([.[] | select(tag != "!!str")] | length | tostring)' <<<"$dist") || return 1
-  read -r count other <<<"$counts"
-  if ((other > 0)); then
-    log_err "$2: info.requires_dist holds an item that is not text: $(yq -o json -I0 '[.[] | select(tag != "!!str")][0]' <<<"$dist")"
-    return 1
-  fi
-  ((count > 0)) || return 0
-  mapfile -t REQUIRES_LIST < <(yq -r '.[]' <<<"$dist")
-  if ((${#REQUIRES_LIST[@]} != count)); then
-    log_err "$2: info.requires_dist holds an item with a line break"
-    return 1
-  fi
+  local req
+  local -a python
+  mapfile -t REQUIRES_LIST < <(metadata_field "$1" Requires-Dist)
+  mapfile -t python < <(metadata_field "$1" Requires-Python)
+  # shellcheck disable=SC2034 # pyrules.sh reads it
+  REQUIRES_PYTHON=${python[0]:-}
   for req in "${REQUIRES_LIST[@]}"; do
     if has_control "$req"; then
-      log_err "$2: info.requires_dist holds a control character: ${req@Q}"
+      log_err "$2: Requires-Dist holds a control character: ${req@Q}"
       return 1
     fi
   done

@@ -2132,7 +2132,7 @@ alerts:
     hold: true"
   run_requires 'fired_alerts "$1" 0.1.3 0.1.4' "$TEST_TMPDIR/packages/pkg.yml"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"https://pypi.org/pypi/zensical/0.1.4/json: The requested URL returned error: 404"* ]]
+  [[ "$output" == *"zensical: PyPI has no release 0.1.4"* ]]
 }
 
 @test "lib.sh: fired_alerts fails on a requires rule other than changed or outside pypi" {
@@ -2494,69 +2494,187 @@ run_split() {
 }
 
 @test "requires.sh: requires_names lists the requirements that apply on Arch" {
-  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/zensical/0.1.3/json")" "zensical 0.1.3"'
+  run_requires 'requires_names "$(pypi_metadata zensical 0.1.3)" "zensical 0.1.3"'
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf '%s\n' click jinja2 markdown pathspec pygments pymdown-extensions pyyaml tomli zensical-ui)" ]
-  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/zensical/0.0.74/json")" "zensical 0.0.74"'
+  run_requires 'requires_names "$(pypi_metadata zensical 0.0.74)" "zensical 0.0.74"'
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf '%s\n' click deepmerge jinja2 markdown pathspec pygments pymdown-extensions pyyaml tomli zensical-ui)" ]
   # SecretStorage and jeepney under sys_platform == "linux" stay, pywin32-ctypes and the extras go
-  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/keyring/25.7.0/json")" "keyring 25.7.0"'
+  run_requires 'requires_names "$(pypi_metadata keyring 25.7.0)" "keyring 25.7.0"'
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf '%s\n' jaraco-classes jaraco-context jaraco-functools jeepney secretstorage)" ]
-  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/black/26.10.1/json")" "black 26.10.1"'
+  run_requires 'requires_names "$(pypi_metadata black 26.10.1)" "black 26.10.1"'
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf '%s\n' click mypy-extensions packaging pathspec platformdirs pytokens)" ]
 }
 
 @test "requires.sh: requires_names counts the requirements of an older Python of pacman" {
   export MOCK_PYTHON_VERSION=3.10.12-1
-  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/black/26.10.1/json")" "black 26.10.1"'
+  run_requires 'requires_names "$(pypi_metadata black 26.10.1)" "black 26.10.1"'
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf '%s\n' click mypy-extensions packaging pathspec platformdirs pytokens tomli typing-extensions)" ]
 }
 
 @test "requires.sh: requires_names asks pacman once, and only for a Python field" {
   export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
-  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/zensical/0.1.3/json")" "zensical 0.1.3"'
+  run_requires 'requires_names "$(pypi_metadata zensical 0.1.3)" "zensical 0.1.3"'
   [ "$status" -eq 0 ]
   [ ! -e "$PACMAN_ARGS_LOG" ]
-  run_requires 'requires_names "$(http_get_json "https://pypi.org/pypi/black/26.10.1/json")" "black 26.10.1"'
+  run_requires 'requires_names "$(pypi_metadata black 26.10.1)" "black 26.10.1"'
   [ "$status" -eq 0 ]
   [ "$(cat "$PACMAN_ARGS_LOG")" = "-Si python" ]
 }
 
-@test "requires.sh: requires_names prints nothing for requires_dist null" {
-  run_requires 'requires_names "$1" "zensical-ui 0.0.43"' '{"info": {"version": "0.0.43", "requires_dist": null}}'
+@test "requires.sh: requires_names prints nothing for metadata without Requires-Dist" {
+  run_requires 'requires_names "$1" "zensical-ui 0.0.43"' $'Metadata-Version: 2.4\nName: zensical-ui\nVersion: 0.0.43'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
-@test "requires.sh: requires_names fails on a requires_dist it cannot read" {
+# PyPI answers requires_dist null for aws-xray-sdk 2.15.0, and its wheel metadata lists two
+@test "requires.sh: requires_names reads the requirements of the metadata of a wheel" {
+  run_requires 'requires_names "$(pypi_metadata aws-xray-sdk 2.15.0)" "aws-xray-sdk 2.15.0"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' botocore wrapt)" ]
+}
+
+@test "requires.sh: requires_names fails on a requirement it cannot read" {
   local -a cases=(
-    '{"info": {"version": "1.0"}}|demo 1.0: the PyPI answer holds no info.requires_dist'
-    '[1]|demo 1.0: the PyPI answer holds no info.requires_dist'
-    '{"info": {"requires_dist": "click"}}|demo 1.0: info.requires_dist is !!str, not a list'
-    '{"info": {"requires_dist": ["click", 5]}}|demo 1.0: info.requires_dist holds an item that is not text: 5'
-    '{"info": {"requires_dist": ["click", "jinja2\nmarkdown"]}}|demo 1.0: info.requires_dist holds an item with a line break'
-    '{"info": {"requires_dist": ["click", "jinja2\rmarkdown"]}}|demo 1.0: info.requires_dist holds a control character: $'"'"'jinja2\rmarkdown'"'"
-    '{"info": {"requires_dist": ["click", "foo bar"]}}|demo 1.0: cannot read the requirement '"'"'foo bar'"'"
-    '{"info": {"requires_dist": ["click", ""]}}|demo 1.0: cannot read the requirement '"''"
+    $'Requires-Dist: click\nRequires-Dist: jinja2\x01x|demo 1.0: Requires-Dist holds a control character: $'"'"'jinja2\001x'"'"
+    $'Requires-Dist: click\nRequires-Dist: foo bar|demo 1.0: cannot read the requirement '"'"'foo bar'"'"
+    $'Requires-Dist: click\nRequires-Dist:|demo 1.0: cannot read the requirement '"''"
   )
-  local case json message
+  local case headers message
   for case in "${cases[@]}"; do
-    json=${case%%|*}
+    headers=${case%%|*}
     message=${case#*|}
-    run_requires 'requires_names "$1" "demo 1.0"' "$json"
+    run_requires 'requires_names "$1" "demo 1.0"' "$headers"
     [ "$status" -eq 1 ] || {
-      echo "took: $json"
+      echo "took: $headers"
       return 1
     }
     [[ "$output" == *"$message" ]] || {
-      echo "$json: $output"
+      echo "$headers: $output"
       return 1
     }
   done
+}
+
+@test "requires.sh: metadata_field prints the values of a field in any case of its name" {
+  run_requires 'metadata_field "$1" requires-dist; metadata_field "$1" Requires-Python; metadata_field "$1" Summary' \
+    $'Requires-Dist: a\nrequires-python: >=3.9\nREQUIRES-DIST: b ; extra == "x"\nRequires-Distx: c'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'a\nb ; extra == "x"\n>=3.9' ]
+}
+
+@test "requires.sh: pypi_release finds a release by PEP 440 and reads the simple page once" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_requires 'pypi_release liblinear-official 2.50 && echo "$PYPI_RELEASE" && cut -f1,5 <<<"$PYPI_FILES" | sort &&
+    pypi_release Liblinear_Official 2.50.0 && echo "$PYPI_RELEASE"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' 2.50.0 liblinear_official-2.50.0-cp310-cp310-macosx_15_0_x86_64.whl$'\t'64607 \
+    liblinear_official-2.50.0-cp310-cp310-win_amd64.whl$'\t'60279 liblinear_official-2.50.0.tar.gz$'\t'48946 2.50.0)" ]
+  [ "$(grep -c pypi.org/simple/ "$CURL_ARGS_LOG")" -eq 1 ]
+  [[ "$(<"$CURL_ARGS_LOG")" == *" -H Accept: application/vnd.pypi.simple.v1+json "*" https://pypi.org/simple/liblinear-official/" ]]
+}
+
+@test "requires.sh: pypi_release leaves out yanked files and fails with 3 for a missing release" {
+  pypi_fake demo 1.0 a
+  pypi_fake demo 1.0.post1 b
+  yq -i -o json '.files[0].yanked = "broken build"' "$MOCK_FILES_DIR/simple/demo.json"
+  run_requires 'pypi_release demo 1.0 && printf "%s\n" "$PYPI_FILES"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run_requires 'pypi_release demo 1.0.post1 && cut -f1 <<<"$PYPI_FILES"'
+  [ "$output" = demo-1.0.post1-py3-none-any.whl ]
+  run_requires 'pypi_release zensical 0.1.4'
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"zensical: PyPI has no release 0.1.4"* ]]
+  run_requires 'pypi_release none-such 1.0'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://pypi.org/simple/none-such/: The requested URL returned error: 404"* ]]
+}
+
+@test "requires.sh: pypi_metadata reads the metadata of a none-any wheel first, then one for linux x86_64" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_requires 'pypi_metadata zensical 0.1.3'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\nRequires-Dist: zensical-ui==0.0.43'* ]]
+  [ "$(grep -c 'zensical-0.1.3-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata$' "$CURL_ARGS_LOG")" -eq 1 ]
+  [ "$(grep -c 'metadata$' "$CURL_ARGS_LOG")" -eq 1 ]
+  pypi_fake demo 1.0 any-dep
+  printf 'Metadata-Version: 2.4\nName: demo\nRequires-Dist: linux-dep\n' >"$MOCK_FILES_DIR/demo-1.0-cp314-cp314-manylinux_2_17_x86_64.whl.metadata"
+  : >"$MOCK_FILES_DIR/demo-1.0-cp314-cp314-manylinux_2_17_x86_64.whl"
+  pypi_fake_file demo 1.0 "$MOCK_FILES_DIR/demo-1.0-cp314-cp314-manylinux_2_17_x86_64.whl" \
+    "$(sha256sum "$MOCK_FILES_DIR/demo-1.0-cp314-cp314-manylinux_2_17_x86_64.whl.metadata" | cut -d' ' -f1)"
+  yq -i -o json '.files |= reverse' "$MOCK_FILES_DIR/simple/demo.json"
+  run_requires 'metadata_field "$(pypi_metadata demo 1.0)" Requires-Dist'
+  [ "$status" -eq 0 ]
+  [ "$output" = any-dep ]
+}
+
+@test "requires.sh: pypi_metadata stops at the body, joins folded lines and strips CR" {
+  pypi_fake_metadata demo 1.0 $'Metadata-Version: 2.4\r\nName: demo\r\nRequires-Dist: a;\r\n  python_version >= "3"\r\nRequires-Dist: b\r\n\r\nRequires-Dist: c\r\n'
+  run_requires 'pypi_metadata demo 1.0'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'Metadata-Version: 2.4\nName: demo\nRequires-Dist: a; python_version >= "3"\nRequires-Dist: b' ]
+  run_requires 'metadata_field "$(pypi_metadata zensical 0.1.3)" requires-dist | head -1'
+  [ "$output" = "click>=8.1.8" ]
+}
+
+@test "requires.sh: pypi_metadata fails on metadata that does not match its sha256 or holds control characters" {
+  sed 's/anyio/anyiO/' "$FIXTURES_DIR/pypi/metadata/httpx-0.28.1-py3-none-any.whl.metadata" \
+    >"$MOCK_FILES_DIR/httpx-0.28.1-py3-none-any.whl.metadata"
+  run_requires 'pypi_metadata httpx 0.28.1'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"httpx-0.28.1-py3-none-any.whl.metadata does not match its sha256"* ]]
+  pypi_fake_metadata demo 1.0 $'Metadata-Version: 2.4\nName: demo\x1b[31m\n'
+  run_requires 'pypi_metadata demo 1.0'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo-1.0-py3-none-any.whl.metadata holds a control character"* ]]
+}
+
+@test "requires.sh: pypi_metadata reads PKG-INFO of an sdist from Metadata-Version 2.2 on" {
+  pypi_fake_sdist demo 1.0 $'Metadata-Version: 2.2\nName: demo\nVersion: 1.0\nRequires-Dist: click\nDynamic: Summary\n\nbody\n'
+  run_requires 'pypi_metadata demo 1.0'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'Metadata-Version: 2.2\nName: demo\nVersion: 1.0\nRequires-Dist: click\nDynamic: Summary' ]
+}
+
+@test "requires.sh: pypi_metadata fails with 4 for an sdist whose requirements are dynamic or unknown" {
+  local text
+  for text in $'Metadata-Version: 2.2\nName: demo\nDynamic: requires-dist\n' $'Metadata-Version: 2.1\nName: demo\nRequires-Dist: click\n' \
+    $'Name: demo\n'; do
+    rm -rf "$MOCK_FILES_DIR"/* "$TEST_TMPDIR"/sdist-*
+    pypi_fake_sdist demo 1.0 "$text"
+    run_requires 'pypi_metadata demo 1.0'
+    [ "$status" -eq 4 ] || {
+      echo "${text@Q}: $status $output"
+      return 1
+    }
+    [[ "$output" == *"demo 1.0: PyPI holds no metadata that lists the requirements without running code"* ]]
+  done
+  rm -rf "$MOCK_FILES_DIR"/*
+  pypi_fake demo 1.0 a
+  yq -i -o json '.files = []' "$MOCK_FILES_DIR/simple/demo.json"
+  run_requires 'pypi_metadata demo 1.0'
+  [ "$status" -eq 4 ]
+}
+
+@test "requires.sh: pypi_metadata checks the sha256 of an sdist and reads PKG-INFO of its top directory alone" {
+  pypi_fake_sdist demo 1.0 $'Metadata-Version: 2.4\nName: demo\n'
+  printf 'x' >>"$MOCK_FILES_DIR/demo-1.0.tar.gz"
+  run_requires 'pypi_metadata demo 1.0'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"demo-1.0.tar.gz does not match its sha256"* ]]
+  rm -rf "$MOCK_FILES_DIR"/*
+  mkdir -p "$TEST_TMPDIR/deep/demo-2.0/sub"
+  printf 'Metadata-Version: 2.4\nName: deep\n' >"$TEST_TMPDIR/deep/demo-2.0/sub/PKG-INFO"
+  bsdtar -czf "$MOCK_FILES_DIR/demo-2.0.tar.gz" -C "$TEST_TMPDIR/deep" demo-2.0
+  pypi_fake_file demo 2.0 "$MOCK_FILES_DIR/demo-2.0.tar.gz" false
+  run_requires 'pypi_metadata demo 2.0'
+  [ "$status" -eq 4 ]
 }
 
 # Helper: runs requires_change for a pypi package of registry $1 from release $2 to $3, with
@@ -2568,6 +2686,8 @@ run_change() {
 }
 
 @test "requires.sh: requires_change names the requirements that the new release adds and drops" {
+  pypi_fake mixer 1.0 keep old-dep
+  pypi_fake mixer 2.0 'keep>=2' 'New_Dep>=1' 'other-new; sys_platform == "linux"' 'win-only; sys_platform == "win32"'
   run_change mixer 1.0 2.0
   [ "$status" -eq 0 ]
   [ "$output" = "adds new-dep, other-new; drops old-dep" ]
@@ -2594,25 +2714,41 @@ run_change() {
 }
 
 @test "requires.sh: requires_change notes a release of current that PyPI lacks" {
+  pypi_fake gone 0.1.3
   run_change gone 0.1.2 0.1.3
   [ "$status" -eq 0 ]
   [ "$output" = "PyPI has no release 0.1.2 of gone to compare with" ]
 }
 
-@test "requires.sh: requires_change fails when PyPI lacks the new release or answers with an error" {
+# Only a publish moves current, so a failure here would stop the package for good
+@test "requires.sh: requires_change notes a release of current whose requirements PyPI cannot list" {
+  pypi_fake_sdist old 1.0 $'Metadata-Version: 2.1\nName: old\n'
+  pypi_fake old 2.0 click
+  run_change old 1.0 2.0
+  [ "$status" -eq 0 ]
+  [ "$output" = "old 1.0: PyPI holds no metadata that lists the requirements without running code" ]
+}
+
+@test "requires.sh: requires_change fails when PyPI lacks the new release or its requirements, or answers with an error" {
   run_change zensical 0.1.3 0.1.4
   [ "$status" -eq 1 ]
-  [[ "$output" == *"https://pypi.org/pypi/zensical/0.1.4/json: The requested URL returned error: 404"* ]]
+  [[ "$output" == *"zensical: PyPI has no release 0.1.4"* ]]
   run_change flaky 1.0 2.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"https://pypi.org/pypi/flaky/1.0/json: The requested URL returned error: 503"* ]]
+  [[ "$output" == *"https://pypi.org/simple/flaky/: The requested URL returned error: 503"* ]]
+  pypi_fake old 1.0 click
+  pypi_fake_sdist old 2.0 $'Metadata-Version: 2.1\nName: old\n'
+  run_change old 1.0 2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"old 2.0: PyPI holds no metadata that lists the requirements without running code"* ]]
 }
 
 @test "requires.sh: requires_change reads answers within upstream.max_answer_mb" {
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
   run_change zensical 0.0.74 0.1.3 "  max_answer_mb: 7"
   [ "$status" -eq 0 ]
-  [ "$(grep -c -- '--max-filesize 7M' "$CURL_ARGS_LOG")" -eq 2 ]
+  [ "$(grep -c -- '--max-filesize 7M' "$CURL_ARGS_LOG")" -eq 3 ]
+  [ "$(grep -c 'pypi.org/simple/zensical/$' "$CURL_ARGS_LOG")" -eq 1 ]
 }
 
 @test "requires.sh: requires_change asks for no version outside the characters of PyPI versions" {
@@ -5097,6 +5233,7 @@ current: 0.1.2
 alerts:
   - requires: changed
     hold: true"
+  pypi_fake gone 3.2.1
 
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
@@ -5105,7 +5242,6 @@ alerts:
   [ ! -e "$TEST_TMPDIR/.status/_hosts" ]
 }
 
-# PyPI answers hold requires_dist, null for releases without requirements
 @test "check-all: a requires rule fires nothing between releases without requirements" {
   create_test_package "plain" "pypi" "upstream:
   registry: plain
@@ -5114,6 +5250,8 @@ allow_missing_arch: false
 alerts:
   - requires: changed
     hold: true"
+  pypi_fake plain 3.2.0
+  pypi_fake plain 3.2.1
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/plain")" = "new_version: 3.2.1" ]
@@ -5129,9 +5267,9 @@ alerts:
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
 
   run "$TEST_TMPDIR/scripts/check-all.sh"
-  [ "$(cat "$TEST_TMPDIR/.status/flaky-bin")" = "check_failed: https://pypi.org/pypi/flaky/1.0/json: The requested URL returned error: 503" ]
+  [ "$(cat "$TEST_TMPDIR/.status/flaky-bin")" = "check_failed: https://pypi.org/simple/flaky/: The requested URL returned error: 503" ]
   [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'flaky-bin\tpypi.org' ]
-  [ "$(grep -c 'pypi.org/pypi/flaky/1.0/json' "$CURL_ARGS_LOG")" -eq 2 ]
+  [ "$(grep -c 'pypi.org/simple/flaky/$' "$CURL_ARGS_LOG")" -eq 2 ]
 }
 
 # Helper: creates zensical-bin at 0.0.74, which the alerts $1 or a requires rule hold at 0.1.3,
@@ -5261,8 +5399,8 @@ current: 3.2.1"
   GITHUB_RUN_NUMBER=1 run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
-  run grep -o -E 'pypi\.org/pypi/[^ ]+' "$CURL_ARGS_LOG"
-  [ "$output" = $'pypi.org/pypi/zensical/json\npypi.org/pypi/zensical/0.0.74/json\npypi.org/pypi/zensical/0.1.3/json\npypi.org/pypi/requests/json\npypi.org/pypi/zensical/json' ]
+  run grep -o -E 'pypi\.org/(pypi|simple)/[^ ]+' "$CURL_ARGS_LOG"
+  [ "$output" = $'pypi.org/pypi/zensical/json\npypi.org/simple/zensical/\npypi.org/pypi/requests/json\npypi.org/pypi/zensical/json\npypi.org/simple/zensical/' ]
 }
 
 @test "check-all: a package with pin_from waits for the second check of its project" {
