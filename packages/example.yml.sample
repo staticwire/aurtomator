@@ -26,8 +26,10 @@ upstream:                 # strategy fields
 #     hold: true
 #   - requires: unmet        # pypi: depends of the AUR miss a requirement of the new version
 #     hold: true
+#   - requires: imports      # pypi: the new version imports a module that depends miss
 # python:
 #   map:                     # PyPI name: the Arch package that meets it
 #     svg-path: python-svg.path
+#   skip: [tools]            # paths of the release that requires: imports leaves out
 
 # Runs write current, last_updated, current_asset, arch_wait and arch_out.

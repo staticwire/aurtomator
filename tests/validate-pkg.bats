@@ -2258,6 +2258,28 @@ alerts:
   [ "$status" -eq 0 ]
 }
 
+@test "validate: requires: imports passes as a notice, and hold: true on it is refused" {
+  create_test_package "mypkg" "pypi" "upstream:
+  registry: zensical
+python:
+  skip: [tools, docs/api]
+alerts:
+  - requires: imports
+    note: Check the imports
+  - requires: unmet
+    hold: true"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+  create_test_package "mypkg" "pypi" "upstream:
+  registry: zensical
+alerts:
+  - requires: imports
+    hold: true"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/mypkg.yml: alerts[0].hold does not apply to requires: imports"* ]]
+}
+
 @test "validate: python.map maps PyPI names to package names" {
   create_test_package "mypkg" "pypi" "upstream:
   registry: graphviz2drawio
@@ -2273,7 +2295,11 @@ python:
     "python: {map: {-x: python-x}}|python.map: '-x' is not a PyPI name" \
     "python: {map: {x: Python-X}}|python.map.x must be a package name of a-z, 0-9 and @ . _ + -: 'Python-X'" \
     "python: {map: {x: [a]}}|python.map.x must be a package name of a-z, 0-9 and @ . _ + -: '[\"a\"]'" \
-    "python: {skip: [docs]}|python: unknown key: skip"; do
+    "python: {pypi: x}|python: unknown key: pypi" "python: {skip: docs}|python.skip must be a list of relative paths" \
+    "python: {skip: [../x]}|python.skip: '../x' must be a relative path without .." \
+    "python: {skip: [/abs]}|python.skip: '/abs' must be a relative path without .." \
+    "python: {skip: [a/../b]}|python.skip: 'a/../b' must be a relative path without .." \
+    "python: {skip: ['']}|python.skip: '' must be a relative path without .."; do
     body=${entry%%|*}
     message=${entry#*|}
     create_test_package "mypkg" "pypi" "upstream:
@@ -2290,7 +2316,7 @@ $body"
 
 @test "validate: an alert requires outside changed, pypi and the spelling of PyPI rejected" {
   local entry strategy body message
-  for entry in "pypi|  - requires: always|alerts[0].requires must be changed or unmet, got always" \
+  for entry in "pypi|  - requires: always|alerts[0].requires must be changed, unmet or imports, got always" \
     "npm|  - requires: changed|alerts[0]: requires applies to the pypi strategy only" \
     "pypi|  - requires: changed
     from: '1.0'|alerts[0] must hold exactly one of when, from, match, requires" \

@@ -50,15 +50,15 @@ alert_note_error() {
   printf 'note must be one line of text%s\n' "${value:+: put $value in quotes}"
 }
 
-# Print the notes of rule unmet for version $2 of package file $1, as python_unmet does, nothing for
-# a package the AUR lacks; without a run cache, one of its own
-alert_unmet() {
+# Print the notes of rule $1, unmet or imports, for version $3 of package file $2, as python_unmet
+# and python_imports do, nothing for a package the AUR lacks; without a run cache, one of its own
+alert_python() {
   local name srcinfo rc=0 out
-  name=$(package_name "$1") || return 1
+  name=$(package_name "$2") || return 1
   if [[ -z "${AURTOMATOR_RUN_CACHE:-}" ]]; then
     local -x AURTOMATOR_RUN_CACHE
     AURTOMATOR_RUN_CACHE=$(mktemp -d) || return 1
-    out=$(alert_unmet "$@") || rc=$?
+    out=$(alert_python "$@") || rc=$?
     rm -rf "$AURTOMATOR_RUN_CACHE"
     [[ -z "$out" ]] || printf '%s\n' "$out"
     return "$rc"
@@ -66,7 +66,7 @@ alert_unmet() {
   srcinfo=$(aur_srcinfo "$name") || rc=$?
   ((rc != 3)) || return 0
   ((rc == 0)) || return 1
-  python_unmet "$1" "$srcinfo" "$(pkg_get "$1" .upstream.registry)" "$2"
+  "python_$1" "$2" "$srcinfo" "$(pkg_get "$2" .upstream.registry)" "$3"
 }
 
 # Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as hold or
@@ -87,8 +87,8 @@ fired_alerts() {
       return 1
     fi
     if [[ "$kind" == requires ]]; then
-      if [[ "$value" != changed && "$value" != unmet ]]; then
-        log_err "alerts[$i].requires must be changed or unmet, got $value"
+      if [[ "$value" != changed && "$value" != unmet && "$value" != imports ]]; then
+        log_err "alerts[$i].requires must be changed, unmet or imports, got $value"
         return 1
       fi
       if [[ $(pkg_get "$file" .strategy) != pypi ]]; then
@@ -100,10 +100,10 @@ fired_alerts() {
         log_err "alerts[$i].$(alert_note_error "$file" "$i")"
         return 1
       fi
-      # unmet reads no current, so prepare and publish take its lines from the check run
-      if [[ "$value" == unmet ]]; then
+      # unmet and imports read no current, so prepare and publish take their lines from the check run
+      if [[ "$value" != changed ]]; then
         [[ -z "$offline" ]] || continue
-        change=$(alert_unmet "$file" "$latest") || return 1
+        change=$(alert_python "$value" "$file" "$latest") || return 1
         [[ -n "$change" ]] || continue
         action=notice
         [[ "$hold" != true || $'\n'"$change" != *$'\nhold\t'* ]] || action=hold

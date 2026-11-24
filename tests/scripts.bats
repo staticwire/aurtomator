@@ -2156,7 +2156,7 @@ alerts:
   - requires: always"
   run_requires 'fired_alerts "$1" 0.0.74 0.1.3' "$TEST_TMPDIR/packages/pkg.yml"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"alerts[0].requires must be changed or unmet, got always"* ]]
+  [[ "$output" == *"alerts[0].requires must be changed, unmet or imports, got always"* ]]
   create_test_package "pkg" "npm" "upstream:
   registry: express
 alerts:
@@ -2962,6 +2962,100 @@ python_files_db() {
   [ "$output" = $'python-rich 14.2.0 extra\npython-svg.path 6.3 aur\nnone-such: none' ]
 }
 
+# === py_imports.py ===
+
+# Helper: writes file $1 under $TEST_TMPDIR/py with the lines after it
+py_file() {
+  mkdir -p "$(dirname "$TEST_TMPDIR/py/$1")"
+  printf '%s\n' "${@:2}" >"$TEST_TMPDIR/py/$1"
+}
+
+# Helper: runs py_imports.py on the files $@ of $TEST_TMPDIR/py as the rules run it
+run_py_imports() {
+  run --separate-stderr python3 -I -S "$TEST_TMPDIR/scripts/lib/py_imports.py" "$TEST_TMPDIR/py" "$@"
+}
+
+@test "py_imports.py: prints the modules of import and from, with their scope" {
+  py_file mod.py 'import os' 'import a.b as c, json' 'from x.y import z, w as v' 'from star import *' \
+    'def f():' '    import inner' 'async def g():' '    from deep import thing' 'h = lambda: __import__("no")' \
+    'class K:' '    import in_class'
+  run_py_imports mod.py
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'import\tmod.py\t%s\n' 'os	module' 'a.b	module' 'json	module' 'x.y	module' 'x.y.z	module' \
+    'x.y.w	module' 'star	module' 'inner	function' 'deep	function' 'deep.thing	function' 'in_class	module')" ]
+}
+
+@test "py_imports.py: reads try, suppress and TYPE_CHECKING as optional and typing scopes" {
+  py_file mod.py 'try:' '    import fast' 'except ImportError:' '    import slow' 'try:' '    import a' 'except (ValueError, ModuleNotFoundError):' \
+    '    pass' 'try:' '    import b' 'except KeyError:' '    pass' 'try:' '    import c' 'except:' '    pass' \
+    'from contextlib import suppress' 'import contextlib' 'with suppress(ImportError):' '    import d' \
+    'with contextlib.suppress(Exception):' '    import e' 'with open("x"):' '    import f' \
+    'from typing import TYPE_CHECKING' 'if TYPE_CHECKING:' '    import g' 'import typing' 'if typing.TYPE_CHECKING:' '    import h' \
+    'def fn():' '    try:' '        import i' '    except ImportError:' '        pass'
+  run_py_imports mod.py
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'import\tmod.py\t%s\n' 'fast	optional' 'slow	optional' 'a	optional' 'b	module' 'c	optional' \
+    'contextlib	module' 'contextlib.suppress	module' 'contextlib	module' 'd	optional' 'e	optional' 'f	module' \
+    'typing	module' 'typing.TYPE_CHECKING	module' 'g	typing' 'typing	module' 'h	typing' 'i	function')" ]
+}
+
+@test "py_imports.py: follows the branch that the Python running it takes" {
+  py_file mod.py 'import sys, os, platform' 'if sys.version_info >= (3, 11):' '    import tomllib' 'else:' '    import tomli' \
+    'if sys.version_info[:2] < (3, 8):' '    import old' 'if sys.platform == "win32":' '    import winreg' \
+    'elif sys.platform.startswith(("linux", "freebsd")):' '    import fcntl' 'if os.name != "posix" or not platform.system() == "Linux":' \
+    '    import never' 'if sys.version_info >= (3, 11) and unknown():' '    import maybe' 'else:' '    import other'
+  run_py_imports mod.py
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'import\tmod.py\t%s\n' 'sys	module' 'os	module' 'platform	module' 'tomllib	module' 'fcntl	module' \
+    'maybe	module' 'other	module')" ]
+}
+
+@test "py_imports.py: resolves relative imports against the path of the file" {
+  py_file pkg/__init__.py 'from . import sub' 'from .core import run'
+  py_file pkg/sub/mod.py 'from . import x' 'from .m import y' 'from .. import top' 'from ..core import run'
+  run_py_imports pkg/__init__.py pkg/sub/mod.py
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'import\t%s\n' 'pkg/__init__.py	pkg	module' 'pkg/__init__.py	pkg.sub	module' \
+    'pkg/__init__.py	pkg.core	module' 'pkg/__init__.py	pkg.core.run	module' 'pkg/sub/mod.py	pkg.sub	module' \
+    'pkg/sub/mod.py	pkg.sub.x	module' 'pkg/sub/mod.py	pkg.sub.m	module' 'pkg/sub/mod.py	pkg.sub.m.y	module' \
+    'pkg/sub/mod.py	pkg	module' 'pkg/sub/mod.py	pkg.top	module' 'pkg/sub/mod.py	pkg.core	module' \
+    'pkg/sub/mod.py	pkg.core.run	module')" ]
+}
+
+@test "py_imports.py: prints an error line for a file it cannot parse and goes on" {
+  py_file bad.py 'def f(:' '    pass'
+  py_file good.py 'import json'
+  printf '\xff\xfe import x\n' >"$TEST_TMPDIR/py/bytes.py"
+  run_py_imports bad.py missing.py bytes.py good.py
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 4 ]
+  [[ "${lines[0]}" == error$'\t'bad.py$'\t'* ]]
+  [[ "${lines[1]}" == error$'\t'missing.py$'\t'* ]]
+  [[ "${lines[2]}" == error$'\t'bytes.py$'\t'* ]]
+  [ "${lines[3]}" = import$'\t'good.py$'\t'json$'\t'module ]
+}
+
+# sys and builtins live in the interpreter, so no file of the files database names them
+@test "py_imports.py: --stdlib prints the standard modules of the Python that runs it" {
+  run --separate-stderr python3 -I -S "$TEST_TMPDIR/scripts/lib/py_imports.py" --stdlib
+  [ "$status" -eq 0 ]
+  local name
+  for name in sys builtins json os _io; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$name"$'\n'* ]] || {
+      echo "missing: $name"
+      return 1
+    }
+  done
+  [[ $'\n'"$output"$'\n' != *$'\nnumpy\n'* ]]
+}
+
+@test "py_imports.py: exits 2 without a root" {
+  run --separate-stderr python3 -I -S "$TEST_TMPDIR/scripts/lib/py_imports.py"
+  [ "$status" -eq 2 ]
+  run --separate-stderr python3 -I -S "$TEST_TMPDIR/scripts/lib/py_imports.py" "$TEST_TMPDIR/none-such"
+  [ "$status" -eq 2 ]
+}
+
 # === pyrules.sh ===
 
 # Helper: the mock pacman with the repository packages of the tests, a files database with their
@@ -3205,6 +3299,181 @@ $2"
   run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/ydiskarc.yml"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+# Helper: zips directory $3 into a wheel of release $2 of project $1 in MOCK_FILES_DIR and adds it to
+# the simple page of the project
+pypi_fake_wheel() {
+  local wheel="$MOCK_FILES_DIR/${1//-/_}-$2-py3-none-any.whl" entries
+  mapfile -t entries < <(ls -A "$3")
+  bsdtar --format zip -cf "$wheel" -C "$3" "${entries[@]}"
+  pypi_fake_file "$1" "$2" "$wheel" false
+}
+
+# Helper: the owners of modules in the files database: tqdm, numba, pandas, the json of python,
+# pygraphviz, yaml and diagrams
+imports_env() {
+  unmet_env
+  local line
+  for line in 'python-tqdm tqdm/__init__.py' 'python-numba numba/__init__.py' 'python-pandas pandas/__init__.py' \
+    'python-pygraphviz pygraphviz/__init__.py' 'python-yaml yaml/__init__.py' 'python-yaml _yaml/__init__.py' \
+    'python-diagrams diagrams/__init__.py' 'python-diagrams diagrams/aws/__init__.py'; do
+    printf 'extra\t%s\t1-1\tusr/lib/python3.14/site-packages/%s\n' "${line% *}" "${line#* }"
+  done >>"$MOCK_PACMAN_FILES"
+  printf 'core\tpython\t3.14.10-1\tusr/lib/python3.14/%s\n' json/__init__.py os.py lib-dynload/_json.cpython-314-x86_64-linux-gnu.so \
+    >>"$MOCK_PACMAN_FILES"
+  printf '%s\n' 'python-numba 0.62.1-1 extra' 'python-pandas 2.3.3-1 extra' 'python-diagrams 0.25.1-1 extra' >>"$MOCK_PACMAN_SYNC"
+}
+
+# Helper: a wheel demo 1.0 with a package, an entry point, a plugin that nothing imports and a script
+demo_wheel() {
+  local w="$TEST_TMPDIR/wheel"
+  mkdir -p "$w/demo/plugins" "$w/demo-1.0.dist-info" "$w/demo-1.0.data/scripts"
+  printf '%s\n' 'from . import core' >"$w/demo/__init__.py"
+  printf '%s\n' 'import json, sys, builtins' >"$w/demo/core.py"
+  printf '%s\n' 'import tqdm' 'try:' '    import numba' 'except ImportError:' '    numba = None' 'def main():' '    import yaml' >"$w/demo/cli.py"
+  printf '%s\n' 'import pandas' >"$w/demo/plugins/extra.py"
+  printf '%s\n' '[console_scripts]' 'demo = demo.cli:main' '[demo.plugins]' 'extra = demo.plugins.extra' >"$w/demo-1.0.dist-info/entry_points.txt"
+  printf '%s\n' '#!/usr/bin/python' 'import os' >"$w/demo-1.0.data/scripts/demo-run"
+  pypi_fake_wheel demo 1.0 "$w"
+}
+
+# Helper: runs python_imports for package pkg of registry $2 at version $3 with .SRCINFO $1
+run_imports() {
+  create_test_package "pkg" "pypi" "upstream:
+  registry: $2
+${4:-}"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; python_imports "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml" "$1" "$2" "$3"
+}
+
+@test "pyrules.sh: python_imports notes required and optional imports that depends and optdepends miss" {
+  imports_env
+  demo_wheel
+  {
+    printf 'pkgbase = python-demo\n\tpkgver = 1.0\n\tpkgrel = 1\n\tdepends = python\n\tdepends = python-yaml\n'
+    printf '\toptdepends = python-numba: faster\n\npkgname = python-demo\n'
+  } >"$TEST_TMPDIR/demo.SRCINFO"
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timport pandas (optional): python-pandas in neither depends nor optdepends\nnotice\timport tqdm: python-tqdm not in depends' ]
+}
+
+@test "pyrules.sh: python_imports finds the imports of a script of the wheel" {
+  imports_env
+  local w="$TEST_TMPDIR/wheel"
+  mkdir -p "$w/kubediagrams-0.9.0.data/scripts" "$w/kubediagrams-0.9.0.dist-info"
+  printf '%s\n' '#!python' 'import argparse' 'import pygraphviz' 'import yaml' 'import diagrams' 'from diagrams.aws.enablement import X' \
+    >"$w/kubediagrams-0.9.0.data/scripts/kube-diagrams"
+  printf '%s\n' '#!/bin/bash' 'kube-diagrams "$@"' >"$w/kubediagrams-0.9.0.data/scripts/helm-diagrams"
+  printf 'Metadata-Version: 2.4\n' >"$w/kubediagrams-0.9.0.dist-info/METADATA"
+  pypi_fake_wheel KubeDiagrams 0.9.0 "$w"
+  printf 'core\tpython\t3.14.10-1\tusr/lib/python3.14/argparse.py\n' >>"$MOCK_PACMAN_FILES"
+  unmet_srcinfo "$TEST_TMPDIR/k.SRCINFO" kube-diagrams bash python python-diagrams python-pygraphviz python-yaml
+  run_imports "$TEST_TMPDIR/k.SRCINFO" KubeDiagrams 0.9.0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  unmet_srcinfo "$TEST_TMPDIR/k.SRCINFO" kube-diagrams bash python python-diagrams python-yaml
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  run_imports "$TEST_TMPDIR/k.SRCINFO" KubeDiagrams 0.9.0
+  [ "$output" = $'notice\timport pygraphviz: python-pygraphviz not in depends' ]
+}
+
+@test "pyrules.sh: python_imports notes a module no package owns and a file that does not parse" {
+  imports_env
+  local w="$TEST_TMPDIR/wheel"
+  mkdir -p "$w/demo"
+  printf '%s\n' 'import nowhere' 'import demo.broken' >"$w/demo/__init__.py"
+  printf '%s\n' 'def f(:' >"$w/demo/broken.py"
+  pypi_fake_wheel demo 1.0 "$w"
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = notice$'\t'"import nowhere: no package owns it" ]
+  [[ "${lines[1]}" == notice$'\t'"imports: demo/broken.py does not parse: "* ]]
+  [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "pyrules.sh: python_imports reads an sdist without tests, docs and python.skip, and the modules of src/" {
+  imports_env
+  local s="$TEST_TMPDIR/sdist" stem=demo-2.0
+  mkdir -p "$s/$stem/src/demo" "$s/$stem/tests" "$s/$stem/docs" "$s/$stem/tools" "$s/$stem/bin"
+  printf '%s\n' 'import tqdm' 'from demo import util' >"$s/$stem/src/demo/__init__.py"
+  printf '%s\n' 'import demo' >"$s/$stem/src/demo/util.py"
+  printf '%s\n' 'import pytest' >"$s/$stem/tests/test_a.py"
+  printf '%s\n' 'import sphinx' >"$s/$stem/docs/conf.py"
+  printf '%s\n' 'import pandas' >"$s/$stem/tools/gen.py"
+  printf '%s\n' '#!/usr/bin/env python3' 'import numba' >"$s/$stem/bin/demo"
+  printf 'Metadata-Version: 2.4\nName: demo\n' >"$s/$stem/PKG-INFO"
+  bsdtar -czf "$MOCK_FILES_DIR/$stem.tar.gz" -C "$s" "$stem"
+  pypi_fake_file demo 2.0 "$MOCK_FILES_DIR/$stem.tar.gz" false
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python python-tqdm
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0 "python:
+  skip:
+    - tools"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timport numba: python-numba not in depends' ]
+}
+
+@test "pyrules.sh: python_imports fails on a wheel that does not match its sha256" {
+  imports_env
+  demo_wheel
+  printf 'x' >>"$MOCK_FILES_DIR/demo-1.0-py3-none-any.whl"
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"demo-1.0-py3-none-any.whl does not match its sha256"* ]]
+}
+
+@test "pyrules.sh: python_imports reads no release past 20 MB of Python files" {
+  imports_env
+  mkdir -p "$TEST_TMPDIR/wheel/demo"
+  truncate -s 21M "$TEST_TMPDIR/wheel/demo/__init__.py"
+  pypi_fake_wheel demo 1.0 "$TEST_TMPDIR/wheel"
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timports: the release holds more than 20 MB of Python files, not read' ]
+}
+
+@test "pyrules.sh: python_imports gives one note without python3, within 60 s or without a files database" {
+  imports_env
+  demo_wheel
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  printf '#!/usr/bin/env bash\nexit 127\n' >"$MOCK_DIR/python3"
+  chmod +x "$MOCK_DIR/python3"
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$output" = $'notice\timports: python3 is not installed, not read' ]
+  printf '#!/usr/bin/env bash\nexit 124\n' >"$MOCK_DIR/python3"
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$output" = $'notice\timports: not read within 60 s' ]
+  rm "$MOCK_DIR/python3"
+  export MOCK_PACMAN_NO_FILES=1
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$output" = $'notice\timports: pacman has no files database, not read' ]
+}
+
+@test "lib.sh: fired_alerts fires requires: imports as a notice" {
+  imports_env
+  demo_wheel
+  {
+    printf 'pkgbase = demo\n\tpkgver = 1.0\n\tpkgrel = 1\n\tdepends = python\n\tdepends = python-yaml\n'
+    printf '\toptdepends = python-numba: faster\n\npkgname = demo\n'
+  } >"$TEST_TMPDIR/demo.SRCINFO"
+  aur_srcinfo_remote demo "$TEST_TMPDIR/demo.SRCINFO"
+  create_test_package "demo" "pypi" "upstream:
+  registry: demo
+alerts:
+  - requires: imports
+    note: Check the imports"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 0.9 1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\tCheck the imports: import pandas (optional): python-pandas in neither depends nor optdepends; import tqdm: python-tqdm not in depends' ]
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 0.9 1.0 offline' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
+  [ -z "$output" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
 }
 
 # === version of aurtomator ===

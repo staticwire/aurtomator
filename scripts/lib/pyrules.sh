@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# pyrules.sh - The requires rule unmet: Python requirements of a release against Arch packages
+# pyrules.sh - The requires rules unmet and imports: a Python release against Arch packages
 #
 # Sourced by lib.sh.
 
@@ -192,4 +192,391 @@ _python_unmet_extras() {
         printf 'hold\t%s[%s]: %s not in depends\n' "$4" "$extra" "$REQ_NAME"
     done
   done
+}
+
+# Print the notes of rule imports for release $4 of PyPI project $3, packaged by package file $1
+# with .SRCINFO $2: lines of notice, a tab and the note, for each pkgname with Python
+python_imports() {
+  local pkgname any="" work rc=0 out
+  local -a pkgnames
+  mapfile -t pkgnames < <(srcinfo_pkgnames "$2")
+  for pkgname in "${pkgnames[@]}"; do
+    ! pkgname_has_python "$2" "$pkgname" || any=1
+  done
+  [[ -n "$any" ]] || return 0
+  files_index_python || return 1
+  if [[ "$ARCHDB_FILES" == none ]]; then
+    printf 'notice\timports: pacman has no files database, not read\n'
+    return 0
+  fi
+  archdb_cache || return 1
+  work=$(mktemp -d "$AURTOMATOR_RUN_CACHE/imports.XXXXXX") || return 1
+  out=$(_python_imports_read "$1" "$2" "$3" "$4" "$work" "${pkgnames[@]}") || rc=$?
+  rm -rf "$work"
+  ((rc == 0)) || return 1
+  [[ -z "$out" ]] || printf '%s\n' "$out" | LC_ALL=C sort -u
+}
+
+# python_imports for package file $1, .SRCINFO $2, project $3, release $4, work directory $5 and
+# the pkgnames after it: reads the files of the release and prints the notes of each pkgname
+_python_imports_read() {
+  local LC_ALL=C file=$1 srcinfo=$2 work=$5 name url sha kind top root size rc=0 helper entry pkgname
+  local -a pkgnames=("${@:6}") files skip
+  _python_imports_archive "$3" "$4" || return 1
+  if [[ -z "${PY_ARCHIVE:-}" ]]; then
+    printf 'notice\timports: PyPI holds no wheel or sdist of %s %s, not read\n' "$3" "$4"
+    return 0
+  fi
+  IFS=$'\t' read -r name url sha kind <<<"$PY_ARCHIVE"
+  http_get "$url" -o "$work/archive" || return 1
+  if [[ "$(sha256sum "$work/archive")" != "$sha "* ]]; then
+    log_err "$name does not match its sha256"
+    return 1
+  fi
+  # The listing takes at most 16 MiB, and an ignored SIGXFSZ makes a write past it fail
+  if ! (trap '' XFSZ && ulimit -f 16384 && bsdtar -tvf "$work/archive" >"$work/list" 2>/dev/null); then
+    printf 'notice\timports: bsdtar cannot list %s, not read\n' "$name"
+    return 0
+  fi
+  size=$(awk '/^-/ { path = $0; sub(/^([^ ]+ +){8}/, "", path)
+    if (path ~ /\.py$|\/scripts\/|(^|\/)bin\//) sum += $5 } END { printf "%d\n", sum }' "$work/list")
+  if ((size > 20 * 1024 * 1024)); then
+    printf 'notice\timports: the release holds more than 20 MB of Python files, not read\n'
+    return 0
+  fi
+  mkdir "$work/tree" || return 1
+  # bsdtar fails for each pattern that matches nothing, which is no failure here
+  (trap '' XFSZ && ulimit -f $((20 * 1024)) && bsdtar -xf "$work/archive" -C "$work/tree" --no-same-owner \
+    --include '*.py' --include '*/scripts/*' --include 'scripts/*' --include '*/bin/*' --include 'bin/*' \
+    --include '*entry_points.txt' 2>"$work/errors")
+  if grep -qv -e ': Not found in archive$' -e '^bsdtar: Error exit delayed from previous errors' "$work/errors"; then
+    printf 'notice\timports: bsdtar cannot extract %s, not read\n' "$name"
+    return 0
+  fi
+  # Links of the archive could point at any file of the runner
+  find "$work/tree" -type l -delete
+  top="$work/tree"
+  if [[ "$kind" == sdist ]]; then
+    top="$work/tree/${name%.tar.gz}"
+    top=${top%.zip}
+    [[ -d "$top" ]] || return 0
+    for entry in tests test docs doc examples; do
+      rm -rf "${top:?}/$entry"
+    done
+  fi
+  mapfile -t skip < <(pkg_get "$file" '.python.skip // [] | .[] | select(tag == "!!str")')
+  for entry in "${skip[@]}"; do
+    [[ -n "$entry" && "$entry" != /* && "/$entry/" != */../* ]] || continue
+    rm -rf "${top:?}/$entry"
+  done
+  root=$top
+  [[ "$kind" != sdist || ! -d "$top/src" ]] || root="$top/src"
+  _python_imports_files "$top" "$root" "$kind"
+  files=("${PY_FILES[@]}")
+  ((${#files[@]} > 0)) || return 0
+  helper="${BASH_SOURCE[0]%/*}/py_imports.py"
+  timeout 60 python3 -I -S "$helper" "$root" "${files[@]}" >"$work/imports" 2>/dev/null || rc=$?
+  ((rc != 0)) || timeout 60 python3 -I -S "$helper" --stdlib >"$work/stdlib" 2>/dev/null || rc=$?
+  case $rc in
+    0) ;;
+    124)
+      printf 'notice\timports: not read within 60 s\n'
+      return 0
+      ;;
+    127)
+      printf 'notice\timports: python3 is not installed, not read\n'
+      return 0
+      ;;
+    *)
+      printf 'notice\timports: py_imports.py exits %s, not read\n' "$rc"
+      return 0
+      ;;
+  esac
+  _python_imports_classify "$top" "$root" "$work/imports" "$work/stdlib" || return 1
+  for pkgname in "${pkgnames[@]}"; do
+    pkgname_has_python "$srcinfo" "$pkgname" || continue
+    _python_imports_notes "$file" "$srcinfo" "$pkgname" "${#pkgnames[@]}" || return 1
+  done
+}
+
+# Set PY_ARCHIVE to name, URL, sha256 and wheel or sdist of the file of release $2 of project $1
+# that the rule reads: a wheel for any platform, then one for Linux on x86_64, any other wheel, the sdist
+_python_imports_archive() {
+  local name url sha
+  local -a any=() linux=() other=() sdists=()
+  PY_ARCHIVE=""
+  pypi_release "$1" "$2" || return 1
+  while IFS=$'\t' read -r name url sha _; do
+    case $name in
+      "") ;;
+      *-none-any.whl) any+=("$name"$'\t'"$url"$'\t'"$sha"$'\twheel') ;;
+      *linux*x86_64*.whl) linux+=("$name"$'\t'"$url"$'\t'"$sha"$'\twheel') ;;
+      *.whl) other+=("$name"$'\t'"$url"$'\t'"$sha"$'\twheel') ;;
+      *) sdists+=("$name"$'\t'"$url"$'\t'"$sha"$'\tsdist') ;;
+    esac
+  done <<<"$PYPI_FILES"
+  PY_ARCHIVE=${any[0]:-${linux[0]:-${other[0]:-${sdists[0]:-}}}}
+}
+
+# Set PY_FILES to the files under $2, the root of the modules in tree $1 of a wheel or sdist ($3),
+# that the rule parses: every .py file and the scripts whose first line names python, relative to $2
+_python_imports_files() {
+  local LC_ALL=C top=$1 root=$2 path line rel
+  local -A seen=()
+  PY_FILES=()
+  while IFS= read -r -d '' path; do
+    rel=${path#"$root"/}
+    if [[ "$rel" == *$'\t'* ]] || has_control "$rel"; then
+      continue
+    fi
+    seen[$rel]=1
+    PY_FILES+=("$rel")
+  done < <(find "$root" -type f -name '*.py' -print0 | sort -z)
+  while IFS= read -r -d '' path; do
+    line=""
+    IFS= read -r line <"$path" || [[ -n "$line" ]] || continue
+    [[ "$line" =~ ^#!.*python ]] || continue
+    rel=${path#"$top"/}
+    [[ "$root" == "$top" ]] || rel="../$rel"
+    if [[ "$rel" == *$'\t'* || -n "${seen[$rel]:-}" ]] || has_control "$rel"; then
+      continue
+    fi
+    PY_FILES+=("$rel")
+  done < <(
+    if [[ "$3" == wheel ]]; then
+      find "$top" -mindepth 3 -maxdepth 3 -type f -path '*.data/scripts/*' -print0
+    else
+      find "$top/bin" "$top/scripts" -type f -print0 2>/dev/null
+    fi | sort -z
+  )
+}
+
+# Sort the imports of py_imports.py output $3 for the modules under $2 of tree $1, $4 listing the standard
+# modules: PY_ERRORS gets the files that do not parse, PY_REQUIRED and PY_OPTIONAL the modules of other projects
+_python_imports_classify() {
+  local LC_ALL=C top=$1 root=$2 kind path module scope line name entry rel
+  local -A own=() reached=() mods=() required=() optional=() stdlib=()
+  local -a queue=()
+  PY_ERRORS=() PY_REQUIRED=() PY_OPTIONAL=()
+  for entry in "$root"/*; do
+    name=${entry##*/}
+    if [[ -f "$entry" && "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*\.py$ ]]; then
+      own[${name%.py}]=1
+      queue+=("$name")
+    elif [[ -d "$entry" && "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [[ -n "$(find "$entry" -name '*.py' -print -quit)" ]]; then
+      own[$name]=1
+      [[ ! -f "$entry/__init__.py" ]] || queue+=("$name/__init__.py")
+    fi
+  done
+  while IFS=$'\t' read -r kind path module scope; do
+    case $kind in
+      error)
+        rel=$path
+        if [[ "$rel" == ../* ]]; then
+          rel=${rel#../}
+        elif [[ "$root" != "$top" ]]; then
+          rel="${root#"$top"/}/$rel"
+        fi
+        PY_ERRORS+=("$rel: $module")
+        ;;
+      import)
+        [[ "$scope" != typing && -n "$module" ]] || continue
+        mods[$path]+="$scope"$'\t'"$module"$'\n'
+        # Scripts are entry points of their own
+        [[ "$path" == *.py ]] || queue+=("$path")
+        ;;
+    esac
+  done <"$3"
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:blank:]]*[A-Za-z0-9_.-]+[[:blank:]]*=[[:blank:]]*([A-Za-z_][A-Za-z0-9_.]*) ]] || continue
+    while IFS= read -r rel; do
+      queue+=("$rel")
+    done < <(_python_module_files "$root" "${BASH_REMATCH[1]}")
+  done < <(find "$top" -maxdepth 3 -type f -name entry_points.txt -path '*.*-info/*' -exec awk '
+    /^\[/ { keep = ($0 ~ /^\[(console|gui)_scripts\][[:blank:]]*$/); next } keep' {} +)
+  while ((${#queue[@]} > 0)); do
+    path=${queue[0]}
+    queue=("${queue[@]:1}")
+    [[ -z "${reached[$path]:-}" ]] || continue
+    reached[$path]=1
+    while IFS=$'\t' read -r scope module; do
+      [[ "$scope" == module && -n "${own[${module%%.*}]:-}" ]] || continue
+      while IFS= read -r rel; do
+        [[ -n "${reached[$rel]:-}" ]] || queue+=("$rel")
+      done < <(_python_module_files "$root" "$module")
+    done <<<"${mods[$path]:-}"
+  done
+  while IFS= read -r name; do
+    [[ -z "$name" ]] || stdlib[$name]=1
+  done <"$4"
+  for path in "${!mods[@]}"; do
+    while IFS=$'\t' read -r scope module; do
+      [[ -n "$module" && -z "${own[${module%%.*}]:-}" && -z "${stdlib[${module%%.*}]:-}" ]] || continue
+      if [[ -n "${reached[$path]:-}" && "$scope" == module ]]; then
+        required[$module]=1
+      else
+        optional[$module]=1
+      fi
+    done <<<"${mods[$path]}"
+  done
+  PY_REQUIRED=("${!required[@]}")
+  for module in "${!optional[@]}"; do
+    [[ -n "${required[$module]:-}" ]] || PY_OPTIONAL+=("$module")
+  done
+}
+
+# Print the files under root $1 that importing dotted module $2 runs: the __init__.py of each
+# package on the way, then the module file or the __init__.py of the package it names
+_python_module_files() {
+  local path="" part
+  local -a parts
+  IFS=. read -ra parts <<<"$2"
+  for part in "${parts[@]}"; do
+    path+="${path:+/}$part"
+    if [[ -f "$1/$path/__init__.py" ]]; then
+      printf '%s\n' "$path/__init__.py"
+    elif [[ -f "$1/$path.py" ]]; then
+      printf '%s\n' "$path.py"
+      return 0
+    else
+      return 0
+    fi
+  done
+}
+
+# Write the owners of the top-level modules $@ that the run did not ask for yet to py-owners of the
+# run cache: lines of the pkgname and the path under the directory of Python, site-packages left out
+_python_owners_index() {
+  local LC_ALL=C file="$AURTOMATOR_RUN_CACHE/py-owners" asked="$AURTOMATOR_RUN_CACHE/py-owners-asked" name
+  local pkg path rel alternation="" top
+  local -A known=()
+  local -a names=()
+  touch "$file" "$asked" || return 1
+  while IFS= read -r name; do
+    known[$name]=1
+  done <"$asked"
+  for name in "$@"; do
+    [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && -z "${known[$name]:-}" ]] || continue
+    known[$name]=1
+    names+=("$name")
+  done
+  ((${#names[@]} > 0)) || return 0
+  printf -v alternation '%s|' "${names[@]}"
+  while IFS=$'\t' read -r pkg path; do
+    rel=${path#usr/lib/python3.*/}
+    rel=${rel#site-packages/}
+    rel=${rel#lib-dynload/}
+    # pacman matches without regard to case, and module names keep theirs
+    top=${rel%%/*}
+    top=${top%%.*}
+    [[ -n "${known[$top]:-}" ]] || continue
+    printf '%s\t%s\n' "$pkg" "$rel"
+  done < <(files_index_owner "^usr/lib/python3\\.[0-9]+/((site-packages|lib-dynload)/)?(${alternation%|})(/|\\.py\$|\\.[^/]*\\.so\$)") >>"$file"
+  printf '%s\n' "${names[@]}" >>"$asked"
+}
+
+# Print the dotted prefix of module $1 that names its owners in py-owners, then the owners, one a
+# line, for the longest prefix that some package owns; nothing when none does
+_python_owners() {
+  local LC_ALL=C prefix owners path n
+  local -a parts
+  IFS=. read -ra parts <<<"$1"
+  for ((n = ${#parts[@]}; n > 0; n--)); do
+    path=$(IFS=/ && printf '%s' "${parts[*]:0:n}")
+    owners=$(awk -F'\t' -v p="$path" '$2 == p ".py" || index($2, p "/") == 1 ||
+      (index($2, p ".") == 1 && $2 ~ /\.so$/ && index(substr($2, length(p) + 2), "/") == 0) { print $1 }' \
+      "$AURTOMATOR_RUN_CACHE/py-owners" | sort -u)
+    if [[ -n "$owners" ]]; then
+      prefix=$(IFS=. && printf '%s' "${parts[*]:0:n}")
+      printf '%s\n%s\n' "$prefix" "$owners"
+      return 0
+    fi
+  done
+}
+
+# Print the notes of pkgname $3 of .SRCINFO $2 of package file $1, with PY_REQUIRED, PY_OPTIONAL
+# and PY_ERRORS of the release; $4 is the number of pkgnames, and more than one names the pkgname
+_python_imports_notes() {
+  local file=$1 srcinfo=$2 pkgname=$3 prefix="" module dep key lower owner met entry
+  local -a lines
+  local -A in_depends=() in_opt=() noted=()
+  local -a owners tops=()
+  (($4 < 2)) || prefix="$pkgname: "
+  while IFS= read -r dep; do
+    in_depends[$dep]=1
+    ! arch_package "$dep" 2>/dev/null || in_depends[$PKG_NAME]=1
+  done < <(srcinfo_depends "$srcinfo" "$pkgname" depends)
+  while IFS= read -r dep; do
+    in_opt[$dep]=1
+    ! arch_package "$dep" 2>/dev/null || in_opt[$PKG_NAME]=1
+  done < <(srcinfo_depends "$srcinfo" "$pkgname" optdepends)
+  while IFS= read -r dep; do
+    in_depends[$dep]=1
+  done < <(srcinfo_pkgnames "$srcinfo")
+  in_depends[python]=1
+  for entry in "${PY_ERRORS[@]}"; do
+    printf 'notice\t%simports: %s does not parse: %s\n' "$prefix" "${entry%%: *}" "${entry#*: }"
+  done
+  for module in "${PY_REQUIRED[@]}" "${PY_OPTIONAL[@]}"; do
+    tops+=("${module%%.*}")
+  done
+  _python_owners_index "${tops[@]}" || return 1
+  for module in "${PY_REQUIRED[@]}" "${PY_OPTIONAL[@]}"; do
+    owners=()
+    mapfile -t lines < <(_python_owners "$module")
+    key=${module%%.*}
+    if ((${#lines[@]} > 0)); then
+      owners=("${lines[@]:1}")
+      # Namespace packages, as google, have owners that differ by sub-path
+      [[ "$(_python_owners "$key" | wc -l)" -le 2 ]] || key=${lines[0]}
+    else
+      for dep in "${!in_depends[@]}" "${!in_opt[@]}"; do
+        lower=${key,,}
+        if [[ "$dep" == "python-$lower" || "$dep" == "python-${lower//_/-}" ]]; then
+          owners=("$dep")
+          break
+        fi
+      done
+      if ((${#owners[@]} == 0)) && _pypi_norm "$key"; then
+        owner=$(python_map "$file" "$PYPI_NORM")
+        [[ -z "$owner" ]] || owners=("$owner")
+      fi
+    fi
+    [[ -z "${noted[$key]:-}" ]] || continue
+    noted[$key]=1
+    if ((${#owners[@]} == 0)); then
+      _python_is_required "$module" && printf 'notice\t%simport %s: no package owns it\n' "$prefix" "$key"
+      continue
+    fi
+    met=""
+    for owner in "${owners[@]}"; do
+      [[ -z "${in_depends[$owner]:-}" ]] || met=1
+    done
+    [[ -z "$met" ]] || continue
+    if _python_is_required "$module"; then
+      printf 'notice\t%simport %s: %s not in depends\n' "$prefix" "$key" "$(_python_join "${owners[@]}")"
+      continue
+    fi
+    for owner in "${owners[@]}"; do
+      [[ -z "${in_opt[$owner]:-}" ]] || met=1
+    done
+    [[ -n "$met" ]] ||
+      printf 'notice\t%simport %s (optional): %s in neither depends nor optdepends\n' "$prefix" "$key" "$(_python_join "${owners[@]}")"
+  done
+}
+
+# Succeed when module $1 is one of PY_REQUIRED
+_python_is_required() {
+  local module
+  for module in "${PY_REQUIRED[@]}"; do
+    [[ "$module" != "$1" ]] || return 0
+  done
+  return 1
+}
+
+# Print the words $@ joined by " or "
+_python_join() {
+  local out
+  printf -v out '%s or ' "$@"
+  printf '%s\n' "${out% or }"
 }

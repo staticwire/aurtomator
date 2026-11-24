@@ -28,6 +28,7 @@ setup_test_env() {
   # Symlink all scripts and strategies for bashcov coverage tracking
   ln -sf "$PROJECT_DIR/scripts/"*.sh "$TEST_TMPDIR/scripts/"
   ln -sf "$PROJECT_DIR/scripts/lib/"*.sh "$TEST_TMPDIR/scripts/lib/"
+  ln -sf "$PROJECT_DIR/scripts/lib/"*.py "$TEST_TMPDIR/scripts/lib/"
   ln -sf "$PROJECT_DIR/strategies/"*.sh "$TEST_TMPDIR/strategies/"
 
   # Mock curl first in PATH, the mock git of AUR clones after MOCK_DIR: git mocks that a test writes

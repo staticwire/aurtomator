@@ -20,6 +20,17 @@ TMPDIR=$(mktemp -d)
 export TMPDIR AURTOMATOR_KEEP_TEST_DIRS=1
 (tail --pid="$PPID" -f /dev/null && rm -rf "$TMPDIR") </dev/null >/dev/null 2>&1 {trace_fd}>&- &
 
+# coverage.py measures scripts/lib/py_imports.py through the python3 of cov-shims; -I keeps the
+# coverage/ directory of the reports from standing in for the coverage module
+helpers=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+unset COVERAGE_FILE
+if python3 -I -m coverage --version >/dev/null 2>&1; then
+  mkdir -p coverage
+  rm -f coverage/.coverage coverage/.coverage.* coverage/python.xml
+  export COVERAGE_FILE="$PWD/coverage/.coverage"
+  export PATH="$helpers/cov-shims:$PATH"
+fi
+
 # Every writer of a blocking pipe waits for bashcov, so only the records of .sh files reach it.
 # Records start with one or more + and BASHCOV> and the delimiter; the second field is BASH_SOURCE.
 exec {filter_fd}> >(LC_ALL=C gawk -v d="$delimiter" '
@@ -40,4 +51,9 @@ set +euo pipefail
 status=$?
 exec {filter_fd}>&-
 wait "$filter_pid"
+if [[ -n "${COVERAGE_FILE:-}" ]] && compgen -G "$COVERAGE_FILE.*" >/dev/null; then
+  # The data names scripts/lib/py_imports.py relative to the root of aurtomator
+  (cd "$helpers/../.." && python3 -I -m coverage combine --rcfile=.coveragerc &&
+    python3 -I -m coverage xml --rcfile=.coveragerc -o "${COVERAGE_FILE%/*}/python.xml") >&2 || status=1
+fi
 exit "$status"

@@ -1,0 +1,4 @@
+# coverage.py of tests/helpers/bashcov-bats.sh, for the Python helpers of scripts/lib/
+[run]
+source = scripts/lib
+relative_files = True

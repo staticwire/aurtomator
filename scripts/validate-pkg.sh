@@ -91,9 +91,10 @@ key_strategies() {
   esac
 }
 
-# Check the python key of package file $1: a map with map, from PyPI names to package names
+# Check the python key of package file $1: a map with map, from PyPI names to package names, and
+# skip, the relative paths that the rule imports leaves out
 validate_python() {
-  local file="$1" shown="packages/${1##*/}" errors=0 key value unknown
+  local file="$1" shown="packages/${1##*/}" errors=0 key value unknown path
   case $(pkg_get "$file" '.python | tag') in
     "!!null") return 0 ;;
     "!!map") ;;
@@ -102,7 +103,7 @@ validate_python() {
       return 1
       ;;
   esac
-  unknown=$(pkg_get "$file" '.python | [keys[] | select(. != "map")] | join(", ")')
+  unknown=$(pkg_get "$file" '.python | [keys[] | select(. != "map" and . != "skip")] | join(", ")')
   if [[ -n "$unknown" ]]; then
     log_err "$shown: python: unknown key: $unknown"
     errors=1
@@ -125,13 +126,28 @@ validate_python() {
       errors=1
       ;;
   esac
+  case $(pkg_get "$file" '.python.skip | tag') in
+    "!!null") ;;
+    "!!seq")
+      while IFS= read -r path; do
+        if [[ -z "$path" || "$path" == /* || "/$path/" == */../* ]]; then
+          log_err "$shown: python.skip: ${path@Q} must be a relative path without .."
+          errors=1
+        fi
+      done < <(pkg_get "$file" '.python.skip[] | (select(tag == "!!str") // to_json(0))')
+      ;;
+    *)
+      log_err "$shown: python.skip must be a list of relative paths"
+      errors=1
+      ;;
+  esac
   return "$errors"
 }
 
 # Check entry $2 of the alerts of package file $1, with pkgver_format $3 if any, strategy $4
 # and pkgver_dash set when $5 is true; the errors go to stderr
 validate_alert() {
-  local file="$1" i="$2" format="$3" rule="packages/${1##*/}: alerts[$2]" errors=0 unknown tag value
+  local file="$1" i="$2" format="$3" rule="packages/${1##*/}: alerts[$2]" errors=0 unknown tag value requires
   if [[ $(pkg_get "$file" ".alerts[$i] | tag") != "!!map" ]]; then
     log_err "$rule must be a map with note and one of when, from, match, requires"
     return 1
@@ -150,8 +166,9 @@ validate_alert() {
   # the spelling of PyPI, which pkgver_format and pkgver_dash change
   tag=$(pkg_get "$file" ".alerts[$i].requires | tag")
   value=$(pkg_get "$file" ".alerts[$i].requires")
-  if [[ "$tag" != "!!null" && "$value" != changed && "$value" != unmet ]]; then
-    log_err "$rule.requires must be changed or unmet, got $value"
+  requires=$value
+  if [[ "$tag" != "!!null" && "$value" != changed && "$value" != unmet && "$value" != imports ]]; then
+    log_err "$rule.requires must be changed, unmet or imports, got $value"
     errors=1
   elif [[ "$tag" != "!!null" && "$4" != pypi ]]; then
     log_err "$rule: requires applies to the pypi strategy only"
@@ -198,6 +215,9 @@ validate_alert() {
 
   if ! flag_ok "$file" ".alerts[$i].hold"; then
     log_err "$rule.hold must be true or false"
+    errors=1
+  elif [[ "$requires" == imports && "$(pkg_bool "$file" ".alerts[$i].hold")" == true ]]; then
+    log_err "$rule.hold does not apply to requires: imports"
     errors=1
   fi
 

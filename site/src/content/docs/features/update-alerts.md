@@ -21,7 +21,7 @@ alerts:
 | `when` | one of `when`, `from`, `match`, `requires` | `major`: the first number of the new version is greater than that of `current`, as in `28+25 → 29+1` |
 | `from` | one of `when`, `from`, `match`, `requires` | version: the new version is at or above it, and `current` is below it |
 | `match` | one of `when`, `from`, `match`, `requires` | ERE: the new version matches it, and `current` does not |
-| `requires` | one of `when`, `from`, `match`, `requires` | `changed`: the names of the requirements that apply on Arch differ between the release in `current` and the new version. `unmet`: the `depends` of the AUR package do not meet a requirement of the new version. `pypi` only |
+| `requires` | one of `when`, `from`, `match`, `requires` | `changed`: the names of the requirements that apply on Arch differ between the release in `current` and the new version. `unmet`: the `depends` of the AUR package do not meet a requirement of the new version. `imports`: the files of the new version import modules that `depends` and `optdepends` do not hold. `pypi` only |
 | `note` | yes, optional with `requires` | one line of text without tabs for the maintainer. Numbers, booleans and dates go in quotes, as in `note: '2024'` |
 | `hold` | no | `true` holds the update. Default `false` |
 
@@ -67,6 +67,22 @@ The rule resolves names of `provides` with `pacman -Sddp` for the repositories a
 ```
 
 Missing entries, lower bounds, exact pins and `Requires-Python` hold the update under `hold: true`: `rich: not in depends`, `botocore<1.45.0,>=1.44.10: python-botocore has 1.43.108`, `httpx[http2]: h2 not in depends`, `Requires-Python <3.14: python has 3.14.10`. Upper caps that Arch exceeds give notices also under `hold: true`, since Arch ships such pairs: sympy 1.14.0 requires `mpmath<1.4,>=1.1.0`, and Arch has python-mpmath 1.4.1. Requirements on a URL, versions outside PEP 440, such as `r675.70e1dda` of a `-git` package, and extras whose metadata PyPI does not give for the version in Arch give notices too. The rule joins its notes with `; `, and in packages with more than one pkgname each note starts with its pkgname. Packages that the AUR lacks fire nothing. `unmet` reads no `current`, so it also runs for packages without `current`, and `--prepare` and `--publish` take its notes from the check run.
+
+`requires: imports` reads the files of the new version: a wheel, picked in the order of the metadata that the [pypi strategy](/strategies/#pypi) reads, otherwise the sdist without its `tests`, `test`, `docs`, `doc` and `examples` directories. `python.skip` lists more paths that the rule leaves out, relative to the top of the wheel or the sdist:
+
+```yaml
+python:
+  skip:
+    - tools
+```
+
+Archives within `upstream.max_answer_mb` have to match their sha256, and releases with more than 20 MB of Python files and scripts are not read. `scripts/lib/py_imports.py` parses every `.py` file and every script whose first line names `python` with the `ast` module of Python, which the `check` job installs. Imports at module level are required when they run from a top-level package or module, from a `console_scripts` or `gui_scripts` entry of `entry_points.txt` or from a script, through the imports between the modules of the release. Imports inside functions, in `try` blocks that catch `ImportError`, under `suppress(ImportError)` and at module level of the other modules are optional, and imports under `if TYPE_CHECKING:` do not count. Tests on `sys.version_info`, `sys.platform`, `os.name` and `platform.system()` take the values of the Python of Arch on Linux, and imports in the branches they rule out do not count. Each module belongs to `python` for the standard library or to the package that holds it in `site-packages`, by the files database of pacman, else to an entry of `depends` or `optdepends` named `python-<module>`, else to the package that `python.map` names.
+
+```text
+! demo: update 1.0 → 1.1 notice: import tqdm: python-tqdm not in depends
+```
+
+Required imports whose package is not in `depends` note `import tqdm: python-tqdm not in depends`, optional ones whose package is in neither `depends` nor `optdepends` note `import numba (optional): python-numba in neither depends nor optdepends`, and required imports of a module that no package holds note `import foo: no package owns it`. Files that do not parse note `imports: <file> does not parse: <message>`. The rule gives notices alone, and `validate-pkg.sh` refuses `hold: true` on it. Without a files database, which local runs lack until `pacman -Fy`, and without `python3`, the rule notes that it read nothing.
 
 Releases of `current` that PyPI lacks fire the rule with `PyPI has no release <version> of <registry> to compare with`, and releases of `current` without metadata that lists their requirements fire it with `<registry> <version>: PyPI holds no metadata that lists the requirements without running code`, since only a publish moves `current`. New versions without such metadata fail the check. Other failed requests fail the check of the package with their URL, as failed strategies do. `--prepare` and `--publish` take the notes of these rules from the check run. `--prepare` asks PyPI again only for rules with `hold: true`, which it fires from the `pkgver` of the AUR, and `--publish` asks PyPI nothing. `requires` reads `current` as a version of PyPI, so it does not apply with `pkgver_format` or `pkgver_dash`.
 

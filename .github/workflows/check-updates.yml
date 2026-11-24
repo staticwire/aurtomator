@@ -81,7 +81,7 @@ jobs:
         run: |
           pacman-key --init
           pacman -Sy --noconfirm --needed archlinux-keyring
-          pacman -Su --noconfirm --needed sudo git go-yq
+          pacman -Su --noconfirm --needed sudo git go-yq python
 
       # builder must own no file that the runner mounts into the container
       - &add-builder
