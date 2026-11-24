@@ -4871,6 +4871,20 @@ alerts:
   [ ! -e "$TEST_TMPDIR/.status/_hosts" ]
 }
 
+# PyPI answers hold requires_dist, null for releases without requirements
+@test "check-all: a requires rule fires nothing between releases without requirements" {
+  create_test_package "plain" "pypi" "upstream:
+  registry: plain
+current: 3.2.0
+allow_missing_arch: false
+alerts:
+  - requires: changed
+    hold: true"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/plain")" = "new_version: 3.2.1" ]
+}
+
 @test "check-all: a requires rule whose request fails fails the check, names the host and runs again" {
   create_test_package "flaky-bin" "pypi" "upstream:
   registry: flaky

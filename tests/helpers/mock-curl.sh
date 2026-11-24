@@ -530,7 +530,7 @@ case "$url" in
     ;;
   # PyPI JSON API
   *pypi.org/pypi/*/json)
-    echo '{"info": {"version": "3.2.1"}}'
+    echo '{"info": {"version": "3.2.1", "requires_dist": null}}'
     ;;
   # npm registry
   *registry.npmjs.org/*/latest)
