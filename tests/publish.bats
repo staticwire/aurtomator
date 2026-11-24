@@ -3765,6 +3765,41 @@ EOF
   done
 }
 
+# Each status that leaves the newest release of the project in the AUR, or a dry run of it,
+# lets the package with pin_from go
+@test "check-all --publish: publishes a package with pin_from after each status of its project at the newest release" {
+  local checked lines dry want
+  while IFS='|' read -r checked lines dry want; do
+    create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+${lines//;/$'\n'}"
+    create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41"
+    rm -rf "$TEST_TMPDIR/.status" "$TEST_TMPDIR/out" "$TEST_TMPDIR/publish-pkg.sh.args"
+    mkdir -p "$TEST_TMPDIR/.status" "$TEST_TMPDIR/out/prepared/zensical-bin" "$TEST_TMPDIR/out/prepared/python-zensical-ui"
+    checked_status zensical-bin "$checked"
+    checked_status python-zensical-ui "new_version: 0.0.43"
+    [[ "$checked" != arch_back:* ]] || printf 'zensical-bin\t0.0.74\t\t\n' >"$TEST_TMPDIR/.status/_arches"
+    stub_script publish-pkg.sh 0
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out" ${dry:+--dry-run}
+    [ "$status" -eq 0 ] && [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "$want" ] &&
+      grep -q '^python-zensical-ui 0\.0\.43 ' "$TEST_TMPDIR/publish-pkg.sh.args" || {
+      echo "$checked${dry:+ with --dry-run}: $(cat "$TEST_TMPDIR/.status/zensical-bin"), $(cat "$TEST_TMPDIR/.status/python-zensical-ui")"
+      return 1
+    }
+  done <<EOF
+available_downgrade: 0.0.70|allow_downgrade: true||downgrade: 0.0.70
+new_build: 0.0.74|||rebuilt: 0.0.74
+arch_back: 0.0.74 aarch64|arch_out:;  aarch64: '$(printf 'a%.0s' {1..40})'||arch_added: 0.0.74 aarch64
+new_version: 0.1.3||1|new_version: 0.1.3
+new_build: 0.0.74||1|new_build: 0.0.74
+arch_back: 0.0.74 aarch64|arch_out:;  aarch64: '$(printf 'a%.0s' {1..40})'|1|arch_back: 0.0.74 aarch64
+EOF
+}
+
 @test "check-all --publish: keeps a held update and publishes nothing" {
   create_test_package "held" "github-release" "upstream:
   project: owner/repo
