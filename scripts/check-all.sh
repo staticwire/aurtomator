@@ -758,7 +758,7 @@ run_package() {
   # The latest release of a GitHub project can be a maintenance release of an
   # older line, so a lower version needs allow_downgrade
   if [[ "$is_downgrade" == "true" ]] &&
-    [[ "$(pkg_get "$pkg_file" '.allow_downgrade // false')" != "true" ]]; then
+    [[ "$(pkg_bool "$pkg_file" .allow_downgrade)" != true ]]; then
     log_warn "$pkg_name: DOWNGRADE detected $current → $latest, skipped: allow_downgrade is not set"
     echo "downgrade_skipped: ${latest}" >"${STATUS_DIR}/${pkg_name}"
     return
@@ -767,7 +767,7 @@ run_package() {
   # First numbers that grow by two digits or more can be another version scheme,
   # such as build tags beside release tags, so they need allow_version_jump
   if version_jump "$current" "$latest" &&
-    [[ "$(pkg_get "$pkg_file" '.allow_version_jump // false')" != "true" ]]; then
+    [[ "$(pkg_bool "$pkg_file" .allow_version_jump)" != true ]]; then
     log_warn "$pkg_name: version jump $current → $latest, skipped: allow_version_jump is not set"
     echo "jump_skipped: ${latest}" >"${STATUS_DIR}/${pkg_name}"
     return

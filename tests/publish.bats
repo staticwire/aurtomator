@@ -178,6 +178,39 @@ $2"
   grep -qx 'pkgver=1.1.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
 }
 
+@test "update-pkg --prepare: reads hold, allow_downgrade and allow_version_jump in any case" {
+  local value
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools
+  mock_source_tools
+  # Runs update-pkg.sh for version $1 of a YAML without current that ends with $2
+  prepare_without_current() {
+    create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+$2"
+    rm -rf "$TEST_TMPDIR/out"
+    run "$TEST_TMPDIR/scripts/update-pkg.sh" demo "$1" --prepare "$TEST_TMPDIR/out"
+  }
+  for value in True TRUE; do
+    prepare_without_current 2.0.0 $'alerts:\n  - when: major\n    hold: '"$value"$'\n    note: Split package'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"demo has 1.0.0 on the AUR, and an alert holds 1.0.0 to 2.0.0: Split package"* ]]
+    prepare_without_current 0.5.0 "allow_downgrade: $value"
+    [ "$status" -eq 0 ]
+    grep -qx 'pkgver=0.5.0' "$TEST_TMPDIR/out/demo/PKGBUILD"
+    prepare_without_current 2026111600 "allow_version_jump: $value"
+    [ "$status" -eq 0 ]
+    grep -qx 'pkgver=2026111600' "$TEST_TMPDIR/out/demo/PKGBUILD"
+  done
+  for value in False FALSE; do
+    prepare_without_current 0.5.0 "allow_downgrade: $value"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"demo has 1.0.0 on the AUR, and 0.5.0 is below it"* ]]
+  done
+}
+
 @test "update-pkg --prepare: fails the step from the AUR pkgver that a requires rule with hold fires on" {
   create_test_package "demo" "pypi" "upstream:
   registry: zensical

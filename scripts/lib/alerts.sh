@@ -62,7 +62,7 @@ fired_alerts() {
       return 1
     fi
     value=$(pkg_get "$file" ".alerts[$i].$kind")
-    hold=$(pkg_get "$file" ".alerts[$i].hold")
+    hold=$(pkg_bool "$file" ".alerts[$i].hold")
     if [[ "$kind" == when && "$value" != major ]]; then
       log_err "alerts[$i].when must be major, got $value"
       return 1

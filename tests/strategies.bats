@@ -832,18 +832,24 @@ run_pin() {
 }
 
 @test "crates: prerelease reads max_version" {
-  create_test_package "test-crates" "crates" "upstream:
+  local value
+  for value in true True TRUE; do
+    create_test_package "test-crates" "crates" "upstream:
   registry: pre-crate
-  prerelease: true"
+  prerelease: $value"
 
-  run "$TEST_TMPDIR/strategies/crates.sh" "test-crates"
-  [ "$status" -eq 0 ]
-  [ "$output" = "1.0.0-beta.24" ]
+    run "$TEST_TMPDIR/strategies/crates.sh" "test-crates"
+    [ "$status" -eq 0 ]
+    [ "$output" = "1.0.0-beta.24" ] || {
+      echo "prerelease: $value read $output"
+      return 1
+    }
+  done
 }
 
 @test "crates: reads max_stable_version without prerelease" {
   local field
-  for field in '' 'prerelease: false'; do
+  for field in '' 'prerelease: false' 'prerelease: False' 'prerelease: FALSE'; do
     create_test_package "test-crates" "crates" "upstream:
   registry: pre-crate
   $field"
@@ -948,16 +954,18 @@ run_pin() {
   done
 }
 
-@test "archpkg: takes the newer of the testing and the stable build with testing: true" {
-  local entry
-  for entry in arch-split:2.0 arch-stale:3.0 arch-testing-only:5.0 arch-epoch:1.0 ffmpeg:9.0.2; do
-    create_test_package "test-archpkg" "archpkg" "upstream:
+@test "archpkg: takes the newer of the testing and the stable build with testing: true in any case" {
+  local entry value
+  for value in true True TRUE; do
+    for entry in arch-split:2.0 arch-stale:3.0 arch-testing-only:5.0 arch-epoch:1.0 ffmpeg:9.0.2; do
+      create_test_package "test-archpkg" "archpkg" "upstream:
   archpkg: ${entry%%:*}
-  testing: true"
-    run "$TEST_TMPDIR/strategies/archpkg.sh" "test-archpkg"
-    echo "$entry: $output"
-    [ "$status" -eq 0 ]
-    [ "$output" = "${entry#*:}" ]
+  testing: $value"
+      run "$TEST_TMPDIR/strategies/archpkg.sh" "test-archpkg"
+      echo "testing: $value, $entry: $output"
+      [ "$status" -eq 0 ]
+      [ "$output" = "${entry#*:}" ]
+    done
   done
 }
 

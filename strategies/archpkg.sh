@@ -14,7 +14,7 @@ source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 pkg_file=$(pkg_file "$NAME")
 archpkg_name=$(pkg_get "$pkg_file" '.upstream.archpkg // .name')
 repos=(core extra multilib)
-if [[ $(pkg_get "$pkg_file" '.upstream.testing') == true ]]; then
+if [[ $(pkg_bool "$pkg_file" .upstream.testing) == true ]]; then
   repos+=(core-testing extra-testing multilib-testing)
 fi
 

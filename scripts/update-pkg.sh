@@ -116,11 +116,11 @@ if ! validate_pkgver "$aur_pkgver" 2>/dev/null; then
   fi
   log_warn "The AUR .SRCINFO of $PKG_NAME holds no pkgver to compare $NEW_VERSION with, so only current counts"
 elif [[ "$aur_pkgver" != "$NEW_VERSION" ]]; then
-  if [[ "$(vercmp "$aur_pkgver" "$NEW_VERSION")" -gt 0 && "$(pkg_get "$PKG_FILE" '.allow_downgrade // false')" != true ]]; then
+  if [[ "$(vercmp "$aur_pkgver" "$NEW_VERSION")" -gt 0 && "$(pkg_bool "$PKG_FILE" .allow_downgrade)" != true ]]; then
     log_err "$PKG_NAME has $aur_pkgver on the AUR, and $NEW_VERSION is below it"
     exit 1
   fi
-  if version_jump "$aur_pkgver" "$NEW_VERSION" && [[ "$(pkg_get "$PKG_FILE" '.allow_version_jump // false')" != true ]]; then
+  if version_jump "$aur_pkgver" "$NEW_VERSION" && [[ "$(pkg_bool "$PKG_FILE" .allow_version_jump)" != true ]]; then
     log_err "$PKG_NAME has $aur_pkgver on the AUR, and $aur_pkgver to $NEW_VERSION is a version jump"
     exit 1
   fi

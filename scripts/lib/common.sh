@@ -51,6 +51,16 @@ pkg_get() {
   yq -r "$query" "$file"
 }
 
+# Print true or false for a boolean field in any case, and nothing for another value
+# Usage: pkg_bool packages/my-package.yml .allow_downgrade
+pkg_bool() {
+  local value
+  value=$(pkg_get "$1" "$2 | select(tag == \"!!bool\")") || return 1
+  case "${value,,}" in
+    true | false) printf '%s\n' "${value,,}" ;;
+  esac
+}
+
 # Set a field in a YAML file
 # Usage: pkg_set packages/my-package.yml .current '"24.12.3"'
 pkg_set() {
