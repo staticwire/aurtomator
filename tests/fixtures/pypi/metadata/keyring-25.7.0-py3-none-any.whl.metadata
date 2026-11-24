@@ -1,0 +1,50 @@
+Metadata-Version: 2.4
+Name: keyring
+Version: 25.7.0
+Summary: Store and access your passwords safely.
+Author-email: Kang Zhang <jobo.zh@gmail.com>
+Maintainer-email: "Jason R. Coombs" <jaraco@jaraco.com>
+License-Expression: MIT
+Project-URL: Source, https://github.com/jaraco/keyring
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Requires-Python: >=3.9
+Description-Content-Type: text/x-rst
+License-File: LICENSE
+Requires-Dist: pywin32-ctypes>=0.2.0; sys_platform == "win32"
+Requires-Dist: SecretStorage>=3.2; sys_platform == "linux"
+Requires-Dist: jeepney>=0.4.2; sys_platform == "linux"
+Requires-Dist: importlib_metadata>=4.11.4; python_version < "3.12"
+Requires-Dist: jaraco.classes
+Requires-Dist: jaraco.functools
+Requires-Dist: jaraco.context
+Provides-Extra: test
+Requires-Dist: pytest!=8.1.*,>=6; extra == "test"
+Requires-Dist: pyfakefs; extra == "test"
+Provides-Extra: doc
+Requires-Dist: sphinx>=3.5; extra == "doc"
+Requires-Dist: jaraco.packaging>=9.3; extra == "doc"
+Requires-Dist: rst.linker>=1.9; extra == "doc"
+Requires-Dist: furo; extra == "doc"
+Requires-Dist: sphinx-lint; extra == "doc"
+Requires-Dist: jaraco.tidelift>=1.4; extra == "doc"
+Provides-Extra: check
+Requires-Dist: pytest-checkdocs>=2.4; extra == "check"
+Requires-Dist: pytest-ruff>=0.2.1; sys_platform != "cygwin" and extra == "check"
+Provides-Extra: cover
+Requires-Dist: pytest-cov; extra == "cover"
+Provides-Extra: enabler
+Requires-Dist: pytest-enabler>=3.4; extra == "enabler"
+Provides-Extra: type
+Requires-Dist: pytest-mypy>=1.0.1; extra == "type"
+Requires-Dist: pygobject-stubs; extra == "type"
+Requires-Dist: shtab; extra == "type"
+Requires-Dist: types-pywin32; extra == "type"
+Provides-Extra: completion
+Requires-Dist: shtab>=1.1.0; extra == "completion"
+Dynamic: license-file
+
+.. image:: https://img.shields.io/pypi/v/keyring.svg
+   :target: https://pypi.org/project/keyring

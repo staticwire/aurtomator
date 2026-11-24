@@ -4,6 +4,8 @@
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$(cd "$TESTS_DIR/.." && pwd)"
+# Answers of real services that the mocks serve, see tests/fixtures/pypi/README.md
+export FIXTURES_DIR="$TESTS_DIR/fixtures"
 
 # CI sets it for the repository of aurtomator, and update-readme.sh reads it
 unset GITHUB_REPOSITORY
@@ -54,6 +56,11 @@ setup_test_env() {
 
   # git of the tests reaches no host, except where a script sets GIT_ALLOW_PROTOCOL itself
   export GIT_ALLOW_PROTOCOL=file
+
+  # Files a test writes for mock curl: simple/<project>.json, files.pythonhosted.org files by
+  # their name, and aur-rpc.json, a list of the packages AUR RPC knows
+  export MOCK_FILES_DIR="$TEST_TMPDIR/mock-files"
+  mkdir -p "$MOCK_FILES_DIR"
 }
 
 # bashcov-bats.sh sets AURTOMATOR_KEEP_TEST_DIRS: bashcov reads the trace
@@ -109,6 +116,20 @@ add_canary() {
 # Succeeds when no code of a PKGBUILD of add_canary ran
 canary_untouched() {
   [ -d "$TEST_TMPDIR/canary" ] && [ -z "$(ls -A "$TEST_TMPDIR/canary")" ]
+}
+
+# Usage: aur_srcinfo_remote <pkgbase> <.SRCINFO>. The mock git of AUR clones then serves a repo
+# with that .SRCINFO and a stub PKGBUILD for <pkgbase>; MOCK_DIR keeps its git.
+aur_srcinfo_remote() {
+  local work="$TEST_TMPDIR/aur-work-$1" remote="$TEST_TMPDIR/aur-remote/$1.git"
+  git init -q --bare -b master "$remote"
+  git init -q -b master "$work"
+  cp "$2" "$work/.SRCINFO"
+  printf 'pkgname=%s\n' "$1" >"$work/PKGBUILD"
+  git -C "$work" add .
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid \
+    -c commit.gpgsign=false commit -qm "aur state"
+  git -C "$work" push -q "$remote" master
 }
 
 make_aur_remote() {

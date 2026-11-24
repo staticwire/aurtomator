@@ -10,6 +10,8 @@ readonly SCRIPT_DIR
 
 # shellcheck source=../scripts/lib/common.sh
 source "${SCRIPT_DIR}/../scripts/lib/common.sh"
+# shellcheck source=../scripts/lib/pep440.sh
+source "${SCRIPT_DIR}/../scripts/lib/pep440.sh"
 # shellcheck source=../scripts/lib/requires.sh
 source "${SCRIPT_DIR}/../scripts/lib/requires.sh"
 

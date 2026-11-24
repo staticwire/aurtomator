@@ -5,8 +5,8 @@ bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test_env
-  # Strategies need scripts/lib/common.sh, pypi.sh lib/requires.sh too, and nothing else of scripts/
-  find "$TEST_TMPDIR/scripts" -type l ! -name common.sh ! -name requires.sh -delete
+  # Strategies need scripts/lib/common.sh, pypi.sh lib/pep440.sh and lib/requires.sh too, and nothing else of scripts/
+  find "$TEST_TMPDIR/scripts" -type l ! -name common.sh ! -name pep440.sh ! -name requires.sh -delete
   cp "$TESTS_DIR/helpers/mock-git.sh" "$MOCK_DIR/git"
   chmod +x "$MOCK_DIR/git"
 }

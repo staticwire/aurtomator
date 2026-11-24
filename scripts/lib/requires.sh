@@ -235,122 +235,30 @@ _marker_string() {
   _MK_VAL=$hit
 }
 
-# Set _MK_VAL for operator $1 between a version field of value $4 and constant $2, where $3 is
-# set for a field right of the operator; in and not in are false, forms beyond the subset unknown
+# Set _MK_VAL for operator $1 between a version field of value $4 and constant $2, $3 set for a field
+# right of it: the left side meets the right as packaging tests markers, text outside PEP 440 is unknown
 _marker_version() {
-  local op=$1 const=$2 release
-  local re_version='^[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?$' re_release='^[0-9]+(\.[0-9]+)*$'
+  local rc=0
   _MK_VAL='?'
-  if [[ "$op" == in || "$op" == "not in" ]]; then
+  if [[ "$1" == in || "$1" == "not in" ]]; then
     _MK_VAL=0
     return 0
   fi
   [[ -n "$4" ]] || return 0
-  if [[ "$op" == "===" ]]; then
-    if [[ "${4,,}" == "${const,,}" ]]; then _MK_VAL=1; else _MK_VAL=0; fi
+  if [[ "$1" == "===" ]]; then
+    if [[ "${4,,}" == "${2,,}" ]]; then _MK_VAL=1; else _MK_VAL=0; fi
     return 0
   fi
+  [[ "$2" != *,* ]] || return 0
   if [[ -n "$3" ]]; then
-    case $op in
-      "<") op=">" ;;
-      ">") op="<" ;;
-      "<=") op=">=" ;;
-      ">=") op="<=" ;;
-      "~=") return 0 ;;
-    esac
-    [[ "$const" != *".*" ]] || return 0
+    pep440_holds "$2" "$1$4" || rc=$?
+  else
+    pep440_holds "$4" "$1$2" || rc=$?
   fi
-  [[ "$4" =~ $re_version ]] || return 0
-  if [[ "$const" == *".*" ]]; then
-    release=${const%".*"}
-    if [[ "$op" != "==" && "$op" != "!=" ]] || [[ ! "$release" =~ $re_release ]]; then
-      return 0
-    fi
-    if _pep440_prefix "$4" "$release"; then _MK_VAL=1; else _MK_VAL=0; fi
-    [[ "$op" == "==" ]] || _MK_VAL=$((1 - _MK_VAL))
-    return 0
-  fi
-  [[ "$const" =~ $re_version ]] || return 0
-  release=${const%%[abr]*}
-  [[ "$op" != "~=" || "$release" == *.* ]] || return 0
-  if _version_holds "$op" "$4" "$const"; then _MK_VAL=1; else _MK_VAL=0; fi
-}
-
-# Succeed when version $2 stands in relation $1 to version $3, both of the subset of _pep440_cmp
-_version_holds() {
-  local release=${3%%[abr]*}
-  _pep440_cmp "$2" "$3"
-  case $1 in
-    "==") ((PEP440_ORDER == 0)) ;;
-    "!=") ((PEP440_ORDER != 0)) ;;
-    "<") ((PEP440_ORDER < 0)) ;;
-    "<=") ((PEP440_ORDER <= 0)) ;;
-    ">") ((PEP440_ORDER > 0)) ;;
-    ">=") ((PEP440_ORDER >= 0)) ;;
-    *) ((PEP440_ORDER >= 0)) && _pep440_prefix "$2" "${release%.*}" ;;
+  case $rc in
+    0) _MK_VAL=1 ;;
+    1) _MK_VAL=0 ;;
   esac
-}
-
-# Set PEP440_ORDER to -1, 0 or 1 as version $1 sorts before, with or after version $2, both
-# N(.N)* with an optional a, b or rc and a number. vercmp puts 3.14.0 after 3.14.
-_pep440_cmp() {
-  local LC_ALL=C left=${1%%[abr]*} right=${2%%[abr]*} i n
-  local -a lparts rparts
-  IFS=. read -ra lparts <<<"$left"
-  IFS=. read -ra rparts <<<"$right"
-  n=$((${#lparts[@]} > ${#rparts[@]} ? ${#lparts[@]} : ${#rparts[@]}))
-  for ((i = 0; i < n; i++)); do
-    _number_order "${lparts[i]:-0}" "${rparts[i]:-0}"
-    ((PEP440_ORDER == 0)) || return 0
-  done
-  _pre_order "${1#"$left"}" "${2#"$right"}"
-}
-
-# Set PEP440_ORDER for the numbers of digit strings $1 and $2, which can exceed bash integers
-_number_order() {
-  local a=${1#"${1%%[!0]*}"} b=${2#"${2%%[!0]*}"}
-  if ((${#a} != ${#b})); then
-    PEP440_ORDER=$((${#a} < ${#b} ? -1 : 1))
-  elif [[ "$a" < "$b" ]]; then
-    PEP440_ORDER=-1
-  elif [[ "$a" > "$b" ]]; then
-    PEP440_ORDER=1
-  else
-    PEP440_ORDER=0
-  fi
-}
-
-# Set PEP440_ORDER for pre-release parts $1 and $2: none sorts after rc, rc after b, b after a
-_pre_order() {
-  local part
-  local -a rank=()
-  for part in "$1" "$2"; do
-    case $part in
-      "") rank+=(4) ;;
-      rc*) rank+=(3) ;;
-      b*) rank+=(2) ;;
-      *) rank+=(1) ;;
-    esac
-  done
-  if ((rank[0] != rank[1])); then
-    PEP440_ORDER=$((rank[0] < rank[1] ? -1 : 1))
-  elif ((rank[0] == 4)); then
-    PEP440_ORDER=0
-  else
-    _number_order "${1##*[a-z]}" "${2##*[a-z]}"
-  fi
-}
-
-# Succeed when the release parts of version $1, padded with zeros, start with release $2
-_pep440_prefix() {
-  local LC_ALL=C i
-  local -a vparts pparts
-  IFS=. read -ra vparts <<<"${1%%[abr]*}"
-  IFS=. read -ra pparts <<<"$2"
-  for i in "${!pparts[@]}"; do
-    _number_order "${vparts[i]:-0}" "${pparts[i]}"
-    ((PEP440_ORDER == 0)) || return 1
-  done
 }
 
 # Print the PEP 503 names of the requirements in PyPI answer $1 whose markers are not false on

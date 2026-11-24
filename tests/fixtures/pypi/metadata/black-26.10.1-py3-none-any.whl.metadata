@@ -1,0 +1,49 @@
+Metadata-Version: 2.5
+Name: black
+Version: 26.10.1
+Summary: The uncompromising code formatter.
+Project-URL: Documentation, https://black.readthedocs.io/
+Project-URL: Changelog, https://github.com/psf/black/blob/main/CHANGES.md
+Project-URL: Repository, https://github.com/psf/black
+Project-URL: Issues, https://github.com/psf/black/issues
+Author-email: Łukasz Langa <lukasz@langa.pl>
+License-Expression: MIT
+License-File: LICENSE
+Keywords: automation,autopep8,formatter,gofmt,pyfmt,rustfmt,yapf
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Programming Language :: Python :: 3.15
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Topic :: Software Development :: Quality Assurance
+Requires-Python: >=3.10
+Requires-Dist: click>=8.0.0
+Requires-Dist: mypy-extensions>=0.4.3
+Requires-Dist: packaging>=22.0
+Requires-Dist: pathspec>=1.0.0
+Requires-Dist: platformdirs>=2
+Requires-Dist: pytokens~=0.4.0
+Requires-Dist: tomli>=1.1.0; python_version < '3.11'
+Requires-Dist: typing-extensions>=4.0.1; python_version < '3.11'
+Provides-Extra: colorama
+Requires-Dist: colorama>=0.4.3; extra == 'colorama'
+Provides-Extra: d
+Requires-Dist: aiohttp>=3.10; extra == 'd'
+Provides-Extra: jupyter
+Requires-Dist: ipython>=7.8.0; extra == 'jupyter'
+Requires-Dist: tokenize-rt>=3.2.0; extra == 'jupyter'
+Provides-Extra: uvloop
+Requires-Dist: uvloop>=0.15.2; (sys_platform != 'win32') and extra == 'uvloop'
+Requires-Dist: winloop>=0.5.0; (sys_platform == 'win32') and extra == 'uvloop'
+Description-Content-Type: text/markdown
+
+[![Black Logo](https://raw.githubusercontent.com/psf/black/main/docs/_static/logo2-readme.png)](https://black.readthedocs.io/en/stable/)
+

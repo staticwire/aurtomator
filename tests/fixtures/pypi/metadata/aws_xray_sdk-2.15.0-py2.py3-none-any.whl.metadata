@@ -1,0 +1,27 @@
+Metadata-Version: 2.1
+Name: aws-xray-sdk
+Version: 2.15.0
+Summary: The AWS X-Ray SDK for Python (the SDK) enables Python developers to record and emit information from within their applications to the AWS X-Ray service.
+Home-page: https://github.com/aws/aws-xray-sdk-python
+Author: Amazon Web Services
+License: Apache License 2.0
+Keywords: aws xray sdk
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: Natural Language :: English
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+Requires-Dist: wrapt
+Requires-Dist: botocore >=1.11.3
+
+![Build Status](https://github.com/aws/aws-xray-sdk-python/actions/workflows/IntegrationTesting.yaml/badge.svg)
+[![codecov](https://codecov.io/gh/aws/aws-xray-sdk-python/branch/master/graph/badge.svg)](https://codecov.io/gh/aws/aws-xray-sdk-python)

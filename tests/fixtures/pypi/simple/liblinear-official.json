@@ -1,0 +1,53 @@
+{
+  "meta": {
+    "_last-serial": 33245158,
+    "api-version": "1.4"
+  },
+  "name": "liblinear-official",
+  "versions": [
+    "2.43.0",
+    "2.44.0",
+    "2.45.0",
+    "2.46.1",
+    "2.47.0",
+    "2.48.0",
+    "2.49.0",
+    "2.50.0"
+  ],
+  "files": [
+    {
+      "filename": "liblinear_official-2.50.0-cp310-cp310-macosx_15_0_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/c9/df/81aa397bba12057a1a19e9c81bbbd7f5cf976af07b73bbb60091cc9b55d1/liblinear_official-2.50.0-cp310-cp310-macosx_15_0_x86_64.whl",
+      "hashes": {
+        "sha256": "657e758af446688ee82f4a98c0e6cbaf951f5e32fcb2618734628885f09b7eb0"
+      },
+      "core-metadata": {
+        "sha256": "9cc381f645a7cf1c12ab9423e98eef38801b75480d1e6454cd1c67662d0eea1a"
+      },
+      "size": 64607,
+      "yanked": false
+    },
+    {
+      "filename": "liblinear_official-2.50.0-cp310-cp310-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/b6/89/e1b66cbfff0b191f2edc801408f5d2c703bc070bb857bb8c846e048e0af5/liblinear_official-2.50.0-cp310-cp310-win_amd64.whl",
+      "hashes": {
+        "sha256": "68d33ae5f1b96a8c15c0596f978b3f4d88b9411b098051a9c841228137210f9d"
+      },
+      "core-metadata": {
+        "sha256": "eb7eefed41ff571a6d2aeb388b1bde33f5bff2d5b5de5f12db3e31b35ed672c1"
+      },
+      "size": 60279,
+      "yanked": false
+    },
+    {
+      "filename": "liblinear_official-2.50.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/a6/02/9e98604263aa0983ab60e056ebfe54d7e75b39c91191514f93b68431f502/liblinear_official-2.50.0.tar.gz",
+      "hashes": {
+        "sha256": "1a1b37eb61ca500205aecccde4913559487be567c61bd24eb876beee4728b2c1"
+      },
+      "core-metadata": false,
+      "size": 48946,
+      "yanked": false
+    }
+  ]
+}

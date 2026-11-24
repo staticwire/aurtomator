@@ -1,0 +1,154 @@
+{
+  "meta": {
+    "_last-serial": 42047284,
+    "api-version": "1.4"
+  },
+  "name": "black",
+  "versions": [
+    "18.3a0",
+    "18.3a1",
+    "18.3a2",
+    "18.3a3",
+    "18.3a4",
+    "18.4a0",
+    "18.4a1",
+    "18.4a2",
+    "18.4a3",
+    "18.4a4",
+    "18.5b0",
+    "18.5b1",
+    "18.6b0",
+    "18.6b1",
+    "18.6b2",
+    "18.6b3",
+    "18.6b4",
+    "18.9b0",
+    "19.3b0",
+    "19.10b0",
+    "20.8b0",
+    "20.8b1",
+    "21.4b0",
+    "21.4b1",
+    "21.4b2",
+    "21.5b0",
+    "21.5b1",
+    "21.5b2",
+    "21.6b0",
+    "21.7b0",
+    "21.8b0",
+    "21.9b0",
+    "21.10b0",
+    "21.11b0",
+    "21.11b1",
+    "21.12b0",
+    "22.1.0",
+    "22.3.0",
+    "22.6.0",
+    "22.8.0",
+    "22.10.0",
+    "22.12.0",
+    "23.1a1",
+    "23.1.0",
+    "23.3.0",
+    "23.7.0",
+    "23.9.0",
+    "23.9.1",
+    "23.10.0",
+    "23.10.1",
+    "23.11.0",
+    "23.12.0",
+    "23.12.1",
+    "24.1a1",
+    "24.1.0",
+    "24.1.1",
+    "24.2.0",
+    "24.3.0",
+    "24.4.0",
+    "24.4.1",
+    "24.4.2",
+    "24.8.0",
+    "24.10.0",
+    "25.1.0",
+    "25.9.0",
+    "25.11.0",
+    "25.12.0",
+    "26.1a1",
+    "26.1.0",
+    "26.3.0",
+    "26.3.1",
+    "26.5.0",
+    "26.5.1",
+    "26.10.0",
+    "26.10.1"
+  ],
+  "files": [
+    {
+      "filename": "black-26.1.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/da/7c/b05f22964316a52ab6b4265bcd52c0ad2c30d7ca6bd3d0637e438fc32d6e/black-26.1.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "hashes": {
+        "sha256": "1de0f7d01cc894066a1153b738145b194414cc6eeaad8ef4397ac9abacf40f6b"
+      },
+      "core-metadata": {
+        "sha256": "d980dd434d36191397c663282cb40d3c644830b18dcfcb1644934e30af4d44a6"
+      },
+      "size": 1775212,
+      "yanked": false
+    },
+    {
+      "filename": "black-26.1.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/e4/3d/51bdb3ecbfadfaf825ec0c75e1de6077422b4afa2091c6c9ba34fbfc0c2d/black-26.1.0-py3-none-any.whl",
+      "hashes": {
+        "sha256": "1054e8e47ebd686e078c0bb0eaf31e6ce69c966058d122f2c0c950311f9f3ede"
+      },
+      "core-metadata": {
+        "sha256": "d2c410c4fde9c2e197e892b7fb61b6160ab3f6450c1bafbf9a3d6a19ac7400ff"
+      },
+      "size": 204010,
+      "yanked": false
+    },
+    {
+      "filename": "black-26.1.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/13/88/560b11e521c522440af991d46848a2bde64b5f7202ec14e1f46f9509d328/black-26.1.0.tar.gz",
+      "hashes": {
+        "sha256": "d294ac3340eef9c9eb5d29288e96dc719ff269a88e27b396340459dd85da4c58"
+      },
+      "core-metadata": false,
+      "size": 658785,
+      "yanked": false
+    },
+    {
+      "filename": "black-26.10.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/7b/0f/4dd24ea0ebadbe05e293c3ea7fbebd4389f50508f714640c9b309a0849d2/black-26.10.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "hashes": {
+        "sha256": "03c0ddd93bb392e71209903a691767eb366fe1a76deb9509ccbaae9e1f14bb52"
+      },
+      "core-metadata": {
+        "sha256": "089d3059ed0304369f3460397d2aa2e62f7caf8ab4845ce91f89188985b1b587"
+      },
+      "size": 2055268,
+      "yanked": false
+    },
+    {
+      "filename": "black-26.10.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/b1/28/9dd29175c1db777e6189e2a0bb5f37101adf19c3e509b236c8920f778d0b/black-26.10.1-py3-none-any.whl",
+      "hashes": {
+        "sha256": "28842f9a8207cc1df6eb983a35a14c5a0dfcd603d214fe82d84bef552afd2e3a"
+      },
+      "core-metadata": {
+        "sha256": "412150cb16c1114d7c7e5395b0496be788a0cbaf6eaaa18498621c0586a459da"
+      },
+      "size": 239267,
+      "yanked": false
+    },
+    {
+      "filename": "black-26.10.1.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/f8/65/a9611a6ec0a8c88d86e59385da02d68d9533f7e86a05913d20c67be54029/black-26.10.1.tar.gz",
+      "hashes": {
+        "sha256": "5f9f83beae62437e060dafd53d7f1fc327e3d3494f74d72ee5c2b73eb90fc4e7"
+      },
+      "core-metadata": false,
+      "size": 741979,
+      "yanked": false
+    }
+  ]
+}

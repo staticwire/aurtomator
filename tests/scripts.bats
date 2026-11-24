@@ -40,6 +40,111 @@ teardown() {
   [ "$output" = unset ]
 }
 
+# === test helpers ===
+
+@test "test helpers: FIXTURES_DIR names the fixtures, MOCK_FILES_DIR starts empty" {
+  [ "$FIXTURES_DIR" = "$TESTS_DIR/fixtures" ]
+  [ -f "$FIXTURES_DIR/pypi/simple/httpx.json" ]
+  [ -d "$MOCK_FILES_DIR" ]
+  [ -z "$(ls -A "$MOCK_FILES_DIR")" ]
+}
+
+@test "test helpers: mock curl writes the answer into the file of -o and -w text to stdout" {
+  local url=https://files.pythonhosted.org/packages/x/httpx-0.28.1-py3-none-any.whl.metadata
+  run curl -sf -o "$TEST_TMPDIR/out" -w '\n%{url_effective}' "$url"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'\n'"$url" ]
+  cmp "$TEST_TMPDIR/out" "$FIXTURES_DIR/pypi/metadata/httpx-0.28.1-py3-none-any.whl.metadata"
+}
+
+@test "test helpers: mock curl answers the simple API of PyPI from the fixtures, 404 for other projects" {
+  source "$PROJECT_DIR/scripts/lib/common.sh"
+  run http_get_json https://pypi.org/simple/httpx/ -H 'Accept: application/vnd.pypi.simple.v1+json'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(<"$FIXTURES_DIR/pypi/simple/httpx.json")" ]
+  run http_get_json https://pypi.org/simple/none-such/
+  [ "$status" -eq 22 ]
+  [[ "$output" == *"https://pypi.org/simple/none-such/: The requested URL returned error: 404"* ]]
+}
+
+@test "test helpers: mock curl takes simple pages and files of MOCK_FILES_DIR first" {
+  source "$PROJECT_DIR/scripts/lib/common.sh"
+  mkdir "$MOCK_FILES_DIR/simple"
+  echo '{"name": "httpx", "files": []}' >"$MOCK_FILES_DIR/simple/httpx.json"
+  echo demo >"$MOCK_FILES_DIR/demo-1.0-py3-none-any.whl"
+  run http_get_json https://pypi.org/simple/httpx/
+  [ "$output" = '{"name": "httpx", "files": []}' ]
+  run http_get https://files.pythonhosted.org/packages/a/b/demo-1.0-py3-none-any.whl -o "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(<"$TEST_TMPDIR/out")" = demo ]
+  run http_get https://files.pythonhosted.org/packages/a/b/none-1.0.tar.gz -o "$TEST_TMPDIR/out"
+  [ "$status" -eq 22 ]
+  [[ "$output" == *"none-1.0.tar.gz: The requested URL returned error: 404"* ]]
+}
+
+@test "test helpers: mock curl answers AUR RPC info with the packages of MOCK_FILES_DIR that the args name" {
+  source "$PROJECT_DIR/scripts/lib/common.sh"
+  echo '[{"Name": "a", "Version": "1-1"}, {"Name": "b", "Version": "2-1"}, {"Name": "c++", "Version": "3-1"}]' \
+    >"$MOCK_FILES_DIR/aur-rpc.json"
+  run http_get_json 'https://aur.archlinux.org/rpc/v5/info?arg[]=a&arg%5B%5D=c%2B%2B&arg[]=missing'
+  [ "$status" -eq 0 ]
+  [ "$(yq -o json -I0 '[.version, .type, .resultcount, [.results[].Name]]' <<<"$output")" = '[5,"multiinfo",2,["a","c++"]]' ]
+  rm "$MOCK_FILES_DIR/aur-rpc.json"
+  run http_get_json 'https://aur.archlinux.org/rpc/v5/info?arg[]=a'
+  [ "$(yq -o json -I0 '[.resultcount, .results]' <<<"$output")" = '[0,[]]' ]
+}
+
+@test "test helpers: aur_srcinfo_remote serves a .SRCINFO to AUR clones of its name alone" {
+  printf 'pkgbase = demo\n\tpkgver = 1.0\n\npkgname = demo\n' >"$TEST_TMPDIR/srcinfo"
+  aur_srcinfo_remote demo "$TEST_TMPDIR/srcinfo"
+  [ ! -e "$MOCK_DIR/git" ]
+  git clone -q --depth 1 --no-checkout https://aur.archlinux.org/demo.git "$TEST_TMPDIR/demo"
+  [ "$(git -C "$TEST_TMPDIR/demo" show HEAD:.SRCINFO)" = "$(<"$TEST_TMPDIR/srcinfo")" ]
+  git -C "$TEST_TMPDIR/demo" cat-file -e HEAD:PKGBUILD
+  git clone -q --no-checkout https://aur.archlinux.org/other.git "$TEST_TMPDIR/other"
+  run ! git -C "$TEST_TMPDIR/other" rev-parse -q --verify HEAD
+}
+
+@test "test helpers: mock pacman answers -Fx --machinereadable from MOCK_PACMAN_FILES" {
+  use_mock_pacman
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args" MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
+  printf 'extra\tpython-yaml\t6.0.2-2\tusr/lib/python3.13/site-packages/PyYAML-6.0.2.dist-info/METADATA\n' >"$MOCK_PACMAN_FILES"
+  printf 'extra\tazure-cli\t2.71.0-1\topt/azure-cli/lib/python3.13/site-packages/PyYAML-6.0.2.dist-info/METADATA\n' >>"$MOCK_PACMAN_FILES"
+  run bash -c 'set -o pipefail; pacman -Fx --machinereadable "$1" | tr "\0" "|"' _ '^usr/lib/.*METADATA$'
+  [ "$status" -eq 0 ]
+  [ "$output" = 'extra|python-yaml|6.0.2-2|usr/lib/python3.13/site-packages/PyYAML-6.0.2.dist-info/METADATA' ]
+  [ "$(pacman -Fx --machinereadable 'METADATA$' | tr '\0' '|' | wc -l)" -eq 2 ]
+  run pacman -Fx --machinereadable '^usr/bin/none$'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  MOCK_PACMAN_NO_FILES=1 run --separate-stderr pacman -Fx --machinereadable 'METADATA$'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"database file for 'core' does not exist"* ]]
+  [ "$(head -1 "$PACMAN_ARGS_LOG")" = "-Fx --machinereadable ^usr/lib/.*METADATA\$" ]
+}
+
+@test "test helpers: mock pacman answers -Sddp and -Si from MOCK_PACMAN_SYNC, by name or provides" {
+  use_mock_pacman
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args" MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync"
+  printf '%s\n' 'python-yaml 6.0.4-1 extra python-pyyaml' 'python-h2 4.3.0-2 extra' >"$MOCK_PACMAN_SYNC"
+  run pacman -Sddp --print-format '%n %v %r' python-pyyaml
+  [ "$status" -eq 0 ]
+  [ "$output" = 'python-yaml 6.0.4-1 extra' ]
+  run pacman -Sddp --print-format '%n %v %r' python-h2
+  [ "$output" = 'python-h2 4.3.0-2 extra' ]
+  run pacman -Sddp --print-format '%n %v %r' python-none
+  [ "$status" -eq 1 ]
+  [ "$output" = 'error: target not found: python-none' ]
+  run pacman -Si python-yaml
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\nVersion         : 6.0.4-1\n'* ]]
+  [[ "$output" == *$'\nProvides        : python-pyyaml'* ]]
+  run pacman -Si python
+  [[ "$output" == *"Version         : 3.14.10-1"* ]]
+  [ "$(wc -l <"$PACMAN_ARGS_LOG")" -eq 5 ]
+}
+
 # === lib.sh ===
 
 @test "lib.sh: pkg_file resolves existing package" {
@@ -2056,6 +2161,102 @@ alerts:
   [[ "$output" == *"alerts[0].note must be one line of text: put 2024 in quotes"* ]]
 }
 
+# === pep440.sh ===
+
+# Helper: checks pep440_cmp on lines of "a b order" in one shell, and prints the lines that fail
+check_order() {
+  run bash -c 'source "$0/scripts/lib.sh"
+    for line in "$@"; do
+      read -r a b want <<<"$line"
+      if ! pep440_cmp "$a" "$b"; then echo "$line: fails"; elif [[ "$PEP440_ORDER" != "$want" ]]; then echo "$line: $PEP440_ORDER"; fi
+    done' "$TEST_TMPDIR" "$@"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Helper: checks pep440_holds on lines of "version spec status" in one shell
+check_holds() {
+  run bash -c 'source "$0/scripts/lib.sh"
+    for line in "$@"; do
+      read -r v spec want <<<"$line"
+      rc=0
+      pep440_holds "$v" "$spec" || rc=$?
+      [[ "$rc" == "$want" ]] || echo "$line: $rc"
+    done' "$TEST_TMPDIR" "$@"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "pep440.sh: pep440_parse sets the parts of a version" {
+  run bash -c 'source "$0/scripts/lib.sh"
+    for v in "$@"; do
+      pep440_parse "$v" || { echo "$v: fails"; continue; }
+      echo "$PV_EPOCH|$PV_RELEASE|$PV_PRE_L|$PV_PRE_N|$PV_POST|$PV_DEV|$PV_LOCAL"
+    done' "$TEST_TMPDIR" '1!2.0rc3.post4.dev5+Local-7_x' '01.002' 'v1.0-1' '1.0.dev' '1.0a' '1.0c1' 'V1.0.PRE1' \
+    '1.0post' '1.0r' '1.0.post-1' ' 2.0 ' '1.0_alpha_1' '1.0-preview-2' '1.0.beta.2'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' '1|2.0|rc|3|4|5|local.7.x' '0|1.2|||||' '0|1.0|||1||' '0|1.0||||0|' \
+    '0|1.0|a|0|||' '0|1.0|rc|1|||' '0|1.0|rc|1|||' '0|1.0|||0||' '0|1.0|||0||' '0|1.0|||1||' \
+    '0|2.0|||||' '0|1.0|a|1|||' '0|1.0|rc|2|||' '0|1.0|b|2|||')" ]
+}
+
+@test "pep440.sh: pep440_parse refuses versions outside PEP 440" {
+  local v
+  for v in 1.0- a1 1..0 1.0+ r675.70e1dda 1.0+_a '1!' '' '1.0 1' $'1.0\n'; do
+    run bash -c 'source "$0/scripts/lib.sh"; pep440_parse "$1"' "$TEST_TMPDIR" "$v"
+    [ "$status" -eq 1 ] || {
+      echo "${v@Q}: $status"
+      return 1
+    }
+  done
+  run bash -c 'source "$0/scripts/lib.sh"; pep440_cmp 1.0 r675.70e1dda' "$TEST_TMPDIR"
+  [ "$status" -eq 1 ]
+}
+
+@test "pep440.sh: pep440_cmp orders the examples of PEP 440" {
+  local -a chain=(1.0.dev456 1.0a1 1.0a2.dev456 1.0a12.dev456 1.0a12 1.0b1.dev456 1.0b2 1.0b2.post345.dev456
+    1.0b2.post345 1.0rc1.dev456 1.0rc1 1.0 1.0+abc.5 1.0+abc.7 1.0+5 1.0.post456.dev34 1.0.post456 1.0.15 1.1.dev1)
+  local -a lines=()
+  local i j
+  for ((i = 0; i < ${#chain[@]}; i++)); do
+    lines+=("${chain[i]} ${chain[i]} 0")
+    for ((j = i + 1; j < ${#chain[@]}; j++)); do
+      lines+=("${chain[i]} ${chain[j]} -1" "${chain[j]} ${chain[i]} 1")
+    done
+  done
+  check_order "${lines[@]}"
+}
+
+@test "pep440.sh: pep440_cmp reads every spelling and number size" {
+  check_order "3.14 3.14.0 0" "1.0a 1.0a0 0" "1.0-1 1.0.post1 0" "1.0.REV2 1.0.post2 0" "v1.0 1.0 0" \
+    "1!1.0 2.0 1" "0.66b2 0.66 -1" "2.9.0 2.9.0.post0 -1" "18446744073709551617 18446744073709551616 1" \
+    "1.0+abc 1.0+ABC 0" "1.0+1.a 1.0+1.b -1" "1.0+a.1 1.0+1 -1" "1.0+1.0 1.0+1 1" "1.0c1 1.0rc1 0" \
+    "1.0.pre1 1.0rc1 0" "1.0-preview-1 1.0rc1 0" "1.0_alpha_1 1.0a1 0" "1.0.dev 1.0.dev0 0" \
+    "3.14.10 3.14.9 1" "3.14.0rc2 3.14.0rc10 -1" "03.014 3.14 0" "1.0a1 1.0.0a01 0" "1 1.0.0.0 0" "2 10 -1" \
+    "1.0+01 1.0+1 0" "1.0+1.post 1.0+1.post 0"
+}
+
+@test "pep440.sh: pep440_holds evaluates every operator as packaging does" {
+  check_holds "1.0 ==1.0 0" "1.0.0 ==1.0 0" "1.1 ==1.0 1" "1.0+local.1 ==1.0 0" "1.0+local.1 ==1.0+local.2 1" \
+    "1.0+local.1 ==1.0+local.1 0" "1.0 ==1.0+local.1 1" "0.66b2 ==0.66b2 0" "1.0 !=1.0 1" "1.1 !=1.0 0" \
+    "1.0+local.1 !=1.0 1" "1.4.5 ==1.4.* 0" "1.4 ==1.4.* 0" "1.4rc1 ==1.4.* 0" "1.4.post1 ==1.4.* 0" \
+    "1.5 ==1.4.* 1" "1.40 ==1.4.* 1" "1!1.4 ==1.4.* 1" "1!1.4.2 ==1!1.4.* 0" "1.4 ==1.4.0.* 0" \
+    "1.4.5 !=1.4.* 1" "1.5 !=1.4.* 0" "1.0 <1.1 0" "1.1 <1.1 1" "1.1a1 <1.1 1" "1.1.dev1 <1.1 1" \
+    "1.0a1 <1.1 0" "1.1a1 <1.1rc1 0" "1.1 <=1.1 0" "1.1+local <=1.1 0" "1.2 <=1.1 1" "1.2 >1.1 0" \
+    "1.1 >1.1 1" "1.1.post1 >1.1 1" "1.1+local >1.1 1" "1.1.post2 >1.1.post1 0" "1.2+local >1.1 0" \
+    "1.1 >=1.1 0" "1.0 >=1.1 1" "1.1+local >=1.1 0" "1.4.5 ~=1.4 0" "2.0 ~=1.4 1" "1.3 ~=1.4 1" \
+    "1.4.5 ~=1.4.2 0" "1.5 ~=1.4.2 1" "1.4.2rc1 ~=1.4.2 1" "1.4.2rc2 ~=1.4.2rc1 0" \
+    "1.44.9 <1.45.0,>=1.44.10 1" "1.44.10 <1.45.0,>=1.44.10 0" "1.4.1 <1.4,>=1.1.0 1" "1.0 ===1.0 0" \
+    "1.0.0 ===1.0 1" "1.0a1 ===1.0A1 0"
+}
+
+@test "pep440.sh: pep440_holds returns 2 for a clause it cannot read, 0 for no clause" {
+  check_holds "2.0 =<1 2" "2.0 ~=1 2" "2.0 <1.0.* 2" "2.0 <1.0+local 2" "2.0 ==1.0a1.* 2" "2.0 ~=1.0+local 2" \
+    "2.0 ==1.0.*.* 2" "2.0 >=1.0,, 2" "2.0 >=x 2" "r675.70e1dda >=1.0 2" "2.0 >=1.0,<x 2"
+  run bash -c 'source "$0/scripts/lib.sh"; pep440_holds 2.0 ""' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+}
+
 # === requires.sh ===
 
 # Helper: runs bash code $1 with lib.sh sourced and the mock pacman first in PATH; the other
@@ -2207,18 +2408,19 @@ run_split() {
     '?' 'python_version ~= "3"' '?' 'python_version >= "3.*"' '?' 'python_version == "3.14rc1.*"'
 }
 
-@test "requires.sh: marker_value gives unknown for version forms beyond its subset of PEP 440" {
+@test "requires.sh: marker_value compares every form of PEP 440, and text outside it gives unknown" {
   check_markers \
-    '?' 'python_version >= "3.14.post1"' '?' 'python_version < "3.15.dev0"' \
-    '?' 'python_version >= "1!3.0"' '?' 'python_version == "3.14+local"' \
-    '?' 'python_version >= "foo"' '?' 'python_version >= ""' '?' 'python_version >= "v3.14"'
+    0 'python_version >= "3.14.post1"' 1 'python_version < "3.15.dev0"' \
+    0 'python_version >= "1!3.0"' 0 'python_version == "3.14+local"' \
+    '?' 'python_version >= "foo"' '?' 'python_version >= ""' 1 'python_version >= "v3.14"'
 }
 
-@test "requires.sh: marker_value turns the comparison around for a field on the right" {
+@test "requires.sh: marker_value tests the constant against a field on the right" {
   check_markers \
     0 '"3.11" > python_version' 1 '"3.15" > python_version' 1 '"3.14" <= python_version' \
     0 '"3.14" < python_version' 1 '"3.14" == python_version' 0 '"3.14" != python_version' \
-    1 '"3.14.10" === python_full_version' '?' '"3.*" == python_version' '?' '"3.10" ~= python_version'
+    1 '"3.14.10" === python_full_version' '?' '"3.*" == python_version' 0 '"3.10" ~= python_version' \
+    1 '"3.14.5" ~= python_version'
 }
 
 @test "requires.sh: marker_value reads extra as a field with no extras" {
@@ -2288,24 +2490,6 @@ run_split() {
   for version in 3.15.0rc1-1 3.14-1 3.14.10 x; do
     export MOCK_PYTHON_VERSION="$version"
     check_markers '?' 'python_version >= "3"' '?' 'python_full_version >= "3"'
-  done
-}
-
-@test "requires.sh: _pep440_cmp orders the versions of its subset" {
-  local -a pairs=(
-    "3.14.0 3.14 0" "3.14 3.14.0 0" "3.14.10 3.14.9 1" "3.14.9 3.14.10 -1" "3.14.0rc1 3.14.0 -1"
-    "3.14.0 3.14.0rc1 1" "3.14.0a1 3.14.0b1 -1" "3.14.0b2 3.14.0rc1 -1" "3.14.0rc2 3.14.0rc10 -1"
-    "03.014 3.14 0" "1.0a1 1.0.0a01 0" "99999999999999999999 99999999999999999998 1" "1 1.0.0.0 0" "2 10 -1"
-  )
-  local pair a b want
-  for pair in "${pairs[@]}"; do
-    read -r a b want <<<"$pair"
-    run_requires '_pep440_cmp "$1" "$2" && printf "%s\n" "$PEP440_ORDER"' "$a" "$b"
-    [ "$status" -eq 0 ]
-    [ "$output" = "$want" ] || {
-      echo "$pair: $output"
-      return 1
-    }
   done
 }
 
@@ -5630,7 +5814,7 @@ current: 28+22"
     [ "$status" -eq 1 ]
     run grep -n -E "${cmd}(makepkg|updpkgsums|eval)[[:space:]]|${cmd}source[[:space:]]+[^|[:space:]]|${dot}\\.[[:space:]]+[^[:space:]]|(ba)?sh[[:space:]]+-c" "$file"
     [ "$status" -le 1 ]
-    run grep -v -E '^[0-9]+:[[:space:]]*source "(\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)|\$SCRIPT_DIR)/lib(/[a-z]+)?\.sh"$|^[0-9]+:[[:space:]]*bounded "\$CHECK_TIMEOUT" bash -c .source "\$1/scripts/lib\.sh" && ' <<<"$output"
+    run grep -v -E '^[0-9]+:[[:space:]]*source "(\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)|\$SCRIPT_DIR)/lib(/[a-z0-9]+)?\.sh"$|^[0-9]+:[[:space:]]*bounded "\$CHECK_TIMEOUT" bash -c .source "\$1/scripts/lib\.sh" && ' <<<"$output"
     [ -z "$output" ]
   done
   [ "$count" -gt 20 ]

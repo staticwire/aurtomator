@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "_last-serial": 42986763,
+    "api-version": "1.4"
+  },
+  "name": "aws-xray-sdk",
+  "versions": [
+    "0.91",
+    "0.91.1",
+    "0.92",
+    "0.92.1",
+    "0.92.2",
+    "0.93",
+    "0.94",
+    "0.95",
+    "0.96",
+    "0.97",
+    "1.0",
+    "1.1",
+    "1.1.1",
+    "1.1.2",
+    "2.0",
+    "2.0.1",
+    "2.1.0",
+    "2.2.0",
+    "2.3.0",
+    "2.4.0",
+    "2.4.1",
+    "2.4.2",
+    "2.4.3",
+    "2.5.0",
+    "2.6.0",
+    "2.7.0",
+    "2.8.0",
+    "2.9.0",
+    "2.10.0",
+    "2.11.0",
+    "2.12.0",
+    "2.12.1",
+    "2.13.0",
+    "2.13.1",
+    "2.14.0",
+    "2.15.0",
+    "2.16.0"
+  ],
+  "files": [
+    {
+      "filename": "aws_xray_sdk-2.15.0-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/ef/c3/f30a7a63e664acc7c2545ca0491b6ce8264536e0e5cad3965f1d1b91e960/aws_xray_sdk-2.15.0-py2.py3-none-any.whl",
+      "hashes": {
+        "sha256": "422d62ad7d52e373eebb90b642eb1bb24657afe03b22a8df4a8b2e5108e278a3"
+      },
+      "core-metadata": {
+        "sha256": "373698ec0a7571f508690eaa231c3b52e267f463f263470902a3f8187bfc2152"
+      },
+      "size": 103228,
+      "yanked": false
+    },
+    {
+      "filename": "aws_xray_sdk-2.15.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/14/25/0cbd7a440080def5e6f063720c3b190a25f8aa2938c1e34415dc18241596/aws_xray_sdk-2.15.0.tar.gz",
+      "hashes": {
+        "sha256": "794381b96e835314345068ae1dd3b9120bd8b4e21295066c37e8814dbb341365"
+      },
+      "core-metadata": false,
+      "size": 76315,
+      "yanked": false
+    }
+  ]
+}
