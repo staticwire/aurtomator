@@ -98,7 +98,7 @@ While `packages/` holds no package, the script writes nothing, so repositories f
 | `.status/<name>` | `arch_added: 28+23 aarch64` | arches put back at the AUR version, pushed |
 | `.status/<name>` | `check_failed: <error>` | check failed |
 | `.status/<name>` | `update_failed: <error>` | update failed |
-| `.status/_alerts` | package, `hold`, `notice` or `wait`, note | one line for each alert that fired, and `wait` for packages with `upstream.pin_from` that wait for a held update; `--publish` copies the lines of the check run |
+| `.status/_alerts` | package, `hold`, `notice` or `wait`, note | one line for each alert that fired, and `wait` for packages with `upstream.pin_from` that wait for the package of their project, with the note `Waits for the held update of <name>` or `Waits for the update of <name>`; `--publish` copies the lines of the check run |
 | `.status/_assets` | package, asset value | one line for each value found |
 | `.status/_arches` | package, version, arches out or those a wait waits for, start of the wait, and for waits the AUR commit that builds them | see [Versions without some arches](/features/missing-arches/) |
 | `.status/_hosts` | package, host | one line for each check that failed on a request, with the host of that request |
