@@ -1600,6 +1600,20 @@ MOCKCURL
   [ "$(find "$TEST_TMPDIR/.status" -mindepth 1 -maxdepth 1 ! -name '_*' -printf '%f\n')" = pkg ]
 }
 
+@test "check-all: keeps one run cache for the checks of a run and removes it at the end" {
+  printf '#!/usr/bin/env bash\necho "$AURTOMATOR_RUN_CACHE" >>"%s/run-cache"\n[[ -d "$AURTOMATOR_RUN_CACHE" ]] || exit 1\necho 1.0.0\n' \
+    "$TEST_TMPDIR" >"$TEST_TMPDIR/strategies/cache.sh"
+  chmod +x "$TEST_TMPDIR/strategies/cache.sh"
+  create_test_package "one" "cache" "current: '1.0.0'"
+  create_test_package "two" "cache" "current: '1.0.0'"
+  AURTOMATOR_RUN_CACHE="$TEST_TMPDIR/stale" run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(sort -u "$TEST_TMPDIR/run-cache" | wc -l)" -eq 1 ]
+  [ "$(wc -l <"$TEST_TMPDIR/run-cache")" -eq 2 ]
+  [ "$(<"$TEST_TMPDIR/run-cache")" != "$TEST_TMPDIR/stale"* ]
+  [ ! -e "$(head -1 "$TEST_TMPDIR/run-cache")" ]
+}
+
 # The records of a run split their lines at tabs, and git prints the error text of a server with tabs
 @test "check-all: writes the error of a failed check with a space for each tab and control character" {
   printf '#!/usr/bin/env bash\nprintf "remote error\\n\\tliq\\t2.5.0\\033[1m\\n" >&2\nexit 1\n' >"$TEST_TMPDIR/strategies/fail.sh"
@@ -2675,6 +2689,13 @@ run_split() {
   pypi_fake_file demo 2.0 "$MOCK_FILES_DIR/demo-2.0.tar.gz" false
   run_requires 'pypi_metadata demo 2.0'
   [ "$status" -eq 4 ]
+  # The top directory takes the name of the file
+  mkdir -p "$TEST_TMPDIR/other/other-3.0"
+  printf 'Metadata-Version: 2.4\nName: other\n' >"$TEST_TMPDIR/other/other-3.0/PKG-INFO"
+  bsdtar -czf "$MOCK_FILES_DIR/demo-3.0.tar.gz" -C "$TEST_TMPDIR/other" other-3.0
+  pypi_fake_file demo 3.0 "$MOCK_FILES_DIR/demo-3.0.tar.gz" false
+  run_requires 'pypi_metadata demo 3.0'
+  [ "$status" -eq 4 ]
 }
 
 # Helper: runs requires_change for a pypi package of registry $1 from release $2 to $3, with
@@ -2757,6 +2778,165 @@ run_change() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"PyPI versions hold A-Za-z0-9._+!- alone: '0.1.3/../x'"* ]]
   [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+# === archdb.sh ===
+
+# Helper: runs bash code $1 with lib.sh sourced, the mock pacman first in PATH and a run cache in
+# the test directory; the other arguments become $1 and on
+run_archdb() {
+  use_mock_pacman
+  export AURTOMATOR_RUN_CACHE="$TEST_TMPDIR/run-cache"
+  mkdir -p "$AURTOMATOR_RUN_CACHE"
+  run bash -c "source \"\$0/scripts/lib.sh\"; $1" "$TEST_TMPDIR" "${@:2}"
+}
+
+# Helper: writes the files database lines of tests/fixtures to MOCK_PACMAN_FILES: python-yaml,
+# python-brotli, python-protobuf and python-gpgme, and a copy of PyYAML that azure-cli vendors
+python_files_db() {
+  export MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
+  printf 'extra\t%s\t%s\t%s\n' \
+    python-yaml 6.0.2-2 usr/lib/python3.13/site-packages/PyYAML-6.0.2.dist-info/METADATA \
+    python-yaml 6.0.2-2 usr/lib/python3.13/site-packages/yaml/__init__.py \
+    python-brotli 1.1.0-3 usr/lib/python3.13/site-packages/Brotli-1.1.0.dist-info/METADATA \
+    python-protobuf 30.2-1 usr/lib/python3.13/site-packages/protobuf-6.30.2.dist-info/METADATA \
+    python-gpgme 1.24.2-4 usr/lib/python3.13/site-packages/gpg-1.24.2.dist-info/METADATA \
+    azure-cli 2.71.0-1 opt/azure-cli/lib/python3.13/site-packages/PyYAML-6.0.2.dist-info/METADATA \
+    >"$MOCK_PACMAN_FILES"
+}
+
+@test "archdb.sh: srcinfo_pkgnames prints the pkgnames in order" {
+  run_archdb 'srcinfo_pkgnames "$1"' "$FIXTURES_DIR/aur/liblinear.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'liblinear\npython-liblinear' ]
+}
+
+@test "archdb.sh: srcinfo_depends prints the names of depends and optdepends of a pkgname" {
+  local aur="$FIXTURES_DIR/aur"
+  run_archdb 'srcinfo_depends "$1" ydiskarc depends' "$aur/ydiskarc.SRCINFO"
+  [ "$output" = "$(printf '%s\n' python python-typer python-yaml python-requests python-rich python-urllib3 python-tqdm)" ]
+  run_archdb 'srcinfo_depends "$1" graphviz2drawio depends' "$aur/graphviz2drawio.SRCINFO"
+  [ "$output" = "$(printf '%s\n' python python-puremagic python-pygraphviz python-svg.path)" ]
+  run_archdb 'srcinfo_depends "$1" kube-diagrams-git optdepends' "$aur/kube-diagrams-git.SRCINFO"
+  [ "$output" = $'helm\nkubectl' ]
+  run_archdb 'srcinfo_depends "$1" python-liblinear depends; srcinfo_depends "$1" python-liblinear optdepends' "$aur/liblinear.SRCINFO"
+  [ "$output" = "$(printf '%s\n' glibc libgcc libstdc++ python python-numpy python-scipy python-numba)" ]
+  run_archdb 'srcinfo_depends "$1" liblinear depends' "$aur/liblinear.SRCINFO"
+  [ "$output" = $'glibc\nlibgcc\nlibstdc++' ]
+}
+
+@test "archdb.sh: srcinfo_depends takes the pkgbase values unless the pkgname section sets the key" {
+  printf '%s\n' 'pkgbase = split' $'\tpkgver = 1.0' $'\tdepends = base-dep>=2' $'\tdepends_x86_64 = base-x86' \
+    $'\tdepends_aarch64 = base-arm' $'\toptdepends = base-opt: for docs' '' 'pkgname = one' '' 'pkgname = two' \
+    $'\tdepends = own-dep=1.0' $'\toptdepends = ' '' 'pkgname = three' $'\tdepends = ' $'\tdepends_x86_64 = own-x86<3' \
+    >"$TEST_TMPDIR/split.SRCINFO"
+  run_archdb 'for p in one two three; do echo "$p: $(srcinfo_depends "$1" "$p" depends | paste -sd" ") | $(srcinfo_depends "$1" "$p" optdepends | paste -sd" ")"; done' \
+    "$TEST_TMPDIR/split.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'one: base-dep base-x86 | base-opt\ntwo: own-dep base-x86 | \nthree: own-x86 | base-opt' ]
+}
+
+@test "archdb.sh: aur_srcinfo clones the AUR once per run and prints the path of its .SRCINFO" {
+  aur_srcinfo_remote ydiskarc "$FIXTURES_DIR/aur/ydiskarc.SRCINFO"
+  printf '#!/usr/bin/env bash\n[[ "$1" != clone ]] || echo "$*" >>"%s/clones"\nexec "%s/aur-bin/git" "$@"\n' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR" >"$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/git"
+  run_archdb 'aur_srcinfo ydiskarc && aur_srcinfo ydiskarc'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TEST_TMPDIR/run-cache/aur/ydiskarc.SRCINFO"$'\n'"$TEST_TMPDIR/run-cache/aur/ydiskarc.SRCINFO" ]
+  cmp "$TEST_TMPDIR/run-cache/aur/ydiskarc.SRCINFO" "$FIXTURES_DIR/aur/ydiskarc.SRCINFO"
+  [ "$(wc -l <"$TEST_TMPDIR/clones")" -eq 1 ]
+  [[ "$(<"$TEST_TMPDIR/clones")" == "clone --depth 1 --no-checkout -q https://aur.archlinux.org/ydiskarc.git "* ]]
+  run_archdb 'aur_srcinfo ydiskarc'
+  [ "$(wc -l <"$TEST_TMPDIR/clones")" -eq 1 ]
+}
+
+@test "archdb.sh: aur_srcinfo returns 3 for a package the AUR lacks, once per run" {
+  run_archdb 'aur_srcinfo new-pkg'
+  [ "$status" -eq 3 ]
+  run_archdb 'aur_srcinfo new-pkg'
+  [ "$status" -eq 3 ]
+  run_archdb 'aur_srcinfo ../x'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"../x is not an AUR package name"* ]]
+}
+
+@test "archdb.sh: files_index_python lists the distributions of the repositories once per run" {
+  python_files_db
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
+  run_archdb 'files_index_python && files_index_python && echo "$ARCHDB_FILES" && cat "$AURTOMATOR_RUN_CACHE/py-dists"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' files brotli$'\t'python-brotli$'\t'1.1.0 gpg$'\t'python-gpgme$'\t'1.24.2 \
+    protobuf$'\t'python-protobuf$'\t'6.30.2 pyyaml$'\t'python-yaml$'\t'6.0.2)" ]
+  [ "$(cat "$PACMAN_ARGS_LOG")" = "-Fx --machinereadable ^usr/lib/python3\\.[0-9]+/site-packages/[^/]+\\.dist-info/METADATA\$" ]
+}
+
+@test "archdb.sh: files_index_python writes #none without a files database" {
+  python_files_db
+  export MOCK_PACMAN_NO_FILES=1
+  run_archdb 'files_index_python && echo "$ARCHDB_FILES" && cat "$AURTOMATOR_RUN_CACHE/py-dists" && files_index_python && echo "$ARCHDB_FILES"'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'none\n#none\nnone' ]
+}
+
+@test "archdb.sh: python_dists_of prints the distributions of a package" {
+  python_files_db
+  run_archdb 'python_dists_of python-yaml; python_dists_of python-none'
+  [ "$status" -eq 0 ]
+  [ "$output" = pyyaml$'\t'6.0.2 ]
+}
+
+@test "archdb.sh: files_index_owner prints the owners of the paths that match" {
+  python_files_db
+  run_archdb 'files_index_owner "^usr/lib/python3\\.[0-9]+/site-packages/yaml/"'
+  [ "$status" -eq 0 ]
+  [ "$output" = python-yaml$'\t'usr/lib/python3.13/site-packages/yaml/__init__.py ]
+}
+
+@test "archdb.sh: repo_package resolves a name of provides once per run" {
+  export MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync" PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
+  printf '%s\n' 'python-yaml 6.0.4-1 extra python-pyyaml' 'python-epoch 2:1.5-3 core' >"$MOCK_PACMAN_SYNC"
+  run_archdb 'for n in python-pyyaml python-pyyaml python-epoch; do repo_package "$n" && echo "$PKG_NAME $PKG_VERSION $PKG_REPO"; done'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'python-yaml 6.0.4 extra\npython-yaml 6.0.4 extra\npython-epoch 1.5 core' ]
+  [ "$(grep -c -- -Sddp "$PACMAN_ARGS_LOG")" -eq 2 ]
+  run_archdb 'repo_package python-none || echo "fails $?"; repo_package python-none || echo "fails $?"'
+  [ "$output" = $'fails 1\nfails 1' ]
+  [ "$(grep -c -- 'python-none' "$PACMAN_ARGS_LOG")" -eq 1 ]
+}
+
+@test "archdb.sh: aur_package reads the AUR RPC in one request for the names of aur_packages" {
+  cp "$FIXTURES_DIR/aur/rpc.json" "$MOCK_FILES_DIR/aur-rpc.json"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_archdb 'aur_packages python-svg.path kube-diagrams-git none-such &&
+    for n in python-svg.path kube-diagrams-git none-such; do aur_package "$n" && echo "$PKG_NAME $PKG_VERSION $PKG_REPO" || echo "$n: none"; done'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'python-svg.path 6.3 aur\nkube-diagrams-git r675.70e1dda aur\nnone-such: none' ]
+  [ "$(grep -c aur.archlinux.org/rpc "$CURL_ARGS_LOG")" -eq 1 ]
+  [[ "$(<"$CURL_ARGS_LOG")" == *"https://aur.archlinux.org/rpc/v5/info?arg[]=python-svg.path&arg[]=kube-diagrams-git&arg[]=none-such" ]]
+}
+
+@test "archdb.sh: aur_package finds a name of provides and asks in batches of 100" {
+  printf '[{"Name": "foo-git", "Version": "1:r1.abc-2", "Provides": ["foo=1.0"]}, {"Name": "c++lib", "Version": "2.0-1"}]\n' \
+    >"$MOCK_FILES_DIR/aur-rpc.json"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_archdb 'aur_packages foo-git; aur_package foo && echo "$PKG_NAME $PKG_VERSION"; aur_package c++lib && echo "$PKG_NAME"'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'foo-git r1.abc\nc++lib' ]
+  [[ "$(<"$CURL_ARGS_LOG")" == *"arg[]=c%2B%2Blib" ]]
+  : >"$CURL_ARGS_LOG"
+  run_archdb 'aur_packages $(seq -f "pkg%g" 150)'
+  [ "$status" -eq 0 ]
+  [ "$(grep -c aur.archlinux.org/rpc "$CURL_ARGS_LOG")" -eq 2 ]
+}
+
+@test "archdb.sh: arch_package takes the repositories first, then the AUR" {
+  export MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync"
+  printf '%s\n' 'python-rich 14.2.0-1 extra' >"$MOCK_PACMAN_SYNC"
+  cp "$FIXTURES_DIR/aur/rpc.json" "$MOCK_FILES_DIR/aur-rpc.json"
+  run_archdb 'for n in python-rich python-svg.path none-such; do arch_package "$n" && echo "$PKG_NAME $PKG_VERSION $PKG_REPO" || echo "$n: none"; done'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'python-rich 14.2.0 extra\npython-svg.path 6.3 aur\nnone-such: none' ]
 }
 
 # === version of aurtomator ===

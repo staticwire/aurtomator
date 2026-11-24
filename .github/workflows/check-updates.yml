@@ -105,6 +105,10 @@ jobs:
             exit 1
           fi
 
+      # The requires rules read the Python distributions and modules of the repositories with pacman -F
+      - name: Sync the files databases
+        run: pacman -Fy --noconfirm
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

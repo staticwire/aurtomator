@@ -46,8 +46,8 @@ if [[ "$1" == -Fx ]]; then
 fi
 
 if [[ "$1" == -Sddp ]]; then
-  if ! line=$(sync_line "$4"); then
-    echo "error: target not found: $4" >&2
+  if ! line=$(sync_line "${*: -1}"); then
+    echo "error: target not found: ${*: -1}" >&2
     exit 1
   fi
   read -r name version repo _ <<<"$line"

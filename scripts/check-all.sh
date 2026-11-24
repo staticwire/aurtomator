@@ -181,13 +181,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# The memory of the hosts that did not answer in this run, for the requests of
-# the checks; the modes that run no strategy keep none
-unset AURTOMATOR_HOSTS_DIR
+# The memory of the hosts that did not answer in this run, for the requests of the checks, and
+# the run cache of archdb.sh; the modes that run no strategy keep neither
+unset AURTOMATOR_HOSTS_DIR AURTOMATOR_RUN_CACHE
 if [[ "$MODE" == check || "$MODE" == update ]]; then
   AURTOMATOR_HOSTS_DIR=$(mktemp -d)
-  export AURTOMATOR_HOSTS_DIR
-  trap 'rm -rf "$AURTOMATOR_HOSTS_DIR"' EXIT
+  AURTOMATOR_RUN_CACHE=$(mktemp -d)
+  export AURTOMATOR_HOSTS_DIR AURTOMATOR_RUN_CACHE
+  trap 'rm -rf "$AURTOMATOR_HOSTS_DIR" "$AURTOMATOR_RUN_CACHE"' EXIT
   : >"$AURTOMATOR_HOSTS_DIR/silent"
   : >"$AURTOMATOR_HOSTS_DIR/request"
   : >"$AURTOMATOR_HOSTS_DIR/failed"

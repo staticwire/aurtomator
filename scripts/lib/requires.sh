@@ -374,30 +374,18 @@ pypi_metadata() {
   return "$rc"
 }
 
-# Print the headers of the PKG-INFO of the top directory of sdist $1, file name $2, when they
-# list the requirements; return 4 with an error that names release $3 when they cannot
+# Print the headers of PKG-INFO in the top directory of sdist $1, named as file name $2 without
+# its extension, when they list the requirements; return 4 with an error naming release $3 if not
 _sdist_headers() {
-  local LC_ALL=C member="" line out headers version dynamic rc=0
-  local re_member='^[A-Za-z0-9._+-]+/PKG-INFO$'
-  if ! out=$(bsdtar -tf "$1" 2>/dev/null); then
-    log_err "$2 is no archive that bsdtar reads"
-    return 1
-  fi
-  while IFS= read -r line; do
-    if [[ "$line" =~ $re_member ]]; then
-      member=$line
-      break
-    fi
-  done <<<"$out"
+  local LC_ALL=C member out headers="" version dynamic rc=0
+  member=${2%.tar.gz}
+  member="${member%.zip}/PKG-INFO"
   out=$(mktemp) || return 1
-  if [[ -n "$member" ]]; then
-    # PKG-INFO takes at most MAX_ANSWER_MB, and an ignored SIGXFSZ makes a write past it fail
-    if ! (trap '' XFSZ && ulimit -f $((${MAX_ANSWER_MB:-50} * 1024)) && bsdtar -xOf "$1" -- "$member" >"$out" 2>/dev/null); then
-      log_err "$2: bsdtar cannot read $member"
-      rm -f "$out"
-      return 1
-    fi
+  # --fast-read stops at the first match, and an ignored SIGXFSZ makes a write past MAX_ANSWER_MB fail
+  if (trap '' XFSZ && ulimit -f $((${MAX_ANSWER_MB:-50} * 1024)) && bsdtar -xqOf "$1" -- "$member" >"$out" 2>/dev/null); then
     headers=$(_metadata_headers "$out" "$2/$member") || rc=1
+  else
+    member=""
   fi
   rm -f "$out"
   ((rc == 0)) || return 1

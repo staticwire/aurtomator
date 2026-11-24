@@ -1,0 +1,23 @@
+pkgbase = kube-diagrams
+	pkgdesc = Kubernetes architecture diagrams from manifests, Helm charts and helmfiles
+	pkgver = 0.9.0
+	pkgrel = 2
+	url = https://github.com/philippemerle/KubeDiagrams
+	arch = any
+	license = Apache-2.0
+	makedepends = python-build
+	makedepends = python-installer
+	makedepends = python-setuptools
+	makedepends = python-wheel
+	depends = bash
+	depends = graphviz2drawio
+	depends = python
+	depends = python-diagrams
+	depends = python-pygraphviz
+	depends = python-yaml
+	optdepends = helm: helm-diagrams
+	optdepends = kubectl: kubectl-diagrams
+	source = kube-diagrams-0.9.0.tar.gz::https://github.com/philippemerle/KubeDiagrams/archive/refs/tags/v0.9.0.tar.gz
+	sha256sums = 7ddcc9b40b37715fcc27850c9bb01e7eb93a9c2b158a7cebd3581b4dad9cfba4
+
+pkgname = kube-diagrams

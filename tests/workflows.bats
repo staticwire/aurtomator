@@ -4272,6 +4272,18 @@ close_files_step() {
     "$mnt/temp/_runner_file_commands 755" "$mnt/temp/step.sh 644")" ]
 }
 
+# The requires rules of the check read the Python distributions and modules of the repositories
+@test "check-updates: check syncs the files databases after Add builder, before the checkouts" {
+  local at
+  at=$(step_index check "Sync the files databases")
+  [ "$at" -eq $(($(step_index check "Add builder") + 1)) ]
+  [ "$at" -lt "$(step_index check "Checkout")" ]
+  [ "$at" -lt "$(step_index check "Close files to builder")" ]
+  [ "$(step_run check "Sync the files databases")" = "pacman -Fy --noconfirm" ]
+  run yq '[.jobs[].steps[] | select(.name == "Sync the files databases")] | length' "$CHECK_UPDATES"
+  [ "$output" = 1 ]
+}
+
 @test "check-updates: each job with a checkout closes its files before downloads and builder" {
   local job at key
   for job in check prepare verify publish; do
