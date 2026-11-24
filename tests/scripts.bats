@@ -1625,6 +1625,19 @@ MOCKCURL
   [ "$(grep -x -A1 -- -w "$TEST_TMPDIR/curl.args" | tail -1)" = '\n%{url_effective}%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated}' ]
 }
 
+# yq reads YAML too, and a YAML map would pass for a JSON object
+@test "lib.sh: http_get_json refuses an answer in YAML" {
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
+#!/usr/bin/env bash
+printf 'error: rate limited\nretry: later\n\nhttps://example.com/a'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get_json https://example.com/a
+  [ "$status" -eq 1 ]
+  [ "$output" = "https://example.com/a: the answer is not JSON" ]
+}
+
 @test "lib.sh: http_get_json stops at a failed request" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
