@@ -646,6 +646,20 @@ jobs:
           artifact-ids: ${{ needs.verify.outputs.verified-id || '0' }}
           path: /data/handoff
 
+      # Packages on status/_unverified keep the status of the check run, and the failed run gets
+      # one issue in place of an issue for each package
+      - name: Keep the statuses after a failed verify
+        if: needs.check.outputs.prepare == 'true' && needs.verify.result != 'success'
+        env:
+          DATA: /data
+        run: |
+          mkdir -p "$DATA/handoff/status"
+          for f in packages/*.yml; do
+            [ -e "$f" ] || continue
+            name=${f#packages/}
+            printf '%s\n' "${name%.yml}"
+          done >"$DATA/handoff/status/_unverified"
+
       # Only a package to push needs the SSH and GPG keys, so a run before the secrets are set
       # still commits the README
       - name: Find packages to push

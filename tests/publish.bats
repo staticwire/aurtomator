@@ -4061,7 +4061,7 @@ current: '1.0.0'"
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "1" ]
 }
 
-# Only verify writes _unverified: the jobs take no such file from prepare
+# Verify and the publish job write _unverified, and the jobs take no such file from prepare
 @test "check-all --publish: keeps the new version of a package that verify did not reach" {
   create_test_package "pkg" "github-release" "upstream:
   project: owner/repo

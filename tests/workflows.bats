@@ -4040,6 +4040,27 @@ run_bare_issues_step() {
   [ "$output" = "needs.verify.result == 'success'" ]
 }
 
+# Verify jobs that fail as a job hand over nothing, and the failed run gets one issue
+@test "check-updates: publish keeps every status of the check run after a failed verify" {
+  local keep ws="$BATS_TEST_TMPDIR/ws" list="$BATS_TEST_TMPDIR/data/handoff/status/_unverified"
+  keep=$(step_index publish "Keep the statuses after a failed verify")
+  [ "$keep" -gt "$(step_index publish "Download verified handoff")" ]
+  [ "$keep" -lt "$(step_index publish "Find packages to push")" ]
+  run yq '.jobs.publish.steps[] | select(.name == "Keep the statuses after a failed verify") | .if' "$CHECK_UPDATES"
+  [ "$output" = "needs.check.outputs.prepare == 'true' && needs.verify.result != 'success'" ]
+  step_run publish "Keep the statuses after a failed verify" >"$BATS_TEST_TMPDIR/step.sh"
+  mkdir -p "$ws/packages"
+  run sh -e -c 'cd "$1" && DATA="$2" sh -e "$3"' _ "$ws" "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ -f "$list" ] && [ ! -s "$list" ]
+  touch "$ws/packages/foo.yml" "$ws/packages/bar.yml" "$ws/packages/notes.txt"
+  run sh -e -c 'cd "$1" && DATA="$2" sh -e "$3"' _ "$ws" "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ "$(<"$list")" = $'bar\nfoo' ]
+  run run_find_packages_step
+  [ "$output" = "packages=false" ]
+}
+
 @test "check-updates: Setup AUR SSH fails on an empty key" {
   local step="$BATS_TEST_TMPDIR/step.sh" bin="$BATS_TEST_TMPDIR/bin" ssh_dir="$BATS_TEST_TMPDIR/ssh" block
   block=$(step_run publish "Setup AUR SSH")

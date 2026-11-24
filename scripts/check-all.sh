@@ -325,8 +325,8 @@ handed_failure() {
   echo "update_failed: prepare and verify handed over no update"
 }
 
-# Succeeds when verify ran out of its time before package $1, as status/_unverified of the
-# handoff lists, which the jobs take from verify alone
+# Succeeds when status/_unverified of the handoff lists package $1: verify lists the packages it
+# had no time for, and the publish job lists every package after a failed verify
 unverified() {
   local file="${WORK_DIR}/status/_unverified"
   [[ -d "${WORK_DIR}/status" && ! -L "${WORK_DIR}/status" && -f "$file" && ! -L "$file" ]] &&
