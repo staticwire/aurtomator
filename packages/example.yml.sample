@@ -35,5 +35,10 @@ upstream:                 # strategy fields
 #   map:                     # PyPI name: the Arch package that meets it
 #     svg-path: python-svg.path
 #   skip: [tools]            # paths of the release that requires: imports leaves out
+# ruby:                      # rubygems: gems in depends
+#   map:                     # gem name: the Arch package that meets it
+#     simplecov: ruby-simplecov
+#   skip: [win32ole]         # gems that the requires rules leave out
+#   relax: true              # the PKGBUILD turns ~> into >=
 
 # Runs write current, last_updated, current_asset, arch_wait and arch_out.

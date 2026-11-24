@@ -20,7 +20,7 @@ done
 readonly VALID_STRATEGIES
 
 # The top-level keys that the scripts read
-readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump allow_missing_arch arch_wait arch_out cooldown_days alerts upstream python"
+readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump allow_missing_arch arch_wait arch_out cooldown_days alerts upstream python ruby"
 
 # The upstream keys that each strategy reads, in the order of the strategy
 # table of README.md. One test compares them with the keys the scripts name.
@@ -173,6 +173,63 @@ validate_python() {
   return "$errors"
 }
 
+# Check the ruby key of package file $1: a map of map, from gem names to package names, skip, the gems
+# that the rules leave out, and relax, true when the PKGBUILD turns ~> into >=
+validate_ruby() {
+  local file="$1" shown="packages/${1##*/}" errors=0 key value unknown
+  case $(pkg_get "$file" '.ruby | tag') in
+    "!!null") return 0 ;;
+    "!!map") ;;
+    *)
+      log_err "$shown: ruby must be a map"
+      return 1
+      ;;
+  esac
+  unknown=$(pkg_get "$file" '.ruby | [keys[] | select(. != "map" and . != "skip" and . != "relax")] | join(", ")')
+  if [[ -n "$unknown" ]]; then
+    log_err "$shown: ruby: unknown key: $unknown"
+    errors=1
+  fi
+  case $(pkg_get "$file" '.ruby.map | tag') in
+    "!!null") ;;
+    "!!map")
+      while IFS=$'\t' read -r key value; do
+        if ! (LC_ALL=C && [[ "$key" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]); then
+          log_err "$shown: ruby.map: ${key@Q} is not a gem name"
+          errors=1
+        elif ! (LC_ALL=C && [[ "$value" =~ ^[a-z0-9@_+][a-z0-9@._+-]*$ ]]); then
+          log_err "$shown: ruby.map.$key must be a package name of a-z, 0-9 and @ . _ + -: ${value@Q}"
+          errors=1
+        fi
+      done < <(pkg_get "$file" '.ruby.map | to_entries[] | [.key, ((.value | select(tag == "!!str")) // (.value | to_json(0)))] | join("\t")')
+      ;;
+    *)
+      log_err "$shown: ruby.map must be a map of gem names to package names"
+      errors=1
+      ;;
+  esac
+  case $(pkg_get "$file" '.ruby.skip | tag') in
+    "!!null") ;;
+    "!!seq")
+      while IFS= read -r value; do
+        if ! (LC_ALL=C && [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]); then
+          log_err "$shown: ruby.skip: ${value@Q} is not a gem name"
+          errors=1
+        fi
+      done < <(pkg_get "$file" '.ruby.skip[] | (select(tag == "!!str") // to_json(0))')
+      ;;
+    *)
+      log_err "$shown: ruby.skip must be a list of gem names"
+      errors=1
+      ;;
+  esac
+  if ! flag_ok "$file" .ruby.relax; then
+    log_err "$shown: ruby.relax must be true or false"
+    errors=1
+  fi
+  return "$errors"
+}
+
 # Check entry $2 of the alerts of package file $1, with pkgver_format $3 if any, strategy $4
 # and pkgver_dash set when $5 is true; the errors go to stderr
 validate_alert() {
@@ -199,8 +256,9 @@ validate_alert() {
   if [[ "$tag" != "!!null" && "$value" != changed && "$value" != unmet && "$value" != imports ]]; then
     log_err "$rule.requires must be changed, unmet or imports, got $value"
     errors=1
-  elif [[ "$tag" != "!!null" && "$4" != pypi && -z "$(pkg_get "$file" '.python | select(tag == "!!map") | .pypi // .pyproject // ""')" ]]; then
-    log_err "$rule: requires needs strategy pypi, python.pypi or python.pyproject"
+  elif [[ "$tag" != "!!null" && "$4" != pypi && "$4" != rubygems &&
+    -z "$(pkg_get "$file" '.python | select(tag == "!!map") | .pypi // .pyproject // ""')" ]]; then
+    log_err "$rule: requires needs strategy pypi or rubygems, python.pypi or python.pyproject"
     errors=1
   elif [[ "$value" == changed && -n "$(pkg_get "$file" '.python | select(tag == "!!map") | .release // .pyproject // ""')" ]]; then
     log_err "$rule: requires: changed does not apply with python.release or python.pyproject"
@@ -535,6 +593,7 @@ validate_pkg() {
   fi
 
   validate_python "$file" "$strategy" || ((errors++))
+  validate_ruby "$file" || ((errors++))
 
   local branch
   if [[ $(pkg_get "$file" '.upstream.branch | tag') != "!!null" ]]; then

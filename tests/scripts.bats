@@ -2199,7 +2199,7 @@ alerts:
   - requires: changed"
   run_requires 'fired_alerts "$1" 4.0.0 5.0.0' "$TEST_TMPDIR/packages/pkg.yml"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"alerts[0].requires needs strategy pypi, python.pypi or python.pyproject"* ]]
+  [[ "$output" == *"alerts[0].requires needs strategy pypi or rubygems, python.pypi or python.pyproject"* ]]
 }
 
 @test "lib.sh: fired_alerts asks for quotes around a note that YAML reads as a number" {
@@ -3838,6 +3838,140 @@ $1"
     [ -z "$output" ]
   done
   [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+# === rbrules.sh ===
+
+# Helper: the mock pacman with the gems of the tests in the files database and the repositories,
+# ruby 3.4.13, and a run cache in the test directory
+gems_env() {
+  use_mock_pacman
+  export AURTOMATOR_RUN_CACHE="$TEST_TMPDIR/run-cache" MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync" \
+    MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
+  mkdir -p "$AURTOMATOR_RUN_CACHE"
+  printf '%s\n' 'ruby 3.4.13-1 extra ruby-json ruby-optparse' "ruby-simplecov ${1:-0.22.0}-1 extra" 'ruby-rexml 3.4.4-1 extra' \
+    'ruby-erb 4.0.4-9 extra' 'ruby-google-protobuf 36.1-1 extra' 'bash 5.3.9-1 core' >"$MOCK_PACMAN_SYNC"
+  local line
+  for line in "ruby-simplecov simplecov-${1:-0.22.0}" 'ruby-rexml rexml-3.4.4' 'ruby default/json-2.9.1' 'ruby-erb default/erb-4.0.4' \
+    'ruby-google-protobuf google-protobuf-4.36.1'; do
+    printf 'extra\t%s\t1-1\tusr/lib/ruby/gems/3.4.0/specifications/%s.gemspec\n' "${line% *}" "${line#* }"
+  done >"$MOCK_PACMAN_FILES"
+  printf '[]\n' >"$MOCK_FILES_DIR/aur-rpc.json"
+}
+
+# Helper: writes the v2 answer of gem $1 at version $2 with the runtime requirements after them, each "name|requirements"
+gem_v2() {
+  local deps="" dep
+  for dep in "${@:4}"; do
+    deps+="${deps:+, }{\"name\": \"${dep%%|*}\", \"requirements\": \"${dep#*|}\"}"
+  done
+  mkdir -p "$MOCK_FILES_DIR/rubygems/v2"
+  printf '{"name": "%s", "number": "%s", "platform": "ruby", "ruby_version": "%s", "sha": "%s", "gem_uri": "https://rubygems.org/gems/%s-%s.gem", "dependencies": {"runtime": [%s], "development": [{"name": "rspec", "requirements": "~> 3"}]}}\n' \
+    "$1" "$2" "$3" "$(printf '0%.0s' {1..64})" "$1" "$2" "$deps" >"$MOCK_FILES_DIR/rubygems/v2/$1-$2.json"
+}
+
+# Helper: runs ruby_unmet for package pkg of strategy rubygems, registry $2 at version $3, with .SRCINFO $1
+# and the YAML lines $4
+run_ruby_unmet() {
+  create_test_package "pkg" "rubygems" "upstream:
+  registry: $2
+${4:-}"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_unmet "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml" "$1" "$2" "$3"
+}
+
+@test "rbrules.sh: files_index_gems lists the gems of the repositories, default gems included" {
+  gems_env 1.3.2
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; files_index_gems && cat "$AURTOMATOR_RUN_CACHE/gems" && gems_of ruby' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' erb$'\t'ruby-erb$'\t'4.0.4 google-protobuf$'\t'ruby-google-protobuf$'\t'4.36.1 \
+    json$'\t'ruby$'\t'2.9.1 rexml$'\t'ruby-rexml$'\t'3.4.4 simplecov$'\t'ruby-simplecov$'\t'1.3.2 json$'\t'2.9.1)" ]
+}
+
+@test "rbrules.sh: gem_release reads the runtime requirements of a release, and 3 for one rubygems.org lacks" {
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; gem_release bashcov 4.0.3 && printf "%s\n" "$GEM_RUNTIME" "$GEM_RUBY" "$GEM_SHA" "$GEM_URI"' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'simplecov\t~> 1.1\n>= 3.2.0\nbeea63c03617a4ca800e39bd81ca029ec1eb178e9da6d4920bd5130dff5c49b9\nhttps://rubygems.org/gems/bashcov-4.0.3.gem' ]
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; gem_release bashcov 9.9' "$TEST_TMPDIR"
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"bashcov: rubygems.org has no release 9.9"* ]]
+}
+
+@test "rbrules.sh: ruby_unmet holds a requirement that the version of the gem fails, and gives nothing once it holds" {
+  gems_env
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_unmet "$TEST_TMPDIR/b.SRCINFO" bashcov 4.0.3
+  [ "$status" -eq 0 ]
+  [ "$output" = $'hold\tsimplecov ~> 1.1: ruby-simplecov has 0.22.0' ]
+  gems_env 1.3.2
+  rm -rf "$AURTOMATOR_RUN_CACHE"/*
+  run_ruby_unmet "$TEST_TMPDIR/b.SRCINFO" bashcov 4.0.3
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "rbrules.sh: ruby_unmet holds a requirement that no entry of depends meets" {
+  gems_env 1.3.2
+  unmet_srcinfo "$TEST_TMPDIR/c.SRCINFO" ruby-simplecov-cobertura ruby ruby-rexml ruby-simplecov
+  run_ruby_unmet "$TEST_TMPDIR/c.SRCINFO" simplecov-cobertura 4.0.0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  unmet_srcinfo "$TEST_TMPDIR/c.SRCINFO" ruby-simplecov-cobertura ruby ruby-simplecov
+  run_ruby_unmet "$TEST_TMPDIR/c.SRCINFO" simplecov-cobertura 4.0.0
+  [ "$output" = $'hold\trexml: not in depends' ]
+}
+
+@test "rbrules.sh: ruby_unmet gives a notice for the upper bound of ~> under ruby.relax" {
+  gems_env 1.3.2
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_unmet "$TEST_TMPDIR/b.SRCINFO" bashcov 3.3.0 $'ruby:\n  relax: true'
+  [ "$output" = $'notice\tsimplecov ~> 0.21: ruby-simplecov has 1.3.2' ]
+  run_ruby_unmet "$TEST_TMPDIR/b.SRCINFO" bashcov 3.3.0
+  [ "$output" = $'hold\tsimplecov ~> 0.21: ruby-simplecov has 1.3.2' ]
+}
+
+@test "rbrules.sh: ruby_unmet holds a ruby_version that the ruby of Arch fails" {
+  gems_env 1.3.2
+  gem_v2 demo 1.0 '>= 3.5'
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" ruby-demo ruby
+  run_ruby_unmet "$TEST_TMPDIR/d.SRCINFO" demo 1.0
+  [ "$output" = $'hold\truby_version >= 3.5: ruby has 3.4.13' ]
+}
+
+@test "rbrules.sh: ruby_unmet leaves out ruby.skip, compares the version of the gem and names pkgver otherwise" {
+  gems_env 1.3.2
+  gem_v2 demo 1.0 '>= 3.2' 'win32ole|>= 0' 'google-protobuf|>= 4.36, < 5' 'rexml|~> 3.4' 'json|>= 2.9' 'bigx|>= 2'
+  printf 'ruby-bigx 1.5-1 extra\n' >>"$MOCK_PACMAN_SYNC"
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" ruby-demo ruby ruby-google-protobuf ruby-rexml ruby-bigx
+  run_ruby_unmet "$TEST_TMPDIR/d.SRCINFO" demo 1.0 $'ruby:\n  skip: [win32ole]'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'hold\tbigx >= 2: ruby-bigx has 1.5 (pkgver)' ]
+  run_ruby_unmet "$TEST_TMPDIR/d.SRCINFO" demo 1.0
+  [ "${lines[0]}" = $'hold\twin32ole: not in depends' ]
+}
+
+@test "rbrules.sh: ruby_change names the gems that the new release adds and drops" {
+  gem_v2 demo 1.0 '>= 3.2' 'old|>= 1' 'keep|~> 1'
+  gem_v2 demo 2.0 '>= 3.2' 'keep|~> 2' 'new|>= 0'
+  create_test_package "pkg" "rubygems" "upstream:
+  registry: demo"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_change "$1" demo 1.0 2.0; ruby_change "$1" bashcov 3.3.0 4.0.3; ruby_change "$1" bashcov 0.1 4.0.3' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/pkg.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'adds new; drops old\nrubygems.org has no release 0.1 of bashcov to compare with' ]
+}
+
+@test "lib.sh: fired_alerts runs listed requires rules on the gems of a package of strategy rubygems" {
+  gems_env
+  aur_srcinfo_remote bashcov "$FIXTURES_DIR/aur/bashcov.SRCINFO"
+  create_test_package "bashcov" "rubygems" "upstream:
+  registry: bashcov
+alerts:
+  - requires: unmet
+    hold: true
+  - requires: changed"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" 3.3.0 4.0.3' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/bashcov.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'hold\tsimplecov ~> 1.1: ruby-simplecov has 0.22.0' ]
 }
 
 # === version of aurtomator ===
