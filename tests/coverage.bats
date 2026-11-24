@@ -69,8 +69,8 @@ demo_hits() {
   [ ! -e "$TEST_TMPDIR" ]
 }
 
-# 20 MB of trace in a burst is more than bashcov reads in time from a pipe that Ruby opens in
-# non-blocking mode. As a child, demo.sh traces each line once; bats traces a test line twice.
+# 20 MB of trace in a burst fill the trace pipe, where bash drops lines unless the pipe is
+# blocking. As a child, demo.sh traces each line once; bats traces a test line twice.
 @test "bashcov-bats.sh: bashcov counts every run of a line" {
   require_bashcov
   make_fixture '"$TEST_TMPDIR/demo.sh"'

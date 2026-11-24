@@ -14,10 +14,6 @@ delimiter=${PS4#*BASHCOV>}
 # shellcheck disable=SC2016
 delimiter=${delimiter%%'${LINENO-}'*}
 
-# Ruby opens the trace pipe of bashcov 4.0.0 in non-blocking mode, where bash drops a line
-# whenever the pipe is full
-ruby -e 'require "io/nonblock"; IO.for_fd(Integer(ARGV[0]), autoclose: false).nonblock = false' "$trace_fd"
-
 # bashcov resolves the path of a traced script only when it reads the line, so the tests keep
 # their directories in this TMPDIR until bashcov, the parent of this script, exits
 TMPDIR=$(mktemp -d)
