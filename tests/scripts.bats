@@ -1625,6 +1625,19 @@ MOCKCURL
   [ "$(grep -x -A1 -- -w "$TEST_TMPDIR/curl.args" | tail -1)" = '\n%{url_effective}%{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated}' ]
 }
 
+# yq reads YAML too, and a YAML map would pass for a JSON object
+@test "lib.sh: http_get_json refuses an answer in YAML" {
+  cat >"$MOCK_DIR/curl" <<'MOCKCURL'
+#!/usr/bin/env bash
+printf 'error: rate limited\nretry: later\n\nhttps://example.com/a'
+MOCKCURL
+  chmod +x "$MOCK_DIR/curl"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get_json https://example.com/a
+  [ "$status" -eq 1 ]
+  [ "$output" = "https://example.com/a: the answer is not JSON" ]
+}
+
 @test "lib.sh: http_get_json stops at a failed request" {
   mock_curl_failure
   source "$TEST_TMPDIR/scripts/lib.sh"
@@ -4871,6 +4884,20 @@ alerts:
   [ ! -e "$TEST_TMPDIR/.status/_hosts" ]
 }
 
+# PyPI answers hold requires_dist, null for releases without requirements
+@test "check-all: a requires rule fires nothing between releases without requirements" {
+  create_test_package "plain" "pypi" "upstream:
+  registry: plain
+current: 3.2.0
+allow_missing_arch: false
+alerts:
+  - requires: changed
+    hold: true"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/plain")" = "new_version: 3.2.1" ]
+}
+
 @test "check-all: a requires rule whose request fails fails the check, names the host and runs again" {
   create_test_package "flaky-bin" "pypi" "upstream:
   registry: flaky
@@ -4911,6 +4938,35 @@ ${2:-}"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
   [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
   [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge\npython-zensical-ui\twait\tWaits for the held update of zensical-bin\nzensical-bin\tnotice\tpython-zensical-ui waits for this update' ]
+}
+
+# The pin comes from the newest release of the project, which fits the companion only once the
+# package of the project reaches that release
+@test "check-all: a package with pin_from waits for its project in a cooldown, a failed check or a skipped downgrade" {
+  local project want
+  while IFS='|' read -r project want; do
+    create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+${project//;/$'\n'}
+allow_missing_arch: false"
+    create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41
+allow_missing_arch: false"
+    run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ] && [[ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" == "$want"* ]] &&
+      [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ] &&
+      [[ "$output" == *"python-zensical-ui: update 0.0.41 → 0.0.43 waits for the update of zensical-bin"* ]] &&
+      [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'python-zensical-ui\twait\tWaits for the update of zensical-bin' ] || {
+      echo "$want: $output"
+      return 1
+    }
+  done <<EOF
+current: 0.0.74;cooldown_days: 7;last_updated: $(date -u +%F)|cooldown:
+current: 0.0.74;cooldown_days: soon|check_failed: cooldown_days
+current: 9.0.0|downgrade_skipped: 0.1.3
+EOF
 }
 
 @test "check-all: a package with pin_from goes on when its project is not held or not there" {

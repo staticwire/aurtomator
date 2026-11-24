@@ -1,7 +1,7 @@
 version: 2
 updates:
-  # Hostile releases get a week to be found and pulled before Dependabot proposes them, and
-  # merge-image merges the updates of /ci-image without review
+  # Hostile releases get a week to be found and pulled before Dependabot proposes them; its security
+  # updates skip that week, and merge-image merges the updates of /ci-image without review
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

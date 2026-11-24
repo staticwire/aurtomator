@@ -950,10 +950,12 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   diff "$BATS_TEST_TMPDIR/expected" "$BATS_TEST_TMPDIR/actual"
 }
 
-@test "release-please: writes VERSION and aurtomator.sh, keeps vX.Y.Z tags and GitHub notes, and no CHANGELOG" {
+# Immutable releases lock their files once published, so releases start as drafts, and GitHub
+# would tag a draft only when it is published
+@test "release-please: writes VERSION and aurtomator.sh, keeps vX.Y.Z tags and GitHub notes, creates tagged drafts and no CHANGELOG" {
   run yq -o=json -I=0 '.packages["."]' "$RELEASE_CONFIG"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"release-type":"simple","version-file":"VERSION","extra-files":["aurtomator.sh"],"changelog-type":"github","skip-changelog":true,"bump-minor-pre-major":true,"include-component-in-tag":false}' ]
+  [ "$output" = '{"release-type":"simple","version-file":"VERSION","extra-files":["aurtomator.sh"],"changelog-type":"github","skip-changelog":true,"bump-minor-pre-major":true,"include-component-in-tag":false,"draft":true,"force-tag-creation":true}' ]
 }
 
 # release-please updates VERSION in place and does not create it
@@ -975,7 +977,7 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   [ "$output" = "release-please" ]
   run yq -r '.jobs.sign.steps[] | .name // (.uses | sub("@.*"; ""))' "$RELEASE"
   [ "$output" = "$(printf '%s\n' actions/checkout 'Find the release to sign' 'Build the archive' actions/attest \
-    'Attach the archive and its attestation')" ]
+    'Attach the archive and publish the release')" ]
   run yq '[.jobs.sign | .. | select(tag == "!!str") | select(test("app-token|secrets\."))] | length' "$RELEASE"
   [ "$output" = 0 ]
 }
@@ -994,23 +996,24 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
   run yq -r '.jobs[].steps[] | select(.uses // "" | test("^actions/attest@")) | .with["subject-path"]' "$RELEASE"
   [ "$output" = 'aurtomator-${{ steps.find.outputs.version }}.tar.gz' ]
   run yq -r '.jobs[].steps[] | select(.name == "Build the archive" or
-    .name == "Attach the archive and its attestation" or (.uses // "" | test("^actions/attest@"))) | .if' "$RELEASE"
+    .name == "Attach the archive and publish the release" or (.uses // "" | test("^actions/attest@"))) | .if' "$RELEASE"
   [ "$output" = "$(printf '%s\n' "steps.find.outputs.version != ''" "steps.find.outputs.version != ''" \
     "steps.find.outputs.version != ''")" ]
   run yq -r '.jobs[].steps[] | select(.name == "Find the release to sign" or
-    .name == "Attach the archive and its attestation") | .env.GH_TOKEN' "$RELEASE"
+    .name == "Attach the archive and publish the release") | .env.GH_TOKEN' "$RELEASE"
   [ "$output" = "$(printf '%s\n' '${{ github.token }}' '${{ github.token }}')" ]
 }
 
 @test "release-please: the attach step reads the bundle of the attest step" {
   run yq -r '.jobs.sign.steps[] | select(.uses // "" | test("^actions/attest@")) | .id' "$RELEASE"
   [ "$output" = attest ]
-  run yq -r '.jobs.sign.steps[] | select(.name == "Attach the archive and its attestation") | .env.BUNDLE' "$RELEASE"
+  run yq -r '.jobs.sign.steps[] | select(.name == "Attach the archive and publish the release") | .env.BUNDLE' "$RELEASE"
   [ "$output" = '${{ steps.attest.outputs.bundle-path }}' ]
 }
 
 # Runs step $1 of release-please.yml in a checkout whose manifest holds $MANIFEST, with a gh that
-# prints $TAG_SHA for the commit of a tag and $ASSETS for the assets of a release
+# prints the tag ref as $TAG_TYPE, commit by default, and $TAG_SHA, $PEELED for the commit of an
+# annotated tag and $DRAFT, true by default, for whether the release is a draft
 run_release_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$bin" "$ws/.github"
@@ -1019,11 +1022,12 @@ run_release_step() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
 case "$1 $2" in
-  "api repos/"*)
+  "api repos/owner/repo/git/ref/tags/"*)
     [[ -n "${TAG_SHA:-}" ]] || exit 1
-    printf '%s\n' "$TAG_SHA"
+    printf '%s %s\n' "${TAG_TYPE:-commit}" "$TAG_SHA"
     ;;
-  "release view") printf '%s\n' "${ASSETS:-}" ;;
+  "api repos/owner/repo/git/tags/"*) printf '%s\n' "${PEELED:-}" ;;
+  "release view") printf '%s\n' "${DRAFT:-true}" ;;
 esac
 EOF
   chmod +x "$bin/gh"
@@ -1033,20 +1037,33 @@ EOF
   : >"$BATS_TEST_TMPDIR/output"
   cd "$ws"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" REPO=owner/repo \
-    SHA=abc123 TAG_SHA="${TAG_SHA:-}" ASSETS="${ASSETS:-}" VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" \
-    bash -e "$BATS_TEST_TMPDIR/step.sh"
+    SHA=abc123 TAG_SHA="${TAG_SHA:-}" TAG_TYPE="${TAG_TYPE:-}" PEELED="${PEELED:-}" DRAFT="${DRAFT:-}" \
+    VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Sigstore bundles of actions/attest carry the attestation as a DSSE envelope
 SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json","signatures":[{"sig":"c2ln"}]}'
 
-# Reruns of the release job find the release again until it has its archive
-@test "release-please: the find step names the release of the commit of the run without an archive" {
+# Reruns of the release job find the release again while it is a draft
+@test "release-please: the find step names the draft release of the commit of the run" {
   MANIFEST=0.13.1 TAG_SHA=abc123 run_release_step "Find the release to sign"
   [ "$status" -eq 0 ]
   [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
-  grep -qxF 'api repos/owner/repo/commits/v0.13.1 --jq .sha' "$GH_LOG"
-  grep -qxF 'release view v0.13.1 -R owner/repo --json assets --jq .assets[].name' "$GH_LOG"
+  grep -qxF 'api repos/owner/repo/git/ref/tags/v0.13.1 --jq .object.type + " " + .object.sha' "$GH_LOG"
+  grep -qxF 'release view v0.13.1 -R owner/repo --json isDraft --jq .isDraft' "$GH_LOG"
+}
+
+# commits/<ref> also resolves a branch of that name, which accounts with push access can make
+@test "release-please: the find step reads the commit of an annotated tag through its tag object" {
+  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=fff999 PEELED=abc123 run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
+  grep -qxF 'api repos/owner/repo/git/tags/fff999 --jq .object.sha' "$GH_LOG"
+  run grep -c '/commits/' "$GH_LOG"
+  [ "$output" = "0" ]
+  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=abc123 PEELED=def456 run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
 }
 
 # Later pushes would sign the code of an older release with the provenance of a newer commit
@@ -1064,18 +1081,11 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   [ ! -s "$BATS_TEST_TMPDIR/output" ]
 }
 
-@test "release-please: the find step leaves a release that has its archive" {
-  MANIFEST=0.13.1 TAG_SHA=abc123 ASSETS=$'notes.txt\naurtomator-0.13.1.tar.gz' run_release_step "Find the release to sign"
+# GitHub locks the files of a published immutable release
+@test "release-please: the find step leaves a published release" {
+  MANIFEST=0.13.1 TAG_SHA=abc123 DRAFT=false run_release_step "Find the release to sign"
   [ "$status" -eq 0 ]
   [ ! -s "$BATS_TEST_TMPDIR/output" ]
-}
-
-# Runs that fail after the attestation files went up leave the release without its archive
-@test "release-please: the find step names a release that has only the attestation files" {
-  MANIFEST=0.13.1 TAG_SHA=abc123 ASSETS=$'aurtomator-0.13.1.tar.gz.sigstore.json\naurtomator-0.13.1.tar.gz.intoto.jsonl' \
-    run_release_step "Find the release to sign"
-  [ "$status" -eq 0 ]
-  [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
 }
 
 @test "release-please: the find step stops on a manifest without a version" {
@@ -1102,14 +1112,14 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   [ "$output" = "$(printf '%s\n' aurtomator-0.13.1/ aurtomator-0.13.1/file)" ]
 }
 
-@test "release-please: attaches the attestation files and then the archive to the release of its version" {
+@test "release-please: attaches the archive and its attestation files to the draft, then publishes it" {
   local bundle="$BATS_TEST_TMPDIR/attestation.json" ws="$BATS_TEST_TMPDIR/ws"
   printf '%s\n' "{\"mediaType\":\"application/vnd.dev.sigstore.bundle.v0.3+json\",\"dsseEnvelope\":$SAMPLE_ENVELOPE}" >"$bundle"
-  VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and its attestation"
+  VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and publish the release"
   [ "$status" -eq 0 ]
   [ "$(<"$GH_LOG")" = "$(printf '%s\n' \
-    'release upload v0.13.1 aurtomator-0.13.1.tar.gz.sigstore.json aurtomator-0.13.1.tar.gz.intoto.jsonl -R owner/repo --clobber' \
-    'release upload v0.13.1 aurtomator-0.13.1.tar.gz -R owner/repo')" ]
+    'release upload v0.13.1 aurtomator-0.13.1.tar.gz aurtomator-0.13.1.tar.gz.sigstore.json aurtomator-0.13.1.tar.gz.intoto.jsonl -R owner/repo --clobber' \
+    'release edit v0.13.1 -R owner/repo --draft=false')" ]
   cmp "$bundle" "$ws/aurtomator-0.13.1.tar.gz.sigstore.json"
   run cat "$ws/aurtomator-0.13.1.tar.gz.intoto.jsonl"
   [ "${#lines[@]}" -eq 1 ]
@@ -1119,7 +1129,7 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
 @test "release-please: uploads nothing for a bundle without a DSSE envelope" {
   local bundle="$BATS_TEST_TMPDIR/attestation.json"
   printf '%s\n' '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json","messageSignature":{}}' >"$bundle"
-  VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and its attestation"
+  VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and publish the release"
   [ "$status" -ne 0 ]
   run grep -c . "$GH_LOG"
   [ "$output" = "0" ]
@@ -4622,9 +4632,14 @@ EOF
   [ "$output" = "0" ]
 }
 
-@test "spec-watch: opens no second issue while one is open" {
-  GH_OPEN=12 GH_SHAS="source/specifications/core-metadata.rst $(printf 'b%.0s' {1..40})" run_spec_step
+# Specifications that change while the issue is open reach its text
+@test "spec-watch: writes the changed specifications into the open issue and opens no second one" {
+  local path=source/specifications/core-metadata.rst
+  GH_OPEN=12 GH_SHAS="$path $(printf 'b%.0s' {1..40})" run_spec_step
   [ "$status" -eq 0 ]
+  grep -q '^issue edit 12 --body Specifications that ' "$GH_LOG"
+  grep -qF -e "\`: \`" "$GH_LOG"
+  grep -qF -e "to \`bbbbbbbbbbbb\`, https://github.com/pypa/packaging.python.org/commits/main/$path" "$GH_LOG"
   run grep -c '^issue create' "$GH_LOG"
   [ "$output" = "0" ]
 }

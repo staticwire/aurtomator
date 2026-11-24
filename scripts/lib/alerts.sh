@@ -29,12 +29,12 @@ alert_fires() {
   esac
 }
 
-# Print the note of alert $2 of package file $1; fails when it is not one line of text, since
-# it goes into one log line and one line of _alerts
+# Print the note of alert $2 of package file $1; fails when it is not one line of text without tabs,
+# since it goes into one log line and one line of _alerts, whose fields tabs separate
 alert_note() {
   local note
   note=$(pkg_get "$1" ".alerts[$2].note | select(tag == \"!!str\")")
-  [[ -n "$note" && "$note" != *[$'\n\r']* ]] || return 1
+  [[ -n "$note" && "$note" != *$'\t'* ]] && ! has_control "$note" || return 1
   printf '%s\n' "$note"
 }
 
@@ -42,14 +42,18 @@ alert_note() {
 # a bare number, boolean or date as another type than text
 alert_note_error() {
   local value
+  if [[ "$(pkg_get "$1" ".alerts[$2].note | select(tag == \"!!str\")")" == *$'\t'* ]]; then
+    echo 'note must be one line of text without tabs'
+    return
+  fi
   value=$(pkg_get "$1" ".alerts[$2].note | select(tag == \"!!int\" or tag == \"!!float\" or tag == \"!!bool\" or tag == \"!!timestamp\")")
   printf 'note must be one line of text%s\n' "${value:+: put $value in quotes}"
 }
 
-# Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as
-# hold or notice, a tab and the note; fail on a broken rule. $4 offline skips the requires rules.
+# Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as hold or
+# notice, a tab and the note; fail on a broken rule. $4 offline skips requires rules, held those without hold
 fired_alerts() {
-  local file="$1" current="$2" latest="$3" offline="${4:-}" count i kind value rc action note change
+  local file="$1" current="$2" latest="$3" offline="${4:-}" count i kind value rc action note change hold
   count=$(pkg_get "$file" '.alerts | length')
   for ((i = 0; i < count; i++)); do
     kind=$(pkg_get "$file" ".alerts[$i] | [keys[] | select(. == \"when\" or . == \"from\" or . == \"match\" or . == \"requires\")] | join(\" \")")
@@ -58,6 +62,7 @@ fired_alerts() {
       return 1
     fi
     value=$(pkg_get "$file" ".alerts[$i].$kind")
+    hold=$(pkg_get "$file" ".alerts[$i].hold")
     if [[ "$kind" == when && "$value" != major ]]; then
       log_err "alerts[$i].when must be major, got $value"
       return 1
@@ -77,6 +82,7 @@ fired_alerts() {
         return 1
       fi
       [[ -n "$current" && "$offline" != offline ]] || continue
+      [[ "$offline" != held || "$hold" == true ]] || continue
       change=$(requires_change "$file" "$current" "$latest") || return 1
       [[ -n "$change" ]] || continue
       note="${note:+$note: }$change"
@@ -94,7 +100,8 @@ fired_alerts() {
       ((rc == 0)) || continue
     fi
     action=notice
-    [[ $(pkg_get "$file" ".alerts[$i].hold") != true ]] || action=hold
+    [[ "$hold" != true ]] || action=hold
+    [[ "$offline" != held || "$action" == hold ]] || continue
     printf '%s\t%s\n' "$action" "$note"
   done
 }

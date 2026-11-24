@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write # gh release upload attaches the archive
+      contents: write # attaches the archive and publishes the draft release
       id-token: write # actions/attest gets an OIDC token for the Sigstore certificate
       attestations: write # actions/attest stores the attestation
 
@@ -70,7 +70,7 @@ jobs:
           persist-credentials: false
 
       # Only the run of the release commit signs its release, so a later run never signs older code
-      # with the provenance of a newer commit; a rerun of that run finds the release again
+      # with the provenance of a newer commit; a rerun of that run finds the draft again
       - name: Find the release to sign
         id: find
         env:
@@ -83,14 +83,19 @@ jobs:
             echo "::error::The manifest holds no version: $version"
             exit 1
           fi
-          tag_sha=$(gh api "repos/$REPO/commits/v$version" --jq .sha) || tag_sha=""
+          # commits/<ref> would also take a branch of that name; annotated tags point at a tag object
+          ref=$(gh api "repos/$REPO/git/ref/tags/v$version" --jq '.object.type + " " + .object.sha') || ref=""
+          read -r type tag_sha <<<"$ref"
+          if [[ "$type" == tag ]]; then
+            tag_sha=$(gh api "repos/$REPO/git/tags/$tag_sha" --jq .object.sha) || tag_sha=""
+          fi
           if [[ "$tag_sha" != "$SHA" ]]; then
             echo "v$version is no release of this commit"
             exit 0
           fi
-          assets=$(gh release view "v$version" -R "$REPO" --json assets --jq '.assets[].name')
-          if grep -qxF "aurtomator-$version.tar.gz" <<<"$assets"; then
-            echo "v$version has its archive"
+          draft=$(gh release view "v$version" -R "$REPO" --json isDraft --jq .isDraft)
+          if [[ "$draft" != true ]]; then
+            echo "v$version is published"
             exit 0
           fi
           echo "version=$version" >>"$GITHUB_OUTPUT"
@@ -107,9 +112,9 @@ jobs:
         with:
           subject-path: aurtomator-${{ steps.find.outputs.version }}.tar.gz
 
-      # The find step skips a release that has its archive, so the archive goes up last,
-      # and --clobber replaces the attestation files that a failed run left
-      - name: Attach the archive and its attestation
+      # Immutable releases lock their files once published, so the draft gets every file first,
+      # and --clobber replaces the files that a failed run left
+      - name: Attach the archive and publish the release
         if: steps.find.outputs.version != ''
         env:
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
@@ -120,5 +125,5 @@ jobs:
           archive="aurtomator-$VERSION.tar.gz"
           cp "$BUNDLE" "$archive.sigstore.json"
           jq -ce .dsseEnvelope "$BUNDLE" >"$archive.intoto.jsonl"
-          gh release upload "v$VERSION" "$archive.sigstore.json" "$archive.intoto.jsonl" -R "$REPO" --clobber
-          gh release upload "v$VERSION" "$archive" -R "$REPO"
+          gh release upload "v$VERSION" "$archive" "$archive.sigstore.json" "$archive.intoto.jsonl" -R "$REPO" --clobber
+          gh release edit "v$VERSION" -R "$REPO" --draft=false

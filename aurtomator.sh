@@ -314,6 +314,11 @@ fi
 copy="$cache/aurtomator/$sha"
 # User namespaces show the accounts they do not map, root of the host among them, with this uid
 overflow_uid=$(cat /proc/sys/kernel/overflowuid 2>/dev/null) || overflow_uid=65534
+# Namespaces that map no uid show this uid for every file, so each owner check would pass
+if [[ "$(id -u)" == "$overflow_uid" ]]; then
+  echo "Your uid is $overflow_uid, which a user namespace gives the accounts it does not map, so the script cannot tell whether another account could swap the copy of aurtomator; run the script outside the namespace, or in one that maps your uid" >&2
+  exit 1
+fi
 home=""
 if [[ "${HOME:-}" == /* ]]; then
   home=$(cd -P -- "$HOME" 2>/dev/null && pwd -P) || home=""
@@ -371,13 +376,16 @@ check_cache_dirs() {
     exit 1
   done
 }
-# Succeeds when the copy is the checkout of the pin as the fetch left it, which only the user can write
+# Succeeds when the copy is the checkout of the pin as the fetch left it, which only the user can write.
+# git status skips files under the assume-unchanged and skip-worktree bits, which ls-files -v shows.
 copy_ok() {
-  local status
+  local status flagged
   [[ -d "$copy" && ! -L "$copy" && -O "$copy" && -z "$(find "$copy" ! -type l -perm /022 -print -quit 2>/dev/null)" ]] &&
     [[ "$(cache_git -C "$copy" rev-parse HEAD 2>/dev/null)" == "$sha" ]] &&
-    status=$(GIT_OPTIONAL_LOCKS=0 cache_git -C "$copy" status --porcelain --untracked-files=no 2>/dev/null) &&
-    [[ -z "$status" ]]
+    status=$(GIT_OPTIONAL_LOCKS=0 cache_git -C "$copy" status --porcelain --untracked-files=all --ignored 2>/dev/null) &&
+    [[ -z "$status" ]] &&
+    flagged=$(cache_git -C "$copy" ls-files -v 2>/dev/null) &&
+    [[ -z "$(sed '/^H /d' <<<"$flagged")" ]]
 }
 [[ ! -e "${copy%/*}" && ! -L "${copy%/*}" ]] || check_cache_dirs
 if [[ -e "$copy" || -L "$copy" ]] && ! copy_ok; then

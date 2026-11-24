@@ -573,9 +573,13 @@ validate_pkg() {
     fi
   fi
 
-  local date_format version_source sample
+  local date_format version_source sample width_re='%[-_0^#+]*[1-9]'
   date_format=$(pkg_get "$file" '.upstream.date_format')
-  if [[ "$date_format" != "null" ]]; then
+  # date pads a field to any width it is given
+  if [[ "$date_format" != "null" ]] && { ((${#date_format} > 32)) || [[ "$date_format" =~ $width_re ]]; }; then
+    log_err "$shown: upstream.date_format must hold at most 32 characters and no field width such as %10d: ${date_format@Q}"
+    ((errors++))
+  elif [[ "$date_format" != "null" ]]; then
     version_source=$(pkg_get "$file" '.upstream.version_source // "tag"')
     sample=$(date -u -d 2026-01-02 +"$date_format")
     if [[ "$version_source" != "tag_date" && "$version_source" != "published_date" &&

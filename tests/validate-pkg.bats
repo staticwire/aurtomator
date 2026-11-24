@@ -2110,6 +2110,19 @@ alerts:
   done
 }
 
+# _alerts separates its fields with tabs
+@test "validate: an alert note with a tab rejected" {
+  create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+alerts:
+  - when: major
+    hold: true
+    note: \"Raise foo\\tto 2\""
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"alerts[0].note must be one line of text without tabs"* ]]
+}
+
 @test "validate: an alert note that YAML reads as a number, a boolean or a date asks for quotes" {
   local value
   for value in 2024 1.5 true 2024-10-30; do
@@ -2609,6 +2622,21 @@ pkgver_dash: _"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
   [ "$status" -ne 0 ]
   [[ "$output" == *"upstream.date_format must give a valid version, it gives '2026-01-02'"* ]]
+}
+
+# date pads a field to any width, so 12 bytes of YAML could ask for megabytes
+@test "validate: date_format with a field width or over 32 characters rejected before date runs" {
+  local format
+  for format in '%30000000d' '%_10d' '%+10d' '%Y%m%d%H%M%S%Y%m%d%H%M%S%Y%m%d%H%M'; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: tag_date
+  date_format: '$format'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"upstream.date_format must hold at most 32 characters and no field width such as %10d: '$format'"* ]]
+    [[ "$output" != *"it gives"* ]]
+  done
 }
 
 # === values from release asset names ===

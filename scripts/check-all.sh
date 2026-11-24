@@ -304,17 +304,19 @@ elif [[ -n "$AURTOMATOR_VERSION" ]]; then
   fi
 fi
 
-# Prints the update_failed status that prepare or verify wrote for package $1,
-# or one of its own when there is none; it ignores any other status there
+# Prints the update_failed status that prepare or verify wrote for package $1, with the reason of
+# a check_failed of prepare, or one of its own when there is none; it ignores any other status
 handed_failure() {
   local status_dir="${WORK_DIR}/status"
   local file="${status_dir}/$1"
   if [[ -d "$status_dir" && ! -L "$status_dir" && -f "$file" && ! -L "$file" ]] &&
     ! _has_nul "$file"; then
-    local handed
+    local handed head
     # PKGBUILD code of prepare can write this file
-    if [[ "$(head -c 14 -- "$file")" == update_failed: ]]; then
+    head=$(head -c 14 -- "$file")
+    if [[ "$head" == update_failed: || "$head" == "check_failed: " ]]; then
       handed=$(last_bytes "$file")
+      handed=${handed#check_failed: }
       [[ "$handed" == update_failed:* ]] || handed="update_failed: $handed"
       status_text "$handed"
       return
@@ -398,10 +400,20 @@ in_recheck() {
   return 1
 }
 
-# Succeeds when package $2 of file $1, from version $3 to $4 in pass $5, waits for a package of
-# the project of its upstream.pin_from: one held in this run, or in pass 1 one in RECHECK
+# Succeeds for status $1 of a package of a project after its check, or in --publish after its
+# push, when its version in the AUR is the newest release of the project or goes there in this run
+project_at_newest() {
+  case "$1" in
+    up_to_date | "updated: "* | "downgrade: "* | "rebuilt: "* | "arch_added: "* | "new_build: "* | "arch_back: "*) return 0 ;;
+    "new_version: "* | "available_downgrade: "*) [[ "$MODE" == check || -n "$DRY_RUN" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+# Succeeds when package $2 of file $1, from version $3 to $4 in pass $5, waits for a package of the
+# project of its upstream.pin_from: held, in RECHECK in pass 1, or short of the release that pins $4
 companion_waits() {
-  local pin_from name main main_name
+  local pin_from name main main_name status
   pin_from=$(pkg_get "$1" '.upstream.pin_from // ""') || return 1
   [[ -n "$pin_from" ]] || return 1
   name=$(pypi_name "$pin_from") || return 1
@@ -409,7 +421,9 @@ companion_waits() {
   while IFS= read -r main; do
     [[ -n "$main" ]] || continue
     main_name=$(package_name "$main" 2>/dev/null) || continue
-    if [[ -f "${STATUS_DIR}/${main_name}" && "$(<"${STATUS_DIR}/${main_name}")" == "held: "* ]]; then
+    status=""
+    [[ ! -f "${STATUS_DIR}/${main_name}" ]] || status=$(<"${STATUS_DIR}/${main_name}")
+    if [[ "$status" == "held: "* ]]; then
       log_warn "$2: update ${3:-none} → $4 waits for the held update of $main_name"
       echo "held: $4" >"${STATUS_DIR}/$2"
       record_alerts "$2" "wait"$'\t'"Waits for the held update of $main_name"
@@ -420,6 +434,17 @@ companion_waits() {
       log_info "$2 waits for the second check of $main_name"
       echo "unchecked: waits for the second check of $main_name" >"${STATUS_DIR}/$2"
       RECHECK+=("$1")
+      return 0
+    fi
+    if ! project_at_newest "$status"; then
+      log_warn "$2: update ${3:-none} → $4 waits for the update of $main_name"
+      # --publish keeps the status of the check run, so the next run publishes the update
+      if [[ "$MODE" == publish ]]; then
+        printf '%s\n' "${CHECKED[$2]:-}" >"${STATUS_DIR}/$2"
+      else
+        echo "held: $4" >"${STATUS_DIR}/$2"
+        record_alerts "$2" "wait"$'\t'"Waits for the update of $main_name"
+      fi
       return 0
     fi
   done <<<"${PROJECT_FILES[$name]:-}"
@@ -753,7 +778,7 @@ run_package() {
   step_time_left "$pkg_name" || return 0
   err_file=$(mktemp)
   check_rc=0
-  if [[ "$MODE" == publish ]]; then
+  if [[ "$MODE" == prepare || "$MODE" == publish ]]; then
     alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" offline 2>"$err_file") || check_rc=$?
     ((check_rc != 0)) || alerts=$(publish_alerts "$pkg_name" "$alerts")
   else
@@ -789,7 +814,7 @@ run_package() {
     return
   fi
   # Pinned versions move with the package of the project that pins them
-  if [[ "$MODE" == check || "$MODE" == update ]] && [[ "$latest" != "$current" ]] &&
+  if [[ "$MODE" != prepare ]] && [[ "$latest" != "$current" ]] &&
     companion_waits "$pkg_file" "$pkg_name" "$current" "$latest" "$pass"; then
     return
   fi

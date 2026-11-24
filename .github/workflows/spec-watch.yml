@@ -55,19 +55,23 @@ jobs:
             done <<<"$open"
             exit 0
           fi
-          if [[ -n "$open" ]]; then
-            echo "The issue of the changed specifications is open"
-            exit 0
-          fi
-
-          gh label create spec-watch --color c5def5 --description "Changed PyPA specification" 2>/dev/null || true
           # The backticks are Markdown code
           # shellcheck disable=SC2016
-          gh issue create --title "📜 PyPA specifications changed" --label spec-watch --body "$(printf '%s\n' \
+          body=$(printf '%s\n' \
             'Specifications that `scripts/lib/requires.sh` follows have commits after the SHAs in `.github/spec-watch.tsv`:' \
             "" \
             "${changed[@]}" \
             "" \
             'Read the commits. When one changes the meaning of requirements or markers, update `scripts/lib/requires.sh` and its tests. Then set the new SHAs in `.github/spec-watch.tsv`, and the next run closes this issue.' \
             "" \
-            "Run: $RUN_URL")"
+            "Run: $RUN_URL")
+          # Specifications that change while the issue is open reach its text
+          if [[ -n "$open" ]]; then
+            while IFS= read -r number; do
+              gh issue edit "$number" --body "$body"
+            done <<<"$open"
+            exit 0
+          fi
+
+          gh label create spec-watch --color c5def5 --description "Changed PyPA specification" 2>/dev/null || true
+          gh issue create --title "📜 PyPA specifications changed" --label spec-watch --body "$body"

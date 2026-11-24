@@ -30,7 +30,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 | Crafted package YAML | Pull requests to a user repository | `validate-pkg.sh` with allow lists of keys and values |
 | Tampered downloads | Network attackers | `verify` downloads every source again over HTTPS and refuses checksums that do not match |
 | Theft of secrets | Code that runs in a job | Secrets only in `publish`, which runs no PKGBUILD code, and workflow commands stopped in the output of `builder` |
-| Changed dependencies | Actions and the base image | Actions pinned by commit SHA, the base image pinned by digest, and Dependabot pull requests that bring each version a week after its release |
+| Changed dependencies | Actions and the base image | Actions pinned by commit SHA, the base image pinned by digest, and Dependabot pull requests that bring each version a week after its release. Security updates of Dependabot skip that week, and the jobs upgrade the packages of the image from the Arch mirrors, see [Permissions and container](/internals/workflow/#permissions-and-container). The Scorecard action pulls its image by tag, see [Scorecard](/develop/ci/#scorecard) |
 
 ## Trust boundaries
 
@@ -87,3 +87,10 @@ gh attestation verify aurtomator-X.Y.Z.tar.gz -R staticwire/aurtomator \
 ```
 
 `aurtomator-X.Y.Z.tar.gz.intoto.jsonl` holds the SLSA provenance of the archive as an in-toto bundle: the DSSE envelope of the same attestation, on one line.
+
+Releases after v0.14.0 are immutable. The workflow attaches the archive and its attestation files to a draft and publishes it last, and GitHub then locks the tag and the files of the release and adds a release attestation of the tag, the commit and the files. The release page shows it as **Release attestation**, and the GitHub CLI checks it, for the release and for a downloaded file:
+
+```sh
+gh release verify vX.Y.Z -R staticwire/aurtomator
+gh release verify-asset vX.Y.Z aurtomator-X.Y.Z.tar.gz -R staticwire/aurtomator
+```

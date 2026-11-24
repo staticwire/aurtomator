@@ -291,14 +291,16 @@ http_get() {
   return "$rc"
 }
 
-# GET a URL that answers JSON. Bot checks answer HTML with HTTP 200, so answers
-# other than a JSON object or array fail and name the URL they came from.
+# GET a URL that answers JSON. Bot checks answer HTML with HTTP 200, and yq reads YAML too, so answers
+# other than a JSON object or array, which opens with { or [, fail and name the URL they came from.
 http_get_json() {
-  local answer url
+  local answer url lead
   answer=$(http_get "$@" -w "\n%{url_effective}${HTTP_FAILURE}") || return
   url=${answer##*$'\n'}
   answer=${answer%$'\n'*}
-  if [[ ! "$(yq 'tag' <<<"$answer" 2>/dev/null)" =~ ^!!(map|seq)$ ]]; then
+  lead=${answer#"${answer%%[![:space:]]*}"}
+  if [[ "${lead:0:1}" != "{" && "${lead:0:1}" != "[" ]] ||
+    [[ ! "$(yq 'tag' <<<"$answer" 2>/dev/null)" =~ ^!!(map|seq)$ ]]; then
     printf '%s: the answer is not JSON\n' "$url" >&2
     request_failed "$1"
     return 1

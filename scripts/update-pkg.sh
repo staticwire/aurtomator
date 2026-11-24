@@ -124,7 +124,7 @@ elif [[ "$aur_pkgver" != "$NEW_VERSION" ]]; then
     log_err "$PKG_NAME has $aur_pkgver on the AUR, and $aur_pkgver to $NEW_VERSION is a version jump"
     exit 1
   fi
-  alerts=$(fired_alerts "$PKG_FILE" "$aur_pkgver" "$NEW_VERSION") || exit 1
+  alerts=$(fired_alerts "$PKG_FILE" "$aur_pkgver" "$NEW_VERSION" held) || exit 1
   held=$(awk -F'\t' '$1 == "hold" { print $2; exit }' <<<"$alerts")
   if [[ -n "$held" ]]; then
     log_err "$PKG_NAME has $aur_pkgver on the AUR, and an alert holds $aur_pkgver to $NEW_VERSION: $held"
