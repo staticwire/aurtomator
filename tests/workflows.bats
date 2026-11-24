@@ -1010,7 +1010,8 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 }
 
 # Runs step $1 of release-please.yml in a checkout whose manifest holds $MANIFEST, with a gh that
-# prints $TAG_SHA for the commit of a tag and $ASSETS for the assets of a release
+# prints the tag ref as $TAG_TYPE, commit by default, and $TAG_SHA, $PEELED for the commit of an
+# annotated tag and $ASSETS for the assets of a release
 run_release_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$bin" "$ws/.github"
@@ -1019,10 +1020,11 @@ run_release_step() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
 case "$1 $2" in
-  "api repos/"*)
+  "api repos/owner/repo/git/ref/tags/"*)
     [[ -n "${TAG_SHA:-}" ]] || exit 1
-    printf '%s\n' "$TAG_SHA"
+    printf '%s %s\n' "${TAG_TYPE:-commit}" "$TAG_SHA"
     ;;
+  "api repos/owner/repo/git/tags/"*) printf '%s\n' "${PEELED:-}" ;;
   "release view") printf '%s\n' "${ASSETS:-}" ;;
 esac
 EOF
@@ -1033,8 +1035,8 @@ EOF
   : >"$BATS_TEST_TMPDIR/output"
   cd "$ws"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" REPO=owner/repo \
-    SHA=abc123 TAG_SHA="${TAG_SHA:-}" ASSETS="${ASSETS:-}" VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" \
-    bash -e "$BATS_TEST_TMPDIR/step.sh"
+    SHA=abc123 TAG_SHA="${TAG_SHA:-}" TAG_TYPE="${TAG_TYPE:-}" PEELED="${PEELED:-}" ASSETS="${ASSETS:-}" \
+    VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Sigstore bundles of actions/attest carry the attestation as a DSSE envelope
@@ -1045,8 +1047,21 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   MANIFEST=0.13.1 TAG_SHA=abc123 run_release_step "Find the release to sign"
   [ "$status" -eq 0 ]
   [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
-  grep -qxF 'api repos/owner/repo/commits/v0.13.1 --jq .sha' "$GH_LOG"
+  grep -qxF 'api repos/owner/repo/git/ref/tags/v0.13.1 --jq .object.type + " " + .object.sha' "$GH_LOG"
   grep -qxF 'release view v0.13.1 -R owner/repo --json assets --jq .assets[].name' "$GH_LOG"
+}
+
+# commits/<ref> also resolves a branch of that name, which accounts with push access can make
+@test "release-please: the find step reads the commit of an annotated tag through its tag object" {
+  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=fff999 PEELED=abc123 run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
+  grep -qxF 'api repos/owner/repo/git/tags/fff999 --jq .object.sha' "$GH_LOG"
+  run grep -c '/commits/' "$GH_LOG"
+  [ "$output" = "0" ]
+  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=abc123 PEELED=def456 run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
 }
 
 # Later pushes would sign the code of an older release with the provenance of a newer commit
