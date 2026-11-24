@@ -45,7 +45,7 @@ case "$url" in
     echo '<!DOCTYPE html><html><body><h1>Are you Human?</h1></body></html>'
     ;;
   # The same page in front of a registry or of archlinux.org
-  *registry.npmjs.org/gated-pkg/latest | *pypi.org/pypi/gated-pkg/json | \
+  *registry.npmjs.org/gated-pkg/latest | *pypi.org/pypi/gated-pkg/json | *rubygems.org/api/v1/versions/gated-pkg.json | \
     *crates.io/api/v1/crates/gated-pkg | *repology.org/api/v1/project/gated-pkg | \
     *archlinux.org/packages/search/json/?name=gated-pkg)
     host="${url#https://}"
@@ -104,6 +104,35 @@ case "$url" in
       cat "$MOCK_FILES_DIR/$file"
     elif [[ -f "$FIXTURES_DIR/pypi/metadata/$file" ]]; then
       cat "$FIXTURES_DIR/pypi/metadata/$file"
+    else
+      http_error 404
+    fi
+    ;;
+  # rubygems.org: the answers that a test writes, then the fixtures of tests/fixtures
+  *rubygems.org/api/v1/versions/*.json)
+    file=${url##*/}
+    if [[ -f "$MOCK_FILES_DIR/rubygems/versions/$file" ]]; then
+      cat "$MOCK_FILES_DIR/rubygems/versions/$file"
+    elif [[ -f "$FIXTURES_DIR/rubygems/versions/$file" ]]; then
+      cat "$FIXTURES_DIR/rubygems/versions/$file"
+    else
+      http_error 404
+    fi
+    ;;
+  *rubygems.org/api/v2/rubygems/*/versions/*.json)
+    file=${url#*/api/v2/rubygems/}
+    file="${file%%/*}-${url##*/}"
+    if [[ -f "$MOCK_FILES_DIR/rubygems/v2/$file" ]]; then
+      cat "$MOCK_FILES_DIR/rubygems/v2/$file"
+    elif [[ -f "$FIXTURES_DIR/rubygems/v2/$file" ]]; then
+      cat "$FIXTURES_DIR/rubygems/v2/$file"
+    else
+      http_error 404
+    fi
+    ;;
+  *rubygems.org/gems/*.gem)
+    if [[ -f "$MOCK_FILES_DIR/${url##*/}" ]]; then
+      cat "$MOCK_FILES_DIR/${url##*/}"
     else
       http_error 404
     fi

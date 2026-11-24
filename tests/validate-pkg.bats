@@ -1058,6 +1058,20 @@ alerts:
   [[ "$output" != *"applies to"* ]]
 }
 
+@test "validate: rubygems takes registry and max_answer_mb" {
+  create_test_package "mypkg" "rubygems" "upstream:
+  registry: bashcov
+  max_answer_mb: 10"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 0 ]
+  create_test_package "mypkg" "rubygems" "upstream:
+  registry: bashcov
+  prerelease: true"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.prerelease"* ]]
+}
+
 @test "validate: an upstream key of no strategy rejected" {
   create_test_package "mypkg" "github-release" "upstream:
   project: owner/repo

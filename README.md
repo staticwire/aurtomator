@@ -81,7 +81,7 @@ Your repository holds one YAML per package, which names its upstream source, and
 
 ## Strategies
 
-16 built-in version detection strategies:
+17 built-in version detection strategies:
 
 | Strategy         | Source                 | Use for                                                 |
 |------------------|------------------------|---------------------------------------------------------|
@@ -97,6 +97,7 @@ Your repository holds one YAML per package, which names its upstream source, and
 | `pypi`           | PyPI JSON API          | Python packages                                         |
 | `npm`            | npm registry           | Node.js packages                                        |
 | `crates`         | crates.io API          | Rust crates                                             |
+| `rubygems`       | rubygems.org API       | Ruby gems                                               |
 | `repology`       | Repology API           | Fallback across distribution repositories               |
 | `archpkg`        | Arch package search    | Official Arch packages                                  |
 | `webpage-scrape` | HTTPS page and a regex | Upstreams without an API                                |

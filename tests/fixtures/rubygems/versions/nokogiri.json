@@ -1,0 +1,638 @@
+[
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:56.838Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 254180,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "ruby",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "abe94507c54cb18f872777b16bdca4aad32b1abdc4c52fe843f1c80fbdf992b8",
+    "spec_sha": "b3ad09d7445d9d8be3dba3890bff524c1d4d3188a815014e001eaa3807bb3999"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:54.427Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 291709,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "x86_64-linux-musl",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "464d1f3dfb0d53cf54c0c6a7e23e8e91cf68ec3cafc2b27dc4a7682f2d9bf546",
+    "spec_sha": "9898a6ada21c2014bafc8191ee5037a5de29f87031c4a7f08a626da89e437836"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:52.292Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 5461966,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "x86_64-linux-gnu",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "25865ccb462f714e712fdf8906fde07849cb6704a808e3d629d75baa5af5dd3b",
+    "spec_sha": "ddd20a2be5dca7e2265db865a6e22fb8e6685c81bdcb613f44f6c23cac196b7d"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:49.511Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 36506,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "x86_64-darwin",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "508e81e8c5f84aaa240dce981bf1c43faae60808726f0ce7024ee92effc5cafe",
+    "spec_sha": "dda11a6d3065932757b97ffcfe3ff2b8b7c5d33d07f3fd56f158b6c499733f31"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:46.914Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 32060,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "x64-mingw-ucrt",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "9ab6ea96ab479a5ff391196de73b5abf660926ea7e4c57cb1f35adf754f1d066",
+    "spec_sha": "4a2c24a3257d66f4f9ac3785df2f02e0c140888d6c7439a456a6a69c79bd2496"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "2026-11-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:44.638Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 34216,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "java",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [
+      "jar isorelax, isorelax, 20030108",
+      "jar org.nokogiri, nekodtd, 0.1.11.noko2",
+      "jar net.sourceforge.htmlunit, neko-htmlunit, 2.63.0",
+      "jar net.sf.saxon, Saxon-HE, 12.7",
+      "jar nu.validator, jing, 20200702VNU",
+      "jar xalan, serializer, 2.7.3",
+      "jar xalan, xalan, 2.7.3",
+      "jar xerces, xercesImpl, 2.12.2",
+      "jar xml-apis, xml-apis, 1.4.01"
+    ],
+    "sha": "3c97c2874993b890386ac487c41578d173e10621d80c2063830d032839487c3b",
+    "spec_sha": "d594478e803fd87277e6f3d6149b04db734a4fd32592148637e5164ad7c943fd"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:41.894Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 285282,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "arm64-darwin",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "f27d7f25f4873fbc3aa35a2cc2fb680c98555fec1925348da439d0869d541142",
+    "spec_sha": "de80a41dde92449143d43214f1676f45b77f6007c49e42263a4080f74c6d10df"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:39.475Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 15082,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "arm-linux-musl",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "28d0ff0c87b6bb2e56580323a6fb049d5d4a02b94f0958fdd47e9ac146991c77",
+    "spec_sha": "438ed7723303d3df714911bbb98f802d2817e634ea0cfb75394c517e8c867abc"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:36.523Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 15671,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "arm-linux-gnu",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "7fd1907125691aa89e838cc91161761c758b4e17bb32f0dd9b5515a82cc759af",
+    "spec_sha": "cd59b6ca481246e7456a3a7a917dfd18bff429269f353df72328ad7a51a8e825"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:33.803Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 58407,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "aarch64-linux-musl",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "efe0c3602e6e54521bc21c681930ce5568e2d11203de17400710b2b3ca2e4cb4",
+    "spec_sha": "e84587e055b28f7621dee48b4c4fd51803845ce25cfa57b6ca955e030a0591bc"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T18:22:30.560Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 685063,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.7",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "aarch64-linux-gnu",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "8f5e15d299602456406e1f03a9f3456cceb33a0722811e818d2ee2214eb4c84a",
+    "spec_sha": "c0fe5ccfcce100c252798b7cc8ed4fb809332f00d4738ddeeba46f9fe2dd66c2"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:02:19.630Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 18794,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "ruby",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "a61e7192fc2691c23bc0241907c4dbcb70ada6ab904796ce2426a57171022c8f",
+    "spec_sha": "9c414186381a2a96319562c97bfd65b3656a797de2bdf3842e1614d90626b6c8"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:02:17.288Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 30682,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "x86_64-linux-musl",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "c92b29e897f4ddc19bea67188695aab667f695e74592a5c8741642ecb25d34d9",
+    "spec_sha": "2fe6f6f3f4a9261e27019915df908a56a530aa34ddacaf52f23517ebaa9d5b4f"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:02:14.782Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 608067,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "x86_64-linux-gnu",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "ad1e228c3bc873e4f4fc4f845d7e37b4d3648af537acd7b5e8463cce5693065b",
+    "spec_sha": "c078ad92e2baac34392c85ccd3168f430bc280648f219cb100edcdd6dffc6fb5"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:02:12.272Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 1820,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "x86_64-darwin",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "8f15f820fa1373d8685ae48cdd8020d923b4104db74d149d1235ddae956469a6",
+    "spec_sha": "b628aa21038b80fbd52e67cde15bf35794508ba99f38b6a9d7fafd2b473b4f5d"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:02:09.528Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 1743,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "x64-mingw-ucrt",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "b5768c5dab09abe39e6e1329f692db191688398964f7d2c18caaa19aa00f5421",
+    "spec_sha": "8c906b694fa00297e0712cc4f64e8b6a87a62c382e47c8fdf3600b52a504dd55"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "2026-11-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:02:07.374Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 1812,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "java",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [
+      "jar isorelax, isorelax, 20030108",
+      "jar org.nokogiri, nekodtd, 0.1.11.noko2",
+      "jar net.sourceforge.htmlunit, neko-htmlunit, 2.63.0",
+      "jar net.sf.saxon, Saxon-HE, 12.7",
+      "jar nu.validator, jing, 20200702VNU",
+      "jar xalan, serializer, 2.7.3",
+      "jar xalan, xalan, 2.7.3",
+      "jar xerces, xercesImpl, 2.12.2",
+      "jar xml-apis, xml-apis, 1.4.01"
+    ],
+    "sha": "4068744c2afb9c2596666a5b02fe633be1c58abb3bf2c9d06c962ede95c55fba",
+    "spec_sha": "da001714b324c417a826ee9de07e8538ce53ff7025db2a0f2079e527ad4e0d39"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:02:03.973Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 20110,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "arm64-darwin",
+    "rubygems_version": ">= 0",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "0a89005ba8cf40c7bd580f4c0873f5f11e5866a99e364764fb59ac6516f560d0",
+    "spec_sha": "c86c418a88cdbab0bccda568a4bb21d17fff67e33e1ec175a44eae98e4035c79"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:02:01.662Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 711,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "arm-linux-musl",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "c20ea8d8c92cbaa475f0952f755dea88cf6e3ace8b49d634a0a5385a1feaea10",
+    "spec_sha": "d40deb6b0a7b1f47314143abd5161ff510c0df5f16fee766283a16d9d110e307"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:01:58.988Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 864,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "arm-linux-gnu",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "574e50ddd99ed71aaa868027d84eb3b9f051e55fe07ddc844e4fdd654be953fc",
+    "spec_sha": "5df5ed8388fea590d42bb8a9193f120d6884588e20806b304a14dcb415f0efc2"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:01:55.962Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 4284,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "aarch64-linux-musl",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "4a5620da1c52150e0343bd2bba7dbd9b3899b5eb41687dc1942c9092d81e52a3",
+    "spec_sha": "033bfae000105216913f7d0ea3ccc478368a6665824a2cc6b3683e54f58e641d"
+  },
+  {
+    "authors": "Mike Dalessio, Aaron Patterson, Yoko Harada, Akinori MUSHA, John Shahid, Karol Bucek, Sam Ruby, Craig Barnes, Stephen Checkoway, Lars Kanis, Sergio Arbeo, Timothy Elliott, Nobuyoshi Nakada",
+    "built_at": "1980-01-02T00:00:00.000Z",
+    "created_at": "2026-11-02T07:01:53.123Z",
+    "description": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby. It provides a\nsensible, easy-to-understand API for reading, writing, modifying, and querying documents. It is\nfast and standards-compliant by relying on native parsers like libxml2, libgumbo, or xerces.\n",
+    "downloads_count": 128531,
+    "metadata": {
+      "homepage_uri": "https://nokogiri.org",
+      "changelog_uri": "https://nokogiri.org/CHANGELOG.html",
+      "bug_tracker_uri": "https://github.com/sparklemotion/nokogiri/issues",
+      "source_code_uri": "https://github.com/sparklemotion/nokogiri",
+      "documentation_uri": "https://nokogiri.org/rdoc/index.html",
+      "rubygems_mfa_required": "true"
+    },
+    "number": "1.19.6",
+    "summary": "Nokogiri (鋸) makes it easy and painless to work with XML and HTML from Ruby.",
+    "platform": "aarch64-linux-gnu",
+    "rubygems_version": ">= 3.3.22",
+    "ruby_version": ">= 3.2, < 4.1.dev",
+    "prerelease": false,
+    "ruby_abi": null,
+    "licenses": [
+      "MIT"
+    ],
+    "requirements": [],
+    "sha": "746fca23be3cd3f121cabab65cb44c52049e4cf9f0d36e7e8c3c0eb6cc298c57",
+    "spec_sha": "0668ce49956c1fbef887883179453bc24c7202f0ce9053c0a91779990e9eeabf"
+  }
+]

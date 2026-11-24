@@ -94,6 +94,32 @@ teardown() {
   [ "$(yq -o json -I0 '[.resultcount, .results]' <<<"$output")" = '[0,[]]' ]
 }
 
+@test "test helpers: mock curl answers rubygems.org from MOCK_FILES_DIR, then the fixtures, 404 for others" {
+  source "$PROJECT_DIR/scripts/lib/common.sh"
+  run http_get_json https://rubygems.org/api/v1/versions/bashcov.json
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(<"$FIXTURES_DIR/rubygems/versions/bashcov.json")" ]
+  run http_get_json https://rubygems.org/api/v2/rubygems/bashcov/versions/4.0.3.json
+  [ "$output" = "$(<"$FIXTURES_DIR/rubygems/v2/bashcov-4.0.3.json")" ]
+  mkdir -p "$MOCK_FILES_DIR/rubygems/versions" "$MOCK_FILES_DIR/rubygems/v2"
+  echo '[{"number": "1.0"}]' >"$MOCK_FILES_DIR/rubygems/versions/bashcov.json"
+  echo '{"number": "1.0"}' >"$MOCK_FILES_DIR/rubygems/v2/demo-1.0.json"
+  echo gem >"$MOCK_FILES_DIR/demo-1.0.gem"
+  run http_get_json https://rubygems.org/api/v1/versions/bashcov.json
+  [ "$output" = '[{"number": "1.0"}]' ]
+  run http_get_json https://rubygems.org/api/v2/rubygems/demo/versions/1.0.json
+  [ "$output" = '{"number": "1.0"}' ]
+  run http_get https://rubygems.org/gems/demo-1.0.gem -o "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(<"$TEST_TMPDIR/out")" = gem ]
+  for url in https://rubygems.org/api/v1/versions/none-such.json https://rubygems.org/api/v2/rubygems/bashcov/versions/9.9.json \
+    https://rubygems.org/gems/none-1.0.gem; do
+    run http_get "$url"
+    [ "$status" -eq 22 ]
+    [[ "$output" == *"$url: The requested URL returned error: 404"* ]]
+  done
+}
+
 @test "test helpers: aur_srcinfo_remote serves a .SRCINFO to AUR clones of its name alone" {
   printf 'pkgbase = demo\n\tpkgver = 1.0\n\npkgname = demo\n' >"$TEST_TMPDIR/srcinfo"
   aur_srcinfo_remote demo "$TEST_TMPDIR/srcinfo"
@@ -2279,6 +2305,73 @@ check_holds() {
     "2.0 ==1.0.*.* 2" "2.0 >=1.0,, 2" "2.0 >=x 2" "r675.70e1dda >=1.0 2" "2.0 >=1.0,<x 2"
   run bash -c 'source "$0/scripts/lib.sh"; pep440_holds 2.0 ""' "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
+}
+
+# === gemver.sh ===
+
+# Helper: checks gem_cmp on lines of "a b order" in one shell, both ways, and prints the lines that fail
+check_gem_order() {
+  run bash -c 'source "$0/scripts/lib.sh"
+    for line in "$@"; do
+      read -r a b want <<<"$line"
+      if ! gem_cmp "$a" "$b"; then echo "$line: fails"; elif [[ "$GEM_ORDER" != "$want" ]]; then echo "$line: $GEM_ORDER"; fi
+      if ! gem_cmp "$b" "$a"; then echo "$line: fails back"; elif [[ "$GEM_ORDER" != "$((0 - want))" ]]; then echo "$line back: $GEM_ORDER"; fi
+    done' "$TEST_TMPDIR" "$@"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Helper: checks gem_holds on lines of "version|requirements|status" in one shell
+check_gem_holds() {
+  run bash -c 'source "$0/scripts/lib.sh"
+    for line in "$@"; do
+      IFS="|" read -r v req want <<<"$line"
+      rc=0
+      gem_holds "$v" "$req" || rc=$?
+      [[ "$rc" == "$want" ]] || echo "$line: $rc"
+    done' "$TEST_TMPDIR" "$@"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Orders and answers of Gem::Version and Gem::Requirement of ruby 3.4.13, read on 2026-11-25
+@test "gemver.sh: gem_cmp orders versions as Gem::Version does" {
+  check_gem_order "4.0.0.rc1 4.0.0 -1" "1.0 1 0" "1.0.a 1.0 -1" "1.0.a 1.0.b -1" "1.0.a10 1.0.a9 1" \
+    "1.0.0.pre 1.0.0.beta 1" "2.0.0 1.99 1" "1.0.1 1.0.a 1" "1.0-1 1.0.0 -1" "1.0-1 1.0.pre.1 0" "1.19.7 1.19.10 -1" \
+    "1.0.0.rc1 1.0.0.rc10 -1" "1.0a 1.0.a 0" "01.002 1.2 0" "1.0.0.0 1 0" "3.4.0.preview1 3.4.0 -1" \
+    "18446744073709551617 18446744073709551616 1" "1.0.b1 1.0.a2 1" "1.0.rc 1.0.rc0 0"
+}
+
+@test "gemver.sh: gem_segments gives the canonical segments, and gem_version_valid the versions RubyGems reads" {
+  run bash -c 'source "$0/scripts/lib.sh"; for v in 4.0.0.rc1 1.0.0 1.0-1 01.002 1.0a10 1.0.0.0.a; do gem_segments "$v"; echo "${GEM_SEG[*]}"; done' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'4 rc 1\n1\n1 pre 1\n1 2\n1 a 10\n1 a' ]
+  run bash -c 'source "$0/scripts/lib.sh"; for v in "$@"; do gem_version_valid "$v" && echo "$v: yes" || echo "$v: no"; done' "$TEST_TMPDIR" \
+    1.0 1.0-1 1.0-pre-1 1.0.a-1 a1 1..0 '1.0 ' '' 1.0- r675.70e1dda 1.0+1 1.0_1
+  [ "$output" = $'1.0: yes\n1.0-1: yes\n1.0-pre-1: yes\n1.0.a-1: yes\na1: no\n1..0: no\n1.0 : no\n: no\n1.0-: no\nr675.70e1dda: no\n1.0+1: no\n1.0_1: no' ]
+}
+
+@test "gemver.sh: gem_holds evaluates the requirements of rubygems.org as Gem::Requirement does" {
+  check_gem_holds "1.3.2|~> 1.1|0" "1.1.9|~> 1.1|0" "2.0|~> 1.1|1" "1.0.0|~> 1.1|1" "1.1.9|~> 1.1.0|0" "1.3.2|~> 1.1.0|1" \
+    "1.3.2|~> 0.21|1" "0.22.0|~> 0.21|0" "1.0.0|~> 1.0.0.rc1|0" "1.1|~> 1.0.0.rc1|1" "1.3.2|~> 1.1, >= 1.2|0" \
+    "1.1.5|~> 1.1, >= 1.2|1" "1.0|= 1.0|0" "1.0.0|= 1.0|0" "1.0.1|= 1.0|1" "1.0|!= 1.0|1" "1.1|!= 1.0|0" "1.1|> 1.0|0" \
+    "1.0|> 1.0|1" "0.9|< 1.0|0" "1.0|< 1.0|1" "1.0|>= 1.0|0" "0.9|>= 1.0|1" "1.0|<= 1.0|0" "1.1|<= 1.0|1" \
+    "3.4.13|>= 3.2.0|0" "3.4.13|>= 3.5|1" "1.0|>= 0|0" "1.0.rc1|>= 0|0" "1.0|1.0|0" "2.0|~>1.0|1" "2.0|>=1.0|0" \
+    "4.0.0.rc1|~> 4.0|1" "1.0|~> 1|0" "2.5|~> 2|0" "3.0|~> 2|1"
+}
+
+@test "gemver.sh: gem_holds returns 2 for text outside the grammar and names the upper bounds of ~> that fail" {
+  check_gem_holds "2.0|=< 1|2" "2.0|>= x|2" "r675.70e1dda|>= 1.0|2" "2.0|>= 1.0,, < 3|2" "2.0||0"
+  run bash -c 'source "$0/scripts/lib.sh"
+    gem_holds 1.3.2 "~> 0.21" || echo "$GEM_FAILED|$GEM_TILDE_UPPER"
+    gem_holds 0.20 "~> 0.21" || echo "$GEM_FAILED|$GEM_TILDE_UPPER"
+    gem_holds 1.3.2 "~> 0.21, < 1.0" || echo "$GEM_FAILED|$GEM_TILDE_UPPER"' "$TEST_TMPDIR"
+  [ "$output" = $'~> 0.21|1\n~> 0.21|\n~> 0.21, < 1.0|' ]
+}
+
+@test "gemver.sh: gem_prerelease names versions with a letter" {
+  run bash -c 'source "$0/scripts/lib.sh"; for v in 4.0.0.rc1 4.0.0 1.0-1; do gem_prerelease "$v" && echo "$v: pre" || echo "$v: release"; done' "$TEST_TMPDIR"
+  [ "$output" = $'4.0.0.rc1: pre\n4.0.0: release\n1.0-1: pre' ]
 }
 
 # === requires.sh ===

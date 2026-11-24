@@ -37,6 +37,7 @@ readonly UPSTREAM_KEYS=(
   "pypi: registry pin_from max_answer_mb"
   "npm: registry max_answer_mb"
   "crates: registry prerelease max_answer_mb"
+  "rubygems: registry max_answer_mb"
   "repology: repology max_answer_mb"
   "archpkg: archpkg testing max_answer_mb"
   "webpage-scrape: url pattern user_agent max_answer_mb"
