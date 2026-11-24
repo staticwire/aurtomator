@@ -216,7 +216,7 @@ upstream:
 | `upstream.version_pattern` | for `release_body` | Perl regex for the version in the release body. Dashes in the match become `+` |
 | `upstream.tag_version_regex` | no | ERE whose first capture group is the version, for `version_source: tag` |
 | `upstream.tag_version_replace` | no | version built from the groups of `tag_version_regex`, see [github-release](#github-release), and from `\p`, see below |
-| `upstream.date_format` | no | `date` format for `tag_date`, `published_date` and `\p`, `%Y.%m.%d` by default |
+| `upstream.date_format` | no | `date` format for `tag_date`, `published_date` and `\p`, `%Y.%m.%d` by default; at most 32 characters, with no field width such as `%10d` |
 | `upstream.channel` | for pattern D | text that the release name contains |
 
 `tag_date` takes the `YYYY-MM-DD` date in the tag and `published_date` the UTC date of `published_at`, and the two can differ: the servo release `2026-10-21` was published at `2026-10-22T00:25:00Z`. Packages whose `pkgver` has the form `20251213` need `date_format: '%Y%m%d'`, because `vercmp` ranks `20251213` above `2026.10.21`:

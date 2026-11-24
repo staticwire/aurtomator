@@ -2624,6 +2624,21 @@ pkgver_dash: _"
   [[ "$output" == *"upstream.date_format must give a valid version, it gives '2026-01-02'"* ]]
 }
 
+# date pads a field to any width, so 12 bytes of YAML could ask for megabytes
+@test "validate: date_format with a field width or over 32 characters rejected before date runs" {
+  local format
+  for format in '%30000000d' '%_10d' '%+10d' '%Y%m%d%H%M%S%Y%m%d%H%M%S%Y%m%d%H%M'; do
+    create_test_package "mypkg" "github-nightly" "upstream:
+  project: owner/repo
+  version_source: tag_date
+  date_format: '$format'"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"upstream.date_format must hold at most 32 characters and no field width such as %10d: '$format'"* ]]
+    [[ "$output" != *"it gives"* ]]
+  done
+}
+
 # === values from release asset names ===
 
 # Helper: a package of the given strategy with the given asset keys
