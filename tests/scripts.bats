@@ -7838,6 +7838,24 @@ pkgver_dash: ''"
   [[ "$output" == *"Failed to read the commit of tag v2.5.0-rc2 of asset-owner/asset-repo"* ]]
 }
 
+# commits/<ref> also takes a branch of the name of the tag, which can hold newer commits
+@test "check-asset: dates a tag without a release by its git ref, through the object of an annotated tag" {
+  liquidsoap_package
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  MOCK_TAG_AGE=30 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tag v2.5.0-rc2 has no release"* ]]
+  grep -q 'repos/asset-owner/asset-repo/git/ref/tags/v2.5.0-rc2$' "$CURL_ARGS_LOG"
+  grep -q "repos/asset-owner/asset-repo/git/commits/$(printf 'c%.0s' {1..40})\$" "$CURL_ARGS_LOG"
+  run grep -c -e '/commits/v2' -e '/git/tags/' "$CURL_ARGS_LOG"
+  [ "$output" = 0 ]
+  rm "$CURL_ARGS_LOG"
+  MOCK_TAG_TYPE=tag MOCK_TAG_AGE=1 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 3 ]
+  grep -q "repos/asset-owner/asset-repo/git/tags/$(printf 'c%.0s' {1..40})\$" "$CURL_ARGS_LOG"
+  grep -q "repos/asset-owner/asset-repo/git/commits/$(printf 'd%.0s' {1..40})\$" "$CURL_ARGS_LOG"
+}
+
 # bash expands a tilde at the start of an assignment
 @test "check-asset: refuses a value that starts with a tilde" {
   liquidsoap_package '^liquidsoap_(.+)_amd64\.deb$'
