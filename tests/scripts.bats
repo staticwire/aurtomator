@@ -250,11 +250,11 @@ teardown() {
   [ "$output" = "owner/repo" ]
 }
 
-@test "lib.sh: pkg_bool reads true and false in any case, and nothing else" {
+# Callers read nothing as the default of a flag, true for allow_missing_arch
+@test "lib.sh: pkg_bool reads true and false in any case, nothing for no value, and fails on others" {
   local entry
   source "$TEST_TMPDIR/scripts/lib.sh"
-  for entry in true:true True:true TRUE:true false:false False:false FALSE:false \
-    '"true"': yes: '!!bool yes': '!!bool 1': '~': 'tRUE':; do
+  for entry in true:true True:true TRUE:true false:false False:false FALSE:false '~': '': 'null':; do
     printf 'flag: %s\n' "${entry%:*}" >"$TEST_TMPDIR/flag.yml"
     run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
     [ "$status" -eq 0 ]
@@ -267,6 +267,32 @@ teardown() {
   run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+  printf 'a: &x false\nflag: *x\n' >"$TEST_TMPDIR/flag.yml"
+  run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
+  [ "$status" -eq 0 ]
+  [ "$output" = false ]
+  for entry in '"false"' no off 0 yes '!!bool yes' '!!bool 1' tRUE '[]'; do
+    printf 'flag: %s\n' "$entry" >"$TEST_TMPDIR/flag.yml"
+    run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"packages/flag.yml: flag must be true or false" ]] || {
+      echo "${entry} read as $output"
+      return 1
+    }
+  done
+}
+
+# A YAML that says no to missing arches would publish without them after 24 hours
+@test "check-update: fails the check of a package whose flag is no boolean" {
+  local flag
+  for flag in allow_downgrade allow_version_jump allow_missing_arch; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+$flag: \"false\""
+    run "$TEST_TMPDIR/scripts/check-update.sh" mypkg
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"packages/mypkg.yml: $flag must be true or false" ]]
+  done
 }
 
 # vercmp puts an empty string above a version of letters only

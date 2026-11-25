@@ -57,7 +57,7 @@ in_words() {
 
 # Succeeds when field $2 of package file $1 is missing or a boolean that pkg_bool reads
 flag_ok() {
-  [[ $(pkg_get "$1" "$2 | tag") == "!!null" || -n $(pkg_bool "$1" "$2") ]]
+  pkg_bool "$1" "$2" >/dev/null 2>&1
 }
 
 # Print the upstream keys of strategy $1, or fail when UPSTREAM_KEYS has no line for it
@@ -315,7 +315,7 @@ validate_alert() {
   if ! flag_ok "$file" ".alerts[$i].hold"; then
     log_err "$rule.hold must be true or false"
     errors=1
-  elif [[ "$requires" == imports && "$(pkg_bool "$file" ".alerts[$i].hold")" == true ]]; then
+  elif [[ "$requires" == imports && "$(pkg_bool "$file" ".alerts[$i].hold" 2>/dev/null)" == true ]]; then
     log_err "$rule.hold does not apply to requires: imports"
     errors=1
   fi
@@ -651,7 +651,7 @@ validate_pkg() {
     log_err "$shown: upstream.prerelease must be true or false"
     ((errors++))
   # Semver pre-releases always hold a dash
-  elif [[ $(pkg_bool "$file" .upstream.prerelease) == true && "$dash_set" == false ]]; then
+  elif [[ $(pkg_bool "$file" .upstream.prerelease 2>/dev/null) == true && "$dash_set" == false ]]; then
     log_err "$shown: upstream.prerelease needs pkgver_dash"
     ((errors++))
   fi

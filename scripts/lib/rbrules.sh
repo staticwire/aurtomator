@@ -258,7 +258,7 @@ ruby_unmet() {
 # GEM_RUBY and RUBY_FULL
 _ruby_unmet_one() {
   local file=$1 srcinfo=$2 pkgname=$3 name req rc relax text skip
-  relax=$(pkg_bool "$file" .ruby.relax)
+  relax=$(pkg_bool "$file" .ruby.relax) || return 1
   skip=" $(pkg_get "$file" '.ruby.skip // [] | .[] | select(tag == "!!str")' | tr '\n' ' ') "
   if [[ -n "$GEM_RUBY" && -n "$RUBY_FULL" ]]; then
     rc=0
