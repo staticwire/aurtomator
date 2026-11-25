@@ -31,7 +31,7 @@ upstream:
 ./aurtomator.sh validate-pkg my-package
 ```
 
-It checks YAML syntax, required fields and strategy fields.
+It checks YAML syntax, required fields and strategy fields. Online, it also reads what the requires rules of each new version need, as the check reads them: the `.SRCINFO` of the package on the AUR, the `python` or `ruby` key of a package with Python or Ruby in `depends`, and the requirements of the release of `current` on PyPI or rubygems.org, see [Update alerts](/features/update-alerts/). It fails when a rule could not read them, and when the network fails.
 
 ## 4. Test the version check
 

@@ -197,6 +197,42 @@ requires_needed() {
   echo no
 }
 
+# Succeed when the requires rules can read the requirements of package file $1 at its current version, as
+# the check of a new version reads them; fail with the message of that check otherwise
+requires_check() {
+  local rc=0
+  if [[ -n "${AURTOMATOR_RUN_CACHE:-}" ]]; then
+    _requires_check "$1"
+    return
+  fi
+  local -x AURTOMATOR_RUN_CACHE
+  AURTOMATOR_RUN_CACHE=$(mktemp -d) || return 1
+  _requires_check "$1" || rc=$?
+  rm -rf "$AURTOMATOR_RUN_CACHE"
+  return "$rc"
+}
+
+_requires_check() {
+  local file=$1 latest name srcinfo rc=0
+  PY_STATE=""
+  latest=$(pkg_get "$file" '.current // ""') || return 1
+  if [[ -z "$latest" ]]; then
+    name=$(package_name "$file") || return 1
+    srcinfo=$(aur_srcinfo "$name") || rc=$?
+    ((rc != 3)) || return 0
+    ((rc == 0)) || return 1
+    latest=$(srcinfo_pkgver "$srcinfo")
+  fi
+  _requires_state || return 1
+  # python.pyproject reads the requirements in _requires_state
+  if [[ "$PY_STATE" == ready && -z "$PY_HEADERS" ]]; then
+    pypi_metadata "$PY_PROJECT" "$PY_VERSION" >/dev/null || return 1
+  fi
+  if [[ "$RB_STATE" == ready ]]; then
+    gem_release "$RB_GEM" "$RB_VERSION" || return 1
+  fi
+}
+
 # Succeed when key $2, python or ruby, of package file $1 is none
 _requires_off() {
   [[ "$(pkg_get "$1" ".$2 | tag")" == "!!str" && "$(pkg_get "$1" ".$2")" == none ]]

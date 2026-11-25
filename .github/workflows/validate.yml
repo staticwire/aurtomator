@@ -61,10 +61,12 @@ jobs:
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed git go-yq
 
+      # Check the requirements of changed packages compares HEAD with the base of the push or pull request
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Checkout aurtomator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,3 +78,24 @@ jobs:
 
       - name: Validate packages
         run: ./aurtomator/scripts/validate-pkg.sh --all
+
+      # The requires rules read the requirements of each new version, so validate-pkg.sh reads them online
+      # for the packages that the push or the pull request adds or changes, and for all without a base
+      - name: Check the requirements of changed packages
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          name_re='^[a-z0-9][a-z0-9.+_-]*$'
+          if [[ "$BASE" =~ ^[0-9a-f]{40}$ && ! "$BASE" =~ ^0+$ ]] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only --diff-filter=AM "$BASE" HEAD -- packages)
+          else
+            files=$(printf '%s\n' packages/*.yml)
+          fi
+          fail=0
+          while IFS= read -r f; do
+            name=${f#packages/}
+            name=${name%.yml}
+            [[ "$f" == packages/*.yml && "$name" =~ $name_re && -f "$f" && ! -L "$f" ]] || continue
+            ./aurtomator/scripts/validate-pkg.sh "$name" || fail=1
+          done <<<"$files"
+          exit "$fail"

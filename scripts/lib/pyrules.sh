@@ -6,11 +6,7 @@
 
 # Succeed when depends of pkgname $2 of .SRCINFO $1 hold python or python-*
 pkgname_has_python() {
-  local dep
-  while IFS= read -r dep; do
-    [[ "$dep" != python && "$dep" != python-* ]] || return 0
-  done < <(srcinfo_depends "$1" "$2" depends)
-  return 1
+  srcinfo_depends "$1" "$2" depends | awk '$0 == "python" || index($0, "python-") == 1 { found = 1 } END { exit !found }'
 }
 
 # Print the package name that python.map of package file $1 gives PyPI name $2, in PEP 503 form

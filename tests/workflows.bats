@@ -5046,10 +5046,57 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   [ "$output" = "0" ]
   run yq -o=json -I=0 '[.jobs.packages.steps[] | select(.uses | test("^actions/checkout@")) | .with]' "$VALIDATE"
   [ "$status" -eq 0 ]
-  [ "$output" = '[{"persist-credentials":false},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
+  [ "$output" = '[{"persist-credentials":false,"fetch-depth":0},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
   run yq '.jobs.packages.steps[] | select(has("run")) | .run' "$VALIDATE"
   [ "$status" -eq 0 ]
   grep -qxF './aurtomator/scripts/validate-pkg.sh --all' <<<"$output"
+}
+
+# Runs the step of validate.yml that checks the requirements of changed packages in a repository whose
+# first commit holds packages a, b and c and whose second adds d, changes a and deletes c, with $BASE as
+# the base and a validate-pkg.sh that logs each name and fails for b
+run_changed_step() {
+  local repo="$BATS_TEST_TMPDIR/repo" name
+  mkdir -p "$repo/packages" "$repo/aurtomator/scripts"
+  git -C "$repo" init -q
+  for name in a b c; do
+    echo "name: $name" >"$repo/packages/$name.yml"
+  done
+  git -C "$repo" add -A
+  git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m base
+  FIRST=$(git -C "$repo" rev-parse HEAD)
+  echo "name: d" >"$repo/packages/d.yml"
+  echo "current: '2'" >>"$repo/packages/a.yml"
+  git -C "$repo" rm -q packages/c.yml
+  git -C "$repo" add -A
+  git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m head
+  printf '#!/bin/sh
+echo "$1" >>"%s"
+[ "$1" != b ]
+' "$BATS_TEST_TMPDIR/checked" >"$repo/aurtomator/scripts/validate-pkg.sh"
+  chmod +x "$repo/aurtomator/scripts/validate-pkg.sh"
+  yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .run' "$VALIDATE" \
+    >"$BATS_TEST_TMPDIR/step.sh"
+  rm -f "$BATS_TEST_TMPDIR/checked"
+  run env -C "$repo" BASE="${BASE-$FIRST}" sh -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+# The requires rules read the requirements of each new version, so validate-pkg.sh reads them online for
+# the packages that a push or a pull request adds or changes
+@test "validate: checks online the packages that the push or the pull request adds or changes" {
+  run yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env.BASE' "$VALIDATE"
+  [ "$output" = '${{ github.event.pull_request.base.sha || github.event.before }}' ]
+  run_changed_step
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
+  # Runs without a base check every package, and one failure fails the step after the others
+  local base
+  for base in "" 0000000000000000000000000000000000000000 1111111111111111111111111111111111111111; do
+    BASE=$base run_changed_step
+    [ "$status" -ne 0 ]
+    [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
+    rm -rf "$BATS_TEST_TMPDIR/repo"
+  done
 }
 
 # "the image job is the same in every workflow" leaves out the pin check and the repository and

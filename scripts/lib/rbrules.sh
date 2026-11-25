@@ -133,11 +133,7 @@ ruby_source() {
 
 # Succeed when depends of pkgname $2 of .SRCINFO $1 hold ruby or ruby-*
 pkgname_has_ruby() {
-  local dep
-  while IFS= read -r dep; do
-    [[ "$dep" != ruby && "$dep" != ruby-* ]] || return 0
-  done < <(srcinfo_depends "$1" "$2" depends)
-  return 1
+  srcinfo_depends "$1" "$2" depends | awk '$0 == "ruby" || index($0, "ruby-") == 1 { found = 1 } END { exit !found }'
 }
 
 # Print the package name that ruby.map of package file $1 gives gem $2; the name stays out of the yq
