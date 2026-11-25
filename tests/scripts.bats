@@ -3666,6 +3666,92 @@ ${4:-}"
   [ -z "$output" ]
 }
 
+# Helper: an sdist demo 2.0 whose package imports module evil, a link at the top of the archive to a
+# file outside it, with the files database of imports_env
+evil_sdist() {
+  imports_env
+  local s="$TEST_TMPDIR/sdist" stem=demo-2.0
+  mkdir -p "$s/$stem/demo"
+  printf '%s\n' 'import evil' >"$s/$stem/demo/__init__.py"
+  printf '%s\n' 'import secretmod' >"$TEST_TMPDIR/outside.py"
+  ln -s "$TEST_TMPDIR/outside.py" "$s/$stem/evil.py"
+  printf 'Metadata-Version: 2.4\nName: demo\n' >"$s/$stem/PKG-INFO"
+  bsdtar -czf "$MOCK_FILES_DIR/$stem.tar.gz" -C "$s" "$stem"
+  pypi_fake_file demo 2.0 "$MOCK_FILES_DIR/$stem.tar.gz" false
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+}
+
+# Links of an archive could make the rule read any file of the runner, so they count as no module of it
+@test "pyrules.sh: python_imports reads no link of the archive" {
+  evil_sdist
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timport evil: no package owns it' ]
+}
+
+# python.skip names paths in the tree, and rm -rf would take a path outside it
+@test "pyrules.sh: python_imports removes no path of python.skip outside the tree" {
+  evil_sdist
+  mkdir -p "$AURTOMATOR_RUN_CACHE/keep"
+  : >"$AURTOMATOR_RUN_CACHE/keep/file"
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0 "python:
+  skip:
+    - ../../../keep
+    - $AURTOMATOR_RUN_CACHE/keep"
+  [ "$status" -eq 0 ]
+  [ -f "$AURTOMATOR_RUN_CACHE/keep/file" ]
+}
+
+# Helper: a bsdtar first in PATH that lists 16 MiB with BSDTAR_LIST_BIG set and fails each extraction
+# with BSDTAR_EXTRACT_FAIL set, and runs the real one otherwise
+mock_bsdtar() {
+  local real
+  real=$(type -a -P bsdtar | grep -vF -m 1 "$MOCK_DIR/")
+  cat >"$MOCK_DIR/bsdtar" <<EOF
+#!/usr/bin/env bash
+case " \$* " in
+  *" -tvf "*) [[ -z "\${BSDTAR_LIST_BIG:-}" ]] || { head -c \$((16384 * 1024)) /dev/zero | tr '\0' a; exit 0; } ;;
+  *" -xf "*) [[ -z "\${BSDTAR_EXTRACT_FAIL:-}" ]] || { echo "bsdtar: demo/x.py: Can't create 'demo/x.py'" >&2; exit 1; } ;;
+esac
+exec "$real" "\$@"
+EOF
+  chmod +x "$MOCK_DIR/bsdtar"
+}
+
+# A listing of 16 MiB stops at the limit of its size, and an extraction can fail for one member
+@test "pyrules.sh: python_imports reads nothing from a listing of 16 MiB or a failed extraction" {
+  evil_sdist
+  mock_bsdtar
+  BSDTAR_LIST_BIG=1 run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timports: bsdtar cannot list demo-2.0.tar.gz, not read' ]
+  BSDTAR_EXTRACT_FAIL=1 run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timports: bsdtar cannot extract demo-2.0.tar.gz, not read' ]
+}
+
+# Releases can hold files whose parse runs past any limit, and site-packages and RubyGems would
+# load code of the runner into the helpers
+@test "pyrules.sh, rbrules.sh: the helpers run under timeout 60 with -I -S and --disable-gems" {
+  local real
+  real=$(type -a -P timeout | grep -vF -m 1 "$MOCK_DIR/")
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\nexec "%s" "$@"\n' "$TEST_TMPDIR/timeout.log" "$real" \
+    >"$MOCK_DIR/timeout"
+  chmod +x "$MOCK_DIR/timeout"
+  imports_env
+  demo_wheel
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  gems_env 1.3.2
+  bashcov_gem
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$(sed 's| /.*||' "$TEST_TMPDIR/timeout.log")" = "$(printf '%s\n' '60 python3 -I -S' '60 python3 -I -S' '60 ruby --disable-gems' \
+    '60 ruby --disable-gems')" ]
+}
+
 @test "pyrules.sh: python_imports fails on a wheel that does not match its sha256" {
   imports_env
   demo_wheel
@@ -3838,6 +3924,17 @@ toml_reads() {
   toml_reads $'[project]\nname = "demo"\nkeywords = [\n  ["x"],\n]\ndependencies = ["a"]\n' "$demo"
   toml_reads $'[project]\nname = "demo"\ndependencies = ["a"]\n[[project.authors]]\nname = "x"\n[tool.y]\nname = "y"\n' "$demo"
   toml_reads $'[project.urls]\nhome = "https://x"\n[project]\nname = "demo"\nurls.docs = "https://y"\ndependencies = ["a"]\n' "$demo"
+}
+
+# The rules write these values into headers, where an escape or a control character changes their meaning
+@test "pyrules.sh: python_source refuses escapes and control characters in pyproject.toml values" {
+  local value
+  for value in 'demo\u0062' $'demo\x01'; do
+    pyproject_env "[project]"$'\n'"name = \"$value\""$'\ndependencies = ["click"]\n' pyproject.toml
+    run_source $'python:\n  pyproject: pyproject.toml'
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"a value holds an escape or a control character"* ]]
+  done
 }
 
 @test "pyrules.sh: python_source reads the static dependencies of pyproject.toml in the source archive" {
@@ -4198,6 +4295,35 @@ ${4:-}"
   [ "$status" -eq 0 ]
   [ "$output" = $'>= 2.7\nhttps://rubygems.org/gems/json-3.2.0.gem' ]
   grep -q 'https://rubygems.org/api/v2/rubygems/json/versions/3.2.0.json?platform=ruby$' "$CURL_ARGS_LOG"
+}
+
+# Links of a gem could make the rule read any file of the runner, so they count as no file of the gem
+@test "rbrules.sh: ruby_imports reads no link of the gem" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/linked"
+  mkdir -p "$g/lib"
+  printf '%s\n' 'require "evil"' >"$g/lib/bashcov.rb"
+  printf '%s\n' 'require "secretgem"' >"$TEST_TMPDIR/outside.rb"
+  ln -s "$TEST_TMPDIR/outside.rb" "$g/lib/evil.rb"
+  gem_build bashcov 4.0.3 "$g" $'name: bashcov\nrequire_paths:\n- lib\n' 'simplecov|~> 1.1'
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire evil: no package owns it' ]
+}
+
+# rubygems.org writes gem_uri from the name and the version, and the .gem of another URL could be any file
+@test "rbrules.sh: gem_release refuses an answer of another platform or gem_uri" {
+  local json
+  mkdir -p "$MOCK_FILES_DIR/rubygems/v2"
+  for json in '"platform": "java", "gem_uri": "https://rubygems.org/gems/demo-1.0.gem"' \
+    '"platform": "ruby", "gem_uri": "https://evil.example/demo-1.0.gem"'; do
+    printf '{"name": "demo", "number": "1.0", %s, "ruby_version": ">= 3.2", "sha": "%s", "dependencies": {"runtime": []}}\n' \
+      "$json" "$(printf '0%.0s' {1..64})" >"$MOCK_FILES_DIR/rubygems/v2/demo-1.0.json"
+    run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; gem_release demo 1.0' "$TEST_TMPDIR"
+    [ "$status" -eq 1 ]
+  done
+  [[ "$stderr" == *"demo/versions/1.0.json?platform=ruby: ruby_version, sha or gem_uri is not what RubyGems writes"* ]]
 }
 
 @test "rbrules.sh: ruby_unmet holds a requirement that the version of the gem fails, and gives nothing once it holds" {
