@@ -459,7 +459,7 @@ secret_lines() {
   local ci="$GITHUB_DIR/workflows/ci.yml" config file line bad=0
   local image='^(ci|check-updates|validate)\.yml:    container: [$][{][{] needs\.image\.outputs\.ref [}][}] # zizmor: ignore\[unpinned-images\] '
   local call='^ci\.yml:    uses: \./\.github/workflows/(validate|check-updates)\.yml # zizmor: ignore\[self-repository\] '
-  local action='^check-updates\.yml:        uses: \./aurtomator/\.github/actions/(run-as-builder|add-builder|stop-builder) # zizmor: ignore\[self-repository\] '
+  local action='^(check-updates|validate)\.yml:        uses: \./aurtomator/\.github/actions/(run-as-builder|add-builder|stop-builder) # zizmor: ignore\[self-repository\] '
   local actor='^ci\.yml:    if: >- # zizmor: ignore\[bot-conditions\] '
   for config in "$GITHUB_DIR"/zizmor.y*ml "$GITHUB_DIR"/../zizmor.y*ml; do
     [ ! -e "$config" ]
@@ -5171,10 +5171,11 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
 
 # Runs the step of validate.yml that checks the requirements of changed packages in a repository whose
 # first commit holds packages a, b and c and whose second adds d, changes a and deletes c, with $BASE as
-# the base and a validate-pkg.sh that logs each name and fails for b
+# the base and a validate-pkg.sh that logs each name with the copy it reads and fails for b. sudo logs
+# its calls to $BATS_TEST_TMPDIR/sudo.log and runs the command, and chown logs to chown.log.
 run_changed_step() {
-  local repo="$BATS_TEST_TMPDIR/repo" name
-  mkdir -p "$repo/packages" "$repo/aurtomator/scripts"
+  local repo="$BATS_TEST_TMPDIR/repo" bin="$BATS_TEST_TMPDIR/bin" name
+  mkdir -p "$repo/packages" "$repo/aurtomator/scripts" "$bin"
   git -C "$repo" init -q
   for name in a b c; do
     echo "name: $name" >"$repo/packages/$name.yml"
@@ -5188,14 +5189,21 @@ run_changed_step() {
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m head
   printf '#!/bin/sh
-echo "$1" >>"%s"
+echo "$1 $(cat "packages/$1.yml" | head -n 1) cwd=$PWD" >>"%s"
+echo "::warning::from $1"
 [ "$1" != b ]
 ' "$BATS_TEST_TMPDIR/checked" >"$repo/aurtomator/scripts/validate-pkg.sh"
   chmod +x "$repo/aurtomator/scripts/validate-pkg.sh"
+  printf '#!/bin/sh\necho "$*" >>"%s/sudo.log"\n[ "$1 $2 $3" != "-u builder test" ] || exit "${TEST_X_RC:-0}"\nshift 2\nexec "$@"\n' \
+    "$BATS_TEST_TMPDIR" >"$bin/sudo"
+  printf '#!/bin/sh\necho "$*" >>"%s/chown.log"\n' "$BATS_TEST_TMPDIR" >"$bin/chown"
+  chmod +x "$bin/sudo" "$bin/chown"
   yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .run' "$VALIDATE" \
     >"$BATS_TEST_TMPDIR/step.sh"
-  rm -f "$BATS_TEST_TMPDIR/checked"
-  run env -C "$repo" BASE="${BASE-$FIRST}" sh -e "$BATS_TEST_TMPDIR/step.sh"
+  rm -rf "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/sudo.log" "$BATS_TEST_TMPDIR/chown.log"
+  [[ -n "${KEEP_WORK:-}" ]] || rm -rf "$BATS_TEST_TMPDIR/work"
+  run env -C "$repo" PATH="$bin:$PATH" GITHUB_WORKSPACE="$repo" WORK="$BATS_TEST_TMPDIR/work" BASE="${BASE-$FIRST}" \
+    TEST_X_RC="${TEST_X_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # The requires rules read the requirements of each new version, so validate-pkg.sh reads them online for
@@ -5205,15 +5213,62 @@ echo "$1" >>"%s"
   [ "$output" = '${{ github.event.pull_request.base.sha || github.event.before }}' ]
   run_changed_step
   [ "$status" -eq 0 ]
-  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
+  [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
   # Runs without a base check every package, and one failure fails the step after the others
   local base
   for base in "" 0000000000000000000000000000000000000000 1111111111111111111111111111111111111111; do
     BASE=$base run_changed_step
     [ "$status" -ne 0 ]
-    [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
+    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
+}
+
+# The rules download and parse releases, so builder reads copies of the YAMLs in a directory of its own,
+# and text of the AUR or an upstream cannot act as a workflow command
+@test "validate: checks the requirements as builder on copies of the YAMLs, with workflow commands stopped" {
+  local work="$BATS_TEST_TMPDIR/work" script="$BATS_TEST_TMPDIR/repo/aurtomator/scripts/validate-pkg.sh"
+  run_changed_step
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = "a name: a cwd=$work"$'\n'"d name: d cwd=$work" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/sudo.log")" = "-u builder test -x $script"$'\n'"-u builder $script a"$'\n'"-u builder $script d" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/chown.log")" = "-R builder:builder $work" ]
+  [ "$(stat -c %a "$work")" = 700 ]
+  run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
+  [ "$output" = $'./packages\n./packages/a.yml\n./packages/d.yml' ]
+  [ "$(stat -c %a "$work/packages/a.yml")" = 644 ]
+  # The output of builder sits between ::stop-commands:: and the token
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  run_changed_step
+  [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
+  [ "${lines[1]}" = "::warning::from a" ]
+  [ "${lines[2]}" = "::warning::from d" ]
+  [ "${lines[3]}" = "::${BASH_REMATCH[1]}::" ]
+  [ "${#lines[@]}" -eq 4 ]
+}
+
+@test "validate: checks no requirement when builder cannot run validate-pkg.sh or its directory exists" {
+  TEST_X_RC=1 run_changed_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::builder cannot run $BATS_TEST_TMPDIR/repo/aurtomator/scripts/validate-pkg.sh" ]
+  [ ! -e "$BATS_TEST_TMPDIR/checked" ]
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  mkdir "$BATS_TEST_TMPDIR/work"
+  KEEP_WORK=1 run_changed_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::$BATS_TEST_TMPDIR/work exists already" ]
+  [ ! -e "$BATS_TEST_TMPDIR/checked" ]
+}
+
+# Root validates the YAMLs offline, and builder, which add-builder adds after the checkouts, reads
+# the releases online
+@test "validate: the packages job adds builder after the checkouts and stops it at the end" {
+  run yq -o=json -I=0 '[.jobs.packages.steps[] | [.name, .uses // null, .if // null]]' "$VALIDATE"
+  [ "$output" = '[["Install dependencies",null,null],["Checkout","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Checkout aurtomator","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Add builder","./aurtomator/.github/actions/add-builder",null],["Validate packages",null,null],["Check the requirements of changed packages",null,null],["Stop builder","./aurtomator/.github/actions/stop-builder","always()"]]' ]
+  run yq '.jobs.packages.steps[] | select(.name == "Install dependencies") | .run' "$VALIDATE"
+  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq" ]]
+  run yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env.WORK' "$VALIDATE"
+  [ "$output" = /work ]
 }
 
 # "the image job is the same in every workflow" leaves out the pin check and the repository and
