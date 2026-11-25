@@ -655,6 +655,11 @@ _python_pyproject() {
   local LC_ALL=C file=$1 path=$4 url="" line old new format dir top kind value name="" python="" has="" dynamic=""
   local fail="packages/${1##*/}: python.pyproject reads no static dependencies from $4"
   local -a deps=()
+  # The rule removes directories below the one of the file, and runs read YAMLs that validate-pkg.sh did not
+  if ! [[ "$path" =~ ^[A-Za-z0-9._/-]+\.toml$ ]] || [[ "$path" == /* || "/$path/" == */../* ]]; then
+    log_err "packages/${1##*/}: python.pyproject must be a relative path to a .toml file without ..: ${path@Q}"
+    return 1
+  fi
   while IFS= read -r line; do
     line=${line#*::}
     if [[ "$line" == https://* && "$line" =~ \.(tar\.gz|tgz|tar\.xz|tar\.bz2|tar\.zst|zip)$ ]]; then

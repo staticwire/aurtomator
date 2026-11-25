@@ -3963,6 +3963,20 @@ toml_reads() {
   done
 }
 
+# The rule removes directories under the one of the file, and validate-pkg.sh does not run in a check
+@test "pyrules.sh: python_source refuses a python.pyproject path outside the archive" {
+  local path
+  pyproject_env "$TOML" pyproject.toml
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  for path in ../../x/pyproject.toml /etc/pyproject.toml 'a b.toml' pyproject.json; do
+    run_source "python:
+  pyproject: '$path'"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"packages/demo.yml: python.pyproject must be a relative path to a .toml file without ..: "* ]]
+  done
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
 @test "pyrules.sh: python_source reads the static dependencies of pyproject.toml in the source archive" {
   pyproject_env "$TOML" pyproject.toml
   run_source "python:
