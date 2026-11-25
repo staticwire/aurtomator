@@ -3521,6 +3521,26 @@ ${4:-}"
   [ "$output" = $'notice\timport numba: python-numba not in depends' ]
 }
 
+# Builds and test runners read these files of an sdist, and the build installs none of them
+@test "pyrules.sh: python_imports reads no build and test files at the root of an sdist" {
+  imports_env
+  local s="$TEST_TMPDIR/sdist" stem=demo-2.0
+  mkdir -p "$s/$stem/demo"
+  printf '%s\n' 'import tqdm' >"$s/$stem/demo/__init__.py"
+  printf '%s\n' 'import setuptools' >"$s/$stem/setup.py"
+  printf '%s\n' 'import pytest' >"$s/$stem/conftest.py"
+  printf '%s\n' 'import nox' >"$s/$stem/noxfile.py"
+  printf '%s\n' 'import invoke' >"$s/$stem/tasks.py"
+  printf '%s\n' 'import fabric' >"$s/$stem/fabfile.py"
+  printf 'Metadata-Version: 2.4\nName: demo\n' >"$s/$stem/PKG-INFO"
+  bsdtar -czf "$MOCK_FILES_DIR/$stem.tar.gz" -C "$s" "$stem"
+  pypi_fake_file demo 2.0 "$MOCK_FILES_DIR/$stem.tar.gz" false
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python python-tqdm
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "pyrules.sh: python_imports fails on a wheel that does not match its sha256" {
   imports_env
   demo_wheel

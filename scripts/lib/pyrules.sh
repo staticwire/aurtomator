@@ -276,7 +276,8 @@ _python_imports_read() {
     top=${top%.zip}
     [[ "$kind" != tree ]] || top="$work/tree/$PY_TREE_TOP"
     [[ -d "$top" ]] || return 0
-    for entry in tests test docs doc examples; do
+    # Builds and test runners read the files at the root, and the build installs none of them
+    for entry in tests test docs doc examples setup.py conftest.py noxfile.py tasks.py fabfile.py; do
       rm -rf "${top:?}/$entry"
     done
   fi
