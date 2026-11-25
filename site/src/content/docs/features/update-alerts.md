@@ -68,7 +68,7 @@ alerts:
 ! zensical-bin: update 0.0.74 → 0.1.3 held: drops deepmerge
 ```
 
-`requires: unmet` reads the requirements of the new version as `changed` does, and the `.SRCINFO` of HEAD of the AUR repository of the package, and checks each pkgname whose `depends` hold `python` or `python-*`. Each requirement that applies on Arch needs an entry of `depends` that meets it. Entries meet a requirement when their package holds the distribution of that name in the files database of pacman, or when the package, its name or a name of its `provides` is `python-<name>`, `<name>` or `python-<name as written>`, or when `python.map` maps the name to it:
+`requires: unmet` reads the requirements of the new version as `changed` does, and the `.SRCINFO` of HEAD of the AUR repository of the package, and checks each pkgname whose `depends` hold `python` or `python-*`. Each requirement that applies on Arch needs an entry of `depends` that meets it. Entries meet a requirement when their package holds the distribution of that name, a `.dist-info` or `.egg-info` one, in the files database of pacman, or when the package, its name or a name of its `provides` is `python-<name>`, `<name>` or `python-<name as written>`, or when `python.map` maps the name to it:
 
 ```yaml
 python:

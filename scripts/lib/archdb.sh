@@ -79,15 +79,19 @@ srcinfo_depends() {
 # shellcheck disable=SC2034 # pyrules.sh reads ARCHDB_FILES
 files_index_python() {
   local LC_ALL=C file pkg path dir dist version i
-  local re='^usr/lib/python3\.[0-9]+/site-packages/[^/]+\.dist-info/METADATA$'
+  # Packages built with setuptools ship <name>-<version>[-py3.<n>].egg-info, a directory or a file
+  local re='^usr/lib/python3\.[0-9]+/site-packages/[^/]+\.(dist-info/METADATA|egg-info(/PKG-INFO)?)$'
   archdb_cache || return 1
   file="$AURTOMATOR_RUN_CACHE/py-dists"
   if [[ ! -f "$file" ]]; then
     {
       while IFS= read -r -d '' _ && IFS= read -r -d '' pkg && IFS= read -r -d '' _ && IFS= read -r path; do
         [[ "$path" =~ $re ]] || continue
-        dir=${path%.dist-info/METADATA}
+        dir=${path%/PKG-INFO}
+        dir=${dir%.dist-info/METADATA}
+        dir=${dir%.egg-info}
         dir=${dir##*/}
+        [[ ! "$dir" =~ -py3\.[0-9]+$ ]] || dir=${dir%-py3.*}
         # The version follows the last dash whose rest PEP 440 reads
         for ((i = ${#dir} - 1; i > 0; i--)); do
           [[ "${dir:i:1}" == - ]] || continue

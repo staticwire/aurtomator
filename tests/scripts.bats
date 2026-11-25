@@ -2946,11 +2946,16 @@ run_archdb() {
 }
 
 # Helper: writes the files database lines of tests/fixtures to MOCK_PACMAN_FILES: python-yaml,
-# python-brotli, python-protobuf and python-gpgme, and a copy of PyYAML that azure-cli vendors
+# python-brotli, python-protobuf and python-gpgme, a copy of PyYAML that azure-cli vendors, and the
+# .egg-info distributions of python-setuptools, btrfs-progs and gpsd, a directory or a file
 python_files_db() {
   export MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
   printf 'extra\t%s\t%s\t%s\n' \
     python-yaml 6.0.2-2 usr/lib/python3.13/site-packages/PyYAML-6.0.2.dist-info/METADATA \
+    python-setuptools 1:80.0.0-1 usr/lib/python3.13/site-packages/setuptools-80.0.0-py3.13.egg-info/PKG-INFO \
+    btrfs-progs 6.14-1 usr/lib/python3.13/site-packages/btrfsutil-6.14-py3.13.egg-info/ \
+    btrfs-progs 6.14-1 usr/lib/python3.13/site-packages/btrfsutil-6.14-py3.13.egg-info/PKG-INFO \
+    gpsd 3.25-5 usr/lib/python3.13/site-packages/gps-3.25.egg-info \
     python-yaml 6.0.2-2 usr/lib/python3.13/site-packages/yaml/__init__.py \
     python-brotli 1.1.0-3 usr/lib/python3.13/site-packages/Brotli-1.1.0.dist-info/METADATA \
     python-protobuf 30.2-1 usr/lib/python3.13/site-packages/protobuf-6.30.2.dist-info/METADATA \
@@ -3020,9 +3025,10 @@ python_files_db() {
   export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
   run_archdb 'files_index_python && files_index_python && echo "$ARCHDB_FILES" && cat "$AURTOMATOR_RUN_CACHE/py-dists"'
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' files brotli$'\t'python-brotli$'\t'1.1.0 gpg$'\t'python-gpgme$'\t'1.24.2 \
-    protobuf$'\t'python-protobuf$'\t'6.30.2 pyyaml$'\t'python-yaml$'\t'6.0.2)" ]
-  [ "$(cat "$PACMAN_ARGS_LOG")" = "-Fx --machinereadable ^usr/lib/python3\\.[0-9]+/site-packages/[^/]+\\.dist-info/METADATA\$" ]
+  [ "$output" = "$(printf '%s\n' files brotli$'\t'python-brotli$'\t'1.1.0 btrfsutil$'\t'btrfs-progs$'\t'6.14 \
+    gpg$'\t'python-gpgme$'\t'1.24.2 gps$'\t'gpsd$'\t'3.25 protobuf$'\t'python-protobuf$'\t'6.30.2 \
+    pyyaml$'\t'python-yaml$'\t'6.0.2 setuptools$'\t'python-setuptools$'\t'80.0.0)" ]
+  [ "$(cat "$PACMAN_ARGS_LOG")" = "-Fx --machinereadable ^usr/lib/python3\\.[0-9]+/site-packages/[^/]+\\.(dist-info/METADATA|egg-info(/PKG-INFO)?)\$" ]
 }
 
 @test "archdb.sh: files_index_python writes #none without a files database" {
