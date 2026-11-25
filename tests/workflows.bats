@@ -529,9 +529,13 @@ secret_lines() {
   done
 }
 
+# The coverage shims of tests/helpers/cov-shims are bash scripts without an extension
 @test "ci: shfmt checks every test file" {
   local root="$GITHUB_DIR/.." expected
-  expected=$(cd "$root" && find tests -name '*.bats' -o -name '*.sh' | sort)
+  expected=$(cd "$root" && {
+    find tests -name '*.bats' -o -name '*.sh'
+    find tests/helpers/cov-shims -type f
+  } | sort)
   [ -n "$expected" ]
   run yq '.jobs.lint.steps[] | select(.name == "shfmt") | .run' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
@@ -542,7 +546,10 @@ secret_lines() {
 
 @test "ci: shellcheck checks every test helper" {
   local root="$GITHUB_DIR/.." expected
-  expected=$(cd "$root" && find tests/helpers -name '*.sh' | sort)
+  expected=$(cd "$root" && {
+    find tests/helpers -name '*.sh'
+    find tests/helpers/cov-shims -type f
+  } | sort)
   [ -n "$expected" ]
   run yq '.jobs.lint.steps[] | select(.name == "shellcheck") | .run' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]

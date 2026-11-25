@@ -60,10 +60,10 @@ jobs:
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: shellcheck
-        run: shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
+        run: shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh tests/helpers/cov-shims/*
 
       - name: shfmt
-        run: shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
+        run: shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh tests/helpers/cov-shims/*
 
       # The requires rules imports run the parsers of scripts/lib/ in the rules job
       - name: Compile the Python helpers
