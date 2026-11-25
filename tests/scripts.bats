@@ -3021,6 +3021,56 @@ python_files_db() {
   [ "$output" = python-yaml$'\t'usr/lib/python3.13/site-packages/yaml/__init__.py ]
 }
 
+# pacman exits 1 for no match and for an error, which only its error line tells apart
+@test "archdb.sh: files_index_owner fails on an error of pacman and gives nothing for no match" {
+  python_files_db
+  run_archdb 'files_index_owner "^nothing$"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  MOCK_PACMAN_NO_FILES=1 run_archdb 'files_index_owner "^usr/"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  MOCK_PACMAN_FX_EXIT=1 run_archdb 'files_index_owner "^usr/"'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pacman -Fx exits 1: error: failed to read file 'extra.files'" ]]
+  MOCK_PACMAN_FX_EXIT=126 run_archdb 'files_index_owner "^usr/"'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pacman -Fx exits 126" ]]
+}
+
+# Modules that a failed query left out would have no owner for the rest of the run, and Linux
+# takes no argument past 128 KiB
+@test "pyrules.sh: _python_owners_index asks again after a failed query and splits long queries" {
+  python_files_db
+  MOCK_PACMAN_FX_EXIT=1 run_archdb '_python_owners_index yaml'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pacman -Fx exits 1: error: failed to read file 'extra.files'" ]]
+  [ ! -s "$AURTOMATOR_RUN_CACHE/py-owners-asked" ]
+  run_archdb '_python_owners_index yaml && cat "$AURTOMATOR_RUN_CACHE/py-owners-asked" "$AURTOMATOR_RUN_CACHE/py-owners"'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'yaml\npython-yaml\tyaml/__init__.py' ]
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
+  run_archdb '_python_owners_index $(printf "m%05d\n" {1..15000}) brotli'
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$PACMAN_ARGS_LOG")" -eq 2 ]
+  [ "$(awk '{ if (length($0) > max) max = length($0) } END { print (max < 100000) }' "$PACMAN_ARGS_LOG")" -eq 1 ]
+  [ "$(wc -l <"$AURTOMATOR_RUN_CACHE/py-owners-asked")" -eq 15002 ]
+}
+
+@test "rbrules.sh: _ruby_owners fails on an error of pacman and splits long queries" {
+  export MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
+  printf 'extra\truby-rexml\t1-1\tusr/lib/ruby/gems/3.4.0/gems/rexml-3.4.4/lib/rexml/document.rb\n' >"$MOCK_PACMAN_FILES"
+  MOCK_PACMAN_FX_EXIT=1 run_archdb '_ruby_owners rexml/document'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pacman -Fx exits 1: error: failed to read file 'extra.files'" ]]
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
+  run_archdb '_ruby_owners $(printf "r%05d\n" {1..15000}) rexml/document'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'rexml/document\truby-rexml' ]
+  [ "$(wc -l <"$PACMAN_ARGS_LOG")" -eq 2 ]
+  [ "$(awk '{ if (length($0) > max) max = length($0) } END { print (max < 100000) }' "$PACMAN_ARGS_LOG")" -eq 1 ]
+}
+
 @test "archdb.sh: repo_package resolves a name of provides once per run" {
   export MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync" PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
   printf '%s\n' 'python-yaml 6.0.4-1 extra python-pyyaml' 'python-epoch 2:1.5-3 core' >"$MOCK_PACMAN_SYNC"

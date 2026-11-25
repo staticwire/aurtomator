@@ -496,14 +496,21 @@ _ruby_own_file() {
 # Print require path<TAB>pkgname for each require path $@ that a file of the files database holds: a
 # file of ruby, also below x86_64-linux, or the lib/ of an installed gem, as .rb or .so
 _ruby_owners() {
-  local LC_ALL=C req alternation=""
+  local LC_ALL=C req alternation owners="" out
+  local -a words=() alternations
   for req in "$@"; do
-    [[ "$req" =~ ^[A-Za-z0-9_][A-Za-z0-9_/-]*(\.[A-Za-z0-9_-]+)*$ ]] && alternation+="${alternation:+|}${req//./\\.}"
+    [[ "$req" =~ ^[A-Za-z0-9_][A-Za-z0-9_/-]*(\.[A-Za-z0-9_-]+)*$ ]] && words+=("${req//./\\.}")
   done
-  [[ -n "$alternation" ]] || return 0
-  files_index_owner "^usr/lib/ruby/(3\\.[0-9]+\\.0/(x86_64-linux/)?|gems/[^/]+/gems/[^/]+/lib/)($alternation)\\.(rb|so)\$" |
-    awk -F'\t' '{ p = $2; sub(/\.(rb|so)$/, "", p)
-      sub(/^usr\/lib\/ruby\/(3\.[0-9]+\.0\/(x86_64-linux\/)?|gems\/[^\/]+\/gems\/[^\/]+\/lib\/)/, "", p); print p "\t" $1 }' | sort -u
+  ((${#words[@]} > 0)) || return 0
+  mapfile -t alternations < <(files_index_alternations "${words[@]}")
+  for alternation in "${alternations[@]}"; do
+    out=$(files_index_owner "^usr/lib/ruby/(3\\.[0-9]+\\.0/(x86_64-linux/)?|gems/[^/]+/gems/[^/]+/lib/)($alternation)\\.(rb|so)\$") ||
+      return 1
+    owners+="$out"$'\n'
+  done
+  awk -F'\t' 'NF { p = $2; sub(/\.(rb|so)$/, "", p)
+    sub(/^usr\/lib\/ruby\/(3\.[0-9]+\.0\/(x86_64-linux\/)?|gems\/[^\/]+\/gems\/[^\/]+\/lib\/)/, "", p); print p "\t" $1 }' \
+    <<<"$owners" | sort -u
 }
 
 # Print the notes of pkgname $3 of .SRCINFO $2 of package file $1, with RB_REQUIRED, RB_OPTIONAL and

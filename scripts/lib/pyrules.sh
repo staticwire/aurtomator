@@ -470,9 +470,9 @@ _python_module_files() {
 # run cache: lines of the pkgname and the path under the directory of Python, site-packages left out
 _python_owners_index() {
   local LC_ALL=C file="$AURTOMATOR_RUN_CACHE/py-owners" asked="$AURTOMATOR_RUN_CACHE/py-owners-asked" name
-  local pkg path rel alternation="" top
+  local pkg path rel alternation top owners
   local -A known=()
-  local -a names=()
+  local -a names=() alternations
   touch "$file" "$asked" || return 1
   while IFS= read -r name; do
     known[$name]=1
@@ -483,17 +483,23 @@ _python_owners_index() {
     names+=("$name")
   done
   ((${#names[@]} > 0)) || return 0
-  printf -v alternation '%s|' "${names[@]}"
-  while IFS=$'\t' read -r pkg path; do
-    rel=${path#usr/lib/python3.*/}
-    rel=${rel#site-packages/}
-    rel=${rel#lib-dynload/}
-    # pacman matches without regard to case, and module names keep theirs
-    top=${rel%%/*}
-    top=${top%%.*}
-    [[ -n "${known[$top]:-}" ]] || continue
-    printf '%s\t%s\n' "$pkg" "$rel"
-  done < <(files_index_owner "^usr/lib/python3\\.[0-9]+/((site-packages|lib-dynload)/)?(${alternation%|})(/|\\.py\$|\\.[^/]*\\.so\$)") >>"$file"
+  mapfile -t alternations < <(files_index_alternations "${names[@]}")
+  for alternation in "${alternations[@]}"; do
+    owners=$(files_index_owner "^usr/lib/python3\\.[0-9]+/((site-packages|lib-dynload)/)?($alternation)(/|\\.py\$|\\.[^/]*\\.so\$)") ||
+      return 1
+    while IFS=$'\t' read -r pkg path; do
+      [[ -n "$pkg" ]] || continue
+      rel=${path#usr/lib/python3.*/}
+      rel=${rel#site-packages/}
+      rel=${rel#lib-dynload/}
+      # pacman matches without regard to case, and module names keep theirs
+      top=${rel%%/*}
+      top=${top%%.*}
+      [[ -n "${known[$top]:-}" ]] || continue
+      printf '%s\t%s\n' "$pkg" "$rel"
+    done <<<"$owners" >>"$file"
+  done
+  # Names that a failed query left out are asked again
   printf '%s\n' "${names[@]}" >>"$asked"
 }
 

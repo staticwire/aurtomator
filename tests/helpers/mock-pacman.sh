@@ -29,6 +29,11 @@ esac
 # Lines of MOCK_PACMAN_FILES are repo, pkgname, pkgver and path, split by tabs; pacman matches
 # the path without regard to case and splits the fields of an answer by NUL
 if [[ "$1" == -Fx ]]; then
+  # pacman exits 1 for an error as for no match, and the shell 126 for an argument past its limit
+  if [[ -n "${MOCK_PACMAN_FX_EXIT:-}" ]]; then
+    [[ "$MOCK_PACMAN_FX_EXIT" != 1 ]] || echo "error: failed to read file 'extra.files'" >&2
+    exit "$MOCK_PACMAN_FX_EXIT"
+  fi
   if [[ -n "${MOCK_PACMAN_NO_FILES:-}" ]]; then
     echo "warning: database file for 'core' does not exist (use '-Fy' to download)" >&2
     echo "warning: database file for 'extra' does not exist (use '-Fy' to download)" >&2
