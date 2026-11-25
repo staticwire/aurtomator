@@ -3718,6 +3718,32 @@ EOF
   chmod +x "$MOCK_DIR/bsdtar"
 }
 
+# The coverage shims of CI run the helpers without -S and --disable-gems, and bundle exec sets RUBYOPT,
+# so this test runs stand-ins of the helpers that print the flags, outside both
+@test "pyrules.sh, rbrules.sh: the helpers run without site-packages and RubyGems" {
+  unset COVERAGE_FILE SIMPLECOV_HELPER_DIR RUBYOPT
+  printf '%s\n' 'import sys' 'if sys.argv[1:] == ["--stdlib"]:' '    sys.exit(0)' \
+    'for name in sys.stdin.buffer.read().split(b"\0")[:-1]:' \
+    '    print(f"import\t{name.decode()}\tsite{sys.flags.no_site}isolated{sys.flags.isolated}\tmodule")' \
+    >"$TEST_TMPDIR/py-stand-in"
+  printf '%s\n' 'exit 0 if ARGV == ["--builtin"]' '$stdin.read.split("\0").each do |name|' \
+    '  puts "require\t#{name}\trequire\tgems_#{defined?(Gem) ? "on" : "off"}\tmodule"' 'end' >"$TEST_TMPDIR/rb-stand-in"
+  cp --remove-destination "$TEST_TMPDIR/py-stand-in" "$TEST_TMPDIR/scripts/lib/py_imports.py"
+  cp --remove-destination "$TEST_TMPDIR/rb-stand-in" "$TEST_TMPDIR/scripts/lib/rb_requires.rb"
+  imports_env
+  demo_wheel
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timport site1isolated1: no package owns it' ]
+  gems_env 1.3.2
+  bashcov_gem
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire gems_off: no package owns it' ]
+}
+
 # A listing of 16 MiB stops at the limit of its size, and an extraction can fail for one member
 @test "pyrules.sh: python_imports reads nothing from a listing of 16 MiB or a failed extraction" {
   evil_sdist
