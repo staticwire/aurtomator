@@ -6,11 +6,7 @@
 
 # Succeed when depends of pkgname $2 of .SRCINFO $1 hold python or python-*
 pkgname_has_python() {
-  local dep
-  while IFS= read -r dep; do
-    [[ "$dep" != python && "$dep" != python-* ]] || return 0
-  done < <(srcinfo_depends "$1" "$2" depends)
-  return 1
+  srcinfo_depends "$1" "$2" depends | awk '$0 == "python" || index($0, "python-") == 1 { found = 1 } END { exit !found }'
 }
 
 # Print the package name that python.map of package file $1 gives PyPI name $2, in PEP 503 form
@@ -276,7 +272,8 @@ _python_imports_read() {
     top=${top%.zip}
     [[ "$kind" != tree ]] || top="$work/tree/$PY_TREE_TOP"
     [[ -d "$top" ]] || return 0
-    for entry in tests test docs doc examples; do
+    # Builds and test runners read the files at the root, and the build installs none of them
+    for entry in tests test docs doc examples setup.py conftest.py noxfile.py tasks.py fabfile.py; do
       rm -rf "${top:?}/$entry"
     done
   fi
@@ -291,7 +288,8 @@ _python_imports_read() {
   files=("${PY_FILES[@]}")
   ((${#files[@]} > 0)) || return 0
   helper="${BASH_SOURCE[0]%/*}/py_imports.py"
-  timeout 60 python3 -I -S "$helper" "$root" "${files[@]}" >"$work/imports" 2>/dev/null || rc=$?
+  printf '%s\0' "${files[@]}" >"$work/names"
+  timeout 60 python3 -I -S "$helper" "$root" <"$work/names" >"$work/imports" 2>/dev/null || rc=$?
   ((rc != 0)) || timeout 60 python3 -I -S "$helper" --stdlib >"$work/stdlib" 2>/dev/null || rc=$?
   case $rc in
     0) ;;
@@ -469,9 +467,9 @@ _python_module_files() {
 # run cache: lines of the pkgname and the path under the directory of Python, site-packages left out
 _python_owners_index() {
   local LC_ALL=C file="$AURTOMATOR_RUN_CACHE/py-owners" asked="$AURTOMATOR_RUN_CACHE/py-owners-asked" name
-  local pkg path rel alternation="" top
+  local pkg path rel alternation top owners
   local -A known=()
-  local -a names=()
+  local -a names=() alternations
   touch "$file" "$asked" || return 1
   while IFS= read -r name; do
     known[$name]=1
@@ -482,17 +480,23 @@ _python_owners_index() {
     names+=("$name")
   done
   ((${#names[@]} > 0)) || return 0
-  printf -v alternation '%s|' "${names[@]}"
-  while IFS=$'\t' read -r pkg path; do
-    rel=${path#usr/lib/python3.*/}
-    rel=${rel#site-packages/}
-    rel=${rel#lib-dynload/}
-    # pacman matches without regard to case, and module names keep theirs
-    top=${rel%%/*}
-    top=${top%%.*}
-    [[ -n "${known[$top]:-}" ]] || continue
-    printf '%s\t%s\n' "$pkg" "$rel"
-  done < <(files_index_owner "^usr/lib/python3\\.[0-9]+/((site-packages|lib-dynload)/)?(${alternation%|})(/|\\.py\$|\\.[^/]*\\.so\$)") >>"$file"
+  mapfile -t alternations < <(files_index_alternations "${names[@]}")
+  for alternation in "${alternations[@]}"; do
+    owners=$(files_index_owner "^usr/lib/python3\\.[0-9]+/((site-packages|lib-dynload)/)?($alternation)(/|\\.py\$|\\.[^/]*\\.so\$)") ||
+      return 1
+    while IFS=$'\t' read -r pkg path; do
+      [[ -n "$pkg" ]] || continue
+      rel=${path#usr/lib/python3.*/}
+      rel=${rel#site-packages/}
+      rel=${rel#lib-dynload/}
+      # pacman matches without regard to case, and module names keep theirs
+      top=${rel%%/*}
+      top=${top%%.*}
+      [[ -n "${known[$top]:-}" ]] || continue
+      printf '%s\t%s\n' "$pkg" "$rel"
+    done <<<"$owners" >>"$file"
+  done
+  # Names that a failed query left out are asked again
   printf '%s\n' "${names[@]}" >>"$asked"
 }
 
@@ -607,13 +611,13 @@ _python_join() {
 python_source() {
   local tag value json
   PY_SOURCE="" PY_PROJECT="" PY_VERSION="" PY_HEADERS="" PY_NEWEST="" PY_TREE_ARCHIVE="" PY_TREE_TOP=""
-  if [[ "$(pkg_get "$1" .strategy)" == pypi ]]; then
-    PY_SOURCE=pypi PY_PROJECT=$(pkg_get "$1" .upstream.registry) PY_VERSION=$2
-    return 0
-  fi
   tag=$(pkg_get "$1" '.python | tag')
   if [[ "$tag" == "!!str" && "$(pkg_get "$1" .python)" == none ]]; then
     PY_SOURCE=none
+    return 0
+  fi
+  if [[ "$(pkg_get "$1" .strategy)" == pypi ]]; then
+    PY_SOURCE=pypi PY_PROJECT=$(pkg_get "$1" .upstream.registry) PY_VERSION=$2
     return 0
   fi
   if [[ "$tag" == "!!map" ]]; then
@@ -647,6 +651,11 @@ _python_pyproject() {
   local LC_ALL=C file=$1 path=$4 url="" line old new format dir top kind value name="" python="" has="" dynamic=""
   local fail="packages/${1##*/}: python.pyproject reads no static dependencies from $4"
   local -a deps=()
+  # The rule removes directories below the one of the file, and runs read YAMLs that validate-pkg.sh did not
+  if ! [[ "$path" =~ ^[A-Za-z0-9._/-]+\.toml$ ]] || [[ "$path" == /* || "/$path/" == */../* ]]; then
+    log_err "packages/${1##*/}: python.pyproject must be a relative path to a .toml file without ..: ${path@Q}"
+    return 1
+  fi
   while IFS= read -r line; do
     line=${line#*::}
     if [[ "$line" == https://* && "$line" =~ \.(tar\.gz|tgz|tar\.xz|tar\.bz2|tar\.zst|zip)$ ]]; then
@@ -722,15 +731,17 @@ _python_pyproject() {
 }
 
 # Print the values of the [project] table of TOML file $1 that the rules read, lines of name,
-# python, dep and dynamic, a tab and the value, has for a dependencies key, or error and the reason
+# python, dep and dynamic, a tab and the value, has for a dependencies key, or error and the reason.
+# The whole file is parsed, since strings and arrays can hold lines that look like a table header.
 _toml_project() {
   LC_ALL=C awk '
+    BEGIN { S = "\034" }
     function fail(m) { print "error\t" m; failed = 1; exit }
     function blank() { while (pos <= n && substr(t, pos, 1) ~ /[ \t]/) pos++ }
     function space(  c) {
       while (pos <= n) {
         c = substr(t, pos, 1)
-        if (c ~ /[ \t\r\n]/) pos++
+        if (c ~ /[ \t\n]/) pos++
         else if (c == "#") { while (pos <= n && substr(t, pos, 1) != "\n") pos++ }
         else break
       }
@@ -750,15 +761,33 @@ _toml_project() {
       }
       fail("a string has no end")
     }
-    function key(  c, start) {
+    function part(  c, start) {
       c = substr(t, pos, 1)
       if (c == "\"" || c == "\047") return text()
       start = pos
-      while (pos <= n && substr(t, pos, 1) ~ /[A-Za-z0-9_.-]/) pos++
+      while (pos <= n && substr(t, pos, 1) ~ /[A-Za-z0-9_-]/) pos++
       if (pos == start) fail("a key holds an unknown character")
       return substr(t, start, pos - start)
     }
-    function value(name, depth,  c, s) {
+    # A dotted key, its parts joined by S
+    function key(  k) {
+      k = part(); blank()
+      while (substr(t, pos, 1) == ".") { pos++; blank(); k = k S part(); blank() }
+      return k
+    }
+    # The name that the caller reads for key path k, or nothing
+    function field(k) {
+      if (k == "project" S "dependencies") return "dep"
+      if (k == "project" S "dynamic") return "dynamic"
+      if (k == "project" S "name") return "name"
+      if (k == "project" S "requires-python") return "python"
+      return ""
+    }
+    function assign(k, depth) {
+      if (k == "project" S "dependencies") print "has\t"
+      value(k, field(k), depth)
+    }
+    function value(path, name, depth, inner,  c, s) {
       if (depth > 32) fail("values nest deeper than 32 levels")
       c = substr(t, pos, 1)
       if (c == "\"" || c == "\047") {
@@ -766,12 +795,14 @@ _toml_project() {
         if (name != "") print name "\t" s
         return
       }
+      if ((name == "dep" || name == "dynamic") && (c == "{" || (c == "[" && inner)))
+        fail("dependencies and dynamic hold strings alone")
       if (c == "[") {
         pos++
         for (;;) {
           space()
           if (substr(t, pos, 1) == "]") { pos++; return }
-          value(name, depth + 1)
+          value(path, name, depth + 1, 1)
           space()
           c = substr(t, pos, 1)
           if (c == ",") { pos++; continue }
@@ -784,9 +815,9 @@ _toml_project() {
         for (;;) {
           blank()
           if (substr(t, pos, 1) == "}") { pos++; return }
-          key(); blank()
+          s = key()
           if (substr(t, pos, 1) != "=") fail("an inline table holds a key without =")
-          pos++; blank(); value("", depth + 1); blank()
+          pos++; blank(); assign(path S s, depth + 1); blank()
           c = substr(t, pos, 1)
           if (c == ",") { pos++; continue }
           if (c == "}") { pos++; return }
@@ -796,23 +827,30 @@ _toml_project() {
       if (name == "dep" || name == "dynamic") fail("dependencies and dynamic hold strings alone")
       while (pos <= n && substr(t, pos, 1) !~ /[,\]}\n#]/) pos++
     }
-    /^[ \t]*\[/ { table = $0; sub(/[ \t]*(#.*)?$/, "", table); gsub(/[ \t]/, "", table); inside = (table == "[project]"); next }
-    inside { t = t $0 "\n" }
+    # TOML ends lines with LF or CRLF
+    { sub(/\r$/, ""); t = t $0 "\n" }
     END {
-      if (failed) exit
-      n = length(t); pos = 1
+      n = length(t); pos = 1; table = ""
       for (;;) {
         space()
         if (pos > n) break
-        k = key(); blank()
+        if (substr(t, pos, 1) == "[") {
+          if (substr(t, pos, 2) == "[[") {
+            # Tables of an array of tables are never the [project] table
+            pos += 2; blank(); table = "[[" S key()
+            if (substr(t, pos, 2) != "]]") fail("a table header has no end")
+            pos += 2
+          } else {
+            pos++; blank(); table = key()
+            if (substr(t, pos, 1) != "]") fail("a table header has no end")
+            pos++
+          }
+          continue
+        }
+        k = key()
         if (substr(t, pos, 1) != "=") fail("a line holds a key without =")
         pos++; blank()
-        if (k == "dependencies") { print "has\t"; value("dep", 1) }
-        else if (k == "dynamic") value("dynamic", 1)
-        else if (k == "name") value("name", 1)
-        else if (k == "requires-python") value("python", 1)
-        else value("", 1)
-        if (failed) exit
+        assign(table == "" ? k : table S k, 1)
       }
     }' "$1"
 }

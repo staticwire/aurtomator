@@ -79,15 +79,19 @@ srcinfo_depends() {
 # shellcheck disable=SC2034 # pyrules.sh reads ARCHDB_FILES
 files_index_python() {
   local LC_ALL=C file pkg path dir dist version i
-  local re='^usr/lib/python3\.[0-9]+/site-packages/[^/]+\.dist-info/METADATA$'
+  # Packages built with setuptools ship <name>-<version>[-py3.<n>].egg-info, a directory or a file
+  local re='^usr/lib/python3\.[0-9]+/site-packages/[^/]+\.(dist-info/METADATA|egg-info(/PKG-INFO)?)$'
   archdb_cache || return 1
   file="$AURTOMATOR_RUN_CACHE/py-dists"
   if [[ ! -f "$file" ]]; then
     {
       while IFS= read -r -d '' _ && IFS= read -r -d '' pkg && IFS= read -r -d '' _ && IFS= read -r path; do
         [[ "$path" =~ $re ]] || continue
-        dir=${path%.dist-info/METADATA}
+        dir=${path%/PKG-INFO}
+        dir=${dir%.dist-info/METADATA}
+        dir=${dir%.egg-info}
         dir=${dir##*/}
+        [[ ! "$dir" =~ -py3\.[0-9]+$ ]] || dir=${dir%-py3.*}
         # The version follows the last dash whose rest PEP 440 reads
         for ((i = ${#dir} - 1; i > 0; i--)); do
           [[ "${dir:i:1}" == - ]] || continue
@@ -109,12 +113,39 @@ files_index_python() {
   fi
 }
 
-# Print pkgname<TAB>path for each path of the files database that matches regex $1
+# Print pkgname<TAB>path for each path of the files database that matches regex $1; fail when pacman
+# fails, which exits 1 for no match as for an error and writes error: only for the latter
 files_index_owner() {
-  local LC_ALL=C pkg path
+  local LC_ALL=C pkg path out err rc=0
+  out=$(mktemp) || return 1
+  if ! err=$(mktemp); then
+    rm -f "$out"
+    return 1
+  fi
+  pacman -Fx --machinereadable "$1" >"$out" 2>"$err" || rc=$?
+  if ((rc > 1)) || { ((rc == 1)) && grep -q '^error:' "$err"; }; then
+    log_err "pacman -Fx exits $rc$(grep -m 1 '^error:' "$err" | sed 's/^/: /')"
+    rm -f "$out" "$err"
+    return 1
+  fi
   while IFS= read -r -d '' _ && IFS= read -r -d '' pkg && IFS= read -r -d '' _ && IFS= read -r path; do
     printf '%s\t%s\n' "$pkg" "$path"
-  done < <(pacman -Fx --machinereadable "$1" 2>/dev/null)
+  done <"$out"
+  rm -f "$out" "$err"
+}
+
+# Print the words $@ as alternations of a regex, one a line, each below 100,000 bytes, since
+# Linux takes no argument past 128 KiB
+files_index_alternations() {
+  local word chunk=""
+  for word in "$@"; do
+    if ((${#chunk} + ${#word} >= 99000)) && [[ -n "$chunk" ]]; then
+      printf '%s\n' "${chunk%|}"
+      chunk=""
+    fi
+    chunk+="$word|"
+  done
+  [[ -z "$chunk" ]] || printf '%s\n' "${chunk%|}"
 }
 
 # Print the PEP 503 name and the version of each distribution of package $1 in py-dists

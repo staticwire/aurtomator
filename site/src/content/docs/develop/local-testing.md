@@ -82,8 +82,8 @@ bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 ## Linting locally
 
 ```bash
-shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
-shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
+shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh tests/helpers/cov-shims/*
+shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh tests/helpers/cov-shims/*
 actionlint
 zizmor --persona pedantic .
 ```

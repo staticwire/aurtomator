@@ -4,7 +4,9 @@
 
 # Succeeds when package file $1 lets a version go out without some arches
 missing_arch_allowed() {
-  [[ "$(pkg_bool "$1" .allow_missing_arch)" != false && "$(pkgver_dash "$1")" != drop ]]
+  local allow
+  allow=$(pkg_bool "$1" .allow_missing_arch) || return 1
+  [[ "$allow" != false && "$(pkgver_dash "$1")" != drop ]]
 }
 
 # Print the version of the value $1 of an arch_back or arch_added status, a

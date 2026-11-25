@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Print import<TAB>file<TAB>module<TAB>scope for each import of the files after <root>.
+"""Print import<TAB>file<TAB>module<TAB>scope for each import of the files under <root> named on stdin.
 
-Usage: python3 -I -S py_imports.py <root> <file>... | --stdlib
+Usage: python3 -I -S py_imports.py <root> <NUL-separated file names | --stdlib
 Scopes are module, function, optional and typing; files that do not parse give error<TAB>file<TAB>message.
 --stdlib prints the modules of the standard library, also those built into the interpreter, as sys.
 """
@@ -167,30 +167,37 @@ class Imports(ast.NodeVisitor):
     visit_AsyncWith = visit_With
 
     def visit_If(self, node):
-        if dotted(node.test) in ("TYPE_CHECKING", "typing.TYPE_CHECKING"):
+        # typing can be imported under another name, as in import typing as t
+        if (dotted(node.test) or "").split(".")[-1] == "TYPE_CHECKING":
             self.within("typing", node.body)
             for item in node.orelse:
                 self.visit(item)
             return
         value = evaluate(node.test)
-        if value is not False:
-            for item in node.body:
-                self.visit(item)
-        if value is not True:
-            for item in node.orelse:
-                self.visit(item)
+        # Either branch of a test this file cannot decide may never run
+        if value is None:
+            self.within("optional", node.body + node.orelse)
+            return
+        for item in node.body if value else node.orelse:
+            self.visit(item)
 
 
 def main(argv):
+    # File names outside UTF-8 go out as their bytes, as os.fsdecode read them
+    sys.stdout.reconfigure(errors="surrogateescape")
     if argv[1:] == ["--stdlib"]:
         for name in sorted(sys.stdlib_module_names):
             print(name)
         return 0
-    if len(argv) < 2 or not os.path.isdir(argv[1]):
-        print("Usage: python3 -I -S py_imports.py <root> <file>...", file=sys.stderr)
+    if len(argv) != 2 or not os.path.isdir(argv[1]):
+        print("Usage: python3 -I -S py_imports.py <root> <NUL-separated file names", file=sys.stderr)
         return 2
     root = argv[1]
-    for path in argv[2:]:
+    # The names come on stdin, since Linux limits the length of the arguments
+    for name in sys.stdin.buffer.read().split(b"\0"):
+        if not name:
+            continue
+        path = os.fsdecode(name)
         try:
             with open(os.path.join(root, path), "rb") as handle:
                 tree = ast.parse(handle.read(), path)

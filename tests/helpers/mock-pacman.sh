@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Mock pacman for the bats tests: answers -Si python with MOCK_PYTHON_VERSION or fails with
-# MOCK_PYTHON_FAIL set, -Fx from MOCK_PACMAN_FILES, -Sddp and -Si from MOCK_PACMAN_SYNC
+# Mock pacman for the bats tests: -Si python with MOCK_PYTHON_VERSION or failing with MOCK_PYTHON_FAIL set,
+# -Fx from MOCK_PACMAN_FILES, -Sddp and -Si from MOCK_PACMAN_SYNC with the depends of MOCK_PACMAN_DEPENDS
 set -euo pipefail
 
 # Print "name version repo provides" of the line of MOCK_PACMAN_SYNC for name $1, or for a word
@@ -29,6 +29,11 @@ esac
 # Lines of MOCK_PACMAN_FILES are repo, pkgname, pkgver and path, split by tabs; pacman matches
 # the path without regard to case and splits the fields of an answer by NUL
 if [[ "$1" == -Fx ]]; then
+  # pacman exits 1 for an error as for no match, and the shell 126 for an argument past its limit
+  if [[ -n "${MOCK_PACMAN_FX_EXIT:-}" ]]; then
+    [[ "$MOCK_PACMAN_FX_EXIT" != 1 ]] || echo "error: failed to read file 'extra.files'" >&2
+    exit "$MOCK_PACMAN_FX_EXIT"
+  fi
   if [[ -n "${MOCK_PACMAN_NO_FILES:-}" ]]; then
     echo "warning: database file for 'core' does not exist (use '-Fy' to download)" >&2
     echo "warning: database file for 'extra' does not exist (use '-Fy' to download)" >&2
@@ -63,8 +68,9 @@ if [[ "$2" != python ]]; then
     exit 1
   fi
   read -r name version repo provides <<<"$line"
+  depends=$(awk -v n="$name" '$1 == n { $1 = ""; sub(/^ /, ""); print; exit }' "${MOCK_PACMAN_DEPENDS:-/dev/null}")
   printf '%s\n' "Repository      : $repo" "Name            : $name" "Version         : $version" \
-    "Provides        : ${provides:-None}"
+    "Provides        : ${provides:-None}" "Depends On      : ${depends:-None}"
   exit 0
 fi
 if [[ -n "${MOCK_PYTHON_FAIL:-}" ]]; then

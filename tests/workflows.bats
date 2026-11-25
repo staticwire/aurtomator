@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 GITHUB_DIR="$BATS_TEST_DIRNAME/../.github"
-CI_IMAGE="$BATS_TEST_DIRNAME/../ci-image/Dockerfile"
+CI_IMAGE="$BATS_TEST_DIRNAME/../ci-image/archlinux.Dockerfile"
 
 # git reads and writes no config of the user running the tests, nor of the system
 setup() {
@@ -44,6 +44,7 @@ permission_lines() {
     'check-updates.yml ["image",null]' \
     'check-updates.yml ["check",null]' \
     'check-updates.yml ["prepare",null]' \
+    'check-updates.yml ["rules",null]' \
     'check-updates.yml ["verify",null]' \
     'check-updates.yml ["publish",{"contents":"write"}]' \
     'check-updates.yml ["issues",{"contents":"read","issues":"write"}]' \
@@ -67,7 +68,7 @@ permission_lines() {
     'notify-failure.yml ["notify",{"actions":"read","issues":"write"}]' \
     'release-please.yml {"contents":"read"}' \
     'release-please.yml ["release-please",{"contents":"read"}]' \
-    'release-please.yml ["sign",{"contents":"write","id-token":"write","attestations":"write"}]' \
+    'release-please.yml ["sign",{"contents":"write","id-token":"write","attestations":"write","actions":"read"}]' \
     'scorecard.yml {}' \
     'scorecard.yml ["analysis",{"contents":"read","id-token":"write"}]' \
     'spec-watch.yml {}' \
@@ -89,6 +90,7 @@ permission_lines() {
     'check-updates.yml image image' \
     'check-updates.yml check check' \
     'check-updates.yml prepare prepare' \
+    'check-updates.yml rules rules' \
     'check-updates.yml verify verify' \
     'check-updates.yml publish publish' \
     'check-updates.yml issues status' \
@@ -265,15 +267,15 @@ secret_lines() {
     "archlinux:$tag@sha256:${digest}a" "archlinux:$tag@sha256:${digest^^}" "archlinux:base-devel-20261108@sha256:$digest" \
     "archlinux:base-devel-2026110.0.623074@sha256:$digest" "archlinux:base-20261108.0.623074@sha256:$digest" \
     "evil/archlinux:$tag@sha256:$digest"; do
-    echo "FROM $from" >"$work/ci-image/Dockerfile"
+    echo "FROM $from" >"$work/ci-image/archlinux.Dockerfile"
     : >"$work/out"
     run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
     echo "$from: $output"
     [ "$status" -eq 1 ]
-    [ "$output" = "::error::ci-image/Dockerfile must pin a dated tag of archlinux:base-devel by digest" ]
+    [ "$output" = "::error::ci-image/archlinux.Dockerfile must pin a dated tag of archlinux:base-devel by digest" ]
     [ ! -s "$work/out" ]
   done
-  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:$tag@sha256:$digest" >"$work/ci-image/Dockerfile"
+  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:$tag@sha256:$digest" >"$work/ci-image/archlinux.Dockerfile"
   run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
   [ "$status" -eq 0 ]
   [ "$(cat "$work/out")" = "ref=archlinux:$tag@sha256:$digest" ]
@@ -478,9 +480,65 @@ secret_lines() {
 }
 
 @test "ci: the lint job runs actionlint on the workflows" {
-  run yq '[.jobs.lint.steps[] | select(.run == "actionlint")] | length' "$GITHUB_DIR/workflows/ci.yml"
+  run yq -o=json -I=0 '[.jobs.lint.steps[] | select(.name == "actionlint") | [.env, .run]]' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = "1" ]
+  [ "$output" = '[[{"IMAGE":"${{ steps.images.outputs.actionlint }}"},"docker run --rm -v \"$PWD:/repo:ro\" -w /repo \"$IMAGE\""]]' ]
+}
+
+# Dependabot updates the tag and the digest of each FROM line of the files of ci-image/ that end in
+# Dockerfile, and no job builds this one
+@test "ci: lint.Dockerfile pins the images of shellcheck, shfmt and actionlint by tag and digest" {
+  local file="$GITHUB_DIR/../ci-image/lint.Dockerfile"
+  run grep -v -e '^#' -e '^$' "$file"
+  [ "${#lines[@]}" -eq 3 ]
+  [[ "${lines[0]}" =~ ^FROM\ koalaman/shellcheck:v[0-9.]+@sha256:[0-9a-f]{64}\ AS\ shellcheck$ ]]
+  [[ "${lines[1]}" =~ ^FROM\ mvdan/shfmt:v[0-9.]+@sha256:[0-9a-f]{64}\ AS\ shfmt$ ]]
+  [[ "${lines[2]}" =~ ^FROM\ rhysd/actionlint:[0-9.]+@sha256:[0-9a-f]{64}\ AS\ actionlint$ ]]
+  run yq -o=json -I=0 '[.updates[] | select(.["package-ecosystem"] == "docker") | .directory]' "$GITHUB_DIR/dependabot.yml"
+  [ "$output" = '["/ci-image"]' ]
+  run grep -rl -F 'lint.Dockerfile' "$GITHUB_DIR/workflows"
+  [ "$output" = "$GITHUB_DIR/workflows/ci.yml" ]
+}
+
+# Runs the step of the lint job that reads the images with ci-image/lint.Dockerfile of the lines $@
+run_lint_images() {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws/ci-image"
+  printf '%s\n' "$@" >"$ws/ci-image/lint.Dockerfile"
+  yq '.jobs.lint.steps[] | select(.name == "Read the lint images") | .run' "$GITHUB_DIR/workflows/ci.yml" >"$BATS_TEST_TMPDIR/step.sh"
+  : >"$BATS_TEST_TMPDIR/output"
+  run env -C "$ws" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "ci: the lint job reads the image of each tool, and fails on one without a digest" {
+  local digest
+  digest=$(printf '0%.0s' {1..64})
+  run_lint_images '# images' "FROM koalaman/shellcheck:v0.11.0@sha256:$digest AS shellcheck" \
+    "FROM mvdan/shfmt:v3.14.1@sha256:$digest AS shfmt" "FROM rhysd/actionlint:1.7.12@sha256:$digest AS actionlint"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/output")" = "$(printf '%s\n' "shellcheck=koalaman/shellcheck:v0.11.0@sha256:$digest" \
+    "shfmt=mvdan/shfmt:v3.14.1@sha256:$digest" "actionlint=rhysd/actionlint:1.7.12@sha256:$digest")" ]
+  run_lint_images "FROM koalaman/shellcheck:v0.11.0@sha256:$digest AS shellcheck" "FROM mvdan/shfmt:v3.14.1 AS shfmt" \
+    "FROM rhysd/actionlint:1.7.12@sha256:$digest AS actionlint"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::ci-image/lint.Dockerfile must pin the image of shfmt by tag and digest, as FROM <image>:<tag>@sha256:<digest> AS shfmt" ]
+}
+
+# The images come by digest from lint.Dockerfile, which Dependabot updates, in place of the tools of apt and go
+@test "ci: the lint job installs nothing and runs each tool from its image with the checkout read-only" {
+  local ci="$GITHUB_DIR/workflows/ci.yml" line
+  run yq '.jobs.lint.steps[] | select(has("run")) | .run' "$ci"
+  [[ "$output" != *apt-get* && "$output" != *"go install"* ]]
+  while IFS= read -r line; do
+    [[ "$line" == *'docker run --rm -v "$PWD:/src:ro" -w /src "$'* || "$line" == *'docker run --rm -v "$PWD:/repo:ro" -w /repo "$IMAGE"' ||
+      "$line" == *'| docker run --rm -i "$IMAGE" -s bash -' ]] || {
+      echo "$line"
+      return 1
+    }
+  done < <(grep -F 'docker run' <<<"$output")
+  [ "$(grep -c -F 'docker run' <<<"$output")" -eq 6 ]
+  run yq -o=json -I=0 '[.jobs.lint.steps[] | select(.env) | .env]' "$ci"
+  [ "$output" = '[{"IMAGE":"${{ steps.images.outputs.shellcheck }}"},{"IMAGE":"${{ steps.images.outputs.shfmt }}"},{"IMAGE":"${{ steps.images.outputs.actionlint }}"},{"IMAGE":"${{ steps.images.outputs.shellcheck }}"},{"SHELLCHECK":"${{ steps.images.outputs.shellcheck }}","SHFMT":"${{ steps.images.outputs.shfmt }}"}]' ]
 }
 
 # zizmor-action uploads the findings to code scanning by default and passes the job
@@ -502,13 +560,13 @@ secret_lines() {
   run yq '.jobs.lint.steps[] | select(.name == "shellcheck the actions") | .run' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
   [[ "$output" == *'.github/actions/*/action.yml'* ]]
-  [[ "$output" == *'shellcheck -s bash "$RUNNER_TEMP/run.sh"'* ]]
+  [[ "$output" == *'yq '"'"'.runs.steps[] | select(has("run")) | .run'"'"' "$action" | docker run --rm -i "$IMAGE" -s bash -'* ]]
 }
 
 @test "ci: the lint job checks aurtomator.sh with shellcheck and shfmt" {
   run yq '.jobs.lint.steps[] | select(.name == "shellcheck and shfmt the runner") | .run' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = $'shellcheck aurtomator.sh\nshfmt -d -i 2 -ci aurtomator.sh' ]
+  [ "$output" = $'docker run --rm -v "$PWD:/src:ro" -w /src "$SHELLCHECK" aurtomator.sh\ndocker run --rm -v "$PWD:/src:ro" -w /src "$SHFMT" -d -i 2 -ci aurtomator.sh' ]
 }
 
 # The lint steps check only the files they name: shellcheck -x reads a
@@ -520,16 +578,21 @@ secret_lines() {
   for step in shellcheck shfmt; do
     run yq ".jobs.lint.steps[] | select(.name == \"$step\") | .run" "$GITHUB_DIR/workflows/ci.yml"
     [ "$status" -eq 0 ]
-    [[ "$output" == "$step "* ]]
+    [[ "$output" == 'docker run --rm -v "$PWD:/src:ro" -w /src "$IMAGE" '* ]]
+    [ "$(yq ".jobs.lint.steps[] | select(.name == \"$step\") | .env.IMAGE" "$GITHUB_DIR/workflows/ci.yml")" = "\${{ steps.images.outputs.$step }}" ]
     run bash -c 'cd "$1" && for word in $2; do if [[ "$word" == scripts/*.sh || "$word" == strategies/*.sh ]]; then printf "%s\n" "$word"; fi; done | sort' _ "$root" "$output"
     [ "$status" -eq 0 ]
     [ "$output" = "$expected" ]
   done
 }
 
+# The coverage shims of tests/helpers/cov-shims are bash scripts without an extension
 @test "ci: shfmt checks every test file" {
   local root="$GITHUB_DIR/.." expected
-  expected=$(cd "$root" && find tests -name '*.bats' -o -name '*.sh' | sort)
+  expected=$(cd "$root" && {
+    find tests -name '*.bats' -o -name '*.sh'
+    find tests/helpers/cov-shims -type f
+  } | sort)
   [ -n "$expected" ]
   run yq '.jobs.lint.steps[] | select(.name == "shfmt") | .run' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
@@ -540,7 +603,10 @@ secret_lines() {
 
 @test "ci: shellcheck checks every test helper" {
   local root="$GITHUB_DIR/.." expected
-  expected=$(cd "$root" && find tests/helpers -name '*.sh' | sort)
+  expected=$(cd "$root" && {
+    find tests/helpers -name '*.sh'
+    find tests/helpers/cov-shims -type f
+  } | sort)
   [ -n "$expected" ]
   run yq '.jobs.lint.steps[] | select(.name == "shellcheck") | .run' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
@@ -681,7 +747,7 @@ step_index_in() {
   local value
   for value in '' false yes true merge; do
     echo "[$value]"
-    AUTO_MERGE="$value" GH_FILES="ci-image/Dockerfile" run_merge_step
+    AUTO_MERGE="$value" GH_FILES="ci-image/archlinux.Dockerfile" run_merge_step
     [ "$status" -eq 0 ]
     [[ "$output" == *"::notice::"* ]]
     [ ! -s "$GH_LOG" ]
@@ -715,7 +781,7 @@ EOF
 # main by dispatch
 @test "merge-image: merges the tested head when only files of ci-image/ changed, then starts ci.yml and release-please.yml on main" {
   local files
-  for files in ci-image/Dockerfile $'ci-image/Gemfile\nci-image/Gemfile.lock' ci-image/Gemfile.lock \
+  for files in ci-image/archlinux.Dockerfile ci-image/lint.Dockerfile $'ci-image/Gemfile\nci-image/Gemfile.lock' ci-image/Gemfile.lock \
     $'ci-image/requirements.in\nci-image/requirements.txt' ci-image/requirements.txt; do
     echo "$files"
     GH_FILES="$files" run_merge_step
@@ -729,7 +795,7 @@ EOF
 
 @test "merge-image: leaves a pull request that changes other files" {
   local files
-  for files in $'ci-image/Dockerfile\n.github/workflows/ci.yml' ci-image/setup.sh ci-image/Gemfile.local ''; do
+  for files in $'ci-image/archlinux.Dockerfile\n.github/workflows/ci.yml' ci-image/setup.sh ci-image/Gemfile.local ''; do
     echo "[$files]"
     GH_FILES="$files" run_merge_step
     [ "$status" -eq 0 ]
@@ -740,7 +806,7 @@ EOF
 }
 
 @test "merge-image: starts no workflow when the merge fails" {
-  GH_MERGE_RC=1 GH_FILES="ci-image/Dockerfile" run_merge_step
+  GH_MERGE_RC=1 GH_FILES="ci-image/archlinux.Dockerfile" run_merge_step
   [ "$status" -ne 0 ]
   run grep -c '^workflow run' "$GH_LOG"
   [ "$output" = "0" ]
@@ -817,7 +883,18 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
   run cat "$GH_BODY"
   [ "${lines[0]}" = "Dependabot pull request #12 brings versions with published vulnerabilities, so it is not merged by itself." ]
   [ "${lines[1]}" = "| Package | Version | Severity | Advisory |" ]
-  [ "${lines[3]}" = '| `rexml` | `3.4.5` | high | [GHSA-aaaa-bbbb-cccc](https://github.com/advisories/GHSA-aaaa-bbbb-cccc) Denial of service   in the parser |' ]
+  [ "${lines[3]}" = '| `rexml` | `3.4.5` | `high` | [GHSA-aaaa-bbbb-cccc](https://github.com/advisories/GHSA-aaaa-bbbb-cccc) `Denial of service   in the parser` |' ]
+}
+
+# Authors of advisories write their text, and Markdown in the issue would mention accounts and
+# load images under the name of the workflow
+@test "vulnerability-issue: writes the text of an advisory as code and links only a GHSA id" {
+  local changes='[{"name":"rexml","version":"3.4.5","vulnerabilities":[{"severity":"high @x","advisory_ghsa_id":"GHSA-aaaa-bbbb-cccc](https://evil.example)","advisory_summary":"Ping @x ![i](https://evil.example/i.png) `y`","advisory_url":"https://evil.example/"},{"severity":"low","advisory_ghsa_id":"GHSA-23hp-4jxv-gm8m","advisory_summary":null,"advisory_url":"https://evil.example/"}]}]'
+  CHANGES="$changes" run_vulnerability_issue_step
+  [ "$status" -eq 0 ]
+  run cat "$GH_BODY"
+  [ "${lines[3]}" = '| `rexml` | `3.4.5` | `high @x` | `GHSA-aaaa-bbbb-cccc](https://evil.example)` `Ping @x ![i](https://evil.example/i.png)  y ` |' ]
+  [ "${lines[4]}" = '| `rexml` | `3.4.5` | `low` | [GHSA-23hp-4jxv-gm8m](https://github.com/advisories/GHSA-23hp-4jxv-gm8m) `null` |' ]
 }
 
 @test "vulnerability-issue: opens no issue when the review failed without a vulnerable change" {
@@ -848,7 +925,7 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
 }
 
 @test "merge-image: fails when the file list cannot be read" {
-  GH_FAIL=1 GH_FILES="ci-image/Dockerfile" run_merge_step
+  GH_FAIL=1 GH_FILES="ci-image/archlinux.Dockerfile" run_merge_step
   [ "$status" -ne 0 ]
   run grep -c '^pr merge' "$GH_LOG"
   [ "$output" = "0" ]
@@ -1024,7 +1101,9 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 
 # Runs step $1 of release-please.yml in a checkout whose manifest holds $MANIFEST, with a gh that
 # prints the tag ref as $TAG_TYPE, commit by default, and $TAG_SHA, $PEELED for the commit of an
-# annotated tag and $DRAFT, true by default, for whether the release is a draft
+# annotated tag, $DRAFT, true by default, for whether the release is a draft, $ASSETS for the
+# names of its files, $RUN_URL for the newest run of the workflow on a commit and $DRAFT_IDS for
+# the drafts of the tag in the release list
 run_release_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$bin" "$ws/.github"
@@ -1041,7 +1120,15 @@ case "$1 $2" in
     [[ -n "${PEELED:-}" ]] || exit 1
     printf '%s\n' "$PEELED"
     ;;
-  "release view") printf '%s\n' "${DRAFT:-true}" ;;
+  "release view")
+    if [[ " $* " == *" --json assets "* ]]; then
+      [[ -z "${ASSETS:-}" ]] || printf '%s\n' "$ASSETS"
+    else
+      printf '%s\n' "${DRAFT:-true}"
+    fi
+    ;;
+  "run list") printf '%s\n' "${RUN_URL:-}" ;;
+  "api repos/owner/repo/releases?per_page=100") [[ -z "${DRAFT_IDS:-}" ]] || printf '%s\n' "$DRAFT_IDS" ;;
 esac
 EOF
   chmod +x "$bin/gh"
@@ -1052,7 +1139,8 @@ EOF
   cd "$ws"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" REPO=owner/repo \
     SHA=abc123 TAG_SHA="${TAG_SHA:-}" TAG_TYPE="${TAG_TYPE:-}" PEELED="${PEELED:-}" DRAFT="${DRAFT:-}" \
-    VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" ASSETS="${ASSETS:-}" \
+    RUN_URL="${RUN_URL:-}" DRAFT_IDS="${DRAFT_IDS:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Sigstore bundles of actions/attest carry the attestation as a DSSE envelope
@@ -1065,6 +1153,19 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
   grep -qxF 'api repos/owner/repo/git/ref/tags/v0.13.1 --jq .object.type + " " + .object.sha' "$GH_LOG"
   grep -qxF 'release view v0.13.1 -R owner/repo --json isDraft --jq .isDraft' "$GH_LOG"
+  grep -qxF 'api repos/owner/repo/releases?per_page=100 --paginate --jq .[] | select(.draft and .tag_name == "v0.13.1") | .id' "$GH_LOG"
+}
+
+# gh edits the first draft of a tag, and release-please creates the release again when a run
+# stops between the release and the label
+@test "release-please: the find step fails on two drafts of the tag" {
+  MANIFEST=0.13.1 TAG_SHA=abc123 DRAFT_IDS=$'11\n12' run_release_step "Find the release to sign"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::More than one draft release carries the tag v0.13.1; delete all drafts of v0.13.1 but one, then rerun the job" ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  MANIFEST=0.13.1 TAG_SHA=abc123 DRAFT_IDS=11 run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
 }
 
 # commits/<ref> also resolves a branch of that name, which accounts with push access can make
@@ -1075,18 +1176,32 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   grep -qxF 'api repos/owner/repo/git/tags/fff999 --jq .object.sha' "$GH_LOG"
   run grep -c '/commits/' "$GH_LOG"
   [ "$output" = "0" ]
-  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=abc123 PEELED=def456 run_release_step "Find the release to sign"
+  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=abc123 PEELED=def456 DRAFT=false run_release_step "Find the release to sign"
   [ "$status" -eq 0 ]
   [ ! -s "$BATS_TEST_TMPDIR/output" ]
 }
 
 # Later pushes would sign the code of an older release with the provenance of a newer commit
 @test "release-please: the find step leaves the release of another commit" {
-  MANIFEST=0.13.0 TAG_SHA=def456 run_release_step "Find the release to sign"
+  MANIFEST=0.13.0 TAG_SHA=def456 DRAFT=false run_release_step "Find the release to sign"
   [ "$status" -eq 0 ]
+  [ "$output" = "v0.13.0 is no release of this commit" ]
   [ ! -s "$BATS_TEST_TMPDIR/output" ]
-  run grep -c '^release ' "$GH_LOG"
+  run grep -c '^release \(upload\|edit\)\|^run ' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# The run of the release commit can fail before sign, and later runs leave its draft as it is
+@test "release-please: the find step fails on a draft of another commit with the run to rerun" {
+  MANIFEST=0.13.0 TAG_SHA=def456 RUN_URL=https://github.com/owner/repo/actions/runs/7 run_release_step "Find the release to sign"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::v0.13.0 is a draft of the commit def456; rerun all jobs of https://github.com/owner/repo/actions/runs/7 to sign and publish it" ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  grep -qxF 'run list -R owner/repo --workflow release-please.yml --commit def456 --json url --jq .[0].url // ""' "$GH_LOG"
+
+  MANIFEST=0.13.0 TAG_SHA=def456 run_release_step "Find the release to sign"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::v0.13.0 is a draft of the commit def456; rerun all jobs of the run of release-please.yml on that commit to sign and publish it" ]
 }
 
 # The tag of the manifest version exists in every run, and a skipped sign leaves the release a draft
@@ -1141,12 +1256,29 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and publish the release"
   [ "$status" -eq 0 ]
   [ "$(<"$GH_LOG")" = "$(printf '%s\n' \
+    'release view v0.13.1 -R owner/repo --json assets --jq .assets[].name' \
     'release upload v0.13.1 aurtomator-0.13.1.tar.gz aurtomator-0.13.1.tar.gz.sigstore.json aurtomator-0.13.1.tar.gz.intoto.jsonl -R owner/repo --clobber' \
     'release edit v0.13.1 -R owner/repo --draft=false')" ]
   cmp "$bundle" "$ws/aurtomator-0.13.1.tar.gz.sigstore.json"
   run cat "$ws/aurtomator-0.13.1.tar.gz.intoto.jsonl"
   [ "${#lines[@]}" -eq 1 ]
   [ "$output" = "$SAMPLE_ENVELOPE" ]
+}
+
+# Files of a draft are published and locked with the release, and the attestation of GitHub
+# covers them; the files that a failed run of sign left get replaced
+@test "release-please: publishes no draft that holds a file sign does not attach" {
+  local bundle="$BATS_TEST_TMPDIR/attestation.json"
+  printf '%s\n' "{\"dsseEnvelope\":$SAMPLE_ENVELOPE}" >"$bundle"
+  VERSION=0.13.1 BUNDLE="$bundle" ASSETS=$'aurtomator-0.13.1.tar.gz\ninstall.sh' run_release_step "Attach the archive and publish the release"
+  [ "$status" -ne 0 ]
+  [ "$output" = "::error::The draft of v0.13.1 holds install.sh, which sign does not attach" ]
+  [ "$(<"$GH_LOG")" = 'release view v0.13.1 -R owner/repo --json assets --jq .assets[].name' ]
+
+  ASSETS=$'aurtomator-0.13.1.tar.gz\naurtomator-0.13.1.tar.gz.sigstore.json\naurtomator-0.13.1.tar.gz.intoto.jsonl' \
+    VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and publish the release"
+  [ "$status" -eq 0 ]
+  grep -qxF 'release edit v0.13.1 -R owner/repo --draft=false' "$GH_LOG"
 }
 
 @test "release-please: uploads nothing for a bundle without a DSSE envelope" {
@@ -1189,7 +1321,7 @@ step_run() {
 @test "check-updates: every job checks out aurtomator at the SHA of the called workflow" {
   local jobs job path repo='${{ job.workflow_repository }}' sha='${{ job.workflow_sha }}'
   mapfile -t jobs < <(yq '.jobs | keys | .[]' "$CHECK_UPDATES")
-  [ "${#jobs[@]}" -eq 6 ]
+  [ "${#jobs[@]}" -eq 7 ]
   for job in "${jobs[@]}"; do
     echo "$job"
     path=aurtomator
@@ -1237,13 +1369,13 @@ step_run() {
 @test "check-updates: the check job decides the run and executes no PKGBUILD" {
   run yq '[.jobs.check.steps[] | select(.uses == "./aurtomator/.github/actions/run-as-builder") | .with.args // ""] | @json' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = '[""]' ]
+  [ "$output" = '["--rules-later"]' ]
   run yq '.jobs.check.steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [[ "$output" != *"--prepare"* ]]
   [[ "$output" != *"update-pkg.sh"* ]]
   run yq '.jobs.check.outputs | keys | join(" ")' "$CHECK_UPDATES"
-  [ "$output" = "prepare to-prepare work checked-id" ]
+  [ "$output" = "prepare to-prepare rules to-rules work checked-id" ]
   run yq '.jobs.check.outputs["to-prepare"]' "$CHECK_UPDATES"
   [ "$output" = '${{ steps.decide.outputs.to-prepare }}' ]
 }
@@ -1275,19 +1407,22 @@ id_of() {
 }
 
 # Downloads by name take any artifact of that name in the run and empty ids take them all,
-# so 0 stands in for no id; verify takes the handoffs of prepare by a pattern only they upload
+# so 0 stands in for no id; verify takes the handoffs of prepare and publish the files of rules by
+# patterns that only those jobs upload
 @test "check-updates: each job downloads an artifact by the id the job of its upload gave" {
   run yq '.jobs | to_entries[] | .key as $job | .value.steps[] | select(.uses | test("^actions/download-artifact@")) |
     $job + " " + .with.path + " " + (.with["artifact-ids"] // ("pattern " + .with.pattern + " " + (.with["merge-multiple"] | tostring))) + " " + (.with | has("name") | tostring)' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 7 ]
+  [ "${#lines[@]}" -eq 9 ]
   [ "${lines[0]}" = "prepare /data/status $(id_of check checked) false" ]
-  [ "${lines[1]}" = "verify /data/status $(id_of check checked) false" ]
-  [ "${lines[2]}" = "verify /data/handoffs pattern handoff-* true false" ]
-  [ "${lines[3]}" = "publish /data/status $(id_of check checked) false" ]
-  [ "${lines[4]}" = "publish /data/handoff $(id_of verify verified) false" ]
-  [ "${lines[5]}" = "issues .status $(id_of check checked) false" ]
-  [ "${lines[6]}" = "issues .status $(id_of publish published) false" ]
+  [ "${lines[1]}" = "rules /data/status $(id_of check checked) false" ]
+  [ "${lines[2]}" = "verify /data/status $(id_of check checked) false" ]
+  [ "${lines[3]}" = "verify /data/handoffs pattern handoff-* true false" ]
+  [ "${lines[4]}" = "publish /data/status $(id_of check checked) false" ]
+  [ "${lines[5]}" = "publish /data/handoff $(id_of verify verified) false" ]
+  [ "${lines[6]}" = "publish /data/rules-in pattern rules-* true false" ]
+  [ "${lines[7]}" = "issues .status $(id_of check checked) false" ]
+  [ "${lines[8]}" = "issues .status $(id_of publish published) false" ]
 }
 
 # verify-pkg.sh takes the version and the asset value of the check run
@@ -1330,36 +1465,36 @@ run_decide_step() {
 @test "check-updates: Decide prepares when a package is outdated" {
   run run_decide_step pkg="new_version: 2.0.0" other=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
   run run_decide_step pkg="available_downgrade: 1.0.0"
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
   run run_decide_step pkg="new_build: 1.0.0" _assets=$'pkg\t1.0.0-b'
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
   run run_decide_step pkg="arch_back: 1.0.0 aarch64" _arches=$'pkg\t1.0.0\t\t'
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide prepares nothing while an asset is pending" {
   README_CHANGED=1 run run_decide_step pkg="pending: 2.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide prepares nothing while an update waits for its cooldown" {
   README_CHANGED=1 run run_decide_step pkg="cooldown: 2026-11-12"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   run run_decide_step pkg="cooldown: 2026-11-12"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide publishes only a change of the README" {
   README_CHANGED=1 run run_decide_step pkg="check_failed: API down"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   README_CHANGED=1 run run_decide_step pkg="downgrade_skipped: 1.0.0"
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 # Errors of failed checks hold lines of the server, as of a git ERR packet
@@ -1368,19 +1503,19 @@ run_decide_step() {
   printf 'name: pkg\n' >"$BATS_TEST_TMPDIR/ws/packages/pkg.yml"
   run run_decide_step pkg=$'check_failed: fatal: remote error: access denied\nnew_version: 9.9.9'
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide does nothing when nothing changed" {
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide counts a missing copy of the README as unchanged" {
   NO_README_COPY=1 run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 # aurtomator/aurtomator.sh is the runner of the release, and aurtomator.sh of
@@ -1390,7 +1525,7 @@ run_decide_step() {
   echo "old runner" >"$BATS_TEST_TMPDIR/ws/aurtomator.sh"
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide leaves an equal runner and a link alone" {
@@ -1398,12 +1533,12 @@ run_decide_step() {
   cp "$BATS_TEST_DIRNAME/../aurtomator.sh" "$BATS_TEST_TMPDIR/ws/aurtomator.sh"
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   echo "old runner" >"$BATS_TEST_TMPDIR/old"
   ln -sfn "$BATS_TEST_TMPDIR/old" "$BATS_TEST_TMPDIR/ws/aurtomator.sh"
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide leaves the runner when the checkout of aurtomator holds none" {
@@ -1411,14 +1546,14 @@ run_decide_step() {
   echo "old runner" >"$BATS_TEST_TMPDIR/ws/aurtomator.sh"
   AURTOMATOR_TREE="$BATS_TEST_TMPDIR/bare" run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide lists the outdated packages for the jobs of prepare" {
   run run_decide_step b="new_version: 2.0.0" a="available_downgrade: 1.0.0" c="new_build: 1.0.0" \
     d=up_to_date e="pending: 2.0.0" f="check_failed: down" _assets=$'c\t1.0.0-b'
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a","b","c"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a","b","c"]\nrules=false\nto-rules=[]' ]
   [ ! -e "$BATS_TEST_TMPDIR/data/statuses/_deferred" ]
 }
 
@@ -1426,14 +1561,14 @@ run_decide_step() {
   run run_decide_step "bad name=new_version: 2.0.0" "-x=new_version: 2.0.0" "Demo=new_version: 2.0.0" \
     "_x=new_version: 2.0.0" pkg="new_version: 2.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
 }
 
 # builder of check writes the statuses, so a name without a package YAML would start a job
 @test "check-updates: Decide prepares no name without a package YAML" {
   NO_YAML="ghost a0" run run_decide_step ghost="new_version: 2.0.0" a0="arch_back: 1.0.0 aarch64" pkg="new_version: 2.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
 }
 
 # GitHub starts at most 256 jobs from one matrix
@@ -1477,26 +1612,26 @@ decide_stats() {
   echo "name: a" >"$BATS_TEST_TMPDIR/ws/packages/a.yml"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   decide_stats 2026-11-10
   rm "$BATS_TEST_TMPDIR/ws/stats/card.svg"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   decide_stats 2026-11-10
   rm "$BATS_TEST_TMPDIR/ws/stats/events.csv"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide publishes once the windows of the card moved" {
   decide_stats 2026-11-09
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   decide_stats 2026-11-10
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 # Journals root cannot read would set work in every run, and publish would
@@ -1507,20 +1642,20 @@ decide_stats() {
   ln -sf /dev/zero "$ws/stats/events.csv"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   grep -qx '::warning::stats/events.csv is a link or no regular file, so this run records no statistics' \
     "$BATS_TEST_TMPDIR/decide.out"
   rm -r "$ws/stats"
   echo x >"$ws/stats"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   grep -qx '::warning::stats is a link or no directory, so this run records no statistics' "$BATS_TEST_TMPDIR/decide.out"
   rm "$ws/stats"
   decide_stats 2026-11-09
   mv "$ws/stats" "$ws/other"
   ln -s other "$ws/stats"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   grep -qx '::warning::stats is a link or no directory, so this run records no statistics' "$BATS_TEST_TMPDIR/decide.out"
 }
 
@@ -1529,7 +1664,7 @@ decide_stats() {
   echo 'time,package' >"$BATS_TEST_TMPDIR/ws/stats/events.csv"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 # Decide, Record statistics and the commit step read the copies of Hand over
@@ -1542,7 +1677,7 @@ decide_stats() {
 @test "check-updates: update-readme.sh runs as builder after check-all.sh, in check and publish" {
   run yq -o=json -I=0 '[.jobs[].steps[] | select(.uses == "./aurtomator/.github/actions/run-as-builder") | .with.readme // "false"]' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = '["true","false","false","true"]' ]
+  [ "$output" = '["true","false","false","false","true"]' ]
   run run_blocks "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [[ "$output" != *"update-readme.sh"* ]]
@@ -1697,6 +1832,162 @@ run_take_step() {
   [ -z "$output" ]
 }
 
+# The rules download releases and parse their files, so they run without the token and the
+# statuses of the check job, in a job of their own for each package
+@test "check-updates: rules runs a job for each package of to-rules, without a token or a secret" {
+  run yq '.jobs.rules.if' "$CHECK_UPDATES"
+  [ "$output" = "needs.check.outputs.rules == 'true'" ]
+  run yq -o=json -I=0 '.jobs.rules.needs' "$CHECK_UPDATES"
+  [ "$output" = '["image","check"]' ]
+  run yq -o=json -I=0 '.jobs.rules.strategy' "$CHECK_UPDATES"
+  [ "$output" = '{"fail-fast":false,"matrix":{"package":"${{ fromJSON(needs.check.outputs.to-rules) }}"}}' ]
+  run yq -o=json -I=0 '.jobs.rules.env' "$CHECK_UPDATES"
+  [ "$output" = '{"PACKAGE":"${{ matrix.package }}"}' ]
+  run yq -o=json -I=0 '.jobs.rules.steps[] | select(.name == "Run the requires rules") | [.env, .with]' "$CHECK_UPDATES"
+  [ "$output" = '[null,{"args":"--rules rules","package":"${{ matrix.package }}","companions":"true","statuses":"/data/status"}]' ]
+  run yq -o=json '.jobs.rules' "$CHECK_UPDATES"
+  [[ "$output" != *"secrets."* && "$output" != *"github.token"* && "$output" != *GITHUB_TOKEN* ]]
+  run yq -o=json -I=0 '.jobs.check.outputs | [.rules, ."to-rules"]' "$CHECK_UPDATES"
+  [ "$output" = '["${{ steps.decide.outputs.rules }}","${{ steps.decide.outputs.to-rules }}"]' ]
+  run yq '.jobs.publish.needs | join(" ")' "$CHECK_UPDATES"
+  [ "$output" = "image check prepare verify rules" ]
+}
+
+# Publish takes the newest file of each package, and builder writes it only after Stop builder ends
+@test "check-updates: rules hands over the file of its package after Stop builder, by attempt" {
+  local builder
+  builder=$(yq '.jobs.rules.steps | to_entries | map(select(.value.uses == "./aurtomator/.github/actions/run-as-builder")) | .[0].key' "$CHECK_UPDATES")
+  run yq -o=json -I=0 "[.jobs.rules.steps[$((builder + 1))], .jobs.rules.steps[$((builder + 2))], .jobs.rules.steps[$((builder + 3))], .jobs.rules.steps[-1]] | map([.name, .if])" "$CHECK_UPDATES"
+  [ "$output" = "[[\"Stop builder\",\"always()\"],[\"Hand over the rules\",\"always() && steps.stop.outcome == 'success'\"],[\"Upload rules\",null],[\"Drop the checkouts\",\"always()\"]]" ]
+  [ "$(step_run rules "Stop builder")" = "$(step_run check "Stop builder")" ]
+  run yq -o=json -I=0 '.jobs.rules.steps[] | select(.name == "Upload rules") | .with' "$CHECK_UPDATES"
+  [ "$output" = '{"name":"rules-${{ matrix.package }}-${{ github.run_attempt }}","path":"/data/rules-out/","if-no-files-found":"error","retention-days":1}' ]
+  run yq '.jobs.rules.steps[] | select(.name == "Hand over the rules") | .env.ATTEMPT' "$CHECK_UPDATES"
+  [ "$output" = '${{ github.run_attempt }}' ]
+}
+
+# Runs Hand over the rules for package $PACKAGE with the files of $BATS_TEST_TMPDIR/work, and prints
+# each file it hands over with its content
+run_rules_hand_over() {
+  local bin="$BATS_TEST_TMPDIR/bin" data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$bin" "$data"
+  printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$bin/sudo"
+  chmod +x "$bin/sudo"
+  step_run rules "Hand over the rules" >"$BATS_TEST_TMPDIR/step.sh"
+  (PATH="$bin:$PATH" ATTEMPT=2 DATA="$data" WORK="$BATS_TEST_TMPDIR/work" sh -e "$BATS_TEST_TMPDIR/step.sh") || return
+  (cd "$data" && find rules-out -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(cat "$f")"; done)
+}
+
+@test "check-updates: Hand over the rules takes the file of its package alone, within 64 KiB and no link" {
+  local work="$BATS_TEST_TMPDIR/work"
+  mkdir -p "$work/rules"
+  echo mine >"$work/rules/foo"
+  echo other >"$work/rules/bar"
+  PACKAGE=foo run run_rules_hand_over
+  [ "$status" -eq 0 ]
+  [ "$output" = "rules-out/2/foo mine" ]
+  rm -rf "$BATS_TEST_TMPDIR/data"
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  ln -sf "$BATS_TEST_TMPDIR/secret" "$work/rules/foo"
+  PACKAGE=foo run run_rules_hand_over
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  rm -rf "$BATS_TEST_TMPDIR/data" "$work/rules/foo"
+  truncate -s $((64 * 1024 + 1)) "$work/rules/foo"
+  PACKAGE=foo run run_rules_hand_over
+  [ "$status" -eq 0 ]
+  [ "$output" = "::warning::rules/foo is larger than 65536 bytes, so Hand over the rules skips it" ]
+  PACKAGE=../foo run run_rules_hand_over
+  [ "$status" -ne 0 ]
+  [ "$output" = "::error::Not a package name: ../foo" ]
+}
+
+# Adds file $3 of attempt $1 of the rules job of package $2, as publish downloads it into rules-in/
+add_rules_attempt() {
+  mkdir -p "$BATS_TEST_TMPDIR/ws/rules-in/$1"
+  printf '%s\n' "$3" >"$BATS_TEST_TMPDIR/ws/rules-in/$1/$2"
+}
+
+# Runs the step of publish that takes the newest rules, and lists every file of handoff/rules/
+run_take_rules() {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws"
+  step_run publish "Take the newest rules" >"$BATS_TEST_TMPDIR/step.sh"
+  (cd "$ws" && DATA="$ws" sh -e "$BATS_TEST_TMPDIR/step.sh") || return
+  (cd "$ws/handoff/rules" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(cat "$f")"; done)
+}
+
+@test "check-updates: publish takes the rules of the newest attempt of each package" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  add_rules_attempt 1 foo old
+  add_rules_attempt 1 bar first
+  add_rules_attempt 10 foo new
+  add_rules_attempt 2 foo second
+  add_rules_attempt 01 baz padded
+  add_rules_attempt 1 Bad upper
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$ws/rules-in/1/qux"
+  truncate -s $((64 * 1024 + 1)) "$ws/rules-in/1/big"
+  run run_take_rules
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' '::warning::rules-in/1/big is larger than 65536 bytes, so publish skips it' './bar first' './foo new')" ]
+}
+
+@test "check-updates: publish takes no rules without them or through a link" {
+  run run_take_rules
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -d "$BATS_TEST_TMPDIR/ws/handoff/rules" ]
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere/1"
+  echo linked >"$BATS_TEST_TMPDIR/elsewhere/1/foo"
+  rm -rf "$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$BATS_TEST_TMPDIR/ws"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$BATS_TEST_TMPDIR/ws/rules-in"
+  run run_take_rules
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Publish fails a package of _rules without the file of the rules job, so they run in the same run
+@test "check-updates: publish takes the rules after the handoff of verify, before builder" {
+  run yq '.jobs.publish.steps[] | select(.name == "Download rules") | .if' "$CHECK_UPDATES"
+  [ "$output" = "needs.check.outputs.rules == 'true'" ]
+  [ "$(step_index publish "Download rules")" -gt "$(step_index publish "Keep the statuses after a failed verify")" ]
+  [ "$(step_index publish "Take the newest rules")" -eq $(($(step_index publish "Download rules") + 1)) ]
+  [ "$(step_index publish "Take the newest rules")" -lt "$(step_index publish "Publish updates")" ]
+}
+
+@test "run-as-builder: gives builder the files of the rules jobs in the handoff" {
+  local work="$BATS_TEST_TMPDIR/work" rules="$BATS_TEST_TMPDIR/data/handoff/rules"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  mkdir -p "$rules/sub"
+  printf 'version\t1.0\n' >"$rules/foo"
+  echo x >"$rules/Bad"
+  echo x >"$rules/sub/foo"
+  truncate -s $((64 * 1024 + 1)) "$rules/big"
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$rules/link"
+  SUDO_OUT=ok run_builder_step publish "Publish updates"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1/handoff/rules" && find . | LC_ALL=C sort' _ "$work"
+  [ "$output" = $'.\n./foo' ]
+  [ "$(cat "$work/handoff/rules/foo")" = $'version\t1.0' ]
+}
+
+# Publish fails a package of _rules without the file of the rules job, so _rules lists the packages of
+# the jobs of rules alone
+@test "check-updates: Decide lists the packages of _rules among those to prepare for the jobs of rules" {
+  run run_decide_step a="new_version: 2.0.0" b="new_version: 2.0.0" c=up_to_date _rules=$'b\nc\nzz\nBad name\n../x\nb'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a","b"]\nrules=true\nto-rules=["b"]' ]
+  [ "$(cat "$BATS_TEST_TMPDIR/data/statuses/_rules")" = b ]
+  rm -rf "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/ws/packages"
+  run run_decide_step a="new_version: 2.0.0" _rules=c
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a"]\nrules=false\nto-rules=[]' ]
+  [ ! -e "$BATS_TEST_TMPDIR/data/statuses/_rules" ]
+}
+
 @test "check-updates: verify also runs after a failed job of prepare" {
   run yq '.jobs.verify.if' "$CHECK_UPDATES"
   [ "$output" = "!cancelled() && needs.check.outputs.prepare == 'true'" ]
@@ -1833,14 +2124,16 @@ builder_steps() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"scripts/check-all.sh"* ]]
   run builder_steps
-  [ "${#lines[@]}" -eq 4 ]
+  [ "${#lines[@]}" -eq 5 ]
 }
 
 @test "run-as-builder: takes its inputs through the environment" {
   run yq -o=json -I=0 '.runs.steps[0].env' "$BUILDER_ACTION"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"ARGS":"${{ inputs.args }}","HANDOFF":"${{ inputs.handoff }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","STATUSES":"${{ inputs.statuses }}","WORK":"/work"}' ]
+  [ "$output" = '{"ARGS":"${{ inputs.args }}","COMPANIONS":"${{ inputs.companions }}","HANDOFF":"${{ inputs.handoff }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","STATUSES":"${{ inputs.statuses }}","WORK":"/work"}' ]
   run yq '.inputs.readme.default' "$BUILDER_ACTION"
+  [ "$output" = "false" ]
+  run yq '.inputs.companions.default' "$BUILDER_ACTION"
   [ "$output" = "false" ]
   local input
   for input in package statuses handoff; do
@@ -1854,7 +2147,7 @@ builder_steps() {
 # their calls
 run_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep readme package
-  local statuses handoff
+  local statuses handoff companions
   local action_dir="$BATS_TEST_TMPDIR/ws/aurtomator/.github/actions/run-as-builder"
   mkdir -p "$bin" "$action_dir"
   printf '#!/bin/sh\necho "$*" >>"$CALL_LOGS/chown.log"\n' >"$bin/chown"
@@ -1882,6 +2175,7 @@ EOF
   args=$(yq "$step | .with.args // \"\"" "$CHECK_UPDATES")
   keep=$(yq "$step | .with[\"keep-env\"] // \"\"" "$CHECK_UPDATES")
   readme=$(yq "$step | .with.readme // \"false\"" "$CHECK_UPDATES")
+  companions=$(yq "$step | .with.companions // \"false\"" "$CHECK_UPDATES")
   package=$(yq "$step | .with.package // \"\"" "$CHECK_UPDATES")
   # shellcheck disable=SC2016
   package=${package//'${{ matrix.package }}'/${MATRIX_PACKAGE-foo}}
@@ -1893,7 +2187,7 @@ EOF
   rm -f "$SUDO_LOG"
   run env -C "$ws" PATH="$bin:$PATH" GITHUB_WORKSPACE="$ws" CALL_LOGS="$BATS_TEST_TMPDIR" \
     GITHUB_ACTION_PATH="${ACTION_PATH:-$action_dir}" SUDO_LOG="$SUDO_LOG" TEST_X_RC="${TEST_X_RC:-0}" \
-    ARGS="$args" KEEP_ENV="$keep" PACKAGE="$package" README_TOO="$readme" WORK="$BATS_TEST_TMPDIR/work" \
+    ARGS="$args" KEEP_ENV="$keep" PACKAGE="$package" README_TOO="$readme" COMPANIONS="$companions" WORK="$BATS_TEST_TMPDIR/work" \
     STATUSES="$statuses" HANDOFF="$handoff" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
 }
 
@@ -1906,8 +2200,9 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
+    "rules${tab}Run the requires rules${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --rules rules cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
     "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
   )
@@ -1930,7 +2225,7 @@ sudo_commands() {
   [ "$status" -eq 3 ]
   run sudo_commands
   [ "${#lines[@]}" -eq 1 ]
-  [[ "${lines[0]}" == *"/check-all.sh cwd="* ]]
+  [[ "${lines[0]}" == *"/check-all.sh --rules-later cwd="* ]]
 }
 
 # update-readme.sh ends with 3 when it leaves README.md as it is, and the step warns after
@@ -2105,6 +2400,23 @@ make_builder_inputs() {
   [ ! -s "$work/.status/_alerts" ]
 }
 
+# The requires rules read upstream.pin_from of the other packages, whose companion pins they apply
+@test "run-as-builder: gives the rules job the YAMLs of the other packages and no status of theirs" {
+  local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  echo "name: bar" >"$ws/packages/bar.yml"
+  echo "new_version: 3.0" >"$BATS_TEST_TMPDIR/data/status/bar"
+  MATRIX_PACKAGE=foo SUDO_OUT=ok run_builder_step rules "Run the requires rules"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
+  [ "$output" = "$(printf '%s\n' ./.status ./.status/_upstream ./.status/foo ./packages ./packages/bar.yml ./packages/foo.yml)" ]
+  [ "$(cat "$work/packages/bar.yml")" = "name: bar" ]
+  run yq -o=json -I=0 '[.jobs | to_entries[] | select([.value.steps[] | select(.with.companions)] | length > 0) | .key]' "$CHECK_UPDATES"
+  [ "$output" = '["rules"]' ]
+  [ "$(yq '.jobs.rules.steps[] | select(.name == "Run the requires rules") | .with.companions' "$CHECK_UPDATES")" = true ]
+}
+
 # PKGBUILD code of the package runs as builder in prepare
 @test "run-as-builder: gives builder only the lines of its package in _arches, _assets and _alerts" {
   local work="$BATS_TEST_TMPDIR/work"
@@ -2199,7 +2511,7 @@ make_builder_inputs() {
   local steps step token runs
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   mapfile -t steps < <(builder_steps)
-  [ "${#steps[@]}" -eq 4 ]
+  [ "${#steps[@]}" -eq 5 ]
   for step in "${steps[@]}"; do
     echo "$step"
     rm -rf "$BATS_TEST_TMPDIR/work"
@@ -2225,7 +2537,7 @@ make_builder_inputs() {
   local steps step
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   mapfile -t steps < <(builder_steps)
-  [ "${#steps[@]}" -eq 4 ]
+  [ "${#steps[@]}" -eq 5 ]
   for step in "${steps[@]}"; do
     echo "$step"
     rm -rf "$BATS_TEST_TMPDIR/work"
@@ -2262,7 +2574,7 @@ make_builder_inputs() {
   run yq 'explode(.) | .jobs[].steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   mapfile -t found < <(grep -v '^[[:space:]]*#' <<<"$output" | grep useradd)
-  [ "${#found[@]}" -eq 4 ]
+  [ "${#found[@]}" -eq 5 ]
   for line in "${found[@]}"; do
     [ "$line" = "useradd -m -u 2000 builder" ]
   done
@@ -3656,7 +3968,7 @@ make_runner_repo() {
 # or close an issue
 @test "check-updates: the issues job runs in every run that checked, after publish" {
   run yq '.jobs.issues.needs | join(" ")' "$CHECK_UPDATES"
-  [ "$output" = "image check prepare verify publish" ]
+  [ "$output" = "image check prepare verify rules publish" ]
   run yq '.jobs.issues.if' "$CHECK_UPDATES"
   [ "$output" = "!cancelled() && needs.check.result == 'success'" ]
   run yq '.jobs.check.steps[] | select(.name == "Upload statuses") | has("if")' "$CHECK_UPDATES"
@@ -3851,10 +4163,10 @@ run_bare_issues_step() {
 
 # The close step runs only after a publish that succeeded or was skipped, and
 # the issues job runs only after a check that succeeded
-@test "check-updates: the close step knows whether prepare and verify failed" {
+@test "check-updates: the close step knows whether prepare, verify and rules failed" {
   run yq '.jobs.issues.steps[] | select(.name == "Close resolved issues") | .env.RUN_OK' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = "\${{ (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}" ]
+  [ "$output" = "\${{ (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && (needs.verify.result == 'success' || needs.verify.result == 'skipped') && (needs.rules.result == 'success' || needs.rules.result == 'skipped') }}" ]
 }
 
 @test "check-updates: closes the issue of a package that is no longer held" {
@@ -4073,7 +4385,8 @@ run_bare_issues_step() {
   mkdir -p "$ws/packages"
   run sh -e -c 'cd "$1" && DATA="$2" sh -e "$3"' _ "$ws" "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
-  [ -f "$list" ] && [ ! -s "$list" ]
+  [ -f "$list" ]
+  [ ! -s "$list" ]
   touch "$ws/packages/foo.yml" "$ws/packages/bar.yml" "$ws/packages/notes.txt"
   run sh -e -c 'cd "$1" && DATA="$2" sh -e "$3"' _ "$ws" "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
@@ -4283,22 +4596,43 @@ close_files_step() {
     "$mnt/temp/_runner_file_commands 755" "$mnt/temp/step.sh 644")" ]
 }
 
-# The requires rule imports parses the files of a release with scripts/lib/py_imports.py
-@test "check-updates: check installs python and ruby" {
+# The check job holds the token, and the rules job parses the releases with scripts/lib/py_imports.py
+# and scripts/lib/rb_requires.rb
+@test "check-updates: rules installs python and ruby, and check neither" {
   run step_run check "Install dependencies"
-  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq python ruby"* ]]
+  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq" ]]
+  run step_run rules "Install dependencies"
+  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq python ruby" ]]
 }
 
-# The requires rules of the check read the Python distributions and modules of the repositories
-@test "check-updates: check syncs the files databases after Add builder, before the checkouts" {
+# The requires rules read the Python distributions, the modules and the gems of the repositories
+@test "check-updates: rules syncs the files databases after Add builder, before the checkouts" {
   local at
-  at=$(step_index check "Sync the files databases")
-  [ "$at" -eq $(($(step_index check "Add builder") + 1)) ]
-  [ "$at" -lt "$(step_index check "Checkout")" ]
-  [ "$at" -lt "$(step_index check "Close files to builder")" ]
-  [ "$(step_run check "Sync the files databases")" = "pacman -Fy --noconfirm" ]
+  at=$(step_index rules "Sync the files databases")
+  [ "$at" -eq $(($(step_index rules "Add builder") + 1)) ]
+  [ "$at" -lt "$(step_index rules "Checkout")" ]
+  [ "$at" -lt "$(step_index rules "Close files to builder")" ]
   run yq '[.jobs[].steps[] | select(.name == "Sync the files databases")] | length' "$CHECK_UPDATES"
   [ "$output" = 1 ]
+}
+
+# Without the databases the rules run on, so a failed sync warns and fails no job
+@test "check-updates: rules warns when pacman -Fy fails, and goes on" {
+  local bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$bin"
+  printf '#!/bin/sh
+echo "$*" >>"%s"
+exit "${PACMAN_RC:-0}"
+' "$BATS_TEST_TMPDIR/pacman.log" >"$bin/pacman"
+  chmod +x "$bin/pacman"
+  step_run rules "Sync the files databases" >"$BATS_TEST_TMPDIR/step.sh"
+  run env PATH="$bin:$PATH" sh -e "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/pacman.log")" = "-Fy --noconfirm" ]
+  run env PATH="$bin:$PATH" PACMAN_RC=1 sh -e "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ "$output" = "::warning::pacman -Fy failed, so the requires rules run without the files databases of the repositories" ]
 }
 
 @test "check-updates: each job with a checkout closes its files before downloads and builder" {
@@ -4321,10 +4655,10 @@ close_files_step() {
 # Pull requests can commit any directory into the checkout, and the jobs that check it out
 # read and write the files of the run under /data alone
 @test "check-updates: the jobs with a checkout keep the files of the run in /data" {
-  run yq '[(.jobs.check, .jobs.prepare, .jobs.verify, .jobs.publish) | .steps[] |
+  run yq '[(.jobs.check, .jobs.prepare, .jobs.rules, .jobs.verify, .jobs.publish) | .steps[] |
     select(.uses // "" | test("^actions/(up|down)load-artifact@")) | .with.path] |
     (length | tostring) + " " + (map(test("^/data/[a-z-]+/?$")) | all | tostring)' "$CHECK_UPDATES"
-  [ "$output" = "9 true" ]
+  [ "$output" = "12 true" ]
   run yq '[.jobs[].steps[] | select(.uses // "" | test("run-as-builder$")) | .with | (.statuses, .handoff) | select(.)] |
     sort | unique | join(",")' "$CHECK_UPDATES"
   [ "$output" = "/data/handoff,/data/status" ]
@@ -4796,10 +5130,57 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   [ "$output" = "0" ]
   run yq -o=json -I=0 '[.jobs.packages.steps[] | select(.uses | test("^actions/checkout@")) | .with]' "$VALIDATE"
   [ "$status" -eq 0 ]
-  [ "$output" = '[{"persist-credentials":false},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
+  [ "$output" = '[{"persist-credentials":false,"fetch-depth":0},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
   run yq '.jobs.packages.steps[] | select(has("run")) | .run' "$VALIDATE"
   [ "$status" -eq 0 ]
   grep -qxF './aurtomator/scripts/validate-pkg.sh --all' <<<"$output"
+}
+
+# Runs the step of validate.yml that checks the requirements of changed packages in a repository whose
+# first commit holds packages a, b and c and whose second adds d, changes a and deletes c, with $BASE as
+# the base and a validate-pkg.sh that logs each name and fails for b
+run_changed_step() {
+  local repo="$BATS_TEST_TMPDIR/repo" name
+  mkdir -p "$repo/packages" "$repo/aurtomator/scripts"
+  git -C "$repo" init -q
+  for name in a b c; do
+    echo "name: $name" >"$repo/packages/$name.yml"
+  done
+  git -C "$repo" add -A
+  git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m base
+  FIRST=$(git -C "$repo" rev-parse HEAD)
+  echo "name: d" >"$repo/packages/d.yml"
+  echo "current: '2'" >>"$repo/packages/a.yml"
+  git -C "$repo" rm -q packages/c.yml
+  git -C "$repo" add -A
+  git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m head
+  printf '#!/bin/sh
+echo "$1" >>"%s"
+[ "$1" != b ]
+' "$BATS_TEST_TMPDIR/checked" >"$repo/aurtomator/scripts/validate-pkg.sh"
+  chmod +x "$repo/aurtomator/scripts/validate-pkg.sh"
+  yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .run' "$VALIDATE" \
+    >"$BATS_TEST_TMPDIR/step.sh"
+  rm -f "$BATS_TEST_TMPDIR/checked"
+  run env -C "$repo" BASE="${BASE-$FIRST}" sh -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+# The requires rules read the requirements of each new version, so validate-pkg.sh reads them online for
+# the packages that a push or a pull request adds or changes
+@test "validate: checks online the packages that the push or the pull request adds or changes" {
+  run yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env.BASE' "$VALIDATE"
+  [ "$output" = '${{ github.event.pull_request.base.sha || github.event.before }}' ]
+  run_changed_step
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
+  # Runs without a base check every package, and one failure fails the step after the others
+  local base
+  for base in "" 0000000000000000000000000000000000000000 1111111111111111111111111111111111111111; do
+    BASE=$base run_changed_step
+    [ "$status" -ne 0 ]
+    [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
+    rm -rf "$BATS_TEST_TMPDIR/repo"
+  done
 }
 
 # "the image job is the same in every workflow" leaves out the pin check and the repository and
@@ -4860,7 +5241,7 @@ calling_workflow() {
   run yq '.jobs.validate.needs' "$validate"
   [ "$output" = "pins" ]
   run yq -o=json -I=0 '.jobs.pins | del(.steps[0].uses)' "$check"
-  [ "$output" = '{"runs-on":"ubuntu-latest","timeout-minutes":5,"permissions":{"contents":"read"},"steps":[{"with":{"persist-credentials":false,"fetch-depth":2}},{"run":"./aurtomator.sh check-pins"}]}' ]
+  [ "$output" = '{"runs-on":"ubuntu-latest","timeout-minutes":5,"permissions":{"contents":"read"},"steps":[{"with":{"persist-credentials":false,"fetch-depth":2}},{"run":"./aurtomator.sh check-pins","env":{"GITHUB_TOKEN":"${{ github.token }}"}}]}' ]
   [ "$(yq -o=json -I=0 '.jobs.pins' "$validate")" = "$(yq -o=json -I=0 '.jobs.pins' "$check")" ]
   run yq '.jobs.pins.steps[0].uses' "$check"
   [[ "$output" =~ ^actions/checkout@[0-9a-f]{40}$ ]]

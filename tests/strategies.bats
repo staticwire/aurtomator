@@ -754,6 +754,18 @@ run_pin() {
   [ "$output" = "0.0.43" ]
 }
 
+# The check job parses no release archive, and the PKG-INFO of an sdist takes bsdtar
+@test "pypi: pin_from reads the metadata of a wheel alone, and fails for a release with an sdist alone" {
+  use_mock_pacman
+  pypi_fake_sdist sdist-only 3.2.1 $'Metadata-Version: 2.2\nName: sdist-only\nVersion: 3.2.1\nRequires-Dist: demo==1.0\n\n'
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run_pin demo sdist-only
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sdist-only 3.2.1: PyPI holds no wheel with metadata, which pin_from reads"* ]]
+  run grep -c -F '.tar.gz' "$CURL_ARGS_LOG"
+  [ "$output" = 0 ]
+}
+
 @test "pypi: pin_from takes one version that several requirements pin" {
   run_pin same pin-cases
   [ "$status" -eq 0 ]

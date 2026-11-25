@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 #
-# validate-pkg.sh - Check the syntax, the keys and the strategy fields of a package YAML
+# validate-pkg.sh - Check the syntax, the keys and the strategy fields of a package YAML, and online
+# that the requires rules can read the requirements of its current version
 #
 # Usage: ./scripts/validate-pkg.sh <package-name>
-#        ./scripts/validate-pkg.sh --all
+#        ./scripts/validate-pkg.sh --all [--online]
+#
+# --all checks the syntax of every package alone, and with --online the requirements too.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -57,7 +60,7 @@ in_words() {
 
 # Succeeds when field $2 of package file $1 is missing or a boolean that pkg_bool reads
 flag_ok() {
-  [[ $(pkg_get "$1" "$2 | tag") == "!!null" || -n $(pkg_bool "$1" "$2") ]]
+  pkg_bool "$1" "$2" >/dev/null 2>&1
 }
 
 # Print the upstream keys of strategy $1, or fail when UPSTREAM_KEYS has no line for it
@@ -315,7 +318,7 @@ validate_alert() {
   if ! flag_ok "$file" ".alerts[$i].hold"; then
     log_err "$rule.hold must be true or false"
     errors=1
-  elif [[ "$requires" == imports && "$(pkg_bool "$file" ".alerts[$i].hold")" == true ]]; then
+  elif [[ "$requires" == imports && "$(pkg_bool "$file" ".alerts[$i].hold" 2>/dev/null)" == true ]]; then
     log_err "$rule.hold does not apply to requires: imports"
     errors=1
   fi
@@ -651,7 +654,7 @@ validate_pkg() {
     log_err "$shown: upstream.prerelease must be true or false"
     ((errors++))
   # Semver pre-releases always hold a dash
-  elif [[ $(pkg_bool "$file" .upstream.prerelease) == true && "$dash_set" == false ]]; then
+  elif [[ $(pkg_bool "$file" .upstream.prerelease 2>/dev/null) == true && "$dash_set" == false ]]; then
     log_err "$shown: upstream.prerelease needs pkgver_dash"
     ((errors++))
   fi
@@ -1055,7 +1058,21 @@ validate_pkg() {
   return 0
 }
 
+# Succeed when the requires rules can read the requirements of package file $1, which the check of each
+# new version reads: the AUR .SRCINFO, the python or ruby key and the release of the current version
+requirements_ok() {
+  requires_check "$1" && return 0
+  log_err "packages/${1##*/}: the requires rules cannot read its requirements, see https://aurtomator.dev/features/update-alerts/"
+  return 1
+}
+
 # === MAIN ===
+
+USAGE="Usage: validate-pkg.sh <package-name> | --all [--online]"
+if [[ "${1:-}" == --online || ("${1:-}" == --all && $# -gt 1 && "${2:-}" != --online) || $# -gt 2 ]]; then
+  echo "$USAGE" >&2
+  exit 1
+fi
 
 if [[ "${1:-}" == "--all" ]]; then
   total=0
@@ -1072,7 +1089,7 @@ if [[ "${1:-}" == "--all" ]]; then
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     [[ -f "$pkg_file" && ! -L "$pkg_file" ]] || continue
     ((total++)) || true
-    if ! validate_pkg "$pkg_file"; then
+    if ! validate_pkg "$pkg_file" || { [[ "${2:-}" == --online ]] && ! requirements_ok "$pkg_file"; }; then
       ((failed++)) || true
     fi
   done
@@ -1089,11 +1106,11 @@ if [[ "${1:-}" == "--all" ]]; then
   exit 0
 fi
 
-readonly PKG_NAME="${1:?Usage: validate-pkg.sh <package-name> | --all}"
+readonly PKG_NAME="${1:?$USAGE}"
 PKG_FILE="$(pkg_file "$PKG_NAME")"
 readonly PKG_FILE
 
-if validate_pkg "$PKG_FILE"; then
+if validate_pkg "$PKG_FILE" && requirements_ok "$PKG_FILE"; then
   log_ok "$PKG_NAME: valid"
 else
   exit 1

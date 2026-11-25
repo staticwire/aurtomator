@@ -3002,3 +3002,82 @@ current_asset: 1.0-build7"
   [ "$status" -ne 0 ]
   [[ "$output" == *"current_asset needs upstream.asset_var"* ]]
 }
+
+# === Requirements that the requires rules read ===
+
+# Helper: package demo of strategy github-release at current $1 with the YAML lines $2, whose AUR .SRCINFO
+# has the depends after them
+requires_package() {
+  {
+    printf 'pkgbase = demo\n\tpkgver = %s\n\tpkgrel = 1\n\tarch = any\n' "$1"
+    printf '\tdepends = %s\n' "${@:3}"
+    printf '\npkgname = demo\n'
+  } >"$TEST_TMPDIR/demo.SRCINFO"
+  rm -rf "$TEST_TMPDIR/aur-remote" "$TEST_TMPDIR"/aur-work-demo
+  aur_srcinfo_remote demo "$TEST_TMPDIR/demo.SRCINFO"
+  create_test_package "demo" "github-release" "upstream:
+  project: o/demo
+current: '$1'
+$2"
+}
+
+# Packages added with Python or Ruby in depends would fail the check of their first new version
+@test "validate: refuses a package whose AUR depends hold Python or Ruby without a source of requirements" {
+  requires_package 1.1.0 "" bash python python-yaml
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/demo.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]]
+  requires_package 4.0.3 "" ruby ruby-simplecov
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/demo.yml: its depends hold Ruby packages, so set ruby.gem or ruby: none"* ]]
+  requires_package 1.1.0 "python: none" bash python python-yaml
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 0 ]
+  requires_package 1.1.0 "" bash glibc
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: reads the requirements of the current release on PyPI and rubygems.org" {
+  requires_package 1.1.0 $'python:\n  pypi: KubeDiagrams' bash python python-yaml
+  pypi_fake KubeDiagrams 1.1.0 PyYAML
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 0 ]
+  requires_package 1.2.0 $'python:\n  pypi: KubeDiagrams' bash python python-yaml
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"KubeDiagrams: PyPI has no release 1.2.0"* ]]
+  pypi_fake_sdist KubeDiagrams 1.2.0 $'Metadata-Version: 2.1\nName: KubeDiagrams\nVersion: 1.2.0\n\n'
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"KubeDiagrams 1.2.0: PyPI holds no metadata that lists the requirements without running code"* ]]
+  requires_package 4.0.3 $'ruby:\n  gem: bashcov' ruby ruby-simplecov
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 0 ]
+  requires_package 9.9 $'ruby:\n  gem: bashcov' ruby ruby-simplecov
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bashcov: rubygems.org has no release 9.9"* ]]
+}
+
+# --all checks every package of the repository, and a network failure is an error
+@test "validate: --all reads nothing online, --all --online does, and a failure of the AUR is an error" {
+  requires_package 1.1.0 "" bash python python-yaml
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all --online
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/demo.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]]
+  [[ "$output" == *"Validation failed: 1/1 packages have errors"* ]]
+  # The AUR serves an empty repository for a package it lacks, and git fails to clone this one
+  rm -rf "$TEST_TMPDIR/aur-remote/demo.git"
+  mkdir "$TEST_TMPDIR/aur-remote/demo.git"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" demo
+  [ "$status" -eq 1 ]
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --online
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Usage: validate-pkg.sh <package-name> | --all [--online]"* ]]
+}

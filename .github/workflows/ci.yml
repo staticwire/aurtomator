@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 jobs:
-  # Reads the pinned Arch image from ci-image/Dockerfile, whose dated tag and digest Dependabot updates
+  # Reads the pinned Arch image from ci-image/archlinux.Dockerfile, whose dated tag and digest Dependabot updates
   image:
     name: image
     runs-on: ubuntu-latest
@@ -35,9 +35,9 @@ jobs:
       - name: Read image
         id: read
         run: |
-          ref=$(sed -n 's/^FROM //p' ci-image/Dockerfile)
+          ref=$(sed -n 's/^FROM //p' ci-image/archlinux.Dockerfile)
           if [[ ! "$ref" =~ ^archlinux:base-devel-[0-9]{8}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::ci-image/Dockerfile must pin a dated tag of archlinux:base-devel by digest"
+            echo "::error::ci-image/archlinux.Dockerfile must pin a dated tag of archlinux:base-devel by digest"
             exit 1
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
@@ -51,43 +51,58 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install shellcheck, shfmt and actionlint
+      # ci-image/lint.Dockerfile pins the image of each tool by digest, and Dependabot updates them
+      - name: Read the lint images
+        id: images
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck
-          go install mvdan.cc/sh/v3/cmd/shfmt@v3.14.1
-          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          for name in shellcheck shfmt actionlint; do
+            ref=$(awk -v n="$name" 'NF == 4 && $1 == "FROM" && $3 == "AS" && $4 == n { print $2 }' ci-image/lint.Dockerfile)
+            if [[ ! "$ref" =~ ^[a-z0-9]+(/[a-z0-9-]+)+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::ci-image/lint.Dockerfile must pin the image of $name by tag and digest, as FROM <image>:<tag>@sha256:<digest> AS $name"
+              exit 1
+            fi
+            echo "$name=$ref" >>"$GITHUB_OUTPUT"
+          done
 
       - name: shellcheck
-        run: shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
+        env:
+          IMAGE: ${{ steps.images.outputs.shellcheck }}
+        run: docker run --rm -v "$PWD:/src:ro" -w /src "$IMAGE" -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh tests/helpers/cov-shims/*
 
       - name: shfmt
-        run: shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
+        env:
+          IMAGE: ${{ steps.images.outputs.shfmt }}
+        run: docker run --rm -v "$PWD:/src:ro" -w /src "$IMAGE" -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh tests/helpers/cov-shims/*
 
-      # The requires rules imports run the parsers of scripts/lib/ in the check job
+      # The requires rules imports run the parsers of scripts/lib/ in the rules job
       - name: Compile the Python helpers
         run: python3 -m py_compile scripts/lib/*.py
 
       - name: Check the Ruby helpers
         run: ruby -wc scripts/lib/*.rb
 
-      # Checks the workflows, and the run blocks with shellcheck
+      # Checks the workflows, and the run blocks with the shellcheck of its image
       - name: actionlint
-        run: actionlint
+        env:
+          IMAGE: ${{ steps.images.outputs.actionlint }}
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo "$IMAGE"
       # actionlint skips the run blocks of a composite action, and the default severity of
       # shellcheck fails an unquoted variable, as actionlint does in a workflow
       - name: shellcheck the actions
+        env:
+          IMAGE: ${{ steps.images.outputs.shellcheck }}
         run: |
           for action in .github/actions/*/action.yml; do
-            yq '.runs.steps[] | select(has("run")) | .run' "$action" >"$RUNNER_TEMP/run.sh"
-            shellcheck -s bash "$RUNNER_TEMP/run.sh"
+            yq '.runs.steps[] | select(has("run")) | .run' "$action" | docker run --rm -i "$IMAGE" -s bash -
           done
       # The template and every packages repository carry this script
       - name: shellcheck and shfmt the runner
+        env:
+          SHELLCHECK: ${{ steps.images.outputs.shellcheck }}
+          SHFMT: ${{ steps.images.outputs.shfmt }}
         run: |
-          shellcheck aurtomator.sh
-          shfmt -d -i 2 -ci aurtomator.sh
+          docker run --rm -v "$PWD:/src:ro" -w /src "$SHELLCHECK" aurtomator.sh
+          docker run --rm -v "$PWD:/src:ro" -w /src "$SHFMT" -d -i 2 -ci aurtomator.sh
 
   zizmor:
     name: zizmor
@@ -237,8 +252,14 @@ jobs:
             echo
             echo "| Package | Version | Severity | Advisory |"
             echo "|---|---|---|---|"
-            jq -r '.[] | . as $c | .vulnerabilities[] |
-              "| `\($c.name | gsub("[`|\n\r]"; " "))` | `\($c.version | gsub("[`|\n\r]"; " "))` | \(.severity) | [\(.advisory_ghsa_id)](\(.advisory_url)) \(.advisory_summary | gsub("[|\n\r]"; " ")) |"' <<<"$CHANGES"
+            # Authors of advisories write their text, so it goes into code spans, and the link is
+            # built from a checked GHSA id
+            jq -r 'def code: "`" + (tostring | gsub("[`|\n\r]"; " ")) + "`";
+              .[] | . as $c | .vulnerabilities[] |
+              (if (.advisory_ghsa_id | tostring | test("^GHSA(-[0-9a-z]{4}){3}$"))
+                then "[\(.advisory_ghsa_id)](https://github.com/advisories/\(.advisory_ghsa_id))"
+                else (.advisory_ghsa_id | code) end) as $advisory |
+              "| \($c.name | code) | \($c.version | code) | \(.severity | code) | \($advisory) \(.advisory_summary | code) |"' <<<"$CHANGES"
           } >"$body"
           gh issue create -R "$REPO" --title "$title" --label dependency-review --body-file "$body"
 
@@ -288,7 +309,7 @@ jobs:
           fi
           while IFS= read -r file; do
             case "$file" in
-              ci-image/Dockerfile | ci-image/Gemfile | ci-image/Gemfile.lock | ci-image/requirements.in | ci-image/requirements.txt) ;;
+              ci-image/archlinux.Dockerfile | ci-image/lint.Dockerfile | ci-image/Gemfile | ci-image/Gemfile.lock | ci-image/requirements.in | ci-image/requirements.txt) ;;
               *)
                 echo "::notice::#$PR changes $file and stays open"
                 exit 0

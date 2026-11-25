@@ -8,6 +8,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 
 - Updates reach the AUR only after four jobs of `check-updates.yml` in a row: `check` finds the new version, `prepare` updates the PKGBUILD, the checksums and `.SRCINFO`, `verify` downloads the sources again and checks the checksums, and `publish` pushes to the AUR. Packages that fail a job get no push and get an issue.
 - PKGBUILD code runs only as the unprivileged user `builder`, in jobs that hold no secrets. `verify` and `publish` never source a PKGBUILD or run makepkg.
+- The requires rules, which download a release and parse its files, run as `builder` in the job `rules`, one job for each package, without secrets and without a token, and `publish` takes their lines as data.
 - Only `publish` receives the AUR SSH key and the GPG signing subkey. Every job gets only the token permissions it uses: `contents: read`, plus `contents: write` for `publish` and `issues: write` for `issues`.
 - Strategies fetch the answers of upstreams over HTTPS only, with limits on size and time, and a new version passes only with the characters `A-Za-z0-9._+` and within a length limit.
 - `validate-pkg.sh` refuses unknown keys and values in package YAML, and package names match `^[a-z0-9][a-z0-9.+_-]*$`.
@@ -26,6 +27,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 | Threat | Comes from | Counter |
 |---|---|---|
 | Crafted answers of upstream APIs and pages | Hostile or compromised upstreams | HTTPS only, limits on size and time, the check of the version characters, and no use of answers as code |
+| Crafted release archives and metadata | Hostile or compromised upstreams | Parsed only in the job `rules`, one job for each package without secrets or a token, with limits on size, time and files, and lines that `publish` filters before it uses them |
 | Hostile PKGBUILD code | Anyone with push access to the AUR repository of a package | Runs only as `builder` in jobs without secrets, and `verify` and `publish` never source it |
 | Crafted package YAML | Pull requests to a user repository | `validate-pkg.sh` with allow lists of keys and values |
 | Tampered downloads | Network attackers | `verify` downloads every source again over HTTPS and refuses checksums that do not match |
@@ -35,6 +37,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 ## Trust boundaries
 
 - Upstreams to the `check` job: answers enter as data and pass the checks above.
+- Releases to the `rules` job: their files are parsed only there, and `publish` takes the lines of the rules as data.
 - The AUR repository to the jobs: PKGBUILD code runs only as `builder`.
 - Root to `builder` in each job: `builder` writes only into a directory of its own, and root takes its results as data.
 - Jobs without secrets to `publish`: `publish` takes the verified files and checks them against the AUR copy before the push.

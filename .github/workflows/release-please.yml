@@ -63,6 +63,7 @@ jobs:
       contents: write # attaches the archive and publishes the draft release
       id-token: write # actions/attest gets an OIDC token for the Sigstore certificate
       attestations: write # actions/attest stores the attestation
+      actions: read # finds the run of a draft that no run published
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,8 +91,22 @@ jobs:
             tag_sha=$(gh api "repos/$REPO/git/tags/$tag_sha" --jq .object.sha)
           fi
           if [[ "$tag_sha" != "$SHA" ]]; then
+            # Runs that fail before sign leave their draft, which a rerun of that run publishes
+            draft=$(gh release view "v$version" -R "$REPO" --json isDraft --jq .isDraft)
+            if [[ "$draft" == true ]]; then
+              run=$(gh run list -R "$REPO" --workflow release-please.yml --commit "$tag_sha" --json url --jq '.[0].url // ""')
+              echo "::error::v$version is a draft of the commit $tag_sha; rerun all jobs of ${run:-the run of release-please.yml on that commit} to sign and publish it"
+              exit 1
+            fi
             echo "v$version is no release of this commit"
             exit 0
+          fi
+          # gh edits the first draft of a tag, and release-please creates the release again when a
+          # run stops between the release and the label of the release PR
+          ids=$(gh api "repos/$REPO/releases?per_page=100" --paginate --jq ".[] | select(.draft and .tag_name == \"v$version\") | .id")
+          if [[ "$ids" == *$'\n'* ]]; then
+            echo "::error::More than one draft release carries the tag v$version; delete all drafts of v$version but one, then rerun the job"
+            exit 1
           fi
           draft=$(gh release view "v$version" -R "$REPO" --json isDraft --jq .isDraft)
           if [[ "$draft" != true ]]; then
@@ -125,5 +140,17 @@ jobs:
           archive="aurtomator-$VERSION.tar.gz"
           cp "$BUNDLE" "$archive.sigstore.json"
           jq -ce .dsseEnvelope "$BUNDLE" >"$archive.intoto.jsonl"
+          # Files of the draft get published and locked with the release, and the attestation of
+          # GitHub covers them, so the draft holds no file but those of this job
+          names=$(gh release view "v$VERSION" -R "$REPO" --json assets --jq '.assets[].name')
+          while IFS= read -r name; do
+            case "$name" in
+              "" | "$archive" | "$archive.sigstore.json" | "$archive.intoto.jsonl") ;;
+              *)
+                echo "::error::The draft of v$VERSION holds $name, which sign does not attach"
+                exit 1
+                ;;
+            esac
+          done <<<"$names"
           gh release upload "v$VERSION" "$archive" "$archive.sigstore.json" "$archive.intoto.jsonl" -R "$REPO" --clobber
           gh release edit "v$VERSION" -R "$REPO" --draft=false

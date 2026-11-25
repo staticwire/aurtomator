@@ -81,6 +81,16 @@ case "$url" in
   *pypi.org/pypi/zensical/json)
     echo '{"info": {"version": "0.1.3"}}'
     ;;
+  # Published releases of aurtomator and of the fork of runner.bats, as a test writes them under
+  # repos/<owner>/<repo>/releases/tags/; GitHub answers 404 for drafts and tags without a release
+  *api.github.com/repos/staticwire/aurtomator/releases/tags/* | *api.github.com/repos/Someone/Aurtomator-Fork/releases/tags/*)
+    if [[ -f "$MOCK_FILES_DIR/${url#*api.github.com/}" ]]; then
+      cat "$MOCK_FILES_DIR/${url#*api.github.com/}"
+    else
+      echo '{"message": "Not Found"}'
+      http_code=404
+    fi
+    ;;
   # PyPI: a server error on the simple page of a project
   *pypi.org/simple/flaky/)
     http_error 503
@@ -119,10 +129,16 @@ case "$url" in
       http_error 404
     fi
     ;;
-  *rubygems.org/api/v2/rubygems/*/versions/*.json)
-    file=${url#*/api/v2/rubygems/}
-    file="${file%%/*}-${url##*/}"
-    if [[ -f "$MOCK_FILES_DIR/rubygems/v2/$file" ]]; then
+  # rubygems.org answers the first platform of a release without ?platform=ruby, as no-query.json holds
+  *rubygems.org/api/v2/rubygems/*/versions/*.json | *rubygems.org/api/v2/rubygems/*/versions/*.json\?platform=ruby)
+    path=${url%\?platform=ruby}
+    file=${path#*/api/v2/rubygems/}
+    file="${file%%/*}-${path##*/}"
+    if [[ "$path" == "$url" && -f "$MOCK_FILES_DIR/rubygems/v2/${file%.json}.no-query.json" ]]; then
+      cat "$MOCK_FILES_DIR/rubygems/v2/${file%.json}.no-query.json"
+    elif [[ "$path" == "$url" && -f "$FIXTURES_DIR/rubygems/v2/${file%.json}.no-query.json" ]]; then
+      cat "$FIXTURES_DIR/rubygems/v2/${file%.json}.no-query.json"
+    elif [[ -f "$MOCK_FILES_DIR/rubygems/v2/$file" ]]; then
       cat "$MOCK_FILES_DIR/rubygems/v2/$file"
     elif [[ -f "$FIXTURES_DIR/rubygems/v2/$file" ]]; then
       cat "$FIXTURES_DIR/rubygems/v2/$file"
@@ -545,11 +561,19 @@ case "$url" in
   *api.github.com/repos/asset-owner/asset-repo/releases/tags/*)
     http_error 404
     ;;
-  # The commit of a tag, dated MOCK_TAG_DATE or MOCK_TAG_AGE hours back (48
-  # by default); MOCK_COMMIT_STATUS=500 fails the request
-  *api.github.com/repos/asset-owner/asset-repo/commits/*)
+  # Tag refs to commit cccc..., or to tag object cccc... of commit dddd... with MOCK_TAG_TYPE=tag, dated
+  # MOCK_TAG_DATE or MOCK_TAG_AGE hours back (48 by default); MOCK_COMMIT_STATUS=500 fails each request
+  *api.github.com/repos/asset-owner/asset-repo/git/ref/tags/*)
     [[ "${MOCK_COMMIT_STATUS:-200}" == 200 ]] || http_error "$MOCK_COMMIT_STATUS"
-    printf '{"commit": {"committer": {"date": "%s"}}}\n' \
+    printf '{"object": {"type": "%s", "sha": "%s"}}\n' "${MOCK_TAG_TYPE:-commit}" "$(printf 'c%.0s' {1..40})"
+    ;;
+  *api.github.com/repos/asset-owner/asset-repo/git/tags/*)
+    [[ "${MOCK_COMMIT_STATUS:-200}" == 200 ]] || http_error "$MOCK_COMMIT_STATUS"
+    printf '{"object": {"type": "commit", "sha": "%s"}}\n' "$(printf 'd%.0s' {1..40})"
+    ;;
+  *api.github.com/repos/asset-owner/asset-repo/git/commits/*)
+    [[ "${MOCK_COMMIT_STATUS:-200}" == 200 ]] || http_error "$MOCK_COMMIT_STATUS"
+    printf '{"committer": {"date": "%s"}}\n' \
       "${MOCK_TAG_DATE:-$(date -u -d "-${MOCK_TAG_AGE:-48} hours" +%Y-%m-%dT%H:%M:%SZ)}"
     ;;
   # The release of a tag with a plus sign, only under the encoded name
@@ -634,4 +658,8 @@ esac
 # http_get_json asks for the URL of the last answer after the body
 if [[ "$write_out" == '\n%{url_effective}'* ]]; then
   printf '\n%s' "${effective_url:-$url}" >&"$stdout_fd"
+fi
+# aurtomator.sh asks for the status code after the body
+if [[ "$write_out" == '\n%{http_code}' ]]; then
+  printf '\n%s' "${http_code:-200}" >&"$stdout_fd"
 fi

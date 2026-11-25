@@ -237,11 +237,16 @@ _marker_extra() {
 }
 
 # Set _MK_VAL for operator $1 between a string field of value $4 and constant $2, where $3 is
-# set for a field right of the operator. > and < are false, and ~= === >= <= compare as ==.
+# set for a field right of the operator. > and < are false, >= and <= compare as ==, and ~= and ===
+# are unknown, since packaging raises UndefinedComparison for them
 _marker_string() {
   local hit=0
   if [[ "$1" == "<" || "$1" == ">" ]]; then
     _MK_VAL=0
+    return 0
+  fi
+  if [[ "$1" == "~=" || "$1" == "===" ]]; then
+    _MK_VAL='?'
     return 0
   fi
   if [[ -z "$4" ]]; then
@@ -264,8 +269,9 @@ _marker_string() {
 _marker_version() {
   local rc=0
   _MK_VAL='?'
+  # packaging tests in and not in on the text of a version field, as on a string field
   if [[ "$1" == in || "$1" == "not in" ]]; then
-    _MK_VAL=0
+    _marker_string "$@"
     return 0
   fi
   [[ -n "$4" ]] || return 0
@@ -350,7 +356,7 @@ pypi_release() {
 }
 
 # Print the metadata headers of release $2 of project $1: .metadata of a wheel (none-any, linux x86_64, any),
-# else PKG-INFO of the sdist; return 3 without the release, 4 without metadata that lists the requirements
+# else PKG-INFO of the sdist unless $3 is wheels; return 3 without the release, 4 without such metadata
 pypi_metadata() {
   local LC_ALL=C name url sha core size pick="" tmp rc=0
   local -a linux=() other=() sdists=()
@@ -374,8 +380,13 @@ pypi_metadata() {
   if [[ -n "$pick" ]]; then
     pick=${pick/$'\t'/.metadata$'\t'}
   else
-    pick=${linux[0]:-${other[0]:-${sdists[0]:-}}}
+    pick=${linux[0]:-${other[0]:-}}
   fi
+  if [[ -z "$pick" && "${3:-}" == wheels ]]; then
+    log_err "$1 $2: PyPI holds no wheel with metadata, which pin_from reads"
+    return 4
+  fi
+  pick=${pick:-${sdists[0]:-}}
   if [[ -z "$pick" ]]; then
     log_err "$1 $2: PyPI holds no metadata that lists the requirements without running code"
     return 4
@@ -423,16 +434,23 @@ _sdist_headers() {
   printf '%s\n' "$headers"
 }
 
-# Print the headers of metadata file $1, named $2 in errors: up to the first empty line, folded
-# lines joined with one space, CR at line ends dropped; fail on any other control character
+# Print the headers of metadata file $1, named $2 in errors, folded lines joined and CR dropped; fail on
+# other control characters in a header that the rules read, and make those of License or others spaces
 _metadata_headers() {
-  local LC_ALL=C line out=""
+  local LC_ALL=C line out="" header=""
   while IFS= read -r line || [[ -n "$line" ]]; do
     line=${line%$'\r'}
     [[ -n "$line" ]] || break
+    [[ "$line" == [[:blank:]]* && -n "$out" ]] || header=${line%%:*}
     if has_control "$line"; then
-      log_err "$2 holds a control character"
-      return 1
+      case ${header,,} in
+        metadata-version | name | version | requires-dist | requires-python | dynamic)
+          log_err "$2 holds a control character in $header"
+          return 1
+          ;;
+      esac
+      line=${line//[[:cntrl:]]/ }
+      line=${line//$'\xc2'[$'\x80'-$'\x9f']/ }
     fi
     if [[ "$line" == [[:blank:]]* && -n "$out" ]]; then
       out+=" ${line#"${line%%[![:blank:]]*}"}"

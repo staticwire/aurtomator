@@ -48,7 +48,7 @@ echo "$version"
 ## Checklist
 
 1. The script is `strategies/<name>.sh` and executable, where `<name>` is the value of `strategy` in the YAML.
-2. It starts with `set -euo pipefail` and sources `scripts/lib/common.sh`, the one file of `scripts/` that `tests/strategies.bats` gives strategies.
+2. It starts with `set -euo pipefail` and sources `scripts/lib/common.sh`. `tests/strategies.bats` gives strategies that file and the libraries of `pypi.sh` and `rubygems.sh`, `pep440.sh`, `requires.sh` and `gemver.sh`, and no other file of `scripts/`.
 3. It sends its requests through `http_get` or `http_get_json`. One test in `tests/strategies.bats` fails when strategies call `curl` themselves.
 4. It checks the result for empty strings and for `null` from `yq`, and strips the leading `v` with `${version#v}` where tags look like `v1.0.0`.
 5. Its settings stand under `upstream` and in its line of `UPSTREAM_KEYS` in `scripts/validate-pkg.sh`, at its place in the strategy table of `README.md`, with checks of its required fields beside it. Without the line, `validate-pkg.sh` refuses every YAML of the strategy that has `upstream` keys.

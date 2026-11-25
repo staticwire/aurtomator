@@ -109,6 +109,8 @@ hand_over() {
 # check-all.sh compares with current, which lags the AUR after a push by hand, or with nothing,
 # so the rules of downgrades, version jumps and held alerts compare with the AUR pkgver here
 aur_pkgver=$(srcinfo_pkgver "${aur_dir}/.SRCINFO" 2>/dev/null || true)
+allow_downgrade=$(pkg_bool "$PKG_FILE" .allow_downgrade) || exit 1
+allow_version_jump=$(pkg_bool "$PKG_FILE" .allow_version_jump) || exit 1
 if ! validate_pkgver "$aur_pkgver" 2>/dev/null; then
   if [[ -z "$(pkg_get "$PKG_FILE" '.current // ""')" ]]; then
     log_err "$PKG_NAME has no current, and the AUR .SRCINFO holds no pkgver to compare $NEW_VERSION with"
@@ -116,11 +118,11 @@ if ! validate_pkgver "$aur_pkgver" 2>/dev/null; then
   fi
   log_warn "The AUR .SRCINFO of $PKG_NAME holds no pkgver to compare $NEW_VERSION with, so only current counts"
 elif [[ "$aur_pkgver" != "$NEW_VERSION" ]]; then
-  if [[ "$(vercmp "$aur_pkgver" "$NEW_VERSION")" -gt 0 && "$(pkg_bool "$PKG_FILE" .allow_downgrade)" != true ]]; then
+  if [[ "$(vercmp "$aur_pkgver" "$NEW_VERSION")" -gt 0 && "$allow_downgrade" != true ]]; then
     log_err "$PKG_NAME has $aur_pkgver on the AUR, and $NEW_VERSION is below it"
     exit 1
   fi
-  if version_jump "$aur_pkgver" "$NEW_VERSION" && [[ "$(pkg_bool "$PKG_FILE" .allow_version_jump)" != true ]]; then
+  if version_jump "$aur_pkgver" "$NEW_VERSION" && [[ "$allow_version_jump" != true ]]; then
     log_err "$PKG_NAME has $aur_pkgver on the AUR, and $aur_pkgver to $NEW_VERSION is a version jump"
     exit 1
   fi

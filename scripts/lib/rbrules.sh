@@ -44,14 +44,20 @@ gems_of() {
   awk -F'\t' -v p="$1" '$2 == p { print $1 "\t" $3 }' "$AURTOMATOR_RUN_CACHE/gems"
 }
 
-# Set RUBY_FULL to X.Y.Z of package ruby in the pacman databases, once per process, empty without it
+# Set RUBY_FULL to X.Y.Z of package ruby in the pacman databases and RUBY_DEPENDS to the names of its
+# depends, once per process, empty without it
 ruby_version() {
-  local LC_ALL=C line
+  local LC_ALL=C line dep
   [[ -z "${RUBY_READ:-}" ]] || return 0
-  RUBY_READ=1 RUBY_FULL=""
+  RUBY_READ=1 RUBY_FULL="" RUBY_DEPENDS=()
   while IFS= read -r line; do
     if [[ "$line" =~ ^Version[[:blank:]]*:[[:blank:]]*([0-9]+:)?([0-9]+\.[0-9]+\.[0-9]+)-[0-9.]+[[:blank:]]*$ ]]; then
       RUBY_FULL=${BASH_REMATCH[2]}
+    elif [[ "$line" =~ ^Depends\ On[[:blank:]]*:(.*)$ ]]; then
+      for dep in ${BASH_REMATCH[1]}; do
+        dep=${dep%%[<>=]*}
+        [[ "$dep" == None ]] || RUBY_DEPENDS+=("$dep")
+      done
     fi
   done < <(LC_ALL=C pacman -Si ruby 2>/dev/null)
 }
@@ -66,7 +72,7 @@ gem_release() {
     return 1
   fi
   err=$(mktemp) || return 1
-  if ! json=$(http_get_json "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json" 2>"$err"); then
+  if ! json=$(http_get_json "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json?platform=ruby" 2>"$err"); then
     if grep -q ': The requested URL returned error: 404$' "$err"; then
       rm -f "$err"
       log_err "$1: rubygems.org has no release $2"
@@ -78,7 +84,7 @@ gem_release() {
   fi
   rm -f "$err"
   if [[ "$(yq -r '.platform // ""' <<<"$json")" != ruby ]]; then
-    log_err "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json: the answer is not the release for the platform ruby"
+    log_err "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json?platform=ruby: the answer is not the release for the platform ruby"
     return 1
   fi
   while IFS=$'\t' read -r name req; do
@@ -95,7 +101,7 @@ gem_release() {
   GEM_URI=$(yq -r '.gem_uri // ""' <<<"$json")
   if [[ ! "$GEM_RUBY" =~ ^[=!\<\>~\ 0-9A-Za-z.,-]*$ || ! "$GEM_SHA" =~ ^[0-9a-f]{64}$ ||
     "$GEM_URI" != "https://rubygems.org/gems/$1-$2.gem" ]]; then
-    log_err "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json: ruby_version, sha or gem_uri is not what RubyGems writes"
+    log_err "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json?platform=ruby: ruby_version, sha or gem_uri is not what RubyGems writes"
     return 1
   fi
 }
@@ -104,17 +110,15 @@ gem_release() {
 # and RB_VERSION; fail for a package with Ruby in depends that names none
 ruby_source() {
   RB_SOURCE="" RB_GEM="" RB_VERSION=$2
+  if [[ "$(pkg_get "$1" '.ruby | tag')" == "!!str" && "$(pkg_get "$1" .ruby)" == none ]]; then
+    RB_SOURCE=none
+    return 0
+  fi
   if [[ "$(pkg_get "$1" .strategy)" == rubygems ]]; then
     RB_SOURCE=gem RB_GEM=$(pkg_get "$1" .upstream.registry)
     return 0
   fi
   case $(pkg_get "$1" '.ruby | tag') in
-    "!!str")
-      if [[ "$(pkg_get "$1" .ruby)" == none ]]; then
-        RB_SOURCE=none
-        return 0
-      fi
-      ;;
     "!!map")
       RB_GEM=$(pkg_get "$1" '.ruby.gem // ""')
       if [[ -n "$RB_GEM" ]]; then
@@ -129,11 +133,7 @@ ruby_source() {
 
 # Succeed when depends of pkgname $2 of .SRCINFO $1 hold ruby or ruby-*
 pkgname_has_ruby() {
-  local dep
-  while IFS= read -r dep; do
-    [[ "$dep" != ruby && "$dep" != ruby-* ]] || return 0
-  done < <(srcinfo_depends "$1" "$2" depends)
-  return 1
+  srcinfo_depends "$1" "$2" depends | awk '$0 == "ruby" || index($0, "ruby-") == 1 { found = 1 } END { exit !found }'
 }
 
 # Print the package name that ruby.map of package file $1 gives gem $2; the name stays out of the yq
@@ -260,7 +260,7 @@ ruby_unmet() {
 # GEM_RUBY and RUBY_FULL
 _ruby_unmet_one() {
   local file=$1 srcinfo=$2 pkgname=$3 name req rc relax text skip
-  relax=$(pkg_bool "$file" .ruby.relax)
+  relax=$(pkg_bool "$file" .ruby.relax) || return 1
   skip=" $(pkg_get "$file" '.ruby.skip // [] | .[] | select(tag == "!!str")' | tr '\n' ' ') "
   if [[ -n "$GEM_RUBY" && -n "$RUBY_FULL" ]]; then
     rc=0
@@ -332,7 +332,7 @@ _rb_bsdtar_failed() {
 # pkgnames after it: reads the files of the .gem and prints the notes of each pkgname
 _ruby_imports_read() {
   local LC_ALL=C file=$1 srcinfo=$2 gem=$3 work=$5 name count size rc=0 helper bindir path pkgname
-  local -a pkgnames=("${@:6}") paths=() tree_paths=() exes=() files=() include
+  local -a pkgnames=("${@:6}") paths=() tree_paths=() exes=() exts=() files=() include
   # shellcheck disable=SC2034 # _curl_get of common.sh reads it
   MAX_ANSWER_MB=$(max_answer_mb "$file") || return 1
   gem_release "$gem" "$4" || return 1
@@ -352,6 +352,7 @@ _ruby_imports_read() {
   bindir=$(awk '/^bindir: / { print $2; exit }' "$work/spec")
   mapfile -t exes < <(awk '/^[a-z_]+:/ { key = $1; next } key == "executables:" && /^- / { print $2 }' "$work/spec")
   mapfile -t paths < <(awk '/^[a-z_]+:/ { key = $1; next } key == "require_paths:" && /^- / { print $2 }' "$work/spec")
+  mapfile -t exts < <(awk '/^[a-z_]+:/ { key = $1; next } key == "extensions:" && /^- / { print $2 }' "$work/spec")
   ((${#paths[@]} > 0)) || paths=(lib)
   bindir=${bindir:-bin}
   for path in "${paths[@]}"; do
@@ -387,6 +388,15 @@ _ruby_imports_read() {
   fi
   # Links of the archive could point at any file of the runner
   find "$work/tree" -type l -delete
+  # The gem builds these extensions at install, named by create_makefile or else by their directory
+  RB_EXT=()
+  for path in "${exts[@]}"; do
+    [[ "$path" == ext/*/extconf.rb ]] && _ruby_tree_path "$path" || continue
+    name=$(sed -nE "s/^[[:blank:]]*create_makefile[[:blank:](]+[\"']([A-Za-z0-9_][A-Za-z0-9_/-]*)[\"'].*/\\1/p" "$work/tree/$path" 2>/dev/null |
+      head -n 1)
+    path=${path#ext/}
+    RB_EXT+=("${name:-${path%/extconf.rb}}")
+  done
   for path in "${paths[@]}"; do
     [[ -d "$work/tree/$path" ]] || continue
     while IFS= read -r -d '' name; do
@@ -399,7 +409,8 @@ _ruby_imports_read() {
   done
   ((${#files[@]} > 0)) || return 0
   helper="${BASH_SOURCE[0]%/*}/rb_requires.rb"
-  timeout 60 ruby --disable-gems "$helper" "$work/tree" "${files[@]}" >"$work/requires" 2>/dev/null || rc=$?
+  printf '%s\0' "${files[@]}" >"$work/names"
+  timeout 60 ruby --disable-gems "$helper" "$work/tree" <"$work/names" >"$work/requires" 2>/dev/null || rc=$?
   ((rc != 0)) || timeout 60 ruby --disable-gems "$helper" --builtin >"$work/builtin" 2>/dev/null || rc=$?
   case $rc in
     0) ;;
@@ -425,15 +436,19 @@ _ruby_imports_read() {
 }
 
 # Sort the requires of rb_requires.rb output $2 for gem $4 extracted in $1, with the builtin features of
-# $3, bindir $5 and the require paths after it: RB_ERRORS, RB_REQUIRED and RB_OPTIONAL of other gems
+# $3, bindir $5, the require paths after it and the extensions of RB_EXT: RB_ERRORS, RB_REQUIRED and
+# RB_OPTIONAL of other gems
 _ruby_imports_classify() {
   local LC_ALL=C tree=$1 gem=$4 bindir=$5 kind path type req scope rp own line
   local -a rps=("${@:6}") queue=()
-  local -A reached=() reqs=() required=() optional=() builtin=()
+  local -A reached=() reqs=() required=() optional=() builtin=() ext=()
   RB_ERRORS=() RB_REQUIRED=() RB_OPTIONAL=()
   while IFS= read -r line; do
     [[ -z "$line" ]] || builtin[$line]=1
   done <"$3"
+  for line in "${RB_EXT[@]}"; do
+    ext[$line]=1
+  done
   for rp in "${rps[@]}"; do
     for path in "$rp/$gem.rb" "$rp/${gem//-//}.rb"; do
       [[ ! -f "$tree/$path" ]] || queue+=("$path")
@@ -445,6 +460,10 @@ _ruby_imports_classify() {
       require)
         # Other strings name no feature, and the lookups of owners and ruby.map take their text
         if [[ "$type" == relative || "$req" =~ ^[A-Za-z0-9_][A-Za-z0-9_/-]*(\.[A-Za-z0-9_-]+)*$ ]]; then
+          # Features take the file type of Ruby, of a C extension or of a Java one, as in bigdecimal.so
+          if [[ "$type" != relative ]]; then
+            req=${req%.rb} req=${req%.so} req=${req%.jar}
+          fi
           reqs[$path]+="$scope"$'\t'"$type"$'\t'"$req"$'\n'
         fi
         ;;
@@ -464,7 +483,7 @@ _ruby_imports_classify() {
   done
   for path in "${!reqs[@]}"; do
     while IFS=$'\t' read -r scope type req; do
-      [[ -n "$req" && "$type" != relative ]] || continue
+      [[ -n "$req" && "$type" != relative && -z "${ext[$req]:-}" ]] || continue
       [[ -z "$(_ruby_own_file "$tree" "$type" "$req" "${rps[@]}")" && -z "${builtin[${req%.rb}]:-}" ]] || continue
       if [[ -n "${reached[$path]:-}" && "$scope" == module ]]; then
         required[${req%.rb}]=1
@@ -498,14 +517,21 @@ _ruby_own_file() {
 # Print require path<TAB>pkgname for each require path $@ that a file of the files database holds: a
 # file of ruby, also below x86_64-linux, or the lib/ of an installed gem, as .rb or .so
 _ruby_owners() {
-  local LC_ALL=C req alternation=""
+  local LC_ALL=C req alternation owners="" out
+  local -a words=() alternations
   for req in "$@"; do
-    [[ "$req" =~ ^[A-Za-z0-9_][A-Za-z0-9_/-]*(\.[A-Za-z0-9_-]+)*$ ]] && alternation+="${alternation:+|}${req//./\\.}"
+    [[ "$req" =~ ^[A-Za-z0-9_][A-Za-z0-9_/-]*(\.[A-Za-z0-9_-]+)*$ ]] && words+=("${req//./\\.}")
   done
-  [[ -n "$alternation" ]] || return 0
-  files_index_owner "^usr/lib/ruby/(3\\.[0-9]+\\.0/(x86_64-linux/)?|gems/[^/]+/gems/[^/]+/lib/)($alternation)\\.(rb|so)\$" |
-    awk -F'\t' '{ p = $2; sub(/\.(rb|so)$/, "", p)
-      sub(/^usr\/lib\/ruby\/(3\.[0-9]+\.0\/(x86_64-linux\/)?|gems\/[^\/]+\/gems\/[^\/]+\/lib\/)/, "", p); print p "\t" $1 }' | sort -u
+  ((${#words[@]} > 0)) || return 0
+  mapfile -t alternations < <(files_index_alternations "${words[@]}")
+  for alternation in "${alternations[@]}"; do
+    out=$(files_index_owner "^usr/lib/ruby/(3\\.[0-9]+\\.0/(x86_64-linux/)?|gems/[^/]+/gems/[^/]+/lib/)($alternation)\\.(rb|so)\$") ||
+      return 1
+    owners+="$out"$'\n'
+  done
+  awk -F'\t' 'NF { p = $2; sub(/\.(rb|so)$/, "", p)
+    sub(/^usr\/lib\/ruby\/(3\.[0-9]+\.0\/(x86_64-linux\/)?|gems\/[^\/]+\/gems\/[^\/]+\/lib\/)/, "", p); print p "\t" $1 }' \
+    <<<"$owners" | sort -u
 }
 
 # Print the notes of pkgname $3 of .SRCINFO $2 of package file $1, with RB_REQUIRED, RB_OPTIONAL and
@@ -513,8 +539,9 @@ _ruby_owners() {
 _ruby_imports_notes() {
   local LC_ALL=C file=$1 srcinfo=$2 prefix="" req dep owner met entry first
   local -A in_depends=() in_opt=() noted=()
-  local -a owners all=("${RB_REQUIRED[@]}" "${RB_OPTIONAL[@]}")
+  local -a owners skips all=("${RB_REQUIRED[@]}" "${RB_OPTIONAL[@]}")
   (($4 < 2)) || prefix="$3: "
+  mapfile -t skips < <(pkg_get "$file" '.ruby.skip // [] | .[] | select(tag == "!!str")')
   while IFS= read -r dep; do
     in_depends[$dep]=1
     ! arch_package "$dep" 2>/dev/null || in_depends[$PKG_NAME]=1
@@ -527,11 +554,16 @@ _ruby_imports_notes() {
     in_depends[$dep]=1
   done < <(srcinfo_pkgnames "$srcinfo")
   in_depends[ruby]=1
+  # Packages that ruby depends on come with it, as rubygems does
+  ruby_version
+  for dep in "${RUBY_DEPENDS[@]}"; do
+    in_depends[$dep]=1
+  done
   for entry in "${RB_ERRORS[@]}"; do
     printf 'notice\t%simports: %s does not parse: %s\n' "$prefix" "${entry%%: *}" "${entry#*: }"
   done
   for req in "${all[@]}"; do
-    [[ -z "${noted[$req]:-}" ]] || continue
+    [[ -z "${noted[$req]:-}" ]] && ! _ruby_skipped "$req" "${skips[@]}" || continue
     noted[$req]=1
     mapfile -t owners < <(awk -F'\t' -v r="$req" '$1 == r { print $2 }' "$5")
     if ((${#owners[@]} == 0)); then
@@ -563,6 +595,17 @@ _ruby_imports_notes() {
     [[ -n "$met" ]] ||
       printf 'notice\t%srequire %s (optional): %s in neither depends nor optdepends\n' "$prefix" "$req" "$(_python_join "${owners[@]}")"
   done
+}
+
+# Succeed when require path $1 belongs to a gem of ruby.skip $@ after it: its first part names the gem,
+# or its parts joined by dashes start with the name, as win32/process does for win32-process
+_ruby_skipped() {
+  local skip joined=${1//\//-}
+  for skip in "${@:2}"; do
+    [[ -n "$skip" ]] || continue
+    [[ "${1%%/*}" == "$skip" || "$joined" == "$skip" || "$joined" == "$skip"-* ]] && return 0
+  done
+  return 1
 }
 
 # Succeed when require path $1 is one of RB_REQUIRED

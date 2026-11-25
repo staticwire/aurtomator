@@ -51,13 +51,19 @@ pkg_get() {
   yq -r "$query" "$file"
 }
 
-# Print true or false for a boolean field in any case, and nothing for another value
+# Print true or false for a boolean in any case or an alias of one, nothing for null, or fail
 # Usage: pkg_bool packages/my-package.yml .allow_downgrade
 pkg_bool() {
-  local value
-  value=$(pkg_get "$1" "$2 | select(tag == \"!!bool\")") || return 1
+  local tag value=""
+  tag=$(pkg_get "$1" "explode(.) | $2 | tag") || return 1
+  [[ "$tag" != "!!null" ]] || return 0
+  [[ "$tag" != "!!bool" ]] || value=$(pkg_get "$1" "explode(.) | $2") || return 1
   case "${value,,}" in
     true | false) printf '%s\n' "${value,,}" ;;
+    *)
+      log_err "packages/${1##*/}: ${2#.} must be true or false"
+      return 1
+      ;;
   esac
 }
 

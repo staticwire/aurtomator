@@ -20,6 +20,10 @@ if ! (LC_ALL=C && [[ "$strategy" =~ ^[A-Za-z0-9_][A-Za-z0-9_-]*$ ]]); then
   log_err "$PKG_NAME: strategy must be a plain name: ${strategy@Q}"
   exit 1
 fi
+# The run reads a flag that is no boolean as its default, true for allow_missing_arch
+for flag in .allow_downgrade .allow_version_jump .allow_missing_arch; do
+  pkg_bool "$PKG_FILE" "$flag" >/dev/null || exit 1
+done
 current=$(pkg_get "$PKG_FILE" '.current // ""')
 dash=$(pkgver_dash "$PKG_FILE")
 format=$(pkg_get "$PKG_FILE" '.pkgver_format // ""')

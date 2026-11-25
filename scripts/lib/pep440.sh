@@ -135,12 +135,11 @@ _pep440_clause() {
       fi
       ;;
     ">")
-      _pep440_order _PEP440_V _PEP440_X
+      # Local versions compare by their public version, and >V leaves out the post-releases of V
+      # unless V is a post or dev release
+      _pep440_order _PEP440_P _PEP440_X
       ((PEP440_ORDER > 0)) || return 1
-      if [[ -z "${_PEP440_X[4]}" && -n "${_PEP440_V[4]}" ]] && _pep440_same_base; then
-        return 1
-      fi
-      if [[ -n "${_PEP440_V[6]}" ]] && _pep440_same_base; then
+      if [[ -z "${_PEP440_X[4]}${_PEP440_X[5]}" ]] && _pep440_same_pre; then
         return 1
       fi
       ;;
@@ -166,6 +165,14 @@ _pep440_same_base() {
   _PEP440_P=("${_PEP440_V[0]}" "${_PEP440_V[1]}" "" "" "" "" "")
   _PEP440_Q=("${_PEP440_X[0]}" "${_PEP440_X[1]}" "" "" "" "" "")
   _pep440_order _PEP440_P _PEP440_Q
+  ((PEP440_ORDER == 0))
+}
+
+# Succeed when _PEP440_P and _PEP440_X have the same epoch, release and pre-release
+_pep440_same_pre() {
+  _PEP440_R=("${_PEP440_P[0]}" "${_PEP440_P[1]}" "${_PEP440_P[2]}" "${_PEP440_P[3]}" "" "" "")
+  _PEP440_Q=("${_PEP440_X[0]}" "${_PEP440_X[1]}" "${_PEP440_X[2]}" "${_PEP440_X[3]}" "" "" "")
+  _pep440_order _PEP440_R _PEP440_Q
   ((PEP440_ORDER == 0))
 }
 

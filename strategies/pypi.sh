@@ -28,7 +28,8 @@ if [[ -n "$pin_from" ]]; then
     echo "No version found on PyPI for ${pin_from}" >&2
     exit 1
   fi
-  headers=$(pypi_metadata "$pin_from" "$newest") || exit 1
+  # The check job parses no release archive, so pin_from reads the metadata of a wheel alone
+  headers=$(pypi_metadata "$pin_from" "$newest" wheels) || exit 1
   requires_pin "$headers" "$pin_from" "$registry"
   exit 0
 fi

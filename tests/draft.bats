@@ -60,6 +60,17 @@ stub_git_latest() {
   [[ "$output" == *"demo: update available 1.0.0 → 2.0.0"* ]]
 }
 
+# validate-pkg.sh reads what the requires rules of each new version need, so the draft fails at once
+@test "draft: a package with Python in depends and no source of its requirements fails" {
+  aur_package demo 1.0.0 'url = https://demo.example.org' \
+    'source = demo-1.0.0.tar.gz::https://github.com/o/demo/releases/download/v1.0.0/demo-1.0.0.tar.gz' \
+    'depends = python'
+  run "$TEST_TMPDIR/scripts/draft.sh" demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/demo.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]]
+  [[ "$output" == *"Fix packages/demo.yml, or delete it"* ]]
+}
+
 @test "draft: an archive on GitHub gives github-tag" {
   aur_package demo 1.0.0 'source = https://github.com/o/demo/archive/refs/tags/v1.0.0.tar.gz'
   run "$TEST_TMPDIR/scripts/draft.sh" demo

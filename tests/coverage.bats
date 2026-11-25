@@ -154,7 +154,7 @@ require_simplecov() {
 @test "bashcov-bats.sh: measures scripts/lib/py_imports.py with coverage.py into coverage/python.xml" {
   require_bashcov
   require_coverage_py
-  make_fixture 'printf "import json\\n" >"$TEST_TMPDIR/m.py" && python3 -I -S "$PROJECT_DIR/scripts/lib/py_imports.py" "$TEST_TMPDIR" m.py'
+  make_fixture 'printf "import json\\n" >"$TEST_TMPDIR/m.py" && printf "m.py\\0" | python3 -I -S "$PROJECT_DIR/scripts/lib/py_imports.py" "$TEST_TMPDIR"'
   run_bashcov
   [ "$status" -eq 0 ]
   grep -q 'filename="[^"]*py_imports.py"' "$FIXTURE/coverage/python.xml"
@@ -175,7 +175,8 @@ require_simplecov() {
   [ "$status" -eq 0 ]
   [ "$output" = "1 1" ]
   printf 'import json\n' >"$TEST_TMPDIR/m.py"
-  run env -u COVERAGE_FILE "$shim" -I -S "$PROJECT_DIR/scripts/lib/py_imports.py" "$TEST_TMPDIR" m.py
+  printf 'm.py\0' >"$TEST_TMPDIR/files"
+  run env -u COVERAGE_FILE "$shim" -I -S "$PROJECT_DIR/scripts/lib/py_imports.py" "$TEST_TMPDIR" <"$TEST_TMPDIR/files"
   [ "$status" -eq 0 ]
   [ "$output" = import$'\t'm.py$'\t'json$'\t'module ]
 }
@@ -183,7 +184,7 @@ require_simplecov() {
 @test "bashcov-bats.sh: measures scripts/lib/rb_requires.rb with SimpleCov into coverage/ruby.xml" {
   require_bashcov
   require_simplecov
-  make_fixture 'printf "require \\"json\\"\\n" >"$TEST_TMPDIR/m.rb" && ruby --disable-gems "$PROJECT_DIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR" m.rb'
+  make_fixture 'printf "require \\"json\\"\\n" >"$TEST_TMPDIR/m.rb" && printf "m.rb\\0" | ruby --disable-gems "$PROJECT_DIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR"'
   run_bashcov
   [ "$status" -eq 0 ]
   grep -q 'filename="scripts/lib/rb_requires.rb"' "$FIXTURE/coverage/ruby.xml"
@@ -197,7 +198,8 @@ require_simplecov() {
   [ "$status" -eq 0 ]
   [ "$output" = nil ]
   printf 'require "json"\n' >"$TEST_TMPDIR/m.rb"
-  run env -u SIMPLECOV_HELPER_DIR -u RUBYOPT "$shim" --disable-gems "$PROJECT_DIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR" m.rb
+  printf 'm.rb\0' >"$TEST_TMPDIR/files"
+  run env -u SIMPLECOV_HELPER_DIR -u RUBYOPT "$shim" --disable-gems "$PROJECT_DIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR" <"$TEST_TMPDIR/files"
   [ "$status" -eq 0 ]
   [ "$output" = require$'\t'm.rb$'\t'require$'\t'json$'\t'module ]
 }

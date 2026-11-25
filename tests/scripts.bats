@@ -250,11 +250,11 @@ teardown() {
   [ "$output" = "owner/repo" ]
 }
 
-@test "lib.sh: pkg_bool reads true and false in any case, and nothing else" {
+# Callers read nothing as the default of a flag, true for allow_missing_arch
+@test "lib.sh: pkg_bool reads true and false in any case, nothing for no value, and fails on others" {
   local entry
   source "$TEST_TMPDIR/scripts/lib.sh"
-  for entry in true:true True:true TRUE:true false:false False:false FALSE:false \
-    '"true"': yes: '!!bool yes': '!!bool 1': '~': 'tRUE':; do
+  for entry in true:true True:true TRUE:true false:false False:false FALSE:false '~': '': 'null':; do
     printf 'flag: %s\n' "${entry%:*}" >"$TEST_TMPDIR/flag.yml"
     run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
     [ "$status" -eq 0 ]
@@ -267,6 +267,32 @@ teardown() {
   run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+  printf 'a: &x false\nflag: *x\n' >"$TEST_TMPDIR/flag.yml"
+  run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
+  [ "$status" -eq 0 ]
+  [ "$output" = false ]
+  for entry in '"false"' no off 0 yes '!!bool yes' '!!bool 1' tRUE '[]'; do
+    printf 'flag: %s\n' "$entry" >"$TEST_TMPDIR/flag.yml"
+    run pkg_bool "$TEST_TMPDIR/flag.yml" .flag
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"packages/flag.yml: flag must be true or false" ]] || {
+      echo "${entry} read as $output"
+      return 1
+    }
+  done
+}
+
+# A YAML that says no to missing arches would publish without them after 24 hours
+@test "check-update: fails the check of a package whose flag is no boolean" {
+  local flag
+  for flag in allow_downgrade allow_version_jump allow_missing_arch; do
+    create_test_package "mypkg" "github-release" "upstream:
+  project: owner/repo
+$flag: \"false\""
+    run "$TEST_TMPDIR/scripts/check-update.sh" mypkg
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"packages/mypkg.yml: $flag must be true or false" ]]
+  done
 }
 
 # vercmp puts an empty string above a version of letters only
@@ -2297,7 +2323,8 @@ check_holds() {
     "1.1 >=1.1 0" "1.0 >=1.1 1" "1.1+local >=1.1 0" "1.4.5 ~=1.4 0" "2.0 ~=1.4 1" "1.3 ~=1.4 1" \
     "1.4.5 ~=1.4.2 0" "1.5 ~=1.4.2 1" "1.4.2rc1 ~=1.4.2 1" "1.4.2rc2 ~=1.4.2rc1 0" \
     "1.44.9 <1.45.0,>=1.44.10 1" "1.44.10 <1.45.0,>=1.44.10 0" "1.4.1 <1.4,>=1.1.0 1" "1.0 ===1.0 0" \
-    "1.0.0 ===1.0 1" "1.0a1 ===1.0A1 0"
+    "1.0.0 ===1.0 1" "1.0a1 ===1.0A1 0" "1.2+abc.1 >1.2b0.post0 0" "1.2+abc >1.2 1" "1.2.post1+x >1.2 1" \
+    "1.2b0+x >1.2b0 1" "1.2.post1 >1.2b0 0" "1.2.post1 >1.2.dev0 0" "1.2b0.post1 >1.2b0 1" "1.2b1 >1.2b0 0"
 }
 
 @test "pep440.sh: pep440_holds returns 2 for a clause it cannot read, 0 for no clause" {
@@ -2517,7 +2544,7 @@ run_split() {
 @test "requires.sh: marker_value compares string fields as the specification says" {
   check_markers \
     1 'sys_platform != "win32"' 0 'sys_platform != "linux"' \
-    1 'sys_platform ~= "linux"' 1 'sys_platform === "linux"' \
+    '?' 'sys_platform ~= "linux"' '?' 'sys_platform === "linux"' \
     1 'sys_platform >= "linux"' 1 'sys_platform <= "linux"' 0 'sys_platform >= "a"' \
     0 'sys_platform > "a"' 0 'sys_platform < "z"' 0 'platform_machine > "a"' 0 'platform_machine < "z"' \
     1 '"lin" in sys_platform' 1 'sys_platform in "linux darwin"' 0 '"win" in sys_platform' \
@@ -2535,7 +2562,9 @@ run_split() {
     1 'python_full_version > "3.14.10b2"' 0 'python_full_version >= "3.14.11a1"' \
     1 'python_version < "3.99999999999999999999"' \
     1 'python_full_version === "3.14.10"' 0 'python_version === "3.14.0"' 1 'python_version === "3.14"' \
-    0 '"3.14" in python_version' 0 'python_version not in "3.14"'
+    1 '"3.14" in python_version' 0 'python_version not in "3.14"' 1 'python_version in "3.14"' \
+    0 'python_version in "2.7"' 1 'python_version not in "2.7"' 1 'python_version not in "3.0, 3.1"' \
+    1 '"3.1" in python_version' 1 'python_full_version in "3.14.10, 3.15"'
 }
 
 @test "requires.sh: marker_value matches version prefixes and compatible releases" {
@@ -2618,7 +2647,7 @@ run_split() {
   export MOCK_PYTHON_FAIL=1
   check_markers \
     '?' 'python_version < "3.11"' '?' 'python_full_version >= "3.8"' \
-    0 'python_version < "3.11" and sys_platform == "win32"' 0 '"3" in python_version' 1 'sys_platform == "linux"'
+    0 'python_version < "3.11" and sys_platform == "win32"' '?' '"3" in python_version' 1 'sys_platform == "linux"'
 }
 
 @test "requires.sh: marker_value takes the Python of pacman without epoch and pkgrel" {
@@ -2772,7 +2801,23 @@ run_split() {
   pypi_fake_metadata demo 1.0 $'Metadata-Version: 2.4\nName: demo\x1b[31m\n'
   run_requires 'pypi_metadata demo 1.0'
   [ "$status" -eq 1 ]
-  [[ "$output" == *"demo-1.0-py3-none-any.whl.metadata holds a control character"* ]]
+  [[ "$output" == *"demo-1.0-py3-none-any.whl.metadata holds a control character in Name"* ]]
+}
+
+# Build backends copy license files into License, and the license texts of the FSF hold form feeds
+@test "requires.sh: pypi_metadata reads control characters of headers that no rule reads as spaces" {
+  pypi_fake_metadata demo 1.0 $'Metadata-Version: 2.4\nName: demo\nLicense: GPL\n        \x0c\n        more\xc2\x85\nRequires-Dist: click\n'
+  run_requires 'pypi_metadata demo 1.0'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'Metadata-Version: 2.4\nName: demo\nLicense: GPL  more \nRequires-Dist: click' ]
+  local header n=0
+  for header in Metadata-Version Name Version Requires-Dist Requires-Python Dynamic; do
+    n=$((n + 1))
+    pypi_fake_metadata demo 2.$n $'Metadata-Version: 2.4\nName: demo\n'"$header"$': x\n        \x0c\n'
+    run_requires 'pypi_metadata demo 2.'$n
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"demo-2.$n-py3-none-any.whl.metadata holds a control character in $header"* ]]
+  done
 }
 
 @test "requires.sh: pypi_metadata reads PKG-INFO of an sdist from Metadata-Version 2.2 on" {
@@ -2918,11 +2963,16 @@ run_archdb() {
 }
 
 # Helper: writes the files database lines of tests/fixtures to MOCK_PACMAN_FILES: python-yaml,
-# python-brotli, python-protobuf and python-gpgme, and a copy of PyYAML that azure-cli vendors
+# python-brotli, python-protobuf and python-gpgme, a copy of PyYAML that azure-cli vendors, and the
+# .egg-info distributions of python-setuptools, btrfs-progs and gpsd, a directory or a file
 python_files_db() {
   export MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
   printf 'extra\t%s\t%s\t%s\n' \
     python-yaml 6.0.2-2 usr/lib/python3.13/site-packages/PyYAML-6.0.2.dist-info/METADATA \
+    python-setuptools 1:80.0.0-1 usr/lib/python3.13/site-packages/setuptools-80.0.0-py3.13.egg-info/PKG-INFO \
+    btrfs-progs 6.14-1 usr/lib/python3.13/site-packages/btrfsutil-6.14-py3.13.egg-info/ \
+    btrfs-progs 6.14-1 usr/lib/python3.13/site-packages/btrfsutil-6.14-py3.13.egg-info/PKG-INFO \
+    gpsd 3.25-5 usr/lib/python3.13/site-packages/gps-3.25.egg-info \
     python-yaml 6.0.2-2 usr/lib/python3.13/site-packages/yaml/__init__.py \
     python-brotli 1.1.0-3 usr/lib/python3.13/site-packages/Brotli-1.1.0.dist-info/METADATA \
     python-protobuf 30.2-1 usr/lib/python3.13/site-packages/protobuf-6.30.2.dist-info/METADATA \
@@ -2992,9 +3042,10 @@ python_files_db() {
   export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
   run_archdb 'files_index_python && files_index_python && echo "$ARCHDB_FILES" && cat "$AURTOMATOR_RUN_CACHE/py-dists"'
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' files brotli$'\t'python-brotli$'\t'1.1.0 gpg$'\t'python-gpgme$'\t'1.24.2 \
-    protobuf$'\t'python-protobuf$'\t'6.30.2 pyyaml$'\t'python-yaml$'\t'6.0.2)" ]
-  [ "$(cat "$PACMAN_ARGS_LOG")" = "-Fx --machinereadable ^usr/lib/python3\\.[0-9]+/site-packages/[^/]+\\.dist-info/METADATA\$" ]
+  [ "$output" = "$(printf '%s\n' files brotli$'\t'python-brotli$'\t'1.1.0 btrfsutil$'\t'btrfs-progs$'\t'6.14 \
+    gpg$'\t'python-gpgme$'\t'1.24.2 gps$'\t'gpsd$'\t'3.25 protobuf$'\t'python-protobuf$'\t'6.30.2 \
+    pyyaml$'\t'python-yaml$'\t'6.0.2 setuptools$'\t'python-setuptools$'\t'80.0.0)" ]
+  [ "$(cat "$PACMAN_ARGS_LOG")" = "-Fx --machinereadable ^usr/lib/python3\\.[0-9]+/site-packages/[^/]+\\.(dist-info/METADATA|egg-info(/PKG-INFO)?)\$" ]
 }
 
 @test "archdb.sh: files_index_python writes #none without a files database" {
@@ -3017,6 +3068,56 @@ python_files_db() {
   run_archdb 'files_index_owner "^usr/lib/python3\\.[0-9]+/site-packages/yaml/"'
   [ "$status" -eq 0 ]
   [ "$output" = python-yaml$'\t'usr/lib/python3.13/site-packages/yaml/__init__.py ]
+}
+
+# pacman exits 1 for no match and for an error, which only its error line tells apart
+@test "archdb.sh: files_index_owner fails on an error of pacman and gives nothing for no match" {
+  python_files_db
+  run_archdb 'files_index_owner "^nothing$"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  MOCK_PACMAN_NO_FILES=1 run_archdb 'files_index_owner "^usr/"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  MOCK_PACMAN_FX_EXIT=1 run_archdb 'files_index_owner "^usr/"'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pacman -Fx exits 1: error: failed to read file 'extra.files'" ]]
+  MOCK_PACMAN_FX_EXIT=126 run_archdb 'files_index_owner "^usr/"'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pacman -Fx exits 126" ]]
+}
+
+# Modules that a failed query left out would have no owner for the rest of the run, and Linux
+# takes no argument past 128 KiB
+@test "pyrules.sh: _python_owners_index asks again after a failed query and splits long queries" {
+  python_files_db
+  MOCK_PACMAN_FX_EXIT=1 run_archdb '_python_owners_index yaml'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pacman -Fx exits 1: error: failed to read file 'extra.files'" ]]
+  [ ! -s "$AURTOMATOR_RUN_CACHE/py-owners-asked" ]
+  run_archdb '_python_owners_index yaml && cat "$AURTOMATOR_RUN_CACHE/py-owners-asked" "$AURTOMATOR_RUN_CACHE/py-owners"'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'yaml\npython-yaml\tyaml/__init__.py' ]
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
+  run_archdb '_python_owners_index $(printf "m%05d\n" {1..15000}) brotli'
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$PACMAN_ARGS_LOG")" -eq 2 ]
+  [ "$(awk '{ if (length($0) > max) max = length($0) } END { print (max < 100000) }' "$PACMAN_ARGS_LOG")" -eq 1 ]
+  [ "$(wc -l <"$AURTOMATOR_RUN_CACHE/py-owners-asked")" -eq 15002 ]
+}
+
+@test "rbrules.sh: _ruby_owners fails on an error of pacman and splits long queries" {
+  export MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
+  printf 'extra\truby-rexml\t1-1\tusr/lib/ruby/gems/3.4.0/gems/rexml-3.4.4/lib/rexml/document.rb\n' >"$MOCK_PACMAN_FILES"
+  MOCK_PACMAN_FX_EXIT=1 run_archdb '_ruby_owners rexml/document'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pacman -Fx exits 1: error: failed to read file 'extra.files'" ]]
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
+  run_archdb '_ruby_owners $(printf "r%05d\n" {1..15000}) rexml/document'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'rexml/document\truby-rexml' ]
+  [ "$(wc -l <"$PACMAN_ARGS_LOG")" -eq 2 ]
+  [ "$(awk '{ if (length($0) > max) max = length($0) } END { print (max < 100000) }' "$PACMAN_ARGS_LOG")" -eq 1 ]
 }
 
 @test "archdb.sh: repo_package resolves a name of provides once per run" {
@@ -3073,9 +3174,11 @@ py_file() {
   printf '%s\n' "${@:2}" >"$TEST_TMPDIR/py/$1"
 }
 
-# Helper: runs py_imports.py on the files $@ of $TEST_TMPDIR/py as the rules run it
+# Helper: runs py_imports.py on the files $@ of $TEST_TMPDIR/py as the rules run it, the names
+# NUL-separated on stdin
 run_py_imports() {
-  run --separate-stderr python3 -I -S "$TEST_TMPDIR/scripts/lib/py_imports.py" "$TEST_TMPDIR/py" "$@"
+  printf '%s\0' "$@" >"$TEST_TMPDIR/py-files"
+  run --separate-stderr python3 -I -S "$TEST_TMPDIR/scripts/lib/py_imports.py" "$TEST_TMPDIR/py" <"$TEST_TMPDIR/py-files"
 }
 
 @test "py_imports.py: prints the modules of import and from, with their scope" {
@@ -3086,6 +3189,19 @@ run_py_imports() {
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'import\tmod.py\t%s\n' 'os	module' 'a.b	module' 'json	module' 'x.y	module' 'x.y.z	module' \
     'x.y.w	module' 'star	module' 'inner	function' 'deep	function' 'deep.thing	function' 'in_class	module')" ]
+}
+
+# Python writes stdout strictly outside the C locales, and releases can hold any byte in a name
+@test "py_imports.py: prints file names outside UTF-8 as their bytes" {
+  local bad=$'bad\xff.py'
+  py_file ok.py 'import json'
+  printf 'import os\n' >"$TEST_TMPDIR/py/$bad"
+  printf '%s\0' ok.py "$bad" >"$TEST_TMPDIR/py-files"
+  run --separate-stderr env PYTHONIOENCODING=utf-8:strict python3 -S "$TEST_TMPDIR/scripts/lib/py_imports.py" "$TEST_TMPDIR/py" \
+    <"$TEST_TMPDIR/py-files"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = $'import\tok.py\tjson\tmodule' ]
+  [ "${lines[1]}" = "import"$'\t'"$bad"$'\t'"os"$'\t'"module" ]
 }
 
 @test "py_imports.py: reads try, suppress and TYPE_CHECKING as optional and typing scopes" {
@@ -3110,7 +3226,19 @@ run_py_imports() {
   run_py_imports mod.py
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'import\tmod.py\t%s\n' 'sys	module' 'os	module' 'platform	module' 'tomllib	module' 'fcntl	module' \
-    'maybe	module' 'other	module')" ]
+    'maybe	optional' 'other	optional')" ]
+}
+
+# jinja2 tests t.TYPE_CHECKING after import typing as t, and requests imports simplejson under a
+# flag that a try sets
+@test "py_imports.py: reads any TYPE_CHECKING as typing and the branches of an unknown test as optional" {
+  py_file mod.py 'import typing as t' 'if t.TYPE_CHECKING:' '    import typing_extensions as te' \
+    'if has_simplejson:' '    from simplejson import JSONDecodeError' 'elif sys.platform == "win32":' '    import winreg' \
+    'else:' '    import json'
+  run_py_imports mod.py
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'import\tmod.py\t%s\n' 'typing	module' 'typing_extensions	typing' 'simplejson	optional' \
+    'simplejson.JSONDecodeError	optional' 'json	optional')" ]
 }
 
 @test "py_imports.py: resolves relative imports against the path of the file" {
@@ -3519,6 +3647,138 @@ ${4:-}"
   [ "$output" = $'notice\timport numba: python-numba not in depends' ]
 }
 
+# Builds and test runners read these files of an sdist, and the build installs none of them
+@test "pyrules.sh: python_imports reads no build and test files at the root of an sdist" {
+  imports_env
+  local s="$TEST_TMPDIR/sdist" stem=demo-2.0
+  mkdir -p "$s/$stem/demo"
+  printf '%s\n' 'import tqdm' >"$s/$stem/demo/__init__.py"
+  printf '%s\n' 'import setuptools' >"$s/$stem/setup.py"
+  printf '%s\n' 'import pytest' >"$s/$stem/conftest.py"
+  printf '%s\n' 'import nox' >"$s/$stem/noxfile.py"
+  printf '%s\n' 'import invoke' >"$s/$stem/tasks.py"
+  printf '%s\n' 'import fabric' >"$s/$stem/fabfile.py"
+  printf 'Metadata-Version: 2.4\nName: demo\n' >"$s/$stem/PKG-INFO"
+  bsdtar -czf "$MOCK_FILES_DIR/$stem.tar.gz" -C "$s" "$stem"
+  pypi_fake_file demo 2.0 "$MOCK_FILES_DIR/$stem.tar.gz" false
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python python-tqdm
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Helper: an sdist demo 2.0 whose package imports module evil, a link at the top of the archive to a
+# file outside it, with the files database of imports_env
+evil_sdist() {
+  imports_env
+  local s="$TEST_TMPDIR/sdist" stem=demo-2.0
+  mkdir -p "$s/$stem/demo"
+  printf '%s\n' 'import evil' >"$s/$stem/demo/__init__.py"
+  printf '%s\n' 'import secretmod' >"$TEST_TMPDIR/outside.py"
+  ln -s "$TEST_TMPDIR/outside.py" "$s/$stem/evil.py"
+  printf 'Metadata-Version: 2.4\nName: demo\n' >"$s/$stem/PKG-INFO"
+  bsdtar -czf "$MOCK_FILES_DIR/$stem.tar.gz" -C "$s" "$stem"
+  pypi_fake_file demo 2.0 "$MOCK_FILES_DIR/$stem.tar.gz" false
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+}
+
+# Links of an archive could make the rule read any file of the runner, so they count as no module of it
+@test "pyrules.sh: python_imports reads no link of the archive" {
+  evil_sdist
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timport evil: no package owns it' ]
+}
+
+# python.skip names paths in the tree, and rm -rf would take a path outside it
+@test "pyrules.sh: python_imports removes no path of python.skip outside the tree" {
+  evil_sdist
+  mkdir -p "$AURTOMATOR_RUN_CACHE/keep"
+  : >"$AURTOMATOR_RUN_CACHE/keep/file"
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0 "python:
+  skip:
+    - ../../../keep
+    - $AURTOMATOR_RUN_CACHE/keep"
+  [ "$status" -eq 0 ]
+  [ -f "$AURTOMATOR_RUN_CACHE/keep/file" ]
+}
+
+# Helper: a bsdtar first in PATH that lists 16 MiB with BSDTAR_LIST_BIG set and fails each extraction
+# with BSDTAR_EXTRACT_FAIL set, and runs the real one otherwise
+mock_bsdtar() {
+  local real
+  real=$(type -a -P bsdtar | grep -vF -m 1 "$MOCK_DIR/")
+  cat >"$MOCK_DIR/bsdtar" <<EOF
+#!/usr/bin/env bash
+case " \$* " in
+  *" -tvf "*) [[ -z "\${BSDTAR_LIST_BIG:-}" ]] || { head -c \$((16384 * 1024)) /dev/zero | tr '\0' a; exit 0; } ;;
+  *" -xf "*) [[ -z "\${BSDTAR_EXTRACT_FAIL:-}" ]] || { echo "bsdtar: demo/x.py: Can't create 'demo/x.py'" >&2; exit 1; } ;;
+esac
+exec "$real" "\$@"
+EOF
+  chmod +x "$MOCK_DIR/bsdtar"
+}
+
+# The coverage shims of CI run the helpers without -S and --disable-gems, and bundle exec sets RUBYOPT,
+# so this test runs stand-ins of the helpers that print the flags, outside both
+@test "pyrules.sh, rbrules.sh: the helpers run without site-packages and RubyGems" {
+  unset COVERAGE_FILE SIMPLECOV_HELPER_DIR RUBYOPT
+  printf '%s\n' 'import sys' 'if sys.argv[1:] == ["--stdlib"]:' '    sys.exit(0)' \
+    'for name in sys.stdin.buffer.read().split(b"\0")[:-1]:' \
+    '    print(f"import\t{name.decode()}\tsite{sys.flags.no_site}isolated{sys.flags.isolated}\tmodule")' \
+    >"$TEST_TMPDIR/py-stand-in"
+  printf '%s\n' 'exit 0 if ARGV == ["--builtin"]' '$stdin.read.split("\0").each do |name|' \
+    '  puts "require\t#{name}\trequire\tgems_#{defined?(Gem) ? "on" : "off"}\tmodule"' 'end' >"$TEST_TMPDIR/rb-stand-in"
+  cp --remove-destination "$TEST_TMPDIR/py-stand-in" "$TEST_TMPDIR/scripts/lib/py_imports.py"
+  cp --remove-destination "$TEST_TMPDIR/rb-stand-in" "$TEST_TMPDIR/scripts/lib/rb_requires.rb"
+  imports_env
+  demo_wheel
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timport site1isolated1: no package owns it' ]
+  gems_env 1.3.2
+  bashcov_gem
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire gems_off: no package owns it' ]
+}
+
+# A listing of 16 MiB stops at the limit of its size, and an extraction can fail for one member
+@test "pyrules.sh: python_imports reads nothing from a listing of 16 MiB or a failed extraction" {
+  evil_sdist
+  mock_bsdtar
+  BSDTAR_LIST_BIG=1 run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timports: bsdtar cannot list demo-2.0.tar.gz, not read' ]
+  BSDTAR_EXTRACT_FAIL=1 run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 2.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timports: bsdtar cannot extract demo-2.0.tar.gz, not read' ]
+}
+
+# Releases can hold files whose parse runs past any limit, and site-packages and RubyGems would
+# load code of the runner into the helpers
+@test "pyrules.sh, rbrules.sh: the helpers run under timeout 60 with -I -S and --disable-gems" {
+  local real
+  real=$(type -a -P timeout | grep -vF -m 1 "$MOCK_DIR/")
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\nexec "%s" "$@"\n' "$TEST_TMPDIR/timeout.log" "$real" \
+    >"$MOCK_DIR/timeout"
+  chmod +x "$MOCK_DIR/timeout"
+  imports_env
+  demo_wheel
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  gems_env 1.3.2
+  bashcov_gem
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$(sed 's| /.*||' "$TEST_TMPDIR/timeout.log")" = "$(printf '%s\n' '60 python3 -I -S' '60 python3 -I -S' '60 ruby --disable-gems' \
+    '60 ruby --disable-gems')" ]
+}
+
 @test "pyrules.sh: python_imports fails on a wheel that does not match its sha256" {
   imports_env
   demo_wheel
@@ -3667,6 +3927,57 @@ $1"
 
 TOML=$'[build-system]\nrequires = ["setuptools"]\n\n[project]\nname = "demo"\ndescription = """A demo with [brackets],\n"quotes" and # signs."""\nrequires-python = ">=3.10"  # comment\nauthors = [{name = "A", email = "a@example.org"}]\nkeywords = ["a", "b"]\ndependencies = [\n  "click>=8",  # the CLI\n  \'rich\',\n  # a comment line\n]\ndynamic = ["version"]\n\n[project.optional-dependencies]\ndocs = ["sphinx"]\n'
 
+# Helper: _toml_project of the text $1 prints the lines $2
+toml_reads() {
+  printf '%s' "$1" >"$TEST_TMPDIR/case.toml"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; _toml_project "$1"' "$TEST_TMPDIR" "$TEST_TMPDIR/case.toml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$2" ] || {
+    echo "read ${1@Q} as ${output@Q}"
+    return 1
+  }
+}
+
+# tomllib reads every one of these forms, and real archives hold CRLF files
+@test "pyrules.sh: _toml_project reads CRLF, dotted keys, inline and quoted tables, and brackets in values" {
+  local demo=$'name\tdemo\nhas\t\ndep\ta'
+  toml_reads $'[project]\r\nname = "demo"\r\ndependencies = ["a",\r\n "b"]\r\n' $'name\tdemo\nhas\t\ndep\ta\ndep\tb'
+  toml_reads $'project.name = "demo"\nproject.dependencies = ["a"]\n' "$demo"
+  toml_reads $'project = { name = "demo", dependencies = ["a"] }\n' "$demo"
+  toml_reads $'["project"]\nname = "demo"\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[ \'project\' ]  # the table\nname = "demo"\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[tool.x]\ndoc = """\n[project]\ndependencies = ["evil"]\n"""\n[project]\nname = "demo"\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[project]\nname = "demo"\ndescription = """\n[tool.other]\nline\n"""\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[project]\nname = "demo"\nkeywords = [\n  ["x"],\n]\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[project]\nname = "demo"\ndependencies = ["a"]\n[[project.authors]]\nname = "x"\n[tool.y]\nname = "y"\n' "$demo"
+  toml_reads $'[project.urls]\nhome = "https://x"\n[project]\nname = "demo"\nurls.docs = "https://y"\ndependencies = ["a"]\n' "$demo"
+}
+
+# The rules write these values into headers, where an escape or a control character changes their meaning
+@test "pyrules.sh: python_source refuses escapes and control characters in pyproject.toml values" {
+  local value
+  for value in 'demo\u0062' $'demo\x01'; do
+    pyproject_env "[project]"$'\n'"name = \"$value\""$'\ndependencies = ["click"]\n' pyproject.toml
+    run_source $'python:\n  pyproject: pyproject.toml'
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"a value holds an escape or a control character"* ]]
+  done
+}
+
+# The rule removes directories under the one of the file, and validate-pkg.sh does not run in a check
+@test "pyrules.sh: python_source refuses a python.pyproject path outside the archive" {
+  local path
+  pyproject_env "$TOML" pyproject.toml
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  for path in ../../x/pyproject.toml /etc/pyproject.toml 'a b.toml' pyproject.json; do
+    run_source "python:
+  pyproject: '$path'"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"packages/demo.yml: python.pyproject must be a relative path to a .toml file without ..: "* ]]
+  done
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
 @test "pyrules.sh: python_source reads the static dependencies of pyproject.toml in the source archive" {
   pyproject_env "$TOML" pyproject.toml
   run_source "python:
@@ -3742,6 +4053,34 @@ TOML=$'[build-system]\nrequires = ["setuptools"]\n\n[project]\nname = "demo"\nde
   [ "$output" = "pypi zensical 0.1.3" ]
 }
 
+# Releases without metadata that lists the requirements fail the check, and none is the way out
+@test "pyrules.sh: python_source takes python: none for strategy pypi too" {
+  unmet_env
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" demo python
+  create_test_package "demo" "pypi" "upstream:
+  registry: zensical
+python: none"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; python_source "$1" 0.1.3 "$2" && echo "$PY_SOURCE $PY_PROJECT $PY_VERSION"' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" "$TEST_TMPDIR/demo.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = "none  " ]
+}
+
+@test "rbrules.sh: ruby_source takes ruby: none for strategy rubygems too" {
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo
+ruby: none"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_source "$1" 1.0.0 && echo "$RB_SOURCE $RB_GEM $RB_VERSION"' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "none  1.0.0" ]
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_source "$1" 1.0.0 && echo "$RB_SOURCE $RB_GEM $RB_VERSION"' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
+  [ "$output" = "gem demo 1.0.0" ]
+}
+
 # Helper: package kube-diagrams of a strategy that finds 1.1.0, at current 1.0.0 with the YAML lines
 # $1, whose AUR .SRCINFO has the depends after it
 python_package() {
@@ -3755,11 +4094,107 @@ allow_missing_arch: false
 $1"
 }
 
+# The status shows in a code block of the issue, where the mark of log_err is noise
 @test "check-all: fails the check of a package whose depends hold Python and that names no source" {
   python_package "" bash python python-yaml
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
-  [[ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" == "check_failed: "*"packages/kube-diagrams.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "check_failed: packages/kube-diagrams.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none" ]
+}
+
+# The check job of CI holds the token and writes every status, so the rules that download and
+# parse releases run in a job of their own for each package
+@test "check-all: --rules-later runs no requires rule and lists the packages that need them in _rules" {
+  python_package $'python:\n  pypi: KubeDiagrams\nalerts:\n  - match: "^1[.]1"\n    note: Read the changelog' \
+    bash python python-yaml python-diagrams
+  pypi_fake KubeDiagrams 1.0.0 PyYAML diagrams
+  pypi_fake KubeDiagrams 1.1.0 PyYAML diagrams graphviz2drawio
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 1.1.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'kube-diagrams\tnotice\tRead the changelog' ]
+  [ "$(cat "$TEST_TMPDIR/.status/_rules")" = "kube-diagrams" ]
+  [[ ! -e "$CURL_ARGS_LOG" ]] || [ "$(grep -c -e pypi.org -e pythonhosted "$CURL_ARGS_LOG")" = 0 ]
+  python_package "python: none" bash python python-yaml
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 1.1.0" ]
+  [ ! -e "$TEST_TMPDIR/.status/_rules" ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [ "$output" = "--rules-later goes with a check run alone" ]
+}
+
+@test "check-all: --rules-later fails the check of a package whose AUR .SRCINFO it cannot read" {
+  python_package $'python:\n  pypi: KubeDiagrams' bash python python-yaml
+  # The AUR serves an empty repository for a package it lacks, and git fails to clone this one
+  rm -rf "$TEST_TMPDIR/aur-remote/kube-diagrams.git"
+  mkdir "$TEST_TMPDIR/aur-remote/kube-diagrams.git"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" == "check_failed: "* ]]
+  [ ! -e "$TEST_TMPDIR/.status/_rules" ]
+}
+
+@test "check-all: --rules writes the requires lines of the version of the check run, or error and the reason" {
+  python_package $'python:\n  pypi: KubeDiagrams\nalerts:\n  - match: "^1[.]1"\n    note: Read the changelog' \
+    bash python python-yaml python-diagrams
+  pypi_fake KubeDiagrams 1.0.0 PyYAML diagrams
+  pypi_fake KubeDiagrams 1.1.0 PyYAML diagrams graphviz2drawio
+  mkdir -p "$TEST_TMPDIR/.status"
+  echo "new_version: 1.1.0" >"$TEST_TMPDIR/.status/kube-diagrams"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$TEST_TMPDIR/rules/kube-diagrams")" = $'version\t1.1.0' ]
+  grep -qxF $'notice\tadds graphviz2drawio' "$TEST_TMPDIR/rules/kube-diagrams"
+  grep -qxF $'notice\tgraphviz2drawio: not in depends' "$TEST_TMPDIR/rules/kube-diagrams"
+  run grep -c -e changelog -e '^error' "$TEST_TMPDIR/rules/kube-diagrams"
+  [ "$output" = 0 ]
+  # The statuses of the check run stay for the steps after it
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 1.1.0" ]
+  python_package "" bash python python-yaml
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$TEST_TMPDIR/rules/kube-diagrams")" = error ]
+  grep -qF "packages/kube-diagrams.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none" \
+    "$TEST_TMPDIR/rules/kube-diagrams"
+  echo "up_to_date" >"$TEST_TMPDIR/.status/kube-diagrams"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/rules/kube-diagrams")" = $'error\nno new version from the check run' ]
+}
+
+# The rules job gets the YAMLs of the other packages for their upstream.pin_from, and their statuses stay out
+@test "check-all: --rules takes the pin of a companion and runs the rules of packages with a status alone" {
+  unmet_env
+  sed -i 's/"0.0.43-1"/"0.0.41-1"/' "$MOCK_FILES_DIR/aur-rpc.json"
+  pypi_fake zenlike 0.9 'zensical-ui==0.0.41'
+  pypi_fake zenlike 1.0 'zensical-ui==0.0.43'
+  unmet_srcinfo "$TEST_TMPDIR/z.SRCINFO" zenlike python python-zensical-ui
+  aur_srcinfo_remote zenlike "$TEST_TMPDIR/z.SRCINFO"
+  create_test_package "zenlike" "pypi" "upstream:
+  registry: zenlike
+current: '0.9'
+alerts:
+  - requires: unmet
+    hold: true"
+  mkdir -p "$TEST_TMPDIR/.status"
+  echo "new_version: 1.0" >"$TEST_TMPDIR/.status/zenlike"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  grep -qxF $'hold\tzensical-ui==0.0.43: python-zensical-ui has 0.0.41 (AUR pkgver)' "$TEST_TMPDIR/rules/zenlike"
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zenlike
+current: 0.0.41"
+  rm -rf "$TEST_TMPDIR/rules" "$AURTOMATOR_RUN_CACHE"/*
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$TEST_TMPDIR/rules/zenlike")" = $'version\t1.0' ]
+  run grep -c '^hold' "$TEST_TMPDIR/rules/zenlike"
+  [ "$output" = 0 ]
+  [ "$(ls "$TEST_TMPDIR/rules")" = zenlike ]
 }
 
 @test "check-all: runs no requires rule for python: none or without Python in depends" {
@@ -3823,7 +4258,8 @@ $1"
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   grep -qxF $'kube-diagrams\tnotice\tdiagrams: not in depends' "$TEST_TMPDIR/.status/_alerts"
-  ! grep -q -e adds -e drops -e 'has no release' "$TEST_TMPDIR/.status/_alerts"
+  run grep -q -e adds -e drops -e 'has no release' "$TEST_TMPDIR/.status/_alerts"
+  [ "$status" -ne 0 ]
   grep -q 'pypi.org/pypi/KubeDiagrams/json$' "$CURL_ARGS_LOG"
 }
 
@@ -3848,9 +4284,11 @@ rb_file() {
   printf '%s\n' "${@:2}" >"$TEST_TMPDIR/rb/$1"
 }
 
-# Helper: runs rb_requires.rb on the files $@ of $TEST_TMPDIR/rb as the rules run it
+# Helper: runs rb_requires.rb on the files $@ of $TEST_TMPDIR/rb as the rules run it, the names
+# NUL-separated on stdin
 run_rb_requires() {
-  run --separate-stderr ruby --disable-gems "$TEST_TMPDIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR/rb" "$@"
+  printf '%s\0' "$@" >"$TEST_TMPDIR/rb-files"
+  run --separate-stderr ruby --disable-gems "$TEST_TMPDIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR/rb" <"$TEST_TMPDIR/rb-files"
 }
 
 @test "rb_requires.rb: prints the requires of a file with their kind and scope" {
@@ -3872,6 +4310,40 @@ run_rb_requires() {
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'require\tlib/demo.rb\trequire\t%s\n' 'fast	optional' 'slow	optional' 'a	optional' 'b	module' \
     'c	module' 'd	method' 'e	module')" ]
+}
+
+# nkf requires nkf.jar under JRuby, and mixlib-shellout loads files for Windows under RUBY_PLATFORM
+@test "rb_requires.rb: follows the branch of RUBY_ENGINE and RUBY_PLATFORM that Ruby on Arch takes" {
+  rb_file lib/demo.rb 'if RUBY_ENGINE == "jruby"' '  require "demo.jar"' 'elsif RUBY_PLATFORM =~ /mswin|mingw|windows/i' \
+    '  require "win32/process"' 'else' '  require "demo.so"' 'end' 'require "posix" unless Gem.win_platform?' \
+    'require "java" if ::RUBY_PLATFORM.include?("java") || RUBY_ENGINE != "ruby"' 'if !(/darwin/ =~ RUBY_PLATFORM)' \
+    '  require "linux"' 'end' 'if RUBY_PLATFORM.start_with?("x86_64") && ENV["X"]' '  require "maybe"' 'else' '  require "other"' 'end'
+  run_rb_requires lib/demo.rb
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'require\tlib/demo.rb\trequire\t%s\n' 'demo.so	module' 'posix	module' 'linux	module' 'maybe	module' \
+    'other	module')" ]
+}
+
+# File.expand_path reads a leading ~ as a home directory and fails for an unknown user
+@test "rb_requires.rb: keeps a ~ of require_relative as a part of the path" {
+  rb_file lib/tilde.rb 'require_relative "~nouser_zz/x"' 'require "json"'
+  run_rb_requires lib/tilde.rb
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'require\tlib/tilde.rb\t%s\n' 'relative	lib/~nouser_zz/x.rb	module' 'require	json	module')" ]
+}
+
+# SystemStackError is no StandardError, and one file past the stack would end the helper
+@test "rb_requires.rb: prints an error line for a file that overflows the stack and goes on" {
+  rb_file lib/deep.rb 'require "a"'
+  rb_file lib/ok.rb 'require "b"'
+  printf '%s\n' 'require "prism"' 'Prism::Visitor.prepend(Module.new do' '  def visit_program_node(node)' \
+    '    raise SystemStackError, "stack level too deep" if @file.to_s.include?("deep")' '    super' '  end' 'end)' \
+    >"$TEST_TMPDIR/deep.rb"
+  printf '%s\0' lib/deep.rb lib/ok.rb >"$TEST_TMPDIR/rb-files"
+  run --separate-stderr env -u SIMPLECOV_HELPER_DIR -u RUBYOPT ruby --disable-gems -r "$TEST_TMPDIR/deep.rb" \
+    "$TEST_TMPDIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR/rb" <"$TEST_TMPDIR/rb-files"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'error\tlib/deep.rb\tstack level too deep\nrequire\tlib/ok.rb\trequire\tb\tmodule' ]
 }
 
 @test "rb_requires.rb: prints an error line for a file it cannot read and goes on" {
@@ -3904,6 +4376,8 @@ gems_env() {
   export AURTOMATOR_RUN_CACHE="$TEST_TMPDIR/run-cache" MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync" \
     MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
   mkdir -p "$AURTOMATOR_RUN_CACHE"
+  export MOCK_PACMAN_DEPENDS="$TEST_TMPDIR/pacman-depends"
+  : >"$MOCK_PACMAN_DEPENDS"
   printf '%s\n' 'ruby 3.4.13-1 extra ruby-json ruby-optparse' "ruby-simplecov ${1:-0.22.0}-1 extra" 'ruby-rexml 3.4.4-1 extra' \
     'ruby-erb 4.0.4-9 extra' 'ruby-google-protobuf 36.1-1 extra' 'bash 5.3.9-1 core' >"$MOCK_PACMAN_SYNC"
   local line
@@ -3949,6 +4423,44 @@ ${4:-}"
   run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; gem_release bashcov 9.9' "$TEST_TMPDIR"
   [ "$status" -eq 3 ]
   [[ "$stderr" == *"bashcov: rubygems.org has no release 9.9"* ]]
+}
+
+# rubygems.org answers the first platform of a release, java for json 3.2.0, without the query
+@test "rbrules.sh: gem_release reads the release of platform ruby of a gem with a java build" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; gem_release json 3.2.0 && printf "%s\n" "$GEM_RUBY" "$GEM_URI"' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'>= 2.7\nhttps://rubygems.org/gems/json-3.2.0.gem' ]
+  grep -q 'https://rubygems.org/api/v2/rubygems/json/versions/3.2.0.json?platform=ruby$' "$CURL_ARGS_LOG"
+}
+
+# Links of a gem could make the rule read any file of the runner, so they count as no file of the gem
+@test "rbrules.sh: ruby_imports reads no link of the gem" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/linked"
+  mkdir -p "$g/lib"
+  printf '%s\n' 'require "evil"' >"$g/lib/bashcov.rb"
+  printf '%s\n' 'require "secretgem"' >"$TEST_TMPDIR/outside.rb"
+  ln -s "$TEST_TMPDIR/outside.rb" "$g/lib/evil.rb"
+  gem_build bashcov 4.0.3 "$g" $'name: bashcov\nrequire_paths:\n- lib\n' 'simplecov|~> 1.1'
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire evil: no package owns it' ]
+}
+
+# rubygems.org writes gem_uri from the name and the version, and the .gem of another URL could be any file
+@test "rbrules.sh: gem_release refuses an answer of another platform or gem_uri" {
+  local json
+  mkdir -p "$MOCK_FILES_DIR/rubygems/v2"
+  for json in '"platform": "java", "gem_uri": "https://rubygems.org/gems/demo-1.0.gem"' \
+    '"platform": "ruby", "gem_uri": "https://evil.example/demo-1.0.gem"'; do
+    printf '{"name": "demo", "number": "1.0", %s, "ruby_version": ">= 3.2", "sha": "%s", "dependencies": {"runtime": []}}\n' \
+      "$json" "$(printf '0%.0s' {1..64})" >"$MOCK_FILES_DIR/rubygems/v2/demo-1.0.json"
+    run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; gem_release demo 1.0' "$TEST_TMPDIR"
+    [ "$status" -eq 1 ]
+  done
+  [[ "$stderr" == *"demo/versions/1.0.json?platform=ruby: ruby_version, sha or gem_uri is not what RubyGems writes"* ]]
 }
 
 @test "rbrules.sh: ruby_unmet holds a requirement that the version of the gem fails, and gives nothing once it holds" {
@@ -4161,6 +4673,31 @@ run_ruby_imports() {
   run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\trequire erb: ruby-erb not in depends' ]
+}
+
+# bigdecimal requires bigdecimal.so, the extension that the gem builds at install, and rubygems comes with ruby
+@test "rbrules.sh: ruby_imports reads .so and .jar as features, own extensions, ruby.skip and the depends of ruby" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/ext"
+  mkdir -p "$g/lib" "$g/ext/demo_ext"
+  printf '%s\n' 'if RUBY_ENGINE == "jruby"' '  require "demo.jar"' 'else' '  require "demo.so"' 'end' 'require "demo_ext/fast.so"' \
+    'require "bigdecimal.so"' 'require "win32/process" if RUBY_PLATFORM =~ /mswin|mingw/' 'require "ffi/win32/extensions"' \
+    'require "rubygems/command_manager"' 'require "missing"' >"$g/lib/demo.rb"
+  printf '%s\n' 'require "mkmf"' 'create_makefile("demo_ext/fast")' >"$g/ext/demo_ext/extconf.rb"
+  gem_build demo 1.0 "$g" $'name: demo\nextensions:\n- ext/demo_ext/extconf.rb\nrequire_paths:\n- lib\n'
+  printf 'extra\t%s\t1-1\tusr/lib/ruby/%s\n' ruby-bigdecimal gems/3.4.0/gems/bigdecimal-3.1.9/lib/bigdecimal.rb \
+    rubygems 3.4.0/rubygems/command_manager.rb >>"$MOCK_PACMAN_FILES"
+  printf 'ruby gmp libyaml rubygems\n' >"$MOCK_PACMAN_DEPENDS"
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" ruby-demo ruby ruby-bigdecimal
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo
+ruby:
+  skip:
+    - ffi-win32-extensions"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_imports "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" \
+    "$TEST_TMPDIR/d.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire missing: no package owns it' ]
 }
 
 @test "rbrules.sh: ruby_map compares the keys of ruby.map with a gem name as written" {
@@ -7331,6 +7868,24 @@ pkgver_dash: ''"
   MOCK_COMMIT_STATUS=500 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
   [ "$status" -eq 1 ]
   [[ "$output" == *"Failed to read the commit of tag v2.5.0-rc2 of asset-owner/asset-repo"* ]]
+}
+
+# commits/<ref> also takes a branch of the name of the tag, which can hold newer commits
+@test "check-asset: dates a tag without a release by its git ref, through the object of an annotated tag" {
+  liquidsoap_package
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  MOCK_TAG_AGE=30 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tag v2.5.0-rc2 has no release"* ]]
+  grep -q 'repos/asset-owner/asset-repo/git/ref/tags/v2.5.0-rc2$' "$CURL_ARGS_LOG"
+  grep -q "repos/asset-owner/asset-repo/git/commits/$(printf 'c%.0s' {1..40})\$" "$CURL_ARGS_LOG"
+  run grep -c -e '/commits/v2' -e '/git/tags/' "$CURL_ARGS_LOG"
+  [ "$output" = 0 ]
+  rm "$CURL_ARGS_LOG"
+  MOCK_TAG_TYPE=tag MOCK_TAG_AGE=1 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 3 ]
+  grep -q "repos/asset-owner/asset-repo/git/tags/$(printf 'c%.0s' {1..40})\$" "$CURL_ARGS_LOG"
+  grep -q "repos/asset-owner/asset-repo/git/commits/$(printf 'd%.0s' {1..40})\$" "$CURL_ARGS_LOG"
 }
 
 # bash expands a tilde at the start of an assignment
