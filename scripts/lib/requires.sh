@@ -351,7 +351,7 @@ pypi_release() {
 }
 
 # Print the metadata headers of release $2 of project $1: .metadata of a wheel (none-any, linux x86_64, any),
-# else PKG-INFO of the sdist; return 3 without the release, 4 without metadata that lists the requirements
+# else PKG-INFO of the sdist unless $3 is wheels; return 3 without the release, 4 without such metadata
 pypi_metadata() {
   local LC_ALL=C name url sha core size pick="" tmp rc=0
   local -a linux=() other=() sdists=()
@@ -375,8 +375,13 @@ pypi_metadata() {
   if [[ -n "$pick" ]]; then
     pick=${pick/$'\t'/.metadata$'\t'}
   else
-    pick=${linux[0]:-${other[0]:-${sdists[0]:-}}}
+    pick=${linux[0]:-${other[0]:-}}
   fi
+  if [[ -z "$pick" && "${3:-}" == wheels ]]; then
+    log_err "$1 $2: PyPI holds no wheel with metadata, which pin_from reads"
+    return 4
+  fi
+  pick=${pick:-${sdists[0]:-}}
   if [[ -z "$pick" ]]; then
     log_err "$1 $2: PyPI holds no metadata that lists the requirements without running code"
     return 4

@@ -433,7 +433,7 @@ upstream:
   registry: requests
 ```
 
-With `upstream.pin_from`, the version is the pin on `upstream.registry` in the requirements of the newest release of that project, the release that `.info.version` of `https://pypi.org/pypi/{pin_from}/json` names. zensical 0.1.3 requires `zensical-ui==0.0.43`, so python-zensical-ui gets `0.0.43`:
+With `upstream.pin_from`, the version is the pin on `upstream.registry` in the requirements of the newest release of that project, the release that `.info.version` of `https://pypi.org/pypi/{pin_from}/json` names. The check reads the requirements from the `.metadata` of a wheel of that release, since it parses no release archive, and fails with `<pin_from> <version>: PyPI holds no wheel with metadata, which pin_from reads` for a release without one, as one with an sdist alone. zensical 0.1.3 requires `zensical-ui==0.0.43`, so python-zensical-ui gets `0.0.43`:
 
 ```yaml
 name: python-zensical-ui
