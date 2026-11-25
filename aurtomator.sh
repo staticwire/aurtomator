@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-release=0.15.0 # x-release-please-version
+release=0.15.1 # x-release-please-version
 #
 # Runs a script of aurtomator for this repository, at the commit that
 # .github/workflows/check-updates.yml pins:
