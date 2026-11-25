@@ -4043,6 +4043,28 @@ run_rb_requires() {
     'c	module' 'd	method' 'e	module')" ]
 }
 
+# File.expand_path reads a leading ~ as a home directory and fails for an unknown user
+@test "rb_requires.rb: keeps a ~ of require_relative as a part of the path" {
+  rb_file lib/tilde.rb 'require_relative "~nouser_zz/x"' 'require "json"'
+  run_rb_requires lib/tilde.rb
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'require\tlib/tilde.rb\t%s\n' 'relative	lib/~nouser_zz/x.rb	module' 'require	json	module')" ]
+}
+
+# SystemStackError is no StandardError, and one file past the stack would end the helper
+@test "rb_requires.rb: prints an error line for a file that overflows the stack and goes on" {
+  rb_file lib/deep.rb 'require "a"'
+  rb_file lib/ok.rb 'require "b"'
+  printf '%s\n' 'require "prism"' 'Prism::Visitor.prepend(Module.new do' '  def visit_program_node(node)' \
+    '    raise SystemStackError, "stack level too deep" if @file.to_s.include?("deep")' '    super' '  end' 'end)' \
+    >"$TEST_TMPDIR/deep.rb"
+  printf '%s\0' lib/deep.rb lib/ok.rb >"$TEST_TMPDIR/rb-files"
+  run --separate-stderr env -u SIMPLECOV_HELPER_DIR -u RUBYOPT ruby --disable-gems -r "$TEST_TMPDIR/deep.rb" \
+    "$TEST_TMPDIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR/rb" <"$TEST_TMPDIR/rb-files"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'error\tlib/deep.rb\tstack level too deep\nrequire\tlib/ok.rb\trequire\tb\tmodule' ]
+}
+
 @test "rb_requires.rb: prints an error line for a file it cannot read and goes on" {
   rb_file bad.rb 'def x(' 'end end'
   rb_file good.rb 'require "json"'

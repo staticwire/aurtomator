@@ -87,8 +87,9 @@ class Requires < Prism::Visitor
     kind = CALLS[node.name]
     if kind == "relative"
       path = "#{path}.rb" unless path.end_with?(".rb")
-      full = File.expand_path(path, File.dirname(File.join(@root, @file)))
-      path = full.delete_prefix("#{File.expand_path(@root)}/")
+      # absolute_path expands no ~, which require_relative reads as a directory name
+      full = File.absolute_path(path, File.dirname(File.join(@root, @file)))
+      path = full.delete_prefix("#{File.absolute_path(@root)}/")
     end
     return if path.match?(/[\t\n\r]/)
 
@@ -119,7 +120,8 @@ def main(argv)
     visitor = Requires.new(root, file)
     result.value.accept(visitor)
     visitor.lines.each { |line| puts line }
-  rescue SystemCallError, IOError, ArgumentError, EncodingError => e
+  # SystemStackError is no StandardError, and one deep file would end the helper
+  rescue SystemCallError, IOError, ArgumentError, EncodingError, SystemStackError => e
     puts "error\t#{file}\t#{e.message.gsub(/\s+/, ' ')}"
   end
   0
