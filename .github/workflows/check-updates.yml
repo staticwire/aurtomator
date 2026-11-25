@@ -518,9 +518,12 @@ jobs:
       - *add-builder
 
       # The requires rules read the Python distributions, the modules and the gems of the repositories
-      # with pacman -F
+      # with pacman -F, and run on without them
       - name: Sync the files databases
-        run: pacman -Fy --noconfirm
+        run: |
+          if ! pacman -Fy --noconfirm; then
+            echo "::warning::pacman -Fy failed, so the requires rules run without the files databases of the repositories"
+          fi
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

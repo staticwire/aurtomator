@@ -4528,9 +4528,27 @@ close_files_step() {
   [ "$at" -eq $(($(step_index rules "Add builder") + 1)) ]
   [ "$at" -lt "$(step_index rules "Checkout")" ]
   [ "$at" -lt "$(step_index rules "Close files to builder")" ]
-  [ "$(step_run rules "Sync the files databases")" = "pacman -Fy --noconfirm" ]
   run yq '[.jobs[].steps[] | select(.name == "Sync the files databases")] | length' "$CHECK_UPDATES"
   [ "$output" = 1 ]
+}
+
+# Without the databases the rules run on, so a failed sync warns and fails no job
+@test "check-updates: rules warns when pacman -Fy fails, and goes on" {
+  local bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$bin"
+  printf '#!/bin/sh
+echo "$*" >>"%s"
+exit "${PACMAN_RC:-0}"
+' "$BATS_TEST_TMPDIR/pacman.log" >"$bin/pacman"
+  chmod +x "$bin/pacman"
+  step_run rules "Sync the files databases" >"$BATS_TEST_TMPDIR/step.sh"
+  run env PATH="$bin:$PATH" sh -e "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/pacman.log")" = "-Fy --noconfirm" ]
+  run env PATH="$bin:$PATH" PACMAN_RC=1 sh -e "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ "$output" = "::warning::pacman -Fy failed, so the requires rules run without the files databases of the repositories" ]
 }
 
 @test "check-updates: each job with a checkout closes its files before downloads and builder" {
