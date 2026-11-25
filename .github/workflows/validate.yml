@@ -83,11 +83,13 @@ jobs:
         run: ./aurtomator/scripts/validate-pkg.sh --all
 
       # The requires rules read the requirements of each new version, so validate-pkg.sh reads them online
-      # for the packages that the push or the pull request adds or changes, and for all without a base.
-      # builder downloads and parses the releases, with copies of their YAMLs in a directory of its own.
+      # for the packages that the push or the pull request adds or changes, and for all when the base is
+      # missing or no job of its workflows calls validate.yml at this commit. builder downloads and parses
+      # the releases, with copies of their YAMLs in a directory of its own.
       - name: Check the requirements of changed packages
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          PIN: ${{ job.workflow_sha }}
           WORK: /work
         run: |
           set -o pipefail
@@ -102,8 +104,21 @@ jobs:
             echo "::error::$WORK exists already"
             exit 1
           fi
-          if [[ "$BASE" =~ ^[0-9a-f]{40}$ && ! "$BASE" =~ ^0+$ ]] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            files=$(git diff --name-only --diff-filter=AM "$BASE" HEAD -- packages)
+          # actions/checkout trusts the checkout in a git config of its own, and root does not own it
+          git_ws() { git -c safe.directory="$PWD" "$@"; }
+          # Prints the uses: of the jobs in the workflows of the base
+          base_calls() {
+            git_ws ls-tree --name-only "$BASE" -- .github/workflows/ | while IFS= read -r wf; do
+              git_ws show "$BASE:$wf" | yq '.jobs[] | select(has("uses")) | .uses' 2>/dev/null || true
+            done
+          }
+          calls=""
+          if [[ "$BASE" =~ ^[0-9a-f]{40}$ && ! "$BASE" =~ ^0+$ && "$PIN" =~ ^[0-9a-f]{40}$ ]] &&
+            git_ws cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            calls=$(base_calls) || calls=""
+          fi
+          if grep -qxE "[^/]+/[^/]+/\.github/workflows/validate\.yml@$PIN" <<<"$calls"; then
+            files=$(git_ws diff --no-renames --name-only --diff-filter=AM "$BASE" HEAD -- packages)
           else
             files=$(printf '%s\n' packages/*.yml)
           fi
