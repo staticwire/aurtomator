@@ -31,7 +31,7 @@ In scope:
 
 Out of scope:
 
-- Vulnerabilities in external tools that aurtomator calls (`makepkg`, `yq`, `curl`, `git`, `namcap`, `shellcheck`, `shfmt`, `bats`). Report those upstream.
+- Vulnerabilities in external tools that aurtomator calls (`makepkg`, `yq`, `curl`, `git`, `bsdtar`, `pacman`, `python3`, `ruby`, `namcap`, `shellcheck`, `shfmt`, `bats`). Report those upstream.
 - The contents of AUR packages published from user repositories. The maintainer of each user repository is responsible for the packages they publish.
 - The model itself: user repositories run the workflows with their own AUR key, and pins that are not the commit of a published release run the code of the commit they name.
 - Issues in third-party GitHub Actions. Report them to the action's maintainer. aurtomator pins every action by commit SHA.

@@ -115,7 +115,7 @@ In PKGBUILDs, aurtomator changes these lines and no others:
 - variable that `upstream.asset_var` names, when upstream puts more than the version into its file names, as liquidsoap does in `liquidsoap_2.4.6-debian-forky-ocaml5.4.0-3_amd64.deb`
 - `arch=()`, when releases lack the archive of an arch other than `x86_64`
 
-It writes `.SRCINFO` from the result with `makepkg --printsrcinfo`. It does not build packages or check dependencies. These cases are detected and blocked:
+It writes `.SRCINFO` from the result with `makepkg --printsrcinfo`. It does not build packages. For Python and Ruby packages the requires rules compare the requirements and the imports of a release with `depends`. These cases are detected and blocked:
 
 - [`pkgver()` with the wrong strategy](https://aurtomator.dev/supported-packages/#pkgver-with-the-wrong-strategy-blocked)
 - [`SKIP` next to a real checksum of a remote source](https://aurtomator.dev/supported-packages/#mixed-skip-and-real-checksums-blocked)

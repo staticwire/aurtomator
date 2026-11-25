@@ -77,4 +77,4 @@ flowchart TD
 
 In the workflow, `prepare` runs steps 1 to 9. `verify` runs step 10, downloads the sources again and compares every checksum. `publish` runs step 10 once more, then step 11. Steps 6 and 7 are skipped when checksum arrays hold `SKIP` entries other than those of signatures and no remote source has a real checksum, see [Packages with VCS checksums](/supported-packages/#packages-with-vcs-checksums-skip) and [Sources with a signature](/supported-packages/#sources-with-a-signature).
 
-aurtomator does not build packages and does not check runtime dependencies, which needs `ldd` or `readelf` on built binaries. Dependencies stay the maintainer's work.
+aurtomator does not build packages. For Python and Ruby packages the requires rules compare the requirements and the imports of a release with `depends`, see [Update alerts](/features/update-alerts/); dependencies of binaries, which take `ldd` or `readelf` on a built package, stay the maintainer's work.
