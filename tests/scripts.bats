@@ -4061,6 +4061,18 @@ run_rb_requires() {
     'c	module' 'd	method' 'e	module')" ]
 }
 
+# nkf requires nkf.jar under JRuby, and mixlib-shellout loads files for Windows under RUBY_PLATFORM
+@test "rb_requires.rb: follows the branch of RUBY_ENGINE and RUBY_PLATFORM that Ruby on Arch takes" {
+  rb_file lib/demo.rb 'if RUBY_ENGINE == "jruby"' '  require "demo.jar"' 'elsif RUBY_PLATFORM =~ /mswin|mingw|windows/i' \
+    '  require "win32/process"' 'else' '  require "demo.so"' 'end' 'require "posix" unless Gem.win_platform?' \
+    'require "java" if ::RUBY_PLATFORM.include?("java") || RUBY_ENGINE != "ruby"' 'if !(/darwin/ =~ RUBY_PLATFORM)' \
+    '  require "linux"' 'end' 'if RUBY_PLATFORM.start_with?("x86_64") && ENV["X"]' '  require "maybe"' 'else' '  require "other"' 'end'
+  run_rb_requires lib/demo.rb
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'require\tlib/demo.rb\trequire\t%s\n' 'demo.so	module' 'posix	module' 'linux	module' 'maybe	module' \
+    'other	module')" ]
+}
+
 # File.expand_path reads a leading ~ as a home directory and fails for an unknown user
 @test "rb_requires.rb: keeps a ~ of require_relative as a part of the path" {
   rb_file lib/tilde.rb 'require_relative "~nouser_zz/x"' 'require "json"'
@@ -4113,6 +4125,8 @@ gems_env() {
   export AURTOMATOR_RUN_CACHE="$TEST_TMPDIR/run-cache" MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync" \
     MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
   mkdir -p "$AURTOMATOR_RUN_CACHE"
+  export MOCK_PACMAN_DEPENDS="$TEST_TMPDIR/pacman-depends"
+  : >"$MOCK_PACMAN_DEPENDS"
   printf '%s\n' 'ruby 3.4.13-1 extra ruby-json ruby-optparse' "ruby-simplecov ${1:-0.22.0}-1 extra" 'ruby-rexml 3.4.4-1 extra' \
     'ruby-erb 4.0.4-9 extra' 'ruby-google-protobuf 36.1-1 extra' 'bash 5.3.9-1 core' >"$MOCK_PACMAN_SYNC"
   local line
@@ -4379,6 +4393,31 @@ run_ruby_imports() {
   run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\trequire erb: ruby-erb not in depends' ]
+}
+
+# bigdecimal requires bigdecimal.so, the extension that the gem builds at install, and rubygems comes with ruby
+@test "rbrules.sh: ruby_imports reads .so and .jar as features, own extensions, ruby.skip and the depends of ruby" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/ext"
+  mkdir -p "$g/lib" "$g/ext/demo_ext"
+  printf '%s\n' 'if RUBY_ENGINE == "jruby"' '  require "demo.jar"' 'else' '  require "demo.so"' 'end' 'require "demo_ext/fast.so"' \
+    'require "bigdecimal.so"' 'require "win32/process" if RUBY_PLATFORM =~ /mswin|mingw/' 'require "ffi/win32/extensions"' \
+    'require "rubygems/command_manager"' 'require "missing"' >"$g/lib/demo.rb"
+  printf '%s\n' 'require "mkmf"' 'create_makefile("demo_ext/fast")' >"$g/ext/demo_ext/extconf.rb"
+  gem_build demo 1.0 "$g" $'name: demo\nextensions:\n- ext/demo_ext/extconf.rb\nrequire_paths:\n- lib\n'
+  printf 'extra\t%s\t1-1\tusr/lib/ruby/%s\n' ruby-bigdecimal gems/3.4.0/gems/bigdecimal-3.1.9/lib/bigdecimal.rb \
+    rubygems 3.4.0/rubygems/command_manager.rb >>"$MOCK_PACMAN_FILES"
+  printf 'ruby gmp libyaml rubygems\n' >"$MOCK_PACMAN_DEPENDS"
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" ruby-demo ruby ruby-bigdecimal
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo
+ruby:
+  skip:
+    - ffi-win32-extensions"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_imports "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" \
+    "$TEST_TMPDIR/d.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire missing: no package owns it' ]
 }
 
 @test "rbrules.sh: ruby_map compares the keys of ruby.map with a gem name as written" {

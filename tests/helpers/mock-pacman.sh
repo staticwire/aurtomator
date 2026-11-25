@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Mock pacman for the bats tests: answers -Si python with MOCK_PYTHON_VERSION or fails with
-# MOCK_PYTHON_FAIL set, -Fx from MOCK_PACMAN_FILES, -Sddp and -Si from MOCK_PACMAN_SYNC
+# Mock pacman for the bats tests: -Si python with MOCK_PYTHON_VERSION or failing with MOCK_PYTHON_FAIL set,
+# -Fx from MOCK_PACMAN_FILES, -Sddp and -Si from MOCK_PACMAN_SYNC with the depends of MOCK_PACMAN_DEPENDS
 set -euo pipefail
 
 # Print "name version repo provides" of the line of MOCK_PACMAN_SYNC for name $1, or for a word
@@ -68,8 +68,9 @@ if [[ "$2" != python ]]; then
     exit 1
   fi
   read -r name version repo provides <<<"$line"
+  depends=$(awk -v n="$name" '$1 == n { $1 = ""; sub(/^ /, ""); print; exit }' "${MOCK_PACMAN_DEPENDS:-/dev/null}")
   printf '%s\n' "Repository      : $repo" "Name            : $name" "Version         : $version" \
-    "Provides        : ${provides:-None}"
+    "Provides        : ${provides:-None}" "Depends On      : ${depends:-None}"
   exit 0
 fi
 if [[ -n "${MOCK_PYTHON_FAIL:-}" ]]; then
