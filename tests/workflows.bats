@@ -4139,7 +4139,8 @@ run_bare_issues_step() {
   mkdir -p "$ws/packages"
   run sh -e -c 'cd "$1" && DATA="$2" sh -e "$3"' _ "$ws" "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
-  [ -f "$list" ] && [ ! -s "$list" ]
+  [ -f "$list" ]
+  [ ! -s "$list" ]
   touch "$ws/packages/foo.yml" "$ws/packages/bar.yml" "$ws/packages/notes.txt"
   run sh -e -c 'cd "$1" && DATA="$2" sh -e "$3"' _ "$ws" "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
