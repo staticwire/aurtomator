@@ -86,12 +86,12 @@ bounded_rules_needed() {
 # counts the bytes cut, a status fits the 4000 characters that an issue shows.
 ERROR_MAX=3900
 
-# Prints the error of a per-package script: its stderr, or the budget it ran out
-# of and the URL $4 of a request in flight. $1=exit code, $2=stderr file, $3=budget
+# Prints the error of a per-package script: its stderr without the mark of log_err, or the budget it
+# ran out of and the URL $4 of a request in flight. $1=exit code, $2=stderr file, $3=budget
 script_error() {
   case "$1" in
     124 | 137) echo "${4:+$4: }timed out after $3 s" ;;
-    *) last_bytes "$2" ;;
+    *) last_bytes "$2" | LC_ALL=C sed 's/^✗ //' ;;
   esac
 }
 

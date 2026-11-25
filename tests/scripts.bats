@@ -4094,11 +4094,12 @@ allow_missing_arch: false
 $1"
 }
 
+# The status shows in a code block of the issue, where the mark of log_err is noise
 @test "check-all: fails the check of a package whose depends hold Python and that names no source" {
   python_package "" bash python python-yaml
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
-  [[ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" == "check_failed: "*"packages/kube-diagrams.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "check_failed: packages/kube-diagrams.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none" ]
 }
 
 # The check job of CI holds the token and writes every status, so the rules that download and
