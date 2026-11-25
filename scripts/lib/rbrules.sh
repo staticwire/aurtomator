@@ -397,7 +397,8 @@ _ruby_imports_read() {
   done
   ((${#files[@]} > 0)) || return 0
   helper="${BASH_SOURCE[0]%/*}/rb_requires.rb"
-  timeout 60 ruby --disable-gems "$helper" "$work/tree" "${files[@]}" >"$work/requires" 2>/dev/null || rc=$?
+  printf '%s\0' "${files[@]}" >"$work/names"
+  timeout 60 ruby --disable-gems "$helper" "$work/tree" <"$work/names" >"$work/requires" 2>/dev/null || rc=$?
   ((rc != 0)) || timeout 60 ruby --disable-gems "$helper" --builtin >"$work/builtin" 2>/dev/null || rc=$?
   case $rc in
     0) ;;

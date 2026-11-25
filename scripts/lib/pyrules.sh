@@ -292,7 +292,8 @@ _python_imports_read() {
   files=("${PY_FILES[@]}")
   ((${#files[@]} > 0)) || return 0
   helper="${BASH_SOURCE[0]%/*}/py_imports.py"
-  timeout 60 python3 -I -S "$helper" "$root" "${files[@]}" >"$work/imports" 2>/dev/null || rc=$?
+  printf '%s\0' "${files[@]}" >"$work/names"
+  timeout 60 python3 -I -S "$helper" "$root" <"$work/names" >"$work/imports" 2>/dev/null || rc=$?
   ((rc != 0)) || timeout 60 python3 -I -S "$helper" --stdlib >"$work/stdlib" 2>/dev/null || rc=$?
   case $rc in
     0) ;;

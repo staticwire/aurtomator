@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Print import<TAB>file<TAB>module<TAB>scope for each import of the files after <root>.
+"""Print import<TAB>file<TAB>module<TAB>scope for each import of the files under <root> named on stdin.
 
-Usage: python3 -I -S py_imports.py <root> <file>... | --stdlib
+Usage: python3 -I -S py_imports.py <root> <NUL-separated file names | --stdlib
 Scopes are module, function, optional and typing; files that do not parse give error<TAB>file<TAB>message.
 --stdlib prints the modules of the standard library, also those built into the interpreter, as sys.
 """
@@ -186,11 +186,15 @@ def main(argv):
         for name in sorted(sys.stdlib_module_names):
             print(name)
         return 0
-    if len(argv) < 2 or not os.path.isdir(argv[1]):
-        print("Usage: python3 -I -S py_imports.py <root> <file>...", file=sys.stderr)
+    if len(argv) != 2 or not os.path.isdir(argv[1]):
+        print("Usage: python3 -I -S py_imports.py <root> <NUL-separated file names", file=sys.stderr)
         return 2
     root = argv[1]
-    for path in argv[2:]:
+    # The names come on stdin, since Linux limits the length of the arguments
+    for name in sys.stdin.buffer.read().split(b"\0"):
+        if not name:
+            continue
+        path = os.fsdecode(name)
         try:
             with open(os.path.join(root, path), "rb") as handle:
                 tree = ast.parse(handle.read(), path)

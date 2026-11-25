@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Usage: ruby --disable-gems rb_requires.rb <root> <file>... | --builtin. Prints one line a require,
+# Usage: ruby --disable-gems rb_requires.rb <root> <NUL-separated file names | --builtin. Prints one line a require,
 # require<TAB>file<TAB>kind<TAB>path<TAB>scope, or error<TAB>file<TAB>message for a file it cannot parse
 
 require "prism"
@@ -101,12 +101,16 @@ def main(argv)
     $LOADED_FEATURES.reject { |feature| feature.include?("/") }.each { |feature| puts feature.sub(/\.(rb|so)\z/, "") }
     return 0
   end
-  if argv.empty? || !File.directory?(argv[0])
-    warn "Usage: ruby --disable-gems rb_requires.rb <root> <file>... | --builtin"
+  if argv.length != 1 || !File.directory?(argv[0])
+    warn "Usage: ruby --disable-gems rb_requires.rb <root> <NUL-separated file names | --builtin"
     return 2
   end
   root = argv[0]
-  argv.drop(1).each do |file|
+  # The names come on stdin, since Linux limits the length of the arguments
+  $stdin.binmode.read.split("\0").each do |file|
+    next if file.empty?
+
+    file.force_encoding(Encoding.default_external)
     result = Prism.parse_file(File.join(root, file))
     if result.failure?
       puts "error\t#{file}\t#{result.errors.first.message.gsub(/\s+/, ' ')}"

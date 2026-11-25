@@ -3125,9 +3125,11 @@ py_file() {
   printf '%s\n' "${@:2}" >"$TEST_TMPDIR/py/$1"
 }
 
-# Helper: runs py_imports.py on the files $@ of $TEST_TMPDIR/py as the rules run it
+# Helper: runs py_imports.py on the files $@ of $TEST_TMPDIR/py as the rules run it, the names
+# NUL-separated on stdin
 run_py_imports() {
-  run --separate-stderr python3 -I -S "$TEST_TMPDIR/scripts/lib/py_imports.py" "$TEST_TMPDIR/py" "$@"
+  printf '%s\0' "$@" >"$TEST_TMPDIR/py-files"
+  run --separate-stderr python3 -I -S "$TEST_TMPDIR/scripts/lib/py_imports.py" "$TEST_TMPDIR/py" <"$TEST_TMPDIR/py-files"
 }
 
 @test "py_imports.py: prints the modules of import and from, with their scope" {
@@ -3974,9 +3976,11 @@ rb_file() {
   printf '%s\n' "${@:2}" >"$TEST_TMPDIR/rb/$1"
 }
 
-# Helper: runs rb_requires.rb on the files $@ of $TEST_TMPDIR/rb as the rules run it
+# Helper: runs rb_requires.rb on the files $@ of $TEST_TMPDIR/rb as the rules run it, the names
+# NUL-separated on stdin
 run_rb_requires() {
-  run --separate-stderr ruby --disable-gems "$TEST_TMPDIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR/rb" "$@"
+  printf '%s\0' "$@" >"$TEST_TMPDIR/rb-files"
+  run --separate-stderr ruby --disable-gems "$TEST_TMPDIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR/rb" <"$TEST_TMPDIR/rb-files"
 }
 
 @test "rb_requires.rb: prints the requires of a file with their kind and scope" {
