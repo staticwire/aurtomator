@@ -424,16 +424,23 @@ _sdist_headers() {
   printf '%s\n' "$headers"
 }
 
-# Print the headers of metadata file $1, named $2 in errors: up to the first empty line, folded
-# lines joined with one space, CR at line ends dropped; fail on any other control character
+# Print the headers of metadata file $1, named $2 in errors, folded lines joined and CR dropped; fail on
+# other control characters in a header that the rules read, and make those of License or others spaces
 _metadata_headers() {
-  local LC_ALL=C line out=""
+  local LC_ALL=C line out="" header=""
   while IFS= read -r line || [[ -n "$line" ]]; do
     line=${line%$'\r'}
     [[ -n "$line" ]] || break
+    [[ "$line" == [[:blank:]]* && -n "$out" ]] || header=${line%%:*}
     if has_control "$line"; then
-      log_err "$2 holds a control character"
-      return 1
+      case ${header,,} in
+        metadata-version | name | version | requires-dist | requires-python | dynamic)
+          log_err "$2 holds a control character in $header"
+          return 1
+          ;;
+      esac
+      line=${line//[[:cntrl:]]/ }
+      line=${line//$'\xc2'[$'\x80'-$'\x9f']/ }
     fi
     if [[ "$line" == [[:blank:]]* && -n "$out" ]]; then
       out+=" ${line#"${line%%[![:blank:]]*}"}"

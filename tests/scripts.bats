@@ -2800,7 +2800,23 @@ run_split() {
   pypi_fake_metadata demo 1.0 $'Metadata-Version: 2.4\nName: demo\x1b[31m\n'
   run_requires 'pypi_metadata demo 1.0'
   [ "$status" -eq 1 ]
-  [[ "$output" == *"demo-1.0-py3-none-any.whl.metadata holds a control character"* ]]
+  [[ "$output" == *"demo-1.0-py3-none-any.whl.metadata holds a control character in Name"* ]]
+}
+
+# Build backends copy license files into License, and the license texts of the FSF hold form feeds
+@test "requires.sh: pypi_metadata reads control characters of headers that no rule reads as spaces" {
+  pypi_fake_metadata demo 1.0 $'Metadata-Version: 2.4\nName: demo\nLicense: GPL\n        \x0c\n        more\xc2\x85\nRequires-Dist: click\n'
+  run_requires 'pypi_metadata demo 1.0'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'Metadata-Version: 2.4\nName: demo\nLicense: GPL  more \nRequires-Dist: click' ]
+  local header n=0
+  for header in Metadata-Version Name Version Requires-Dist Requires-Python Dynamic; do
+    n=$((n + 1))
+    pypi_fake_metadata demo 2.$n $'Metadata-Version: 2.4\nName: demo\n'"$header"$': x\n        \x0c\n'
+    run_requires 'pypi_metadata demo 2.'$n
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"demo-2.$n-py3-none-any.whl.metadata holds a control character in $header"* ]]
+  done
 }
 
 @test "requires.sh: pypi_metadata reads PKG-INFO of an sdist from Metadata-Version 2.2 on" {
