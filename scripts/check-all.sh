@@ -304,14 +304,14 @@ if [[ "$MODE" == "verify" ]]; then
   exit 0
 fi
 
-# The rules job of CI gets one package, whose requires rules download and parse its release without
-# the token and the statuses of the check job; the version and the lines of the rules, or error and the
-# reason, go to <dir>/<package>, and the statuses of the check run stay
+# The rules job of CI runs the requires rules of the packages with a status, and the other YAMLs give their
+# pin_from; the version and the lines of the rules, or error and the reason, go to <dir>/<package>
 if [[ "$MODE" == rules ]]; then
   mkdir -p "$WORK_DIR"
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     [[ -f "$pkg_file" && ! -L "$pkg_file" ]] || continue
     pkg_name=$(package_name "$pkg_file") || continue
+    [[ -n "${CHECKED[$pkg_name]+set}" ]] || continue
     found="${CHECKED[$pkg_name]:-}"
     version=""
     case "$found" in

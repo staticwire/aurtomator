@@ -4165,6 +4165,38 @@ $1"
   [ "$(cat "$TEST_TMPDIR/rules/kube-diagrams")" = $'error\nno new version from the check run' ]
 }
 
+# The rules job gets the YAMLs of the other packages for their upstream.pin_from, and their statuses stay out
+@test "check-all: --rules takes the pin of a companion and runs the rules of packages with a status alone" {
+  unmet_env
+  sed -i 's/"0.0.43-1"/"0.0.41-1"/' "$MOCK_FILES_DIR/aur-rpc.json"
+  pypi_fake zenlike 0.9 'zensical-ui==0.0.41'
+  pypi_fake zenlike 1.0 'zensical-ui==0.0.43'
+  unmet_srcinfo "$TEST_TMPDIR/z.SRCINFO" zenlike python python-zensical-ui
+  aur_srcinfo_remote zenlike "$TEST_TMPDIR/z.SRCINFO"
+  create_test_package "zenlike" "pypi" "upstream:
+  registry: zenlike
+current: '0.9'
+alerts:
+  - requires: unmet
+    hold: true"
+  mkdir -p "$TEST_TMPDIR/.status"
+  echo "new_version: 1.0" >"$TEST_TMPDIR/.status/zenlike"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  grep -qxF $'hold\tzensical-ui==0.0.43: python-zensical-ui has 0.0.41 (AUR pkgver)' "$TEST_TMPDIR/rules/zenlike"
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zenlike
+current: 0.0.41"
+  rm -rf "$TEST_TMPDIR/rules" "$AURTOMATOR_RUN_CACHE"/*
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$TEST_TMPDIR/rules/zenlike")" = $'version\t1.0' ]
+  run grep -c '^hold' "$TEST_TMPDIR/rules/zenlike"
+  [ "$output" = 0 ]
+  [ "$(ls "$TEST_TMPDIR/rules")" = zenlike ]
+}
+
 @test "check-all: runs no requires rule for python: none or without Python in depends" {
   python_package "python: none" bash python python-yaml
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"

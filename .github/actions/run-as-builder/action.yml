@@ -1,7 +1,8 @@
 name: Run check-all.sh as builder
 description: >-
   Copies the inputs of builder into a directory of its own, only those of one
-  package when package names it, runs scripts/check-all.sh there as builder
+  package when package names it, with the YAMLs of the other packages when
+  companions is true, runs scripts/check-all.sh there as builder
   with workflow commands stopped, then scripts/update-readme.sh when readme
   is true and check-all.sh succeeded, and exits with the status of the last
   script that ran.
@@ -22,6 +23,10 @@ inputs:
     description: The one package whose YAML and status builder gets, with nothing of another package
     required: false
     default: ""
+  companions:
+    description: true gives builder with package the YAMLs of the other packages too, whose upstream.pin_from the requires rules read
+    required: false
+    default: "false"
   readme:
     description: true runs scripts/update-readme.sh as builder after a successful check-all.sh
     required: false
@@ -41,6 +46,7 @@ runs:
     - shell: bash
       env:
         ARGS: ${{ inputs.args }}
+        COMPANIONS: ${{ inputs.companions }}
         HANDOFF: ${{ inputs.handoff }}
         KEEP_ENV: ${{ inputs.keep-env }}
         PACKAGE: ${{ inputs.package }}
@@ -89,6 +95,12 @@ runs:
           # One package: its YAML, its status and the records check-all.sh reads
           if [[ -d packages && ! -L packages ]]; then
             take "packages/$PACKAGE.yml" "packages/$PACKAGE.yml" "$results_max"
+            if [[ "$COMPANIONS" == true ]]; then
+              for f in packages/*.yml; do
+                [[ "${f#packages/}" =~ ^${name_re}\.yml$ ]] || continue
+                take "$f" "$f" "$results_max"
+              done
+            fi
           fi
           if dir_ok "$STATUSES"; then
             for name in "$PACKAGE" _upstream; do

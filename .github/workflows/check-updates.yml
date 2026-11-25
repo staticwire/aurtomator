@@ -554,6 +554,7 @@ jobs:
         with:
           args: --rules rules
           package: ${{ matrix.package }}
+          companions: "true"
           statuses: /data/status
 
       - *stop-builder

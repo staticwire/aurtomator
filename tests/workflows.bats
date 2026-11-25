@@ -1844,7 +1844,7 @@ run_take_step() {
   run yq -o=json -I=0 '.jobs.rules.env' "$CHECK_UPDATES"
   [ "$output" = '{"PACKAGE":"${{ matrix.package }}"}' ]
   run yq -o=json -I=0 '.jobs.rules.steps[] | select(.name == "Run the requires rules") | [.env, .with]' "$CHECK_UPDATES"
-  [ "$output" = '[null,{"args":"--rules rules","package":"${{ matrix.package }}","statuses":"/data/status"}]' ]
+  [ "$output" = '[null,{"args":"--rules rules","package":"${{ matrix.package }}","companions":"true","statuses":"/data/status"}]' ]
   run yq -o=json '.jobs.rules' "$CHECK_UPDATES"
   [[ "$output" != *"secrets."* && "$output" != *"github.token"* && "$output" != *GITHUB_TOKEN* ]]
   run yq -o=json -I=0 '.jobs.check.outputs | [.rules, ."to-rules"]' "$CHECK_UPDATES"
@@ -2130,8 +2130,10 @@ builder_steps() {
 @test "run-as-builder: takes its inputs through the environment" {
   run yq -o=json -I=0 '.runs.steps[0].env' "$BUILDER_ACTION"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"ARGS":"${{ inputs.args }}","HANDOFF":"${{ inputs.handoff }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","STATUSES":"${{ inputs.statuses }}","WORK":"/work"}' ]
+  [ "$output" = '{"ARGS":"${{ inputs.args }}","COMPANIONS":"${{ inputs.companions }}","HANDOFF":"${{ inputs.handoff }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","STATUSES":"${{ inputs.statuses }}","WORK":"/work"}' ]
   run yq '.inputs.readme.default' "$BUILDER_ACTION"
+  [ "$output" = "false" ]
+  run yq '.inputs.companions.default' "$BUILDER_ACTION"
   [ "$output" = "false" ]
   local input
   for input in package statuses handoff; do
@@ -2145,7 +2147,7 @@ builder_steps() {
 # their calls
 run_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep readme package
-  local statuses handoff
+  local statuses handoff companions
   local action_dir="$BATS_TEST_TMPDIR/ws/aurtomator/.github/actions/run-as-builder"
   mkdir -p "$bin" "$action_dir"
   printf '#!/bin/sh\necho "$*" >>"$CALL_LOGS/chown.log"\n' >"$bin/chown"
@@ -2173,6 +2175,7 @@ EOF
   args=$(yq "$step | .with.args // \"\"" "$CHECK_UPDATES")
   keep=$(yq "$step | .with[\"keep-env\"] // \"\"" "$CHECK_UPDATES")
   readme=$(yq "$step | .with.readme // \"false\"" "$CHECK_UPDATES")
+  companions=$(yq "$step | .with.companions // \"false\"" "$CHECK_UPDATES")
   package=$(yq "$step | .with.package // \"\"" "$CHECK_UPDATES")
   # shellcheck disable=SC2016
   package=${package//'${{ matrix.package }}'/${MATRIX_PACKAGE-foo}}
@@ -2184,7 +2187,7 @@ EOF
   rm -f "$SUDO_LOG"
   run env -C "$ws" PATH="$bin:$PATH" GITHUB_WORKSPACE="$ws" CALL_LOGS="$BATS_TEST_TMPDIR" \
     GITHUB_ACTION_PATH="${ACTION_PATH:-$action_dir}" SUDO_LOG="$SUDO_LOG" TEST_X_RC="${TEST_X_RC:-0}" \
-    ARGS="$args" KEEP_ENV="$keep" PACKAGE="$package" README_TOO="$readme" WORK="$BATS_TEST_TMPDIR/work" \
+    ARGS="$args" KEEP_ENV="$keep" PACKAGE="$package" README_TOO="$readme" COMPANIONS="$companions" WORK="$BATS_TEST_TMPDIR/work" \
     STATUSES="$statuses" HANDOFF="$handoff" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
 }
 
@@ -2395,6 +2398,23 @@ make_builder_inputs() {
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
   [ "$output" = "$(printf '%s\n' ./.status ./.status/_alerts ./.status/_arches ./.status/_assets ./.status/_upstream ./.status/foo ./packages ./packages/foo.yml)" ]
   [ ! -s "$work/.status/_alerts" ]
+}
+
+# The requires rules read upstream.pin_from of the other packages, whose companion pins they apply
+@test "run-as-builder: gives the rules job the YAMLs of the other packages and no status of theirs" {
+  local ws="$BATS_TEST_TMPDIR/ws" work="$BATS_TEST_TMPDIR/work"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  echo "name: bar" >"$ws/packages/bar.yml"
+  echo "new_version: 3.0" >"$BATS_TEST_TMPDIR/data/status/bar"
+  MATRIX_PACKAGE=foo SUDO_OUT=ok run_builder_step rules "Run the requires rules"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
+  [ "$output" = "$(printf '%s\n' ./.status ./.status/_upstream ./.status/foo ./packages ./packages/bar.yml ./packages/foo.yml)" ]
+  [ "$(cat "$work/packages/bar.yml")" = "name: bar" ]
+  run yq -o=json -I=0 '[.jobs | to_entries[] | select([.value.steps[] | select(.with.companions)] | length > 0) | .key]' "$CHECK_UPDATES"
+  [ "$output" = '["rules"]' ]
+  [ "$(yq '.jobs.rules.steps[] | select(.name == "Run the requires rules") | .with.companions' "$CHECK_UPDATES")" = true ]
 }
 
 # PKGBUILD code of the package runs as builder in prepare
