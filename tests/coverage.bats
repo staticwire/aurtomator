@@ -190,13 +190,14 @@ require_simplecov() {
   grep -Eq '<line number="[0-9]+" hits="[1-9]' "$FIXTURE/coverage/ruby.xml"
 }
 
+# CI runs the tests under bundle exec, whose RUBYOPT loads RubyGems also with --disable-gems
 @test "cov-shims/ruby: runs every call as ruby without SIMPLECOV_HELPER_DIR" {
   local shim="$PROJECT_DIR/tests/helpers/cov-shims/ruby"
-  run env -u SIMPLECOV_HELPER_DIR "$shim" --disable-gems -e 'puts defined?(Gem).inspect'
+  run env -u SIMPLECOV_HELPER_DIR -u RUBYOPT "$shim" --disable-gems -e 'puts defined?(Gem).inspect'
   [ "$status" -eq 0 ]
   [ "$output" = nil ]
   printf 'require "json"\n' >"$TEST_TMPDIR/m.rb"
-  run env -u SIMPLECOV_HELPER_DIR "$shim" --disable-gems "$PROJECT_DIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR" m.rb
+  run env -u SIMPLECOV_HELPER_DIR -u RUBYOPT "$shim" --disable-gems "$PROJECT_DIR/scripts/lib/rb_requires.rb" "$TEST_TMPDIR" m.rb
   [ "$status" -eq 0 ]
   [ "$output" = require$'\t'm.rb$'\t'require$'\t'json$'\t'module ]
 }
