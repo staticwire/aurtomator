@@ -101,6 +101,13 @@ jobs:
             echo "v$version is no release of this commit"
             exit 0
           fi
+          # gh edits the first draft of a tag, and release-please creates the release again when a
+          # run stops between the release and the label of the release PR
+          ids=$(gh api "repos/$REPO/releases?per_page=100" --paginate --jq ".[] | select(.draft and .tag_name == \"v$version\") | .id")
+          if [[ "$ids" == *$'\n'* ]]; then
+            echo "::error::More than one draft release carries the tag v$version; delete all drafts of v$version but one, then rerun the job"
+            exit 1
+          fi
           draft=$(gh release view "v$version" -R "$REPO" --json isDraft --jq .isDraft)
           if [[ "$draft" != true ]]; then
             echo "v$version is published"

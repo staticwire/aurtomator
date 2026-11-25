@@ -1025,7 +1025,8 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 # Runs step $1 of release-please.yml in a checkout whose manifest holds $MANIFEST, with a gh that
 # prints the tag ref as $TAG_TYPE, commit by default, and $TAG_SHA, $PEELED for the commit of an
 # annotated tag, $DRAFT, true by default, for whether the release is a draft, $ASSETS for the
-# names of its files and $RUN_URL for the newest run of the workflow on a commit
+# names of its files, $RUN_URL for the newest run of the workflow on a commit and $DRAFT_IDS for
+# the drafts of the tag in the release list
 run_release_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$bin" "$ws/.github"
@@ -1050,6 +1051,7 @@ case "$1 $2" in
     fi
     ;;
   "run list") printf '%s\n' "${RUN_URL:-}" ;;
+  "api repos/owner/repo/releases?per_page=100") [[ -z "${DRAFT_IDS:-}" ]] || printf '%s\n' "$DRAFT_IDS" ;;
 esac
 EOF
   chmod +x "$bin/gh"
@@ -1061,7 +1063,7 @@ EOF
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" REPO=owner/repo \
     SHA=abc123 TAG_SHA="${TAG_SHA:-}" TAG_TYPE="${TAG_TYPE:-}" PEELED="${PEELED:-}" DRAFT="${DRAFT:-}" \
     VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" ASSETS="${ASSETS:-}" \
-    RUN_URL="${RUN_URL:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    RUN_URL="${RUN_URL:-}" DRAFT_IDS="${DRAFT_IDS:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Sigstore bundles of actions/attest carry the attestation as a DSSE envelope
@@ -1074,6 +1076,19 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
   grep -qxF 'api repos/owner/repo/git/ref/tags/v0.13.1 --jq .object.type + " " + .object.sha' "$GH_LOG"
   grep -qxF 'release view v0.13.1 -R owner/repo --json isDraft --jq .isDraft' "$GH_LOG"
+  grep -qxF 'api repos/owner/repo/releases?per_page=100 --paginate --jq .[] | select(.draft and .tag_name == "v0.13.1") | .id' "$GH_LOG"
+}
+
+# gh edits the first draft of a tag, and release-please creates the release again when a run
+# stops between the release and the label
+@test "release-please: the find step fails on two drafts of the tag" {
+  MANIFEST=0.13.1 TAG_SHA=abc123 DRAFT_IDS=$'11\n12' run_release_step "Find the release to sign"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::More than one draft release carries the tag v0.13.1; delete all drafts of v0.13.1 but one, then rerun the job" ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  MANIFEST=0.13.1 TAG_SHA=abc123 DRAFT_IDS=11 run_release_step "Find the release to sign"
+  [ "$status" -eq 0 ]
+  [ "$(<"$BATS_TEST_TMPDIR/output")" = "version=0.13.1" ]
 }
 
 # commits/<ref> also resolves a branch of that name, which accounts with push access can make
