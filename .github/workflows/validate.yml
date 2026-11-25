@@ -108,7 +108,7 @@ jobs:
           git_ws() { git -c safe.directory="$PWD" "$@"; }
           if [[ "$BASE" =~ ^[0-9a-f]{40}$ && ! "$BASE" =~ ^0+$ && "$PIN" =~ ^[0-9a-f]{40}$ ]] &&
             git_ws cat-file -e "$BASE^{commit}" 2>/dev/null && git_ws grep -qF "@$PIN" "$BASE" -- .github/workflows; then
-            files=$(git_ws diff --name-only --diff-filter=AM "$BASE" HEAD -- packages)
+            files=$(git_ws diff --no-renames --name-only --diff-filter=AM "$BASE" HEAD -- packages)
           else
             files=$(printf '%s\n' packages/*.yml)
           fi

@@ -5173,7 +5173,8 @@ OLD_PIN=1234567890abcdef1234567890abcdef12345678
 
 # Runs the step of validate.yml that checks the requirements of changed packages in a repository whose
 # first commit holds packages a, b and c and a workflow pinned to $OLD_PIN, and whose second adds d,
-# changes a, deletes c and pins $PIN, with $BASE as the base and a validate-pkg.sh that logs each name
+# changes a, deletes c, or renames it to e with $RENAME, and pins $PIN, with $BASE as the base and a
+# validate-pkg.sh that logs each name
 # with the copy it reads and fails for b. Root of the job does not own the checkout of the runner, which
 # git learns from GIT_TEST_ASSUME_DIFFERENT_OWNER. sudo logs its calls to $BATS_TEST_TMPDIR/sudo.log and
 # runs the command, and chown logs to chown.log.
@@ -5190,7 +5191,11 @@ run_changed_step() {
   FIRST=$(git -C "$repo" rev-parse HEAD)
   echo "name: d" >"$repo/packages/d.yml"
   echo "current: '2'" >>"$repo/packages/a.yml"
-  git -C "$repo" rm -q packages/c.yml
+  if [[ -n "${RENAME:-}" ]]; then
+    git -C "$repo" mv packages/c.yml packages/e.yml
+  else
+    git -C "$repo" rm -q packages/c.yml
+  fi
   echo "    uses: owner/aurtomator/.github/workflows/validate.yml@$pin # v1.1.0" >"$repo/.github/workflows/validate.yml"
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m head
@@ -5228,6 +5233,13 @@ echo "::warning::from $1"
     [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
+}
+
+# git diff reports a rename as R, so a renamed package would miss the check
+@test "validate: checks online the packages that the push or the pull request renames" {
+  RENAME=1 run_changed_step
+  [ "$status" -eq 0 ]
+  [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd\ne' ]
 }
 
 # Packages of the base met the rules of the aurtomator it pinned, so a move of the pin checks them all
