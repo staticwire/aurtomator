@@ -3979,6 +3979,15 @@ ${4:-}"
   [[ "$stderr" == *"bashcov: rubygems.org has no release 9.9"* ]]
 }
 
+# rubygems.org answers the first platform of a release, java for json 3.2.0, without the query
+@test "rbrules.sh: gem_release reads the release of platform ruby of a gem with a java build" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; gem_release json 3.2.0 && printf "%s\n" "$GEM_RUBY" "$GEM_URI"' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'>= 2.7\nhttps://rubygems.org/gems/json-3.2.0.gem' ]
+  grep -q 'https://rubygems.org/api/v2/rubygems/json/versions/3.2.0.json?platform=ruby$' "$CURL_ARGS_LOG"
+}
+
 @test "rbrules.sh: ruby_unmet holds a requirement that the version of the gem fails, and gives nothing once it holds" {
   gems_env
   unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov

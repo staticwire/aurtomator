@@ -104,7 +104,7 @@ Releases of `current` that PyPI lacks fire the rule with `PyPI has no release <v
 
 ## Gems
 
-Packages whose `.SRCINFO` on the AUR has a pkgname with `ruby` or `ruby-*` in `depends` run the three `requires` rules on a gem in every check, listed or not, and the rules that `alerts` does not list fire as notices, as for Python. The rules read the runtime requirements and `ruby_version` of `https://rubygems.org/api/v2/rubygems/{gem}/versions/{version}.json` for the gem that the package names:
+Packages whose `.SRCINFO` on the AUR has a pkgname with `ruby` or `ruby-*` in `depends` run the three `requires` rules on a gem in every check, listed or not, and the rules that `alerts` does not list fire as notices, as for Python. The rules read the runtime requirements and `ruby_version` of `https://rubygems.org/api/v2/rubygems/{gem}/versions/{version}.json?platform=ruby` for the gem that the package names:
 
 | Package | Key | Source |
 |---|---|---|

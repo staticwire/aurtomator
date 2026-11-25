@@ -129,10 +129,16 @@ case "$url" in
       http_error 404
     fi
     ;;
-  *rubygems.org/api/v2/rubygems/*/versions/*.json)
-    file=${url#*/api/v2/rubygems/}
-    file="${file%%/*}-${url##*/}"
-    if [[ -f "$MOCK_FILES_DIR/rubygems/v2/$file" ]]; then
+  # rubygems.org answers the first platform of a release without ?platform=ruby, as no-query.json holds
+  *rubygems.org/api/v2/rubygems/*/versions/*.json | *rubygems.org/api/v2/rubygems/*/versions/*.json\?platform=ruby)
+    path=${url%\?platform=ruby}
+    file=${path#*/api/v2/rubygems/}
+    file="${file%%/*}-${path##*/}"
+    if [[ "$path" == "$url" && -f "$MOCK_FILES_DIR/rubygems/v2/${file%.json}.no-query.json" ]]; then
+      cat "$MOCK_FILES_DIR/rubygems/v2/${file%.json}.no-query.json"
+    elif [[ "$path" == "$url" && -f "$FIXTURES_DIR/rubygems/v2/${file%.json}.no-query.json" ]]; then
+      cat "$FIXTURES_DIR/rubygems/v2/${file%.json}.no-query.json"
+    elif [[ -f "$MOCK_FILES_DIR/rubygems/v2/$file" ]]; then
       cat "$MOCK_FILES_DIR/rubygems/v2/$file"
     elif [[ -f "$FIXTURES_DIR/rubygems/v2/$file" ]]; then
       cat "$FIXTURES_DIR/rubygems/v2/$file"

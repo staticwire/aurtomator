@@ -66,7 +66,7 @@ gem_release() {
     return 1
   fi
   err=$(mktemp) || return 1
-  if ! json=$(http_get_json "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json" 2>"$err"); then
+  if ! json=$(http_get_json "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json?platform=ruby" 2>"$err"); then
     if grep -q ': The requested URL returned error: 404$' "$err"; then
       rm -f "$err"
       log_err "$1: rubygems.org has no release $2"
@@ -78,7 +78,7 @@ gem_release() {
   fi
   rm -f "$err"
   if [[ "$(yq -r '.platform // ""' <<<"$json")" != ruby ]]; then
-    log_err "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json: the answer is not the release for the platform ruby"
+    log_err "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json?platform=ruby: the answer is not the release for the platform ruby"
     return 1
   fi
   while IFS=$'\t' read -r name req; do
@@ -95,7 +95,7 @@ gem_release() {
   GEM_URI=$(yq -r '.gem_uri // ""' <<<"$json")
   if [[ ! "$GEM_RUBY" =~ ^[=!\<\>~\ 0-9A-Za-z.,-]*$ || ! "$GEM_SHA" =~ ^[0-9a-f]{64}$ ||
     "$GEM_URI" != "https://rubygems.org/gems/$1-$2.gem" ]]; then
-    log_err "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json: ruby_version, sha or gem_uri is not what RubyGems writes"
+    log_err "https://rubygems.org/api/v2/rubygems/$1/versions/$2.json?platform=ruby: ruby_version, sha or gem_uri is not what RubyGems writes"
     return 1
   fi
 }
