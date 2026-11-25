@@ -237,8 +237,14 @@ jobs:
             echo
             echo "| Package | Version | Severity | Advisory |"
             echo "|---|---|---|---|"
-            jq -r '.[] | . as $c | .vulnerabilities[] |
-              "| `\($c.name | gsub("[`|\n\r]"; " "))` | `\($c.version | gsub("[`|\n\r]"; " "))` | \(.severity) | [\(.advisory_ghsa_id)](\(.advisory_url)) \(.advisory_summary | gsub("[|\n\r]"; " ")) |"' <<<"$CHANGES"
+            # Authors of advisories write their text, so it goes into code spans, and the link is
+            # built from a checked GHSA id
+            jq -r 'def code: "`" + (tostring | gsub("[`|\n\r]"; " ")) + "`";
+              .[] | . as $c | .vulnerabilities[] |
+              (if (.advisory_ghsa_id | tostring | test("^GHSA(-[0-9a-z]{4}){3}$"))
+                then "[\(.advisory_ghsa_id)](https://github.com/advisories/\(.advisory_ghsa_id))"
+                else (.advisory_ghsa_id | code) end) as $advisory |
+              "| \($c.name | code) | \($c.version | code) | \(.severity | code) | \($advisory) \(.advisory_summary | code) |"' <<<"$CHANGES"
           } >"$body"
           gh issue create -R "$REPO" --title "$title" --label dependency-review --body-file "$body"
 

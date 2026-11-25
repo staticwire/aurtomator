@@ -817,7 +817,18 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
   run cat "$GH_BODY"
   [ "${lines[0]}" = "Dependabot pull request #12 brings versions with published vulnerabilities, so it is not merged by itself." ]
   [ "${lines[1]}" = "| Package | Version | Severity | Advisory |" ]
-  [ "${lines[3]}" = '| `rexml` | `3.4.5` | high | [GHSA-aaaa-bbbb-cccc](https://github.com/advisories/GHSA-aaaa-bbbb-cccc) Denial of service   in the parser |' ]
+  [ "${lines[3]}" = '| `rexml` | `3.4.5` | `high` | [GHSA-aaaa-bbbb-cccc](https://github.com/advisories/GHSA-aaaa-bbbb-cccc) `Denial of service   in the parser` |' ]
+}
+
+# Authors of advisories write their text, and Markdown in the issue would mention accounts and
+# load images under the name of the workflow
+@test "vulnerability-issue: writes the text of an advisory as code and links only a GHSA id" {
+  local changes='[{"name":"rexml","version":"3.4.5","vulnerabilities":[{"severity":"high @x","advisory_ghsa_id":"GHSA-aaaa-bbbb-cccc](https://evil.example)","advisory_summary":"Ping @x ![i](https://evil.example/i.png) `y`","advisory_url":"https://evil.example/"},{"severity":"low","advisory_ghsa_id":"GHSA-23hp-4jxv-gm8m","advisory_summary":null,"advisory_url":"https://evil.example/"}]}]'
+  CHANGES="$changes" run_vulnerability_issue_step
+  [ "$status" -eq 0 ]
+  run cat "$GH_BODY"
+  [ "${lines[3]}" = '| `rexml` | `3.4.5` | `high @x` | `GHSA-aaaa-bbbb-cccc](https://evil.example)` `Ping @x ![i](https://evil.example/i.png)  y ` |' ]
+  [ "${lines[4]}" = '| `rexml` | `3.4.5` | `low` | [GHSA-23hp-4jxv-gm8m](https://github.com/advisories/GHSA-23hp-4jxv-gm8m) `null` |' ]
 }
 
 @test "vulnerability-issue: opens no issue when the review failed without a vulnerable change" {
