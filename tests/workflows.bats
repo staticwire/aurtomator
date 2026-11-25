@@ -1024,7 +1024,8 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 
 # Runs step $1 of release-please.yml in a checkout whose manifest holds $MANIFEST, with a gh that
 # prints the tag ref as $TAG_TYPE, commit by default, and $TAG_SHA, $PEELED for the commit of an
-# annotated tag and $DRAFT, true by default, for whether the release is a draft
+# annotated tag, $DRAFT, true by default, for whether the release is a draft, and $ASSETS for
+# the names of its files
 run_release_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$bin" "$ws/.github"
@@ -1041,7 +1042,13 @@ case "$1 $2" in
     [[ -n "${PEELED:-}" ]] || exit 1
     printf '%s\n' "$PEELED"
     ;;
-  "release view") printf '%s\n' "${DRAFT:-true}" ;;
+  "release view")
+    if [[ " $* " == *" --json assets "* ]]; then
+      [[ -z "${ASSETS:-}" ]] || printf '%s\n' "$ASSETS"
+    else
+      printf '%s\n' "${DRAFT:-true}"
+    fi
+    ;;
 esac
 EOF
   chmod +x "$bin/gh"
@@ -1052,7 +1059,7 @@ EOF
   cd "$ws"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" REPO=owner/repo \
     SHA=abc123 TAG_SHA="${TAG_SHA:-}" TAG_TYPE="${TAG_TYPE:-}" PEELED="${PEELED:-}" DRAFT="${DRAFT:-}" \
-    VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" ASSETS="${ASSETS:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Sigstore bundles of actions/attest carry the attestation as a DSSE envelope
@@ -1141,12 +1148,29 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and publish the release"
   [ "$status" -eq 0 ]
   [ "$(<"$GH_LOG")" = "$(printf '%s\n' \
+    'release view v0.13.1 -R owner/repo --json assets --jq .assets[].name' \
     'release upload v0.13.1 aurtomator-0.13.1.tar.gz aurtomator-0.13.1.tar.gz.sigstore.json aurtomator-0.13.1.tar.gz.intoto.jsonl -R owner/repo --clobber' \
     'release edit v0.13.1 -R owner/repo --draft=false')" ]
   cmp "$bundle" "$ws/aurtomator-0.13.1.tar.gz.sigstore.json"
   run cat "$ws/aurtomator-0.13.1.tar.gz.intoto.jsonl"
   [ "${#lines[@]}" -eq 1 ]
   [ "$output" = "$SAMPLE_ENVELOPE" ]
+}
+
+# Files of a draft are published and locked with the release, and the attestation of GitHub
+# covers them; the files that a failed run of sign left get replaced
+@test "release-please: publishes no draft that holds a file sign does not attach" {
+  local bundle="$BATS_TEST_TMPDIR/attestation.json"
+  printf '%s\n' "{\"dsseEnvelope\":$SAMPLE_ENVELOPE}" >"$bundle"
+  VERSION=0.13.1 BUNDLE="$bundle" ASSETS=$'aurtomator-0.13.1.tar.gz\ninstall.sh' run_release_step "Attach the archive and publish the release"
+  [ "$status" -ne 0 ]
+  [ "$output" = "::error::The draft of v0.13.1 holds install.sh, which sign does not attach" ]
+  [ "$(<"$GH_LOG")" = 'release view v0.13.1 -R owner/repo --json assets --jq .assets[].name' ]
+
+  ASSETS=$'aurtomator-0.13.1.tar.gz\naurtomator-0.13.1.tar.gz.sigstore.json\naurtomator-0.13.1.tar.gz.intoto.jsonl' \
+    VERSION=0.13.1 BUNDLE="$bundle" run_release_step "Attach the archive and publish the release"
+  [ "$status" -eq 0 ]
+  grep -qxF 'release edit v0.13.1 -R owner/repo --draft=false' "$GH_LOG"
 }
 
 @test "release-please: uploads nothing for a bundle without a DSSE envelope" {

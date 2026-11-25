@@ -125,5 +125,17 @@ jobs:
           archive="aurtomator-$VERSION.tar.gz"
           cp "$BUNDLE" "$archive.sigstore.json"
           jq -ce .dsseEnvelope "$BUNDLE" >"$archive.intoto.jsonl"
+          # Files of the draft get published and locked with the release, and the attestation of
+          # GitHub covers them, so the draft holds no file but those of this job
+          names=$(gh release view "v$VERSION" -R "$REPO" --json assets --jq '.assets[].name')
+          while IFS= read -r name; do
+            case "$name" in
+              "" | "$archive" | "$archive.sigstore.json" | "$archive.intoto.jsonl") ;;
+              *)
+                echo "::error::The draft of v$VERSION holds $name, which sign does not attach"
+                exit 1
+                ;;
+            esac
+          done <<<"$names"
           gh release upload "v$VERSION" "$archive" "$archive.sigstore.json" "$archive.intoto.jsonl" -R "$REPO" --clobber
           gh release edit "v$VERSION" -R "$REPO" --draft=false
