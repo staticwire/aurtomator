@@ -67,7 +67,7 @@ permission_lines() {
     'notify-failure.yml ["notify",{"actions":"read","issues":"write"}]' \
     'release-please.yml {"contents":"read"}' \
     'release-please.yml ["release-please",{"contents":"read"}]' \
-    'release-please.yml ["sign",{"contents":"write","id-token":"write","attestations":"write"}]' \
+    'release-please.yml ["sign",{"contents":"write","id-token":"write","attestations":"write","actions":"read"}]' \
     'scorecard.yml {}' \
     'scorecard.yml ["analysis",{"contents":"read","id-token":"write"}]' \
     'spec-watch.yml {}' \
@@ -1024,8 +1024,8 @@ RELEASE_CONFIG="$GITHUB_DIR/release-please-config.json"
 
 # Runs step $1 of release-please.yml in a checkout whose manifest holds $MANIFEST, with a gh that
 # prints the tag ref as $TAG_TYPE, commit by default, and $TAG_SHA, $PEELED for the commit of an
-# annotated tag, $DRAFT, true by default, for whether the release is a draft, and $ASSETS for
-# the names of its files
+# annotated tag, $DRAFT, true by default, for whether the release is a draft, $ASSETS for the
+# names of its files and $RUN_URL for the newest run of the workflow on a commit
 run_release_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$bin" "$ws/.github"
@@ -1049,6 +1049,7 @@ case "$1 $2" in
       printf '%s\n' "${DRAFT:-true}"
     fi
     ;;
+  "run list") printf '%s\n' "${RUN_URL:-}" ;;
 esac
 EOF
   chmod +x "$bin/gh"
@@ -1059,7 +1060,8 @@ EOF
   cd "$ws"
   run env PATH="$bin:$PATH" GH_LOG="$GH_LOG" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" REPO=owner/repo \
     SHA=abc123 TAG_SHA="${TAG_SHA:-}" TAG_TYPE="${TAG_TYPE:-}" PEELED="${PEELED:-}" DRAFT="${DRAFT:-}" \
-    VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" ASSETS="${ASSETS:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    VERSION="${VERSION:-}" BUNDLE="${BUNDLE:-}" ASSETS="${ASSETS:-}" \
+    RUN_URL="${RUN_URL:-}" bash -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Sigstore bundles of actions/attest carry the attestation as a DSSE envelope
@@ -1082,18 +1084,32 @@ SAMPLE_ENVELOPE='{"payload":"e30=","payloadType":"application/vnd.in-toto+json",
   grep -qxF 'api repos/owner/repo/git/tags/fff999 --jq .object.sha' "$GH_LOG"
   run grep -c '/commits/' "$GH_LOG"
   [ "$output" = "0" ]
-  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=abc123 PEELED=def456 run_release_step "Find the release to sign"
+  MANIFEST=0.13.1 TAG_TYPE=tag TAG_SHA=abc123 PEELED=def456 DRAFT=false run_release_step "Find the release to sign"
   [ "$status" -eq 0 ]
   [ ! -s "$BATS_TEST_TMPDIR/output" ]
 }
 
 # Later pushes would sign the code of an older release with the provenance of a newer commit
 @test "release-please: the find step leaves the release of another commit" {
-  MANIFEST=0.13.0 TAG_SHA=def456 run_release_step "Find the release to sign"
+  MANIFEST=0.13.0 TAG_SHA=def456 DRAFT=false run_release_step "Find the release to sign"
   [ "$status" -eq 0 ]
+  [ "$output" = "v0.13.0 is no release of this commit" ]
   [ ! -s "$BATS_TEST_TMPDIR/output" ]
-  run grep -c '^release ' "$GH_LOG"
+  run grep -c '^release \(upload\|edit\)\|^run ' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# The run of the release commit can fail before sign, and later runs leave its draft as it is
+@test "release-please: the find step fails on a draft of another commit with the run to rerun" {
+  MANIFEST=0.13.0 TAG_SHA=def456 RUN_URL=https://github.com/owner/repo/actions/runs/7 run_release_step "Find the release to sign"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::v0.13.0 is a draft of the commit def456; rerun all jobs of https://github.com/owner/repo/actions/runs/7 to sign and publish it" ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+  grep -qxF 'run list -R owner/repo --workflow release-please.yml --commit def456 --json url --jq .[0].url // ""' "$GH_LOG"
+
+  MANIFEST=0.13.0 TAG_SHA=def456 run_release_step "Find the release to sign"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::v0.13.0 is a draft of the commit def456; rerun all jobs of the run of release-please.yml on that commit to sign and publish it" ]
 }
 
 # The tag of the manifest version exists in every run, and a skipped sign leaves the release a draft
