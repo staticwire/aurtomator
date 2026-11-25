@@ -723,15 +723,17 @@ _python_pyproject() {
 }
 
 # Print the values of the [project] table of TOML file $1 that the rules read, lines of name,
-# python, dep and dynamic, a tab and the value, has for a dependencies key, or error and the reason
+# python, dep and dynamic, a tab and the value, has for a dependencies key, or error and the reason.
+# The whole file is parsed, since strings and arrays can hold lines that look like a table header.
 _toml_project() {
   LC_ALL=C awk '
+    BEGIN { S = "\034" }
     function fail(m) { print "error\t" m; failed = 1; exit }
     function blank() { while (pos <= n && substr(t, pos, 1) ~ /[ \t]/) pos++ }
     function space(  c) {
       while (pos <= n) {
         c = substr(t, pos, 1)
-        if (c ~ /[ \t\r\n]/) pos++
+        if (c ~ /[ \t\n]/) pos++
         else if (c == "#") { while (pos <= n && substr(t, pos, 1) != "\n") pos++ }
         else break
       }
@@ -751,15 +753,33 @@ _toml_project() {
       }
       fail("a string has no end")
     }
-    function key(  c, start) {
+    function part(  c, start) {
       c = substr(t, pos, 1)
       if (c == "\"" || c == "\047") return text()
       start = pos
-      while (pos <= n && substr(t, pos, 1) ~ /[A-Za-z0-9_.-]/) pos++
+      while (pos <= n && substr(t, pos, 1) ~ /[A-Za-z0-9_-]/) pos++
       if (pos == start) fail("a key holds an unknown character")
       return substr(t, start, pos - start)
     }
-    function value(name, depth,  c, s) {
+    # A dotted key, its parts joined by S
+    function key(  k) {
+      k = part(); blank()
+      while (substr(t, pos, 1) == ".") { pos++; blank(); k = k S part(); blank() }
+      return k
+    }
+    # The name that the caller reads for key path k, or nothing
+    function field(k) {
+      if (k == "project" S "dependencies") return "dep"
+      if (k == "project" S "dynamic") return "dynamic"
+      if (k == "project" S "name") return "name"
+      if (k == "project" S "requires-python") return "python"
+      return ""
+    }
+    function assign(k, depth) {
+      if (k == "project" S "dependencies") print "has\t"
+      value(k, field(k), depth)
+    }
+    function value(path, name, depth, inner,  c, s) {
       if (depth > 32) fail("values nest deeper than 32 levels")
       c = substr(t, pos, 1)
       if (c == "\"" || c == "\047") {
@@ -767,12 +787,14 @@ _toml_project() {
         if (name != "") print name "\t" s
         return
       }
+      if ((name == "dep" || name == "dynamic") && (c == "{" || (c == "[" && inner)))
+        fail("dependencies and dynamic hold strings alone")
       if (c == "[") {
         pos++
         for (;;) {
           space()
           if (substr(t, pos, 1) == "]") { pos++; return }
-          value(name, depth + 1)
+          value(path, name, depth + 1, 1)
           space()
           c = substr(t, pos, 1)
           if (c == ",") { pos++; continue }
@@ -785,9 +807,9 @@ _toml_project() {
         for (;;) {
           blank()
           if (substr(t, pos, 1) == "}") { pos++; return }
-          key(); blank()
+          s = key()
           if (substr(t, pos, 1) != "=") fail("an inline table holds a key without =")
-          pos++; blank(); value("", depth + 1); blank()
+          pos++; blank(); assign(path S s, depth + 1); blank()
           c = substr(t, pos, 1)
           if (c == ",") { pos++; continue }
           if (c == "}") { pos++; return }
@@ -797,23 +819,30 @@ _toml_project() {
       if (name == "dep" || name == "dynamic") fail("dependencies and dynamic hold strings alone")
       while (pos <= n && substr(t, pos, 1) !~ /[,\]}\n#]/) pos++
     }
-    /^[ \t]*\[/ { table = $0; sub(/[ \t]*(#.*)?$/, "", table); gsub(/[ \t]/, "", table); inside = (table == "[project]"); next }
-    inside { t = t $0 "\n" }
+    # TOML ends lines with LF or CRLF
+    { sub(/\r$/, ""); t = t $0 "\n" }
     END {
-      if (failed) exit
-      n = length(t); pos = 1
+      n = length(t); pos = 1; table = ""
       for (;;) {
         space()
         if (pos > n) break
-        k = key(); blank()
+        if (substr(t, pos, 1) == "[") {
+          if (substr(t, pos, 2) == "[[") {
+            # Tables of an array of tables are never the [project] table
+            pos += 2; blank(); table = "[[" S key()
+            if (substr(t, pos, 2) != "]]") fail("a table header has no end")
+            pos += 2
+          } else {
+            pos++; blank(); table = key()
+            if (substr(t, pos, 1) != "]") fail("a table header has no end")
+            pos++
+          }
+          continue
+        }
+        k = key()
         if (substr(t, pos, 1) != "=") fail("a line holds a key without =")
         pos++; blank()
-        if (k == "dependencies") { print "has\t"; value("dep", 1) }
-        else if (k == "dynamic") value("dynamic", 1)
-        else if (k == "name") value("name", 1)
-        else if (k == "requires-python") value("python", 1)
-        else value("", 1)
-        if (failed) exit
+        assign(table == "" ? k : table S k, 1)
       }
     }' "$1"
 }

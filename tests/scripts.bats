@@ -3689,6 +3689,32 @@ $1"
 
 TOML=$'[build-system]\nrequires = ["setuptools"]\n\n[project]\nname = "demo"\ndescription = """A demo with [brackets],\n"quotes" and # signs."""\nrequires-python = ">=3.10"  # comment\nauthors = [{name = "A", email = "a@example.org"}]\nkeywords = ["a", "b"]\ndependencies = [\n  "click>=8",  # the CLI\n  \'rich\',\n  # a comment line\n]\ndynamic = ["version"]\n\n[project.optional-dependencies]\ndocs = ["sphinx"]\n'
 
+# Helper: _toml_project of the text $1 prints the lines $2
+toml_reads() {
+  printf '%s' "$1" >"$TEST_TMPDIR/case.toml"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; _toml_project "$1"' "$TEST_TMPDIR" "$TEST_TMPDIR/case.toml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$2" ] || {
+    echo "read ${1@Q} as ${output@Q}"
+    return 1
+  }
+}
+
+# tomllib reads every one of these forms, and real archives hold CRLF files
+@test "pyrules.sh: _toml_project reads CRLF, dotted keys, inline and quoted tables, and brackets in values" {
+  local demo=$'name\tdemo\nhas\t\ndep\ta'
+  toml_reads $'[project]\r\nname = "demo"\r\ndependencies = ["a",\r\n "b"]\r\n' $'name\tdemo\nhas\t\ndep\ta\ndep\tb'
+  toml_reads $'project.name = "demo"\nproject.dependencies = ["a"]\n' "$demo"
+  toml_reads $'project = { name = "demo", dependencies = ["a"] }\n' "$demo"
+  toml_reads $'["project"]\nname = "demo"\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[ \'project\' ]  # the table\nname = "demo"\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[tool.x]\ndoc = """\n[project]\ndependencies = ["evil"]\n"""\n[project]\nname = "demo"\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[project]\nname = "demo"\ndescription = """\n[tool.other]\nline\n"""\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[project]\nname = "demo"\nkeywords = [\n  ["x"],\n]\ndependencies = ["a"]\n' "$demo"
+  toml_reads $'[project]\nname = "demo"\ndependencies = ["a"]\n[[project.authors]]\nname = "x"\n[tool.y]\nname = "y"\n' "$demo"
+  toml_reads $'[project.urls]\nhome = "https://x"\n[project]\nname = "demo"\nurls.docs = "https://y"\ndependencies = ["a"]\n' "$demo"
+}
+
 @test "pyrules.sh: python_source reads the static dependencies of pyproject.toml in the source archive" {
   pyproject_env "$TOML" pyproject.toml
   run_source "python:
