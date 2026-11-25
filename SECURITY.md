@@ -7,7 +7,7 @@
 | latest release | yes |
 | older releases | no |
 
-There are no backports. User repositories call aurtomator workflows at a pinned SHA, the SHA of a release tag. They are expected to move the pin to the latest release, and Dependabot opens the pull requests that move it, see [The calling workflows](https://aurtomator.dev/setup/#the-calling-workflows). Unreleased `main` is not supported.
+There are no backports. User repositories call aurtomator workflows at a pinned SHA, the SHA of a release tag. They are expected to move the pin to the latest release, and Dependabot opens the pull requests that move it, see [The calling workflows](https://aurtomator.dev/setup/#the-calling-workflows). Pins count once their release is published: job `pins` of the calling workflows stops at a tag whose release is a draft or missing. Unreleased `main` is not supported.
 
 ## Reporting a vulnerability
 
@@ -33,7 +33,7 @@ Out of scope:
 
 - Vulnerabilities in external tools that aurtomator calls (`makepkg`, `yq`, `curl`, `git`, `namcap`, `shellcheck`, `shfmt`, `bats`). Report those upstream.
 - The contents of AUR packages published from user repositories. The maintainer of each user repository is responsible for the packages they publish.
-- The model itself: user repositories run the workflows with their own AUR key, and pins that are not the SHA of a release tag run the code of the commit they name.
+- The model itself: user repositories run the workflows with their own AUR key, and pins that are not the commit of a published release run the code of the commit they name.
 - Issues in third-party GitHub Actions. Report them to the action's maintainer. aurtomator pins every action by commit SHA.
 
 ## Disclosure

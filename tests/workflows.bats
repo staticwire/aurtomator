@@ -4860,7 +4860,7 @@ calling_workflow() {
   run yq '.jobs.validate.needs' "$validate"
   [ "$output" = "pins" ]
   run yq -o=json -I=0 '.jobs.pins | del(.steps[0].uses)' "$check"
-  [ "$output" = '{"runs-on":"ubuntu-latest","timeout-minutes":5,"permissions":{"contents":"read"},"steps":[{"with":{"persist-credentials":false,"fetch-depth":2}},{"run":"./aurtomator.sh check-pins"}]}' ]
+  [ "$output" = '{"runs-on":"ubuntu-latest","timeout-minutes":5,"permissions":{"contents":"read"},"steps":[{"with":{"persist-credentials":false,"fetch-depth":2}},{"run":"./aurtomator.sh check-pins","env":{"GITHUB_TOKEN":"${{ github.token }}"}}]}' ]
   [ "$(yq -o=json -I=0 '.jobs.pins' "$validate")" = "$(yq -o=json -I=0 '.jobs.pins' "$check")" ]
   run yq '.jobs.pins.steps[0].uses' "$check"
   [[ "$output" =~ ^actions/checkout@[0-9a-f]{40}$ ]]

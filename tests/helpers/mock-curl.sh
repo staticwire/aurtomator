@@ -81,6 +81,16 @@ case "$url" in
   *pypi.org/pypi/zensical/json)
     echo '{"info": {"version": "0.1.3"}}'
     ;;
+  # Published releases of aurtomator and of the fork of runner.bats, as a test writes them under
+  # repos/<owner>/<repo>/releases/tags/; GitHub answers 404 for drafts and tags without a release
+  *api.github.com/repos/staticwire/aurtomator/releases/tags/* | *api.github.com/repos/Someone/Aurtomator-Fork/releases/tags/*)
+    if [[ -f "$MOCK_FILES_DIR/${url#*api.github.com/}" ]]; then
+      cat "$MOCK_FILES_DIR/${url#*api.github.com/}"
+    else
+      echo '{"message": "Not Found"}'
+      http_code=404
+    fi
+    ;;
   # PyPI: a server error on the simple page of a project
   *pypi.org/simple/flaky/)
     http_error 503
@@ -634,4 +644,8 @@ esac
 # http_get_json asks for the URL of the last answer after the body
 if [[ "$write_out" == '\n%{url_effective}'* ]]; then
   printf '\n%s' "${effective_url:-$url}" >&"$stdout_fd"
+fi
+# aurtomator.sh asks for the status code after the body
+if [[ "$write_out" == '\n%{http_code}' ]]; then
+  printf '\n%s' "${http_code:-200}" >&"$stdout_fd"
 fi

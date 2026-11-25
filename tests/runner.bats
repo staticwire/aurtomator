@@ -34,6 +34,13 @@ publish() {
   git clone -q --bare "$2" "$TEST_TMPDIR/github/$1"
 }
 
+# Writes the answer of the GitHub API for the published release $2 of the repository $1, with
+# immutable: $3, true by default; mock curl answers 404 for other tags
+release() {
+  mkdir -p "$MOCK_FILES_DIR/repos/$1/releases/tags"
+  printf '{"tag_name": "%s", "draft": false, "immutable": %s}\n' "$2" "${3:-true}" >"$MOCK_FILES_DIR/repos/$1/releases/tags/$2"
+}
+
 # Writes the calling workflow of the repository with the uses: line $1 and the release $2 after it,
 # v1.0.0 by default
 pin() {
@@ -93,6 +100,8 @@ setup() {
   git -C "$TEST_TMPDIR/work" tag v1.0.0 "$PINNED"
   git -C "$TEST_TMPDIR/work" tag v1.1.0 "$TIP"
   publish staticwire/aurtomator "$TEST_TMPDIR/work"
+  release staticwire/aurtomator v1.0.0
+  release staticwire/aurtomator v1.1.0
 
   REPO="$TEST_TMPDIR/repo"
   mkdir -p "$REPO/.github/workflows" "$REPO/packages"
@@ -185,6 +194,7 @@ teardown() {
   forked=$(commit_aurtomator "$TEST_TMPDIR/fork" forked)
   git -C "$TEST_TMPDIR/fork" tag v9.0.0
   publish Someone/Aurtomator-Fork "$TEST_TMPDIR/fork"
+  release Someone/Aurtomator-Fork v9.0.0
   pin "someone/aurtomator-fork/.github/workflows/check-updates.yml@$forked" v9.0.0
 
   run "$REPO/aurtomator.sh" sample
@@ -554,6 +564,7 @@ shape() {
   annotated=$(commit_aurtomator "$TEST_TMPDIR/work" annotated)
   git -C "$TEST_TMPDIR/work" -c user.name=t -c user.email=t@example.com tag -a v1.2.0 -m release "$annotated"
   publish staticwire/aurtomator "$TEST_TMPDIR/work"
+  release staticwire/aurtomator v1.2.0
 
   pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$untagged" v1.0.0
   run "$REPO/aurtomator.sh" sample
@@ -580,6 +591,76 @@ shape() {
   [ "$status" -eq 1 ]
   [ "$output" = "Write the release after the pin in .github/workflows/check-updates.yml, as ./aurtomator.sh pin vX.Y.Z does: @$PINNED # vX.Y.Z" ]
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+}
+
+# Tags stand before sign publishes their release, and stay when a run stops in between
+@test "runner: refuses a pin whose release is unpublished, or mutable after v0.14.0" {
+  rm "$MOCK_FILES_DIR/repos/staticwire/aurtomator/releases/tags/v1.0.0"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "No published release v1.0.0 of staticwire/aurtomator; pins name the commit of a published release" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+
+  release staticwire/aurtomator v1.0.0 false
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "GitHub shows the release v1.0.0 of staticwire/aurtomator as mutable, and aurtomator publishes every release after v0.14.0 as immutable" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
+
+  # An answer of another tag or of a draft is no published release of the tag
+  printf '{"tag_name": "v1.1.0", "draft": false, "immutable": true}\n' >"$MOCK_FILES_DIR/repos/staticwire/aurtomator/releases/tags/v1.0.0"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "No published release v1.0.0 of staticwire/aurtomator; pins name the commit of a published release" ]
+  printf '{"tag_name": "v1.0.0", "draft": true, "immutable": true}\n' >"$MOCK_FILES_DIR/repos/staticwire/aurtomator/releases/tags/v1.0.0"
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "No published release v1.0.0 of staticwire/aurtomator; pins name the commit of a published release" ]
+}
+
+@test "runner: takes a mutable release up to v0.14.0" {
+  git -C "$TEST_TMPDIR/work" tag v0.9.0 "$PINNED"
+  git -C "$TEST_TMPDIR/work" tag v0.14.0 "$PINNED"
+  git -C "$TEST_TMPDIR/work" tag v0.14.1 "$PINNED"
+  publish staticwire/aurtomator "$TEST_TMPDIR/work"
+  release staticwire/aurtomator v0.9.0 false
+  release staticwire/aurtomator v0.14.0 false
+  release staticwire/aurtomator v0.14.1 false
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v0.9.0
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v0.14.0
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$output" = "name: pinned" ]
+
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v0.14.1
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = "GitHub shows the release v0.14.1 of staticwire/aurtomator as mutable, and aurtomator publishes every release after v0.14.0 as immutable" ]
+}
+
+@test "runner: asks the GitHub API with GITHUB_TOKEN when it is set, and names its failures" {
+  CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  [ "$(<"$TEST_TMPDIR/curl-args")" = "-qgsSL --proto =https --max-time 30 -w \n%{http_code} -H Accept: application/vnd.github+json https://api.github.com/repos/staticwire/aurtomator/releases/tags/v1.0.0" ]
+  rm "$TEST_TMPDIR/curl-args"
+  CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" GITHUB_TOKEN=secret run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 0 ]
+  [ "$(<"$TEST_TMPDIR/curl-args")" = "-qgsSL --proto =https --max-time 30 -w \n%{http_code} -H Accept: application/vnd.github+json -H @- https://api.github.com/repos/staticwire/aurtomator/releases/tags/v1.0.0" ]
+
+  # GitHub answers 403 past the rate limit
+  cat >"$MOCK_DIR/curl" <<'EOF'
+#!/usr/bin/env bash
+[[ -z "${CURL_FAIL:-}" ]] || exit 6
+printf '{"message": "API rate limit exceeded"}\n403'
+EOF
+  run "$REPO/aurtomator.sh" check-pins
+  [ "$status" -eq 1 ]
+  [ "$output" = "The GitHub API answered HTTP 403 for the release v1.0.0 of staticwire/aurtomator: API rate limit exceeded" ]
+  CURL_FAIL=1 run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 1 ]
+  [ "$output" = "Could not ask the GitHub API for the release v1.1.0 of staticwire/aurtomator" ]
 }
 
 @test "runner: names the repository whose tags it cannot list" {
@@ -1036,6 +1117,7 @@ EOF
 @test "runner: pin takes the commit of an annotated tag" {
   git -C "$TEST_TMPDIR/work" -c user.name=t -c user.email=t@example.com tag -a v1.2.0 -m release "$TIP"
   publish staticwire/aurtomator "$TEST_TMPDIR/work"
+  release staticwire/aurtomator v1.2.0
   calling_workflows "$PINNED" v1.0.0
 
   run "$REPO/aurtomator.sh" pin v1.2.0
@@ -1106,6 +1188,10 @@ EOF
   run "$REPO/aurtomator.sh" pin v9.9.9
   [ "$status" -eq 1 ]
   [ "$output" = "No tag v9.9.9 in staticwire/aurtomator" ]
+  rm "$MOCK_FILES_DIR/repos/staticwire/aurtomator/releases/tags/v1.1.0"
+  run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$status" -eq 1 ]
+  [ "$output" = "No published release v1.1.0 of staticwire/aurtomator; pins name the commit of a published release" ]
   local args
   for args in "" 1.1.0 "v1.1.0 v1.2.0" v1.1 "v1.1.0x" xv1.1.0; do
     # shellcheck disable=SC2086

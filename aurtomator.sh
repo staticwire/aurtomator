@@ -160,6 +160,35 @@ tag_commit() {
     awk -v ref="refs/tags/$1" '$2 == ref || $2 == ref "^{}" { sha = $1 } END { print sha }'
 }
 
+# Stop unless the tag $1 of the repository has a published release, immutable after v0.14.0:
+# tags stand before their release is published, and stay when the release run stops
+check_published() {
+  local auth=() answer code body message
+  [[ -z "${GITHUB_TOKEN:-}" ]] || auth=(-H @-)
+  # curl reads the header from stdin, since ps shows every argument to every local user
+  if ! answer=$(curl -qgsSL --proto '=https' --max-time 30 -w '\n%{http_code}' \
+    -H 'Accept: application/vnd.github+json' "${auth[@]}" "https://api.github.com/repos/$repo/releases/tags/$1" \
+    <<<"Authorization: Bearer ${GITHUB_TOKEN:-}"); then
+    echo "Could not ask the GitHub API for the release $1 of $repo" >&2
+    exit 1
+  fi
+  code=${answer##*$'\n'} body=${answer%$'\n'*}
+  if [[ "$code" != 200 && "$code" != 404 ]]; then
+    message=$(yq -p json -r '.message // ""' <<<"$body" 2>/dev/null) || message=""
+    echo "The GitHub API answered HTTP $code for the release $1 of $repo${message:+: ${message%%$'\n'*}}" >&2
+    exit 1
+  fi
+  if [[ "$code" == 404 || "$(T="$1" yq -p json -r '.tag_name == strenv(T) and .draft == false' <<<"$body" 2>/dev/null)" != true ]]; then
+    echo "No published release $1 of $repo; pins name the commit of a published release" >&2
+    exit 1
+  fi
+  if [[ "$(printf '%s\n' v0.14.0 "$1" | sort -V | tail -n 1)" != v0.14.0 &&
+  "$(yq -p json -r '.immutable == true' <<<"$body" 2>/dev/null)" != true ]]; then
+    echo "GitHub shows the release $1 of $repo as mutable, and aurtomator publishes every release after v0.14.0 as immutable" >&2
+    exit 1
+  fi
+}
+
 # Stop unless the pin $3 on the uses: line $2 of file $1 is the commit of the release written
 # after it, since GitHub serves the commits of every fork under the name of its parent
 check_release() {
@@ -177,6 +206,7 @@ check_release() {
     echo "The pin $3 in $1 is not the commit of $tag of $repo; ./aurtomator.sh pin vX.Y.Z pins the commit of a release" >&2
     exit 1
   fi
+  check_published "$tag"
 }
 
 if [[ "${1:-}" == pin ]]; then
@@ -196,6 +226,7 @@ if [[ "${1:-}" == pin ]]; then
     echo "Tag $2 of $repo names no commit SHA" >&2
     exit 1
   fi
+  check_published "$2"
   cd "$root"
   # sed moves a pin on a uses: line alone, so every pin GitHub reads in the two files, of jobs
   # and of steps, has to be on one before any file changes. GitHub reads the repository in any case.
