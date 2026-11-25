@@ -459,7 +459,7 @@ secret_lines() {
   local ci="$GITHUB_DIR/workflows/ci.yml" config file line bad=0
   local image='^(ci|check-updates|validate)\.yml:    container: [$][{][{] needs\.image\.outputs\.ref [}][}] # zizmor: ignore\[unpinned-images\] '
   local call='^ci\.yml:    uses: \./\.github/workflows/(validate|check-updates)\.yml # zizmor: ignore\[self-repository\] '
-  local action='^check-updates\.yml:        uses: \./aurtomator/\.github/actions/run-as-builder # zizmor: ignore\[self-repository\] '
+  local action='^check-updates\.yml:        uses: \./aurtomator/\.github/actions/(run-as-builder|add-builder|stop-builder) # zizmor: ignore\[self-repository\] '
   local actor='^ci\.yml:    if: >- # zizmor: ignore\[bot-conditions\] '
   for config in "$GITHUB_DIR"/zizmor.y*ml "$GITHUB_DIR"/../zizmor.y*ml; do
     [ ! -e "$config" ]
@@ -1300,6 +1300,34 @@ step_run() {
   yq ".jobs.$1.steps[] | select(.name == \"$2\") | .run" "$CHECK_UPDATES"
 }
 
+# Prints the run block of step $2 of the composite action $1 of .github/actions
+action_run() {
+  yq ".runs.steps[] | select(.name == \"$2\") | .run" "$GITHUB_DIR/actions/$1/action.yml"
+}
+
+# The steps of builder live in two actions that both workflows call, in sh -e as a step of a job
+# container runs without a shell of its own
+@test "builder actions: add-builder adds, closes and checks builder, and stop-builder stops it" {
+  run yq -o=json -I=0 '[.runs.using, [.runs.steps[] | [.name, .shell]], .runs.steps[1].env]' "$GITHUB_DIR/actions/add-builder/action.yml"
+  [ "$output" = '["composite",[["Add builder","sh"],["Close files to builder","sh"],["Check builder","sh"]],{"DATA":"/data"}]' ]
+  run yq -o=json -I=0 '[.runs.using, [.runs.steps[] | [.name, .shell]]]' "$GITHUB_DIR/actions/stop-builder/action.yml"
+  [ "$output" = '["composite",[["Stop builder","sh"]]]' ]
+}
+
+@test "check-updates: each job of builder adds builder after the checkouts and stops it with the actions" {
+  local job at
+  for job in check prepare rules verify publish; do
+    echo "$job"
+    at=$(step_index "$job" "Checkout aurtomator")
+    run yq -o=json -I=0 ".jobs.$job.steps[$((at + 1))] | [.name, .uses]" "$CHECK_UPDATES"
+    [ "$output" = '["Add builder","./aurtomator/.github/actions/add-builder"]' ]
+    run yq -o=json -I=0 ".jobs.$job.steps[] | select(.name == \"Stop builder\") | [.uses, .if, .id]" "$CHECK_UPDATES"
+    [ "$output" = '["./aurtomator/.github/actions/stop-builder","always()","stop"]' ]
+  done
+  run yq '[.jobs[].steps[] | select(.name == "Close files to builder" or .name == "Check builder" or (.name == "Add builder" and has("run")) or (.name == "Stop builder" and has("run")))] | length' "$CHECK_UPDATES"
+  [ "$output" = 0 ]
+}
+
 # The commit step writes back to the branch of the run, and a tag is none
 @test "check-updates: check stops first thing on a run started from a tag" {
   run yq -o=json -I=0 '.jobs.check.steps[0] | [.name, .if]' "$CHECK_UPDATES"
@@ -1859,7 +1887,6 @@ run_take_step() {
   builder=$(yq '.jobs.rules.steps | to_entries | map(select(.value.uses == "./aurtomator/.github/actions/run-as-builder")) | .[0].key' "$CHECK_UPDATES")
   run yq -o=json -I=0 "[.jobs.rules.steps[$((builder + 1))], .jobs.rules.steps[$((builder + 2))], .jobs.rules.steps[$((builder + 3))], .jobs.rules.steps[-1]] | map([.name, .if])" "$CHECK_UPDATES"
   [ "$output" = "[[\"Stop builder\",\"always()\"],[\"Hand over the rules\",\"always() && steps.stop.outcome == 'success'\"],[\"Upload rules\",null],[\"Drop the checkouts\",\"always()\"]]" ]
-  [ "$(step_run rules "Stop builder")" = "$(step_run check "Stop builder")" ]
   run yq -o=json -I=0 '.jobs.rules.steps[] | select(.name == "Upload rules") | .with' "$CHECK_UPDATES"
   [ "$output" = '{"name":"rules-${{ matrix.package }}-${{ github.run_attempt }}","path":"/data/rules-out/","if-no-files-found":"error","retention-days":1}' ]
   run yq '.jobs.rules.steps[] | select(.name == "Hand over the rules") | .env.ATTEMPT' "$CHECK_UPDATES"
@@ -1997,7 +2024,11 @@ run_take_rules() {
   local step
   for step in "Stop builder" "Hand over" "Drop the checkouts"; do
     echo "$step"
-    run step_run prepare "$step"
+    if [[ "$step" == "Stop builder" ]]; then
+      run action_run stop-builder "$step"
+    else
+      run step_run prepare "$step"
+    fi
     [ "$status" -eq 0 ]
     [ -n "$output" ]
     [[ "$output" != *"./scripts/"* ]]
@@ -2024,7 +2055,6 @@ step_index() {
     run yq -o=json -I=0 "[.jobs.$job.steps[$((builder + 1))], .jobs.$job.steps[$((builder + 2))], .jobs.$job.steps[-1]] | map([.name, .if, .id])" "$CHECK_UPDATES"
     [ "$status" -eq 0 ]
     [ "$output" = "[[\"Stop builder\",\"always()\",\"stop\"],[\"Hand over\",\"always() && steps.stop.outcome == 'success'\",null],[\"Drop the checkouts\",\"always()\",null]]" ]
-    [ "$(step_run "$job" "Stop builder")" = "$(step_run check "Stop builder")" ]
     [ "$(step_run "$job" "Hand over")" = "$(step_run check "Hand over")" ]
     [ "$(step_run "$job" "Drop the checkouts")" = "$(step_run check "Drop the checkouts")" ]
     # Nothing after the step of builder runs as builder except the kill of Stop builder and the
@@ -2554,29 +2584,33 @@ make_builder_inputs() {
   [ "$output" = "!cancelled() && needs.check.outputs.work == 'true'" ]
 }
 
-# check requires a branch before it installs anything
-@test "check-updates: check, prepare, verify and publish add builder right after the install" {
+# check requires a branch before it installs anything, and the action of Add builder comes with the
+# checkout of aurtomator
+@test "check-updates: check, prepare, rules, verify and publish install first and check out before Add builder" {
   local job first
-  for job in check prepare verify publish; do
+  for job in check prepare rules verify publish; do
     echo "$job"
     first=0
     [[ "$job" != check ]] || first=1
-    run yq -o=json -I=0 "[.jobs.$job.steps[$first].name, .jobs.$job.steps[$((first + 1))].name]" "$CHECK_UPDATES"
-    [ "$status" -eq 0 ]
-    [ "$output" = '["Install dependencies","Add builder"]' ]
-    [ "$(step_run "$job" "Add builder")" = "$(step_run check "Add builder")" ]
+    run yq ".jobs.$job.steps[$first].name" "$CHECK_UPDATES"
+    [ "$output" = "Install dependencies" ]
+    [ "$(step_index "$job" Checkout)" -lt "$(step_index "$job" "Add builder")" ]
   done
 }
 
 @test "check-updates: only Add builder adds a user, builder with the uid 2000" {
-  local found line
+  local file
   # has() does not follow an alias, so explode() writes out each one first
   run yq 'explode(.) | .jobs[].steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  mapfile -t found < <(grep -v '^[[:space:]]*#' <<<"$output" | grep useradd)
-  [ "${#found[@]}" -eq 5 ]
-  for line in "${found[@]}"; do
-    [ "$line" = "useradd -m -u 2000 builder" ]
+  [ "$(grep -v '^[[:space:]]*#' <<<"$output" | grep -c useradd)" -eq 0 ]
+  for file in "$GITHUB_DIR"/actions/*/action.yml; do
+    run yq '.runs.steps[] | select(has("run")) | .run' "$file"
+    if [[ "$file" == */add-builder/action.yml ]]; then
+      [ "$(grep -v '^[[:space:]]*#' <<<"$output" | grep useradd)" = "useradd -m -u 2000 builder" ]
+    else
+      [ "$(grep -v '^[[:space:]]*#' <<<"$output" | grep -c useradd)" -eq 0 ]
+    fi
   done
 }
 
@@ -2591,7 +2625,7 @@ run_add_builder_step() {
   printf '#!/bin/sh\n[ "$*" = "-c %%u $RUNNER_TEMP" ] && [ "$STAT_RC" = 0 ] && echo "$TEMP_OWNER"\nexit "$STAT_RC"\n' >"$bin/stat"
   printf '#!/bin/sh\necho "$*" >>"$CALLS/find"\n[ -z "$FOUND" ] || echo "$FOUND"\nexit "$FIND_RC"\n' >"$bin/find"
   chmod +x "$bin/useradd" "$bin/id" "$bin/stat" "$bin/find"
-  step_run check "Add builder" >"$BATS_TEST_TMPDIR/step.sh"
+  action_run add-builder "Add builder" >"$BATS_TEST_TMPDIR/step.sh"
   run env PATH="$bin:$PATH" CALLS="$CALLS" RUNNER_TEMP=/__w/_temp USERADD_RC="${USERADD_RC:-0}" \
     BUILDER_UID="${BUILDER_UID:-2000}" TEMP_OWNER="${TEMP_OWNER:-1001}" STAT_RC="${STAT_RC:-0}" FOUND="${FOUND:-}" \
     FIND_RC="${FIND_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -2660,7 +2694,7 @@ EOF
   chmod +x "$bin/ps" "$bin/pgrep" "$bin/id" "$bin/sudo" "$bin/pkill" "$bin/sleep"
   CALLS="$BATS_TEST_TMPDIR/calls"
   mkdir -p "$CALLS"
-  step_run check "Stop builder" >"$BATS_TEST_TMPDIR/step.sh"
+  action_run stop-builder "Stop builder" >"$BATS_TEST_TMPDIR/step.sh"
   run timeout 20 env -C "$ws" PATH="$bin:$PATH" CALLS="$CALLS" PS_LINES="${PS_LINES:-}" \
     PS_AFTER_KILL="${PS_AFTER_KILL:-}" PS_RC="${PS_RC:-0}" NO_BUILDER="${NO_BUILDER:-}" \
     KILL_ENDS="${KILL_ENDS:-}" SUDO_RC="${SUDO_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -4530,7 +4564,7 @@ run_summary_step() {
 # it closes under $BATS_TEST_TMPDIR/mnt, so a run in CI changes no mount of its own job
 close_files_step() {
   local mnt="$BATS_TEST_TMPDIR/mnt"
-  step_run check "Close files to builder" |
+  action_run add-builder "Close files to builder" |
     sed -e "s|for dir in /__t /github/home /github/workflow;|for dir in $mnt/t $mnt/home $mnt/workflow;|" \
       -e "s|for dir in /github/home /github/workflow \"\$RUNNER_TEMP\";|for dir in $mnt/home $mnt/workflow $mnt/temp;|" \
       >"$BATS_TEST_TMPDIR/step.sh"
@@ -4606,12 +4640,12 @@ close_files_step() {
 }
 
 # The requires rules read the Python distributions, the modules and the gems of the repositories
-@test "check-updates: rules syncs the files databases after Add builder, before the checkouts" {
+@test "check-updates: rules syncs the files databases after the install, before the checkouts" {
   local at
   at=$(step_index rules "Sync the files databases")
-  [ "$at" -eq $(($(step_index rules "Add builder") + 1)) ]
+  [ "$at" -eq $(($(step_index rules "Install dependencies") + 1)) ]
   [ "$at" -lt "$(step_index rules "Checkout")" ]
-  [ "$at" -lt "$(step_index rules "Close files to builder")" ]
+  [ "$at" -lt "$(step_index rules "Add builder")" ]
   run yq '[.jobs[].steps[] | select(.name == "Sync the files databases")] | length' "$CHECK_UPDATES"
   [ "$output" = 1 ]
 }
@@ -4637,18 +4671,17 @@ exit "${PACMAN_RC:-0}"
 
 @test "check-updates: each job with a checkout closes its files before downloads and builder" {
   local job at key
-  for job in check prepare verify publish; do
+  for job in check prepare rules verify publish; do
     echo "$job"
-    at=$(step_index "$job" "Close files to builder")
+    at=$(step_index "$job" "Add builder")
     [ "$at" -eq $(($(step_index "$job" "Checkout aurtomator") + 1)) ]
-    [ "$(step_run "$job" "Close files to builder")" = "$(step_run check "Close files to builder")" ]
     run yq ".jobs.$job.steps | to_entries[] | select(.value.uses // \"\" | test(\"^actions/download-artifact@|run-as-builder\$\")) | .key" "$CHECK_UPDATES"
     [ "${#lines[@]}" -gt 0 ]
     for key in "${lines[@]}"; do
       [ "$key" -gt "$at" ]
     done
   done
-  run yq '[.jobs.issues.steps[] | select(.name == "Close files to builder")] | length' "$CHECK_UPDATES"
+  run yq '[.jobs.issues.steps[] | select(.name == "Add builder")] | length' "$CHECK_UPDATES"
   [ "$output" = "0" ]
 }
 
@@ -5300,17 +5333,6 @@ calling_workflow() {
 
 # === check-updates.yml: Check builder ===
 
-@test "check-updates: each job of builder checks what builder reaches right after it closes the files" {
-  local job at
-  for job in check prepare verify publish; do
-    echo "$job"
-    at=$(step_index "$job" "Close files to builder")
-    run yq ".jobs.$job.steps[$((at + 1))].name" "$CHECK_UPDATES"
-    [ "$output" = "Check builder" ]
-    [ "$(step_run "$job" "Check builder")" = "$(step_run check "Check builder")" ]
-  done
-}
-
 # The paths that builder may not write, in the order the step tests them,
 # with the file commands under /fc
 BUILDER_PATHS=(/fc/set_env /fc/add_path /fc/set_output /fc/step_summary /__w/_temp /__w/repo/repo
@@ -5343,7 +5365,7 @@ case "$1" in
 esac
 EOF
   chmod +x "$bin/sudo"
-  step_run check "Check builder" >"$BATS_TEST_TMPDIR/step.sh"
+  action_run add-builder "Check builder" >"$BATS_TEST_TMPDIR/step.sh"
   run env PATH="$bin:$PATH" CALLS="$CALLS" REACH="${REACH:-}" BUILDER_ENV="${BUILDER_ENV:-HOME PATH}" \
     WRITABLE="${WRITABLE:-}" FIND_RC="${FIND_RC:-0}" TRUE_RC="${TRUE_RC:-0}" \
     GITHUB_ENV=/fc/set_env GITHUB_PATH=/fc/add_path GITHUB_OUTPUT=/fc/set_output \

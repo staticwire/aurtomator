@@ -85,28 +85,6 @@ jobs:
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git go-yq
 
-      # builder must own no file that the runner mounts into the container
-      - &add-builder
-        name: Add builder
-        run: |
-          useradd -m -u 2000 builder
-          if ! temp_owner=$(stat -c %u "$RUNNER_TEMP"); then
-            echo "::error::Could not read the owner of $RUNNER_TEMP"
-            exit 1
-          fi
-          if [[ "$(id -u builder)" == "$temp_owner" ]]; then
-            echo "::error::builder has the uid of the account that owns $RUNNER_TEMP"
-            exit 1
-          fi
-          if ! owned=$(find /__w /__e /__t \( -user builder -o -group builder \) -print -quit); then
-            echo "::error::find could not search /__w, /__e and /__t for the files of builder"
-            exit 1
-          fi
-          if [[ -n "$owned" ]]; then
-            echo "::error::builder owns $owned"
-            exit 1
-          fi
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -120,73 +98,8 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
-      # PKGBUILD code of prepare runs as builder, which needs aurtomator/ alone. Artifacts go
-      # to $DATA, and no other file of the checkout grants rights to group or others.
-      - &close-files
-        name: Close files to builder
-        env:
-          DATA: /data
-        run: |
-          install -d -m 0700 "$DATA"
-          find . -mindepth 1 -path ./aurtomator -prune -o ! -type l -exec chmod go-rwx -- {} +
-          chmod 0711 .
-          # The runner mounts its tool cache, the home of the steps and the event files read-write
-          for dir in /__t /github/home /github/workflow; do
-            if [ -d "$dir" ]; then
-              find "$dir" ! -type l -perm /022 -exec chmod go-w -- {} +
-            fi
-          done
-          # The event, the home of the steps, and the step scripts and file commands in RUNNER_TEMP
-          # are for root steps and the runner, which owns them
-          for dir in /github/home /github/workflow "$RUNNER_TEMP"; do
-            if [ -n "$dir" ] && [ -d "$dir" ]; then
-              chmod go-rwx -- "$dir"
-            fi
-          done
-
-      # Fails when builder can write a file of the runner or of root steps, read the checkout,
-      # use the Docker socket or get a variable of the runner
-      - &check-builder
-        name: Check builder
-        run: |
-          if ! sudo -u builder true; then
-            echo "::error::sudo could not run a command as builder"
-            exit 1
-          fi
-          fail=0
-          # Runs test with flag $1 on path $2 as builder, which has to fail
-          check() {
-            if sudo -u builder test "$1" "$2"; then
-              echo "::error::builder passes test $1 $2"
-              fail=1
-            fi
-          }
-          for path in "$GITHUB_ENV" "$GITHUB_PATH" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP" \
-            "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/aurtomator" /__w /__w/_actions /__e /__t /github/home /github/workflow; do
-            check -w "$path"
-          done
-          check -r /var/run/docker.sock
-          check -w /var/run/docker.sock
-          for path in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/README.md" /data /github/workflow/event.json /github/home \
-            "$RUNNER_TEMP" "$GITHUB_ENV" "$GITHUB_PATH" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY"; do
-            check -r "$path"
-          done
-          # find skips the directories builder cannot list or enter, as the workspace after Close files,
-          # so aurtomator/ in it, which builder reaches by its name, takes a search of its own
-          if ! writable=$(sudo -u builder find /__w /__e /__t /github "$GITHUB_WORKSPACE/aurtomator" \
-            \( -writable -print -quit \) -o \( -type d \( ! -readable -o ! -executable \) -prune \)); then
-            echo "::error::find could not search /__w, /__e, /__t, /github and $GITHUB_WORKSPACE/aurtomator as builder"
-            fail=1
-          elif [ -n "$writable" ]; then
-            echo "::error::builder can write $writable"
-            fail=1
-          fi
-          names=$(sudo -u builder env | cut -d= -f1)
-          if leaked=$(printf '%s\n' "$names" | grep -E '^(GITHUB|ACTIONS|RUNNER)_'); then
-            echo "::error::sudo passes $(printf '%s\n' "$leaked" | paste -sd ' ' -) to builder"
-            fail=1
-          fi
-          exit "$fail"
+      - name: Add builder
+        uses: ./aurtomator/.github/actions/add-builder # zizmor: ignore[self-repository] add-builder runs from the aurtomator/ checkout
 
       # builder works in /work, and the workspace and aurtomator/ stay root's. The job rules runs the
       # requires rules of the packages that _rules lists.
@@ -199,37 +112,10 @@ jobs:
           keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER
           readme: "true"
 
-      - &stop-builder
-        name: Stop builder
+      - name: Stop builder
         id: stop
         if: always()
-        run: |
-          # Jobs that failed before useradd have no builder to stop
-          uid=$(id -u builder) || exit 0
-          # Returns 0 while a process of builder runs, 1 for none and 2 when ps fails. pid 1
-          # of a job container never reaps a zombie, so a zombie does not count.
-          live() {
-            procs=$(ps -e -o uid=,ruid=,stat=) || return 2
-            printf '%s\n' "$procs" |
-              awk -v u="$uid" '($1 == u || $2 == u) && $3 !~ /^Z/ { n++ } END { exit !n }'
-          }
-          # Processes of builder can outlive their step. kill -1 reaches every process builder
-          # may signal in one call, and forks under way then fail.
-          sudo -u builder kill -KILL -1 || true
-          for _ in $(seq 30); do
-            rc=0
-            live || rc=$?
-            [ "$rc" -eq 1 ] && break
-            pkill -KILL -u builder || true
-            pkill -KILL -U builder || true
-            sleep 1
-          done
-          rc=0
-          live || rc=$?
-          if [ "$rc" -ne 1 ]; then
-            echo "::error::A process of builder is still running, or the process list failed"
-            exit 1
-          fi
+        uses: ./aurtomator/.github/actions/stop-builder # zizmor: ignore[self-repository] stop-builder runs from the aurtomator/ checkout
 
       # Takes what builder wrote as data, once no process of builder runs
       - &hand-over
@@ -432,8 +318,6 @@ jobs:
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git openssh namcap jq go-yq pacman-contrib
 
-      - *add-builder
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -447,9 +331,8 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
-      - *close-files
-
-      - *check-builder
+      - name: Add builder
+        uses: ./aurtomator/.github/actions/add-builder # zizmor: ignore[self-repository] add-builder runs from the aurtomator/ checkout
 
       # By the id of the upload, never by name. Empty ids would download every artifact of
       # the run, and no artifact has the id 0.
@@ -466,7 +349,10 @@ jobs:
           package: ${{ matrix.package }}
           statuses: /data/status
 
-      - *stop-builder
+      - name: Stop builder
+        id: stop
+        if: always()
+        uses: ./aurtomator/.github/actions/stop-builder # zizmor: ignore[self-repository] stop-builder runs from the aurtomator/ checkout
 
       - *hand-over
 
@@ -515,8 +401,6 @@ jobs:
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git go-yq python ruby
 
-      - *add-builder
-
       # The requires rules read the Python distributions, the modules and the gems of the repositories
       # with pacman -F, and run on without them
       - name: Sync the files databases
@@ -538,9 +422,8 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
-      - *close-files
-
-      - *check-builder
+      - name: Add builder
+        uses: ./aurtomator/.github/actions/add-builder # zizmor: ignore[self-repository] add-builder runs from the aurtomator/ checkout
 
       # The version of the check run, from which the rules run
       - name: Download statuses
@@ -557,7 +440,10 @@ jobs:
           companions: "true"
           statuses: /data/status
 
-      - *stop-builder
+      - name: Stop builder
+        id: stop
+        if: always()
+        uses: ./aurtomator/.github/actions/stop-builder # zizmor: ignore[self-repository] stop-builder runs from the aurtomator/ checkout
 
       # Takes the file that builder wrote for this package as data, at most 64 KiB, in a directory of
       # the attempt, so publish can take the newest one
@@ -618,8 +504,6 @@ jobs:
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git jq go-yq
 
-      - *add-builder
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -633,9 +517,8 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
-      - *close-files
-
-      - *check-builder
+      - name: Add builder
+        uses: ./aurtomator/.github/actions/add-builder # zizmor: ignore[self-repository] add-builder runs from the aurtomator/ checkout
 
       # The versions and the asset values that verify-pkg.sh checks against
       - name: Download statuses
@@ -705,7 +588,10 @@ jobs:
           handoff: /data/handoff
           keep-env: GITHUB_RUN_NUMBER
 
-      - *stop-builder
+      - name: Stop builder
+        id: stop
+        if: always()
+        uses: ./aurtomator/.github/actions/stop-builder # zizmor: ignore[self-repository] stop-builder runs from the aurtomator/ checkout
 
       - *hand-over
 
@@ -743,8 +629,6 @@ jobs:
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Su --noconfirm --needed sudo git github-cli openssh gnupg jq go-yq
 
-      - *add-builder
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -758,9 +642,8 @@ jobs:
           path: aurtomator
           persist-credentials: false
 
-      - *close-files
-
-      - *check-builder
+      - name: Add builder
+        uses: ./aurtomator/.github/actions/add-builder # zizmor: ignore[self-repository] add-builder runs from the aurtomator/ checkout
 
       - name: Download statuses
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -922,7 +805,10 @@ jobs:
           statuses: /data/status
           handoff: /data/handoff
 
-      - *stop-builder
+      - name: Stop builder
+        id: stop
+        if: always()
+        uses: ./aurtomator/.github/actions/stop-builder # zizmor: ignore[self-repository] stop-builder runs from the aurtomator/ checkout
 
       - *hand-over
 

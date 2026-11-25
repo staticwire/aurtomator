@@ -1,0 +1,99 @@
+name: Add builder
+description: >-
+  Adds the unprivileged user builder, closes the checkout and the mounts of the
+  runner to it, and fails when builder can write a file of the runner or of
+  root steps, read the checkout, use the Docker socket or get a variable of the
+  runner. Runs after the checkouts, with aurtomator/ in the workspace.
+
+runs:
+  using: composite
+  steps:
+    # builder must own no file that the runner mounts into the container
+    - name: Add builder
+      shell: sh
+      run: |
+        useradd -m -u 2000 builder
+        if ! temp_owner=$(stat -c %u "$RUNNER_TEMP"); then
+          echo "::error::Could not read the owner of $RUNNER_TEMP"
+          exit 1
+        fi
+        if [[ "$(id -u builder)" == "$temp_owner" ]]; then
+          echo "::error::builder has the uid of the account that owns $RUNNER_TEMP"
+          exit 1
+        fi
+        if ! owned=$(find /__w /__e /__t \( -user builder -o -group builder \) -print -quit); then
+          echo "::error::find could not search /__w, /__e and /__t for the files of builder"
+          exit 1
+        fi
+        if [[ -n "$owned" ]]; then
+          echo "::error::builder owns $owned"
+          exit 1
+        fi
+
+    # Code that runs as builder needs aurtomator/ alone. Artifacts go to $DATA, and no other file
+    # of the checkout grants rights to group or others.
+    - name: Close files to builder
+      shell: sh
+      env:
+        DATA: /data
+      run: |
+        install -d -m 0700 "$DATA"
+        find . -mindepth 1 -path ./aurtomator -prune -o ! -type l -exec chmod go-rwx -- {} +
+        chmod 0711 .
+        # The runner mounts its tool cache, the home of the steps and the event files read-write
+        for dir in /__t /github/home /github/workflow; do
+          if [ -d "$dir" ]; then
+            find "$dir" ! -type l -perm /022 -exec chmod go-w -- {} +
+          fi
+        done
+        # The event, the home of the steps, and the step scripts and file commands in RUNNER_TEMP
+        # are for root steps and the runner, which owns them
+        for dir in /github/home /github/workflow "$RUNNER_TEMP"; do
+          if [ -n "$dir" ] && [ -d "$dir" ]; then
+            chmod go-rwx -- "$dir"
+          fi
+        done
+
+    # Fails when builder can write a file of the runner or of root steps, read the checkout,
+    # use the Docker socket or get a variable of the runner
+    - name: Check builder
+      shell: sh
+      run: |
+        if ! sudo -u builder true; then
+          echo "::error::sudo could not run a command as builder"
+          exit 1
+        fi
+        fail=0
+        # Runs test with flag $1 on path $2 as builder, which has to fail
+        check() {
+          if sudo -u builder test "$1" "$2"; then
+            echo "::error::builder passes test $1 $2"
+            fail=1
+          fi
+        }
+        for path in "$GITHUB_ENV" "$GITHUB_PATH" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP" \
+          "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/aurtomator" /__w /__w/_actions /__e /__t /github/home /github/workflow; do
+          check -w "$path"
+        done
+        check -r /var/run/docker.sock
+        check -w /var/run/docker.sock
+        for path in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/README.md" /data /github/workflow/event.json /github/home \
+          "$RUNNER_TEMP" "$GITHUB_ENV" "$GITHUB_PATH" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY"; do
+          check -r "$path"
+        done
+        # find skips the directories builder cannot list or enter, as the workspace after Close files,
+        # so aurtomator/ in it, which builder reaches by its name, takes a search of its own
+        if ! writable=$(sudo -u builder find /__w /__e /__t /github "$GITHUB_WORKSPACE/aurtomator" \
+          \( -writable -print -quit \) -o \( -type d \( ! -readable -o ! -executable \) -prune \)); then
+          echo "::error::find could not search /__w, /__e, /__t, /github and $GITHUB_WORKSPACE/aurtomator as builder"
+          fail=1
+        elif [ -n "$writable" ]; then
+          echo "::error::builder can write $writable"
+          fail=1
+        fi
+        names=$(sudo -u builder env | cut -d= -f1)
+        if leaked=$(printf '%s\n' "$names" | grep -E '^(GITHUB|ACTIONS|RUNNER)_'); then
+          echo "::error::sudo passes $(printf '%s\n' "$leaked" | paste -sd ' ' -) to builder"
+          fail=1
+        fi
+        exit "$fail"
