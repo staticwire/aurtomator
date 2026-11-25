@@ -182,6 +182,8 @@ class Imports(ast.NodeVisitor):
 
 
 def main(argv):
+    # File names outside UTF-8 go out as their bytes, as os.fsdecode read them
+    sys.stdout.reconfigure(errors="surrogateescape")
     if argv[1:] == ["--stdlib"]:
         for name in sorted(sys.stdlib_module_names):
             print(name)

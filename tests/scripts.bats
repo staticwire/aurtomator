@@ -3168,6 +3168,19 @@ run_py_imports() {
     'x.y.w	module' 'star	module' 'inner	function' 'deep	function' 'deep.thing	function' 'in_class	module')" ]
 }
 
+# Python writes stdout strictly outside the C locales, and releases can hold any byte in a name
+@test "py_imports.py: prints file names outside UTF-8 as their bytes" {
+  local bad=$'bad\xff.py'
+  py_file ok.py 'import json'
+  printf 'import os\n' >"$TEST_TMPDIR/py/$bad"
+  printf '%s\0' ok.py "$bad" >"$TEST_TMPDIR/py-files"
+  run --separate-stderr env PYTHONIOENCODING=utf-8:strict python3 -S "$TEST_TMPDIR/scripts/lib/py_imports.py" "$TEST_TMPDIR/py" \
+    <"$TEST_TMPDIR/py-files"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = $'import\tok.py\tjson\tmodule' ]
+  [ "${lines[1]}" = "import"$'\t'"$bad"$'\t'"os"$'\t'"module" ]
+}
+
 @test "py_imports.py: reads try, suppress and TYPE_CHECKING as optional and typing scopes" {
   py_file mod.py 'try:' '    import fast' 'except ImportError:' '    import slow' 'try:' '    import a' 'except (ValueError, ModuleNotFoundError):' \
     '    pass' 'try:' '    import b' 'except KeyError:' '    pass' 'try:' '    import c' 'except:' '    pass' \
