@@ -456,7 +456,7 @@ Packages with `upstream.pin_from` wait for the package of the project that pins 
 ! python-zensical-ui: update 0.0.41 → 0.0.43 waits for the update of zensical-bin
 ```
 
-In environment markers, `os_name` is `posix`, `sys_platform` is `linux`, `platform_system` is `Linux`, `platform_python_implementation` is `CPython` and `implementation_name` is `cpython`. `python_version`, `python_full_version` and `implementation_version` come from the version of the `python` package that `pacman -Si python` prints, and compare as PEP 440 does: `python_version == "3.14.0"` holds for Python 3.14. The check asks for no extras, so `extra == "test"` is false. Comparisons on other fields, such as `platform_machine`, and with text outside PEP 440 are unknown, and requirements count unless their marker is false.
+In environment markers, `os_name` is `posix`, `sys_platform` is `linux`, `platform_system` is `Linux`, `platform_python_implementation` is `CPython` and `implementation_name` is `cpython`. `python_version`, `python_full_version` and `implementation_version` come from the version of the `python` package that `pacman -Si python` prints, and compare as PEP 440 does: `python_version == "3.14.0"` holds for Python 3.14. `in` and `not in` test their text as a substring, as packaging does, so `python_version in "3.13, 3.14"` holds for Python 3.14. The check asks for no extras, so `extra == "test"` is false. Comparisons on other fields, such as `platform_machine`, and with text outside PEP 440 are unknown, and requirements count unless their marker is false.
 
 ### npm
 

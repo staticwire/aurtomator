@@ -264,8 +264,9 @@ _marker_string() {
 _marker_version() {
   local rc=0
   _MK_VAL='?'
+  # packaging tests in and not in on the text of a version field, as on a string field
   if [[ "$1" == in || "$1" == "not in" ]]; then
-    _MK_VAL=0
+    _marker_string "$@"
     return 0
   fi
   [[ -n "$4" ]] || return 0

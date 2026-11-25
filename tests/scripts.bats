@@ -2535,7 +2535,9 @@ run_split() {
     1 'python_full_version > "3.14.10b2"' 0 'python_full_version >= "3.14.11a1"' \
     1 'python_version < "3.99999999999999999999"' \
     1 'python_full_version === "3.14.10"' 0 'python_version === "3.14.0"' 1 'python_version === "3.14"' \
-    0 '"3.14" in python_version' 0 'python_version not in "3.14"'
+    1 '"3.14" in python_version' 0 'python_version not in "3.14"' 1 'python_version in "3.14"' \
+    0 'python_version in "2.7"' 1 'python_version not in "2.7"' 1 'python_version not in "3.0, 3.1"' \
+    1 '"3.1" in python_version' 1 'python_full_version in "3.14.10, 3.15"'
 }
 
 @test "requires.sh: marker_value matches version prefixes and compatible releases" {
@@ -2618,7 +2620,7 @@ run_split() {
   export MOCK_PYTHON_FAIL=1
   check_markers \
     '?' 'python_version < "3.11"' '?' 'python_full_version >= "3.8"' \
-    0 'python_version < "3.11" and sys_platform == "win32"' 0 '"3" in python_version' 1 'sys_platform == "linux"'
+    0 'python_version < "3.11" and sys_platform == "win32"' '?' '"3" in python_version' 1 'sys_platform == "linux"'
 }
 
 @test "requires.sh: marker_value takes the Python of pacman without epoch and pkgrel" {
