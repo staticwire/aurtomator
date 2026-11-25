@@ -480,9 +480,65 @@ secret_lines() {
 }
 
 @test "ci: the lint job runs actionlint on the workflows" {
-  run yq '[.jobs.lint.steps[] | select(.run == "actionlint")] | length' "$GITHUB_DIR/workflows/ci.yml"
+  run yq -o=json -I=0 '[.jobs.lint.steps[] | select(.name == "actionlint") | [.env, .run]]' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = "1" ]
+  [ "$output" = '[[{"IMAGE":"${{ steps.images.outputs.actionlint }}"},"docker run --rm -v \"$PWD:/repo:ro\" -w /repo \"$IMAGE\""]]' ]
+}
+
+# Dependabot updates the tag and the digest of each FROM line of the files of ci-image/ that end in
+# Dockerfile, and no job builds this one
+@test "ci: lint.Dockerfile pins the images of shellcheck, shfmt and actionlint by tag and digest" {
+  local file="$GITHUB_DIR/../ci-image/lint.Dockerfile"
+  run grep -v -e '^#' -e '^$' "$file"
+  [ "${#lines[@]}" -eq 3 ]
+  [[ "${lines[0]}" =~ ^FROM\ koalaman/shellcheck:v[0-9.]+@sha256:[0-9a-f]{64}\ AS\ shellcheck$ ]]
+  [[ "${lines[1]}" =~ ^FROM\ mvdan/shfmt:v[0-9.]+@sha256:[0-9a-f]{64}\ AS\ shfmt$ ]]
+  [[ "${lines[2]}" =~ ^FROM\ rhysd/actionlint:[0-9.]+@sha256:[0-9a-f]{64}\ AS\ actionlint$ ]]
+  run yq -o=json -I=0 '[.updates[] | select(.["package-ecosystem"] == "docker") | .directory]' "$GITHUB_DIR/dependabot.yml"
+  [ "$output" = '["/ci-image"]' ]
+  run grep -rl -F 'lint.Dockerfile' "$GITHUB_DIR/workflows"
+  [ "$output" = "$GITHUB_DIR/workflows/ci.yml" ]
+}
+
+# Runs the step of the lint job that reads the images with ci-image/lint.Dockerfile of the lines $@
+run_lint_images() {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws/ci-image"
+  printf '%s\n' "$@" >"$ws/ci-image/lint.Dockerfile"
+  yq '.jobs.lint.steps[] | select(.name == "Read the lint images") | .run' "$GITHUB_DIR/workflows/ci.yml" >"$BATS_TEST_TMPDIR/step.sh"
+  : >"$BATS_TEST_TMPDIR/output"
+  run env -C "$ws" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" bash -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "ci: the lint job reads the image of each tool, and fails on one without a digest" {
+  local digest
+  digest=$(printf '0%.0s' {1..64})
+  run_lint_images '# images' "FROM koalaman/shellcheck:v0.11.0@sha256:$digest AS shellcheck" \
+    "FROM mvdan/shfmt:v3.14.1@sha256:$digest AS shfmt" "FROM rhysd/actionlint:1.7.12@sha256:$digest AS actionlint"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/output")" = "$(printf '%s\n' "shellcheck=koalaman/shellcheck:v0.11.0@sha256:$digest" \
+    "shfmt=mvdan/shfmt:v3.14.1@sha256:$digest" "actionlint=rhysd/actionlint:1.7.12@sha256:$digest")" ]
+  run_lint_images "FROM koalaman/shellcheck:v0.11.0@sha256:$digest AS shellcheck" "FROM mvdan/shfmt:v3.14.1 AS shfmt" \
+    "FROM rhysd/actionlint:1.7.12@sha256:$digest AS actionlint"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::ci-image/lint.Dockerfile must pin the image of shfmt by tag and digest, as FROM <image>:<tag>@sha256:<digest> AS shfmt" ]
+}
+
+# The images come by digest from lint.Dockerfile, which Dependabot updates, in place of the tools of apt and go
+@test "ci: the lint job installs nothing and runs each tool from its image with the checkout read-only" {
+  local ci="$GITHUB_DIR/workflows/ci.yml" line
+  run yq '.jobs.lint.steps[] | select(has("run")) | .run' "$ci"
+  [[ "$output" != *apt-get* && "$output" != *"go install"* ]]
+  while IFS= read -r line; do
+    [[ "$line" == *'docker run --rm -v "$PWD:/src:ro" -w /src "$'* || "$line" == *'docker run --rm -v "$PWD:/repo:ro" -w /repo "$IMAGE"' ||
+      "$line" == *'| docker run --rm -i "$IMAGE" -s bash -' ]] || {
+      echo "$line"
+      return 1
+    }
+  done < <(grep -F 'docker run' <<<"$output")
+  [ "$(grep -c -F 'docker run' <<<"$output")" -eq 6 ]
+  run yq -o=json -I=0 '[.jobs.lint.steps[] | select(.env) | .env]' "$ci"
+  [ "$output" = '[{"IMAGE":"${{ steps.images.outputs.shellcheck }}"},{"IMAGE":"${{ steps.images.outputs.shfmt }}"},{"IMAGE":"${{ steps.images.outputs.actionlint }}"},{"IMAGE":"${{ steps.images.outputs.shellcheck }}"},{"SHELLCHECK":"${{ steps.images.outputs.shellcheck }}","SHFMT":"${{ steps.images.outputs.shfmt }}"}]' ]
 }
 
 # zizmor-action uploads the findings to code scanning by default and passes the job
@@ -504,13 +560,13 @@ secret_lines() {
   run yq '.jobs.lint.steps[] | select(.name == "shellcheck the actions") | .run' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
   [[ "$output" == *'.github/actions/*/action.yml'* ]]
-  [[ "$output" == *'shellcheck -s bash "$RUNNER_TEMP/run.sh"'* ]]
+  [[ "$output" == *'yq '"'"'.runs.steps[] | select(has("run")) | .run'"'"' "$action" | docker run --rm -i "$IMAGE" -s bash -'* ]]
 }
 
 @test "ci: the lint job checks aurtomator.sh with shellcheck and shfmt" {
   run yq '.jobs.lint.steps[] | select(.name == "shellcheck and shfmt the runner") | .run' "$GITHUB_DIR/workflows/ci.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = $'shellcheck aurtomator.sh\nshfmt -d -i 2 -ci aurtomator.sh' ]
+  [ "$output" = $'docker run --rm -v "$PWD:/src:ro" -w /src "$SHELLCHECK" aurtomator.sh\ndocker run --rm -v "$PWD:/src:ro" -w /src "$SHFMT" -d -i 2 -ci aurtomator.sh' ]
 }
 
 # The lint steps check only the files they name: shellcheck -x reads a
@@ -522,7 +578,8 @@ secret_lines() {
   for step in shellcheck shfmt; do
     run yq ".jobs.lint.steps[] | select(.name == \"$step\") | .run" "$GITHUB_DIR/workflows/ci.yml"
     [ "$status" -eq 0 ]
-    [[ "$output" == "$step "* ]]
+    [[ "$output" == 'docker run --rm -v "$PWD:/src:ro" -w /src "$IMAGE" '* ]]
+    [ "$(yq ".jobs.lint.steps[] | select(.name == \"$step\") | .env.IMAGE" "$GITHUB_DIR/workflows/ci.yml")" = "\${{ steps.images.outputs.$step }}" ]
     run bash -c 'cd "$1" && for word in $2; do if [[ "$word" == scripts/*.sh || "$word" == strategies/*.sh ]]; then printf "%s\n" "$word"; fi; done | sort' _ "$root" "$output"
     [ "$status" -eq 0 ]
     [ "$output" = "$expected" ]
@@ -724,7 +781,7 @@ EOF
 # main by dispatch
 @test "merge-image: merges the tested head when only files of ci-image/ changed, then starts ci.yml and release-please.yml on main" {
   local files
-  for files in ci-image/Dockerfile $'ci-image/Gemfile\nci-image/Gemfile.lock' ci-image/Gemfile.lock \
+  for files in ci-image/Dockerfile ci-image/lint.Dockerfile $'ci-image/Gemfile\nci-image/Gemfile.lock' ci-image/Gemfile.lock \
     $'ci-image/requirements.in\nci-image/requirements.txt' ci-image/requirements.txt; do
     echo "$files"
     GH_FILES="$files" run_merge_step
