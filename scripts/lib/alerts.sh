@@ -50,9 +50,8 @@ alert_note_error() {
   printf 'note must be one line of text%s\n' "${value:+: put $value in quotes}"
 }
 
-# Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as hold or
-# notice, a tab and the note; fail on a broken rule. $4 offline skips requires rules, held those without hold.
-# The requires rules run for each package whose AUR depends hold Python or Ruby, as notices unless listed.
+# Print the alerts of package file $1 from current $2 to version $3 in file order, as hold or notice, a tab and
+# the note, or fail on a broken rule; $4 offline skips requires rules, held those without hold, requires the rest
 fired_alerts() {
   local rc=0
   if [[ -n "${AURTOMATOR_RUN_CACHE:-}" ]]; then
@@ -112,7 +111,7 @@ _fired_alerts() {
       log_err "alerts[$i].match must be a non-empty ERE that bash accepts: $value"
       return 1
     fi
-    ((rc == 0)) || continue
+    ((rc == 0)) && [[ "$offline" != requires ]] || continue
     action=notice
     [[ "$hold" != true ]] || action=hold
     [[ "$offline" != held || "$action" == hold ]] || continue
@@ -175,6 +174,32 @@ _ruby_rule() {
     unmet) ruby_unmet "$file" "$REQ_SRCINFO" "$RB_GEM" "$RB_VERSION" ;;
     imports) ruby_imports "$file" "$REQ_SRCINFO" "$RB_GEM" "$RB_VERSION" ;;
   esac
+}
+
+# Print yes when the requires rules run for package file $1, as a pkgname of its AUR .SRCINFO has Python
+# or Ruby in depends that python: none or ruby: none does not turn off, and no otherwise; fail on the AUR
+requires_needed() {
+  local name srcinfo pkgname rc=0
+  name=$(package_name "$1") || return 1
+  srcinfo=$(aur_srcinfo "$name") || rc=$?
+  if ((rc == 3)); then
+    echo no
+    return 0
+  fi
+  ((rc == 0)) || return 1
+  while IFS= read -r pkgname; do
+    if { pkgname_has_python "$srcinfo" "$pkgname" && ! _requires_off "$1" python; } ||
+      { pkgname_has_ruby "$srcinfo" "$pkgname" && ! _requires_off "$1" ruby; }; then
+      echo yes
+      return 0
+    fi
+  done < <(srcinfo_pkgnames "$srcinfo")
+  echo no
+}
+
+# Succeed when key $2, python or ruby, of package file $1 is none
+_requires_off() {
+  [[ "$(pkg_get "$1" ".$2 | tag")" == "!!str" && "$(pkg_get "$1" ".$2")" == none ]]
 }
 
 # Set REQ_SRCINFO, PY_STATE and RB_STATE once per call of _fired_alerts: a state is ready when the AUR

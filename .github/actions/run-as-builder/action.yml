@@ -31,7 +31,7 @@ inputs:
     required: false
     default: ""
   handoff:
-    description: Directory of the prepared updates that builder gets as handoff/
+    description: Directory of the prepared updates and the files of the rules jobs that builder gets as handoff/
     required: false
     default: ""
 
@@ -73,11 +73,11 @@ runs:
           fi
           install -D -m 0644 "$1" "$WORK/$2"
         }
-        # The limits of the Hand over step
+        # The limits of the Hand over steps
         handoff_max() {
           case "$1" in
             */base) echo 64 ;;
-            status/*) echo 65536 ;;
+            status/* | rules/*) echo 65536 ;;
             *) echo 1048576 ;;
           esac
         }
@@ -124,11 +124,11 @@ runs:
             done
           fi
           if dir_ok "$HANDOFF"; then
-            (cd "$HANDOFF" && find prepared status -type f -print0 2>/dev/null || true) |
+            (cd "$HANDOFF" && find prepared status rules -type f -print0 2>/dev/null || true) |
               while IFS= read -r -d '' f; do
                 # status/_unverified lists the packages that verify did not reach
                 if [[ "$f" =~ ^prepared/${name_re}/(PKGBUILD|\.SRCINFO|base)$ ]] ||
-                  [[ "$f" =~ ^status/(${name_re}|_unverified)$ ]]; then
+                  [[ "$f" =~ ^(status/(${name_re}|_unverified)|rules/${name_re})$ ]]; then
                   take "$HANDOFF/$f" "handoff/$f" "$(handoff_max "$f")"
                 fi
               done

@@ -65,7 +65,7 @@ jobs:
       - name: shfmt
         run: shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 
-      # The requires rules imports run the parsers of scripts/lib/ in the check job
+      # The requires rules imports run the parsers of scripts/lib/ in the rules job
       - name: Compile the Python helpers
         run: python3 -m py_compile scripts/lib/*.py
 

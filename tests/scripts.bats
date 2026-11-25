@@ -4086,6 +4086,69 @@ $1"
   [[ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" == "check_failed: "*"packages/kube-diagrams.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]]
 }
 
+# The check job of CI holds the token and writes every status, so the rules that download and
+# parse releases run in a job of their own for each package
+@test "check-all: --rules-later runs no requires rule and lists the packages that need them in _rules" {
+  python_package $'python:\n  pypi: KubeDiagrams\nalerts:\n  - match: "^1[.]1"\n    note: Read the changelog' \
+    bash python python-yaml python-diagrams
+  pypi_fake KubeDiagrams 1.0.0 PyYAML diagrams
+  pypi_fake KubeDiagrams 1.1.0 PyYAML diagrams graphviz2drawio
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 1.1.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'kube-diagrams\tnotice\tRead the changelog' ]
+  [ "$(cat "$TEST_TMPDIR/.status/_rules")" = "kube-diagrams" ]
+  [[ ! -e "$CURL_ARGS_LOG" ]] || [ "$(grep -c -e pypi.org -e pythonhosted "$CURL_ARGS_LOG")" = 0 ]
+  python_package "python: none" bash python python-yaml
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 1.1.0" ]
+  [ ! -e "$TEST_TMPDIR/.status/_rules" ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [ "$output" = "--rules-later goes with a check run alone" ]
+}
+
+@test "check-all: --rules-later fails the check of a package whose AUR .SRCINFO it cannot read" {
+  python_package $'python:\n  pypi: KubeDiagrams' bash python python-yaml
+  # The AUR serves an empty repository for a package it lacks, and git fails to clone this one
+  rm -rf "$TEST_TMPDIR/aur-remote/kube-diagrams.git"
+  mkdir "$TEST_TMPDIR/aur-remote/kube-diagrams.git"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" == "check_failed: "* ]]
+  [ ! -e "$TEST_TMPDIR/.status/_rules" ]
+}
+
+@test "check-all: --rules writes the requires lines of the version of the check run, or error and the reason" {
+  python_package $'python:\n  pypi: KubeDiagrams\nalerts:\n  - match: "^1[.]1"\n    note: Read the changelog' \
+    bash python python-yaml python-diagrams
+  pypi_fake KubeDiagrams 1.0.0 PyYAML diagrams
+  pypi_fake KubeDiagrams 1.1.0 PyYAML diagrams graphviz2drawio
+  mkdir -p "$TEST_TMPDIR/.status"
+  echo "new_version: 1.1.0" >"$TEST_TMPDIR/.status/kube-diagrams"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$TEST_TMPDIR/rules/kube-diagrams")" = $'version\t1.1.0' ]
+  grep -qxF $'notice\tadds graphviz2drawio' "$TEST_TMPDIR/rules/kube-diagrams"
+  grep -qxF $'notice\tgraphviz2drawio: not in depends' "$TEST_TMPDIR/rules/kube-diagrams"
+  run grep -c -e changelog -e '^error' "$TEST_TMPDIR/rules/kube-diagrams"
+  [ "$output" = 0 ]
+  # The statuses of the check run stay for the steps after it
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "new_version: 1.1.0" ]
+  python_package "" bash python python-yaml
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$TEST_TMPDIR/rules/kube-diagrams")" = error ]
+  grep -qF "packages/kube-diagrams.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none" \
+    "$TEST_TMPDIR/rules/kube-diagrams"
+  echo "up_to_date" >"$TEST_TMPDIR/.status/kube-diagrams"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules "$TEST_TMPDIR/rules"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/rules/kube-diagrams")" = $'error\nno new version from the check run' ]
+}
+
 @test "check-all: runs no requires rule for python: none or without Python in depends" {
   python_package "python: none" bash python python-yaml
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"

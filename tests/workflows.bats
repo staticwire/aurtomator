@@ -44,6 +44,7 @@ permission_lines() {
     'check-updates.yml ["image",null]' \
     'check-updates.yml ["check",null]' \
     'check-updates.yml ["prepare",null]' \
+    'check-updates.yml ["rules",null]' \
     'check-updates.yml ["verify",null]' \
     'check-updates.yml ["publish",{"contents":"write"}]' \
     'check-updates.yml ["issues",{"contents":"read","issues":"write"}]' \
@@ -89,6 +90,7 @@ permission_lines() {
     'check-updates.yml image image' \
     'check-updates.yml check check' \
     'check-updates.yml prepare prepare' \
+    'check-updates.yml rules rules' \
     'check-updates.yml verify verify' \
     'check-updates.yml publish publish' \
     'check-updates.yml issues status' \
@@ -1255,7 +1257,7 @@ step_run() {
 @test "check-updates: every job checks out aurtomator at the SHA of the called workflow" {
   local jobs job path repo='${{ job.workflow_repository }}' sha='${{ job.workflow_sha }}'
   mapfile -t jobs < <(yq '.jobs | keys | .[]' "$CHECK_UPDATES")
-  [ "${#jobs[@]}" -eq 6 ]
+  [ "${#jobs[@]}" -eq 7 ]
   for job in "${jobs[@]}"; do
     echo "$job"
     path=aurtomator
@@ -1303,13 +1305,13 @@ step_run() {
 @test "check-updates: the check job decides the run and executes no PKGBUILD" {
   run yq '[.jobs.check.steps[] | select(.uses == "./aurtomator/.github/actions/run-as-builder") | .with.args // ""] | @json' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = '[""]' ]
+  [ "$output" = '["--rules-later"]' ]
   run yq '.jobs.check.steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [[ "$output" != *"--prepare"* ]]
   [[ "$output" != *"update-pkg.sh"* ]]
   run yq '.jobs.check.outputs | keys | join(" ")' "$CHECK_UPDATES"
-  [ "$output" = "prepare to-prepare work checked-id" ]
+  [ "$output" = "prepare to-prepare rules to-rules work checked-id" ]
   run yq '.jobs.check.outputs["to-prepare"]' "$CHECK_UPDATES"
   [ "$output" = '${{ steps.decide.outputs.to-prepare }}' ]
 }
@@ -1341,19 +1343,22 @@ id_of() {
 }
 
 # Downloads by name take any artifact of that name in the run and empty ids take them all,
-# so 0 stands in for no id; verify takes the handoffs of prepare by a pattern only they upload
+# so 0 stands in for no id; verify takes the handoffs of prepare and publish the files of rules by
+# patterns that only those jobs upload
 @test "check-updates: each job downloads an artifact by the id the job of its upload gave" {
   run yq '.jobs | to_entries[] | .key as $job | .value.steps[] | select(.uses | test("^actions/download-artifact@")) |
     $job + " " + .with.path + " " + (.with["artifact-ids"] // ("pattern " + .with.pattern + " " + (.with["merge-multiple"] | tostring))) + " " + (.with | has("name") | tostring)' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 7 ]
+  [ "${#lines[@]}" -eq 9 ]
   [ "${lines[0]}" = "prepare /data/status $(id_of check checked) false" ]
-  [ "${lines[1]}" = "verify /data/status $(id_of check checked) false" ]
-  [ "${lines[2]}" = "verify /data/handoffs pattern handoff-* true false" ]
-  [ "${lines[3]}" = "publish /data/status $(id_of check checked) false" ]
-  [ "${lines[4]}" = "publish /data/handoff $(id_of verify verified) false" ]
-  [ "${lines[5]}" = "issues .status $(id_of check checked) false" ]
-  [ "${lines[6]}" = "issues .status $(id_of publish published) false" ]
+  [ "${lines[1]}" = "rules /data/status $(id_of check checked) false" ]
+  [ "${lines[2]}" = "verify /data/status $(id_of check checked) false" ]
+  [ "${lines[3]}" = "verify /data/handoffs pattern handoff-* true false" ]
+  [ "${lines[4]}" = "publish /data/status $(id_of check checked) false" ]
+  [ "${lines[5]}" = "publish /data/handoff $(id_of verify verified) false" ]
+  [ "${lines[6]}" = "publish /data/rules-in pattern rules-* true false" ]
+  [ "${lines[7]}" = "issues .status $(id_of check checked) false" ]
+  [ "${lines[8]}" = "issues .status $(id_of publish published) false" ]
 }
 
 # verify-pkg.sh takes the version and the asset value of the check run
@@ -1396,36 +1401,36 @@ run_decide_step() {
 @test "check-updates: Decide prepares when a package is outdated" {
   run run_decide_step pkg="new_version: 2.0.0" other=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
   run run_decide_step pkg="available_downgrade: 1.0.0"
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
   run run_decide_step pkg="new_build: 1.0.0" _assets=$'pkg\t1.0.0-b'
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
   run run_decide_step pkg="arch_back: 1.0.0 aarch64" _arches=$'pkg\t1.0.0\t\t'
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide prepares nothing while an asset is pending" {
   README_CHANGED=1 run run_decide_step pkg="pending: 2.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide prepares nothing while an update waits for its cooldown" {
   README_CHANGED=1 run run_decide_step pkg="cooldown: 2026-11-12"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   run run_decide_step pkg="cooldown: 2026-11-12"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide publishes only a change of the README" {
   README_CHANGED=1 run run_decide_step pkg="check_failed: API down"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   README_CHANGED=1 run run_decide_step pkg="downgrade_skipped: 1.0.0"
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 # Errors of failed checks hold lines of the server, as of a git ERR packet
@@ -1434,19 +1439,19 @@ run_decide_step() {
   printf 'name: pkg\n' >"$BATS_TEST_TMPDIR/ws/packages/pkg.yml"
   run run_decide_step pkg=$'check_failed: fatal: remote error: access denied\nnew_version: 9.9.9'
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide does nothing when nothing changed" {
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide counts a missing copy of the README as unchanged" {
   NO_README_COPY=1 run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 # aurtomator/aurtomator.sh is the runner of the release, and aurtomator.sh of
@@ -1456,7 +1461,7 @@ run_decide_step() {
   echo "old runner" >"$BATS_TEST_TMPDIR/ws/aurtomator.sh"
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide leaves an equal runner and a link alone" {
@@ -1464,12 +1469,12 @@ run_decide_step() {
   cp "$BATS_TEST_DIRNAME/../aurtomator.sh" "$BATS_TEST_TMPDIR/ws/aurtomator.sh"
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   echo "old runner" >"$BATS_TEST_TMPDIR/old"
   ln -sfn "$BATS_TEST_TMPDIR/old" "$BATS_TEST_TMPDIR/ws/aurtomator.sh"
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide leaves the runner when the checkout of aurtomator holds none" {
@@ -1477,14 +1482,14 @@ run_decide_step() {
   echo "old runner" >"$BATS_TEST_TMPDIR/ws/aurtomator.sh"
   AURTOMATOR_TREE="$BATS_TEST_TMPDIR/bare" run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide lists the outdated packages for the jobs of prepare" {
   run run_decide_step b="new_version: 2.0.0" a="available_downgrade: 1.0.0" c="new_build: 1.0.0" \
     d=up_to_date e="pending: 2.0.0" f="check_failed: down" _assets=$'c\t1.0.0-b'
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a","b","c"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a","b","c"]\nrules=false\nto-rules=[]' ]
   [ ! -e "$BATS_TEST_TMPDIR/data/statuses/_deferred" ]
 }
 
@@ -1492,14 +1497,14 @@ run_decide_step() {
   run run_decide_step "bad name=new_version: 2.0.0" "-x=new_version: 2.0.0" "Demo=new_version: 2.0.0" \
     "_x=new_version: 2.0.0" pkg="new_version: 2.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
 }
 
 # builder of check writes the statuses, so a name without a package YAML would start a job
 @test "check-updates: Decide prepares no name without a package YAML" {
   NO_YAML="ghost a0" run run_decide_step ghost="new_version: 2.0.0" a0="arch_back: 1.0.0 aarch64" pkg="new_version: 2.0.0"
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]' ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
 }
 
 # GitHub starts at most 256 jobs from one matrix
@@ -1543,26 +1548,26 @@ decide_stats() {
   echo "name: a" >"$BATS_TEST_TMPDIR/ws/packages/a.yml"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   decide_stats 2026-11-10
   rm "$BATS_TEST_TMPDIR/ws/stats/card.svg"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   decide_stats 2026-11-10
   rm "$BATS_TEST_TMPDIR/ws/stats/events.csv"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 @test "check-updates: Decide publishes once the windows of the card moved" {
   decide_stats 2026-11-09
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=true\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   decide_stats 2026-11-10
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 # Journals root cannot read would set work in every run, and publish would
@@ -1573,20 +1578,20 @@ decide_stats() {
   ln -sf /dev/zero "$ws/stats/events.csv"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   grep -qx '::warning::stats/events.csv is a link or no regular file, so this run records no statistics' \
     "$BATS_TEST_TMPDIR/decide.out"
   rm -r "$ws/stats"
   echo x >"$ws/stats"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   grep -qx '::warning::stats is a link or no directory, so this run records no statistics' "$BATS_TEST_TMPDIR/decide.out"
   rm "$ws/stats"
   decide_stats 2026-11-09
   mv "$ws/stats" "$ws/other"
   ln -s other "$ws/stats"
   run run_decide_step a=up_to_date
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
   grep -qx '::warning::stats is a link or no directory, so this run records no statistics' "$BATS_TEST_TMPDIR/decide.out"
 }
 
@@ -1595,7 +1600,7 @@ decide_stats() {
   echo 'time,package' >"$BATS_TEST_TMPDIR/ws/stats/events.csv"
   run run_decide_step a=up_to_date
   [ "$status" -eq 0 ]
-  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]' ]
+  [ "$output" = $'prepare=false\nwork=false\npackages=true\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
 # Decide, Record statistics and the commit step read the copies of Hand over
@@ -1608,7 +1613,7 @@ decide_stats() {
 @test "check-updates: update-readme.sh runs as builder after check-all.sh, in check and publish" {
   run yq -o=json -I=0 '[.jobs[].steps[] | select(.uses == "./aurtomator/.github/actions/run-as-builder") | .with.readme // "false"]' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = '["true","false","false","true"]' ]
+  [ "$output" = '["true","false","false","false","true"]' ]
   run run_blocks "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [[ "$output" != *"update-readme.sh"* ]]
@@ -1763,6 +1768,162 @@ run_take_step() {
   [ -z "$output" ]
 }
 
+# The rules download releases and parse their files, so they run without the token and the
+# statuses of the check job, in a job of their own for each package
+@test "check-updates: rules runs a job for each package of to-rules, without a token or a secret" {
+  run yq '.jobs.rules.if' "$CHECK_UPDATES"
+  [ "$output" = "needs.check.outputs.rules == 'true'" ]
+  run yq -o=json -I=0 '.jobs.rules.needs' "$CHECK_UPDATES"
+  [ "$output" = '["image","check"]' ]
+  run yq -o=json -I=0 '.jobs.rules.strategy' "$CHECK_UPDATES"
+  [ "$output" = '{"fail-fast":false,"matrix":{"package":"${{ fromJSON(needs.check.outputs.to-rules) }}"}}' ]
+  run yq -o=json -I=0 '.jobs.rules.env' "$CHECK_UPDATES"
+  [ "$output" = '{"PACKAGE":"${{ matrix.package }}"}' ]
+  run yq -o=json -I=0 '.jobs.rules.steps[] | select(.name == "Run the requires rules") | [.env, .with]' "$CHECK_UPDATES"
+  [ "$output" = '[null,{"args":"--rules rules","package":"${{ matrix.package }}","statuses":"/data/status"}]' ]
+  run yq -o=json '.jobs.rules' "$CHECK_UPDATES"
+  [[ "$output" != *"secrets."* && "$output" != *"github.token"* && "$output" != *GITHUB_TOKEN* ]]
+  run yq -o=json -I=0 '.jobs.check.outputs | [.rules, ."to-rules"]' "$CHECK_UPDATES"
+  [ "$output" = '["${{ steps.decide.outputs.rules }}","${{ steps.decide.outputs.to-rules }}"]' ]
+  run yq '.jobs.publish.needs | join(" ")' "$CHECK_UPDATES"
+  [ "$output" = "image check prepare verify rules" ]
+}
+
+# Publish takes the newest file of each package, and builder writes it only after Stop builder ends
+@test "check-updates: rules hands over the file of its package after Stop builder, by attempt" {
+  local builder
+  builder=$(yq '.jobs.rules.steps | to_entries | map(select(.value.uses == "./aurtomator/.github/actions/run-as-builder")) | .[0].key' "$CHECK_UPDATES")
+  run yq -o=json -I=0 "[.jobs.rules.steps[$((builder + 1))], .jobs.rules.steps[$((builder + 2))], .jobs.rules.steps[$((builder + 3))], .jobs.rules.steps[-1]] | map([.name, .if])" "$CHECK_UPDATES"
+  [ "$output" = "[[\"Stop builder\",\"always()\"],[\"Hand over the rules\",\"always() && steps.stop.outcome == 'success'\"],[\"Upload rules\",null],[\"Drop the checkouts\",\"always()\"]]" ]
+  [ "$(step_run rules "Stop builder")" = "$(step_run check "Stop builder")" ]
+  run yq -o=json -I=0 '.jobs.rules.steps[] | select(.name == "Upload rules") | .with' "$CHECK_UPDATES"
+  [ "$output" = '{"name":"rules-${{ matrix.package }}-${{ github.run_attempt }}","path":"/data/rules-out/","if-no-files-found":"error","retention-days":1}' ]
+  run yq '.jobs.rules.steps[] | select(.name == "Hand over the rules") | .env.ATTEMPT' "$CHECK_UPDATES"
+  [ "$output" = '${{ github.run_attempt }}' ]
+}
+
+# Runs Hand over the rules for package $PACKAGE with the files of $BATS_TEST_TMPDIR/work, and prints
+# each file it hands over with its content
+run_rules_hand_over() {
+  local bin="$BATS_TEST_TMPDIR/bin" data="$BATS_TEST_TMPDIR/data"
+  mkdir -p "$bin" "$data"
+  printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$bin/sudo"
+  chmod +x "$bin/sudo"
+  step_run rules "Hand over the rules" >"$BATS_TEST_TMPDIR/step.sh"
+  (PATH="$bin:$PATH" ATTEMPT=2 DATA="$data" WORK="$BATS_TEST_TMPDIR/work" sh -e "$BATS_TEST_TMPDIR/step.sh") || return
+  (cd "$data" && find rules-out -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(cat "$f")"; done)
+}
+
+@test "check-updates: Hand over the rules takes the file of its package alone, within 64 KiB and no link" {
+  local work="$BATS_TEST_TMPDIR/work"
+  mkdir -p "$work/rules"
+  echo mine >"$work/rules/foo"
+  echo other >"$work/rules/bar"
+  PACKAGE=foo run run_rules_hand_over
+  [ "$status" -eq 0 ]
+  [ "$output" = "rules-out/2/foo mine" ]
+  rm -rf "$BATS_TEST_TMPDIR/data"
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  ln -sf "$BATS_TEST_TMPDIR/secret" "$work/rules/foo"
+  PACKAGE=foo run run_rules_hand_over
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  rm -rf "$BATS_TEST_TMPDIR/data" "$work/rules/foo"
+  truncate -s $((64 * 1024 + 1)) "$work/rules/foo"
+  PACKAGE=foo run run_rules_hand_over
+  [ "$status" -eq 0 ]
+  [ "$output" = "::warning::rules/foo is larger than 65536 bytes, so Hand over the rules skips it" ]
+  PACKAGE=../foo run run_rules_hand_over
+  [ "$status" -ne 0 ]
+  [ "$output" = "::error::Not a package name: ../foo" ]
+}
+
+# Adds file $3 of attempt $1 of the rules job of package $2, as publish downloads it into rules-in/
+add_rules_attempt() {
+  mkdir -p "$BATS_TEST_TMPDIR/ws/rules-in/$1"
+  printf '%s\n' "$3" >"$BATS_TEST_TMPDIR/ws/rules-in/$1/$2"
+}
+
+# Runs the step of publish that takes the newest rules, and lists every file of handoff/rules/
+run_take_rules() {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$ws"
+  step_run publish "Take the newest rules" >"$BATS_TEST_TMPDIR/step.sh"
+  (cd "$ws" && DATA="$ws" sh -e "$BATS_TEST_TMPDIR/step.sh") || return
+  (cd "$ws/handoff/rules" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(cat "$f")"; done)
+}
+
+@test "check-updates: publish takes the rules of the newest attempt of each package" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  add_rules_attempt 1 foo old
+  add_rules_attempt 1 bar first
+  add_rules_attempt 10 foo new
+  add_rules_attempt 2 foo second
+  add_rules_attempt 01 baz padded
+  add_rules_attempt 1 Bad upper
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$ws/rules-in/1/qux"
+  truncate -s $((64 * 1024 + 1)) "$ws/rules-in/1/big"
+  run run_take_rules
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' '::warning::rules-in/1/big is larger than 65536 bytes, so publish skips it' './bar first' './foo new')" ]
+}
+
+@test "check-updates: publish takes no rules without them or through a link" {
+  run run_take_rules
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -d "$BATS_TEST_TMPDIR/ws/handoff/rules" ]
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere/1"
+  echo linked >"$BATS_TEST_TMPDIR/elsewhere/1/foo"
+  rm -rf "$BATS_TEST_TMPDIR/ws"
+  mkdir -p "$BATS_TEST_TMPDIR/ws"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$BATS_TEST_TMPDIR/ws/rules-in"
+  run run_take_rules
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Publish fails a package of _rules without the file of the rules job, so they run in the same run
+@test "check-updates: publish takes the rules after the handoff of verify, before builder" {
+  run yq '.jobs.publish.steps[] | select(.name == "Download rules") | .if' "$CHECK_UPDATES"
+  [ "$output" = "needs.check.outputs.rules == 'true'" ]
+  [ "$(step_index publish "Download rules")" -gt "$(step_index publish "Keep the statuses after a failed verify")" ]
+  [ "$(step_index publish "Take the newest rules")" -eq $(($(step_index publish "Download rules") + 1)) ]
+  [ "$(step_index publish "Take the newest rules")" -lt "$(step_index publish "Publish updates")" ]
+}
+
+@test "run-as-builder: gives builder the files of the rules jobs in the handoff" {
+  local work="$BATS_TEST_TMPDIR/work" rules="$BATS_TEST_TMPDIR/data/handoff/rules"
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  mkdir -p "$rules/sub"
+  printf 'version\t1.0\n' >"$rules/foo"
+  echo x >"$rules/Bad"
+  echo x >"$rules/sub/foo"
+  truncate -s $((64 * 1024 + 1)) "$rules/big"
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$rules/link"
+  SUDO_OUT=ok run_builder_step publish "Publish updates"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1/handoff/rules" && find . | LC_ALL=C sort' _ "$work"
+  [ "$output" = $'.\n./foo' ]
+  [ "$(cat "$work/handoff/rules/foo")" = $'version\t1.0' ]
+}
+
+# Publish fails a package of _rules without the file of the rules job, so _rules lists the packages of
+# the jobs of rules alone
+@test "check-updates: Decide lists the packages of _rules among those to prepare for the jobs of rules" {
+  run run_decide_step a="new_version: 2.0.0" b="new_version: 2.0.0" c=up_to_date _rules=$'b\nc\nzz\nBad name\n../x\nb'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a","b"]\nrules=true\nto-rules=["b"]' ]
+  [ "$(cat "$BATS_TEST_TMPDIR/data/statuses/_rules")" = b ]
+  rm -rf "$BATS_TEST_TMPDIR/data" "$BATS_TEST_TMPDIR/ws/packages"
+  run run_decide_step a="new_version: 2.0.0" _rules=c
+  [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["a"]\nrules=false\nto-rules=[]' ]
+  [ ! -e "$BATS_TEST_TMPDIR/data/statuses/_rules" ]
+}
+
 @test "check-updates: verify also runs after a failed job of prepare" {
   run yq '.jobs.verify.if' "$CHECK_UPDATES"
   [ "$output" = "!cancelled() && needs.check.outputs.prepare == 'true'" ]
@@ -1899,7 +2060,7 @@ builder_steps() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"scripts/check-all.sh"* ]]
   run builder_steps
-  [ "${#lines[@]}" -eq 4 ]
+  [ "${#lines[@]}" -eq 5 ]
 }
 
 @test "run-as-builder: takes its inputs through the environment" {
@@ -1972,8 +2133,9 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
+    "rules${tab}Run the requires rules${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --rules rules cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
     "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
   )
@@ -1996,7 +2158,7 @@ sudo_commands() {
   [ "$status" -eq 3 ]
   run sudo_commands
   [ "${#lines[@]}" -eq 1 ]
-  [[ "${lines[0]}" == *"/check-all.sh cwd="* ]]
+  [[ "${lines[0]}" == *"/check-all.sh --rules-later cwd="* ]]
 }
 
 # update-readme.sh ends with 3 when it leaves README.md as it is, and the step warns after
@@ -2265,7 +2427,7 @@ make_builder_inputs() {
   local steps step token runs
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   mapfile -t steps < <(builder_steps)
-  [ "${#steps[@]}" -eq 4 ]
+  [ "${#steps[@]}" -eq 5 ]
   for step in "${steps[@]}"; do
     echo "$step"
     rm -rf "$BATS_TEST_TMPDIR/work"
@@ -2291,7 +2453,7 @@ make_builder_inputs() {
   local steps step
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   mapfile -t steps < <(builder_steps)
-  [ "${#steps[@]}" -eq 4 ]
+  [ "${#steps[@]}" -eq 5 ]
   for step in "${steps[@]}"; do
     echo "$step"
     rm -rf "$BATS_TEST_TMPDIR/work"
@@ -2328,7 +2490,7 @@ make_builder_inputs() {
   run yq 'explode(.) | .jobs[].steps[] | select(has("run")) | .run' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   mapfile -t found < <(grep -v '^[[:space:]]*#' <<<"$output" | grep useradd)
-  [ "${#found[@]}" -eq 4 ]
+  [ "${#found[@]}" -eq 5 ]
   for line in "${found[@]}"; do
     [ "$line" = "useradd -m -u 2000 builder" ]
   done
@@ -3722,7 +3884,7 @@ make_runner_repo() {
 # or close an issue
 @test "check-updates: the issues job runs in every run that checked, after publish" {
   run yq '.jobs.issues.needs | join(" ")' "$CHECK_UPDATES"
-  [ "$output" = "image check prepare verify publish" ]
+  [ "$output" = "image check prepare verify rules publish" ]
   run yq '.jobs.issues.if' "$CHECK_UPDATES"
   [ "$output" = "!cancelled() && needs.check.result == 'success'" ]
   run yq '.jobs.check.steps[] | select(.name == "Upload statuses") | has("if")' "$CHECK_UPDATES"
@@ -3917,10 +4079,10 @@ run_bare_issues_step() {
 
 # The close step runs only after a publish that succeeded or was skipped, and
 # the issues job runs only after a check that succeeded
-@test "check-updates: the close step knows whether prepare and verify failed" {
+@test "check-updates: the close step knows whether prepare, verify and rules failed" {
   run yq '.jobs.issues.steps[] | select(.name == "Close resolved issues") | .env.RUN_OK' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = "\${{ (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}" ]
+  [ "$output" = "\${{ (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && (needs.verify.result == 'success' || needs.verify.result == 'skipped') && (needs.rules.result == 'success' || needs.rules.result == 'skipped') }}" ]
 }
 
 @test "check-updates: closes the issue of a package that is no longer held" {
@@ -4350,20 +4512,23 @@ close_files_step() {
     "$mnt/temp/_runner_file_commands 755" "$mnt/temp/step.sh 644")" ]
 }
 
-# The requires rule imports parses the files of a release with scripts/lib/py_imports.py
-@test "check-updates: check installs python and ruby" {
+# The check job holds the token, and the rules job parses the releases with scripts/lib/py_imports.py
+# and scripts/lib/rb_requires.rb
+@test "check-updates: rules installs python and ruby, and check neither" {
   run step_run check "Install dependencies"
-  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq python ruby"* ]]
+  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq" ]]
+  run step_run rules "Install dependencies"
+  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq python ruby" ]]
 }
 
-# The requires rules of the check read the Python distributions and modules of the repositories
-@test "check-updates: check syncs the files databases after Add builder, before the checkouts" {
+# The requires rules read the Python distributions, the modules and the gems of the repositories
+@test "check-updates: rules syncs the files databases after Add builder, before the checkouts" {
   local at
-  at=$(step_index check "Sync the files databases")
-  [ "$at" -eq $(($(step_index check "Add builder") + 1)) ]
-  [ "$at" -lt "$(step_index check "Checkout")" ]
-  [ "$at" -lt "$(step_index check "Close files to builder")" ]
-  [ "$(step_run check "Sync the files databases")" = "pacman -Fy --noconfirm" ]
+  at=$(step_index rules "Sync the files databases")
+  [ "$at" -eq $(($(step_index rules "Add builder") + 1)) ]
+  [ "$at" -lt "$(step_index rules "Checkout")" ]
+  [ "$at" -lt "$(step_index rules "Close files to builder")" ]
+  [ "$(step_run rules "Sync the files databases")" = "pacman -Fy --noconfirm" ]
   run yq '[.jobs[].steps[] | select(.name == "Sync the files databases")] | length' "$CHECK_UPDATES"
   [ "$output" = 1 ]
 }
@@ -4388,10 +4553,10 @@ close_files_step() {
 # Pull requests can commit any directory into the checkout, and the jobs that check it out
 # read and write the files of the run under /data alone
 @test "check-updates: the jobs with a checkout keep the files of the run in /data" {
-  run yq '[(.jobs.check, .jobs.prepare, .jobs.verify, .jobs.publish) | .steps[] |
+  run yq '[(.jobs.check, .jobs.prepare, .jobs.rules, .jobs.verify, .jobs.publish) | .steps[] |
     select(.uses // "" | test("^actions/(up|down)load-artifact@")) | .with.path] |
     (length | tostring) + " " + (map(test("^/data/[a-z-]+/?$")) | all | tostring)' "$CHECK_UPDATES"
-  [ "$output" = "9 true" ]
+  [ "$output" = "12 true" ]
   run yq '[.jobs[].steps[] | select(.uses // "" | test("run-as-builder$")) | .with | (.statuses, .handoff) | select(.)] |
     sort | unique | join(",")' "$CHECK_UPDATES"
   [ "$output" = "/data/handoff,/data/status" ]

@@ -2,7 +2,8 @@
 #
 # check-all.sh - Check all packages for updates, optionally update them
 #
-# Usage: ./scripts/check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--dry-run]
+# Usage: ./scripts/check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir> | --rules <dir>]
+#                               [--rules-later] [--dry-run]
 #
 # Without a mode: only checks and reports
 # With --update: runs update-pkg.sh for each outdated package
@@ -12,7 +13,10 @@
 #   and removes the ones that fail
 # With --publish <dir>: runs publish-pkg.sh for each package the check run
 #   found outdated, with the version it found, and keeps its other statuses
-# --prepare, --verify and --publish run no strategy.
+# With --rules <dir>: runs the requires rules of each package from current to the version the check
+#   run found, and writes the version and their lines, or error and the reason, to <dir>/<package>
+# --prepare, --verify, --publish and --rules run no strategy.
+# With --rules-later: a check run runs no requires rule and lists the packages that need them in _rules
 # With --dry-run: runs update-pkg.sh or publish-pkg.sh with --dry-run
 #
 # Writes the status of each package to .status/ under AURTOMATOR_DATA_DIR,
@@ -27,6 +31,7 @@ require_cmd vercmp
 MODE=check
 WORK_DIR=""
 DRY_RUN=""
+RULES_LATER=""
 
 # Time budget of one package, in seconds: for its version check, and for
 # its update, verify or publish
@@ -69,6 +74,12 @@ bounded() {
 bounded_alerts() {
   # shellcheck disable=SC2016
   bounded "$CHECK_TIMEOUT" bash -c 'source "$1/scripts/lib.sh" && fired_alerts "${@:2}"' _ "$AURTOMATOR_DIR" "$@"
+}
+
+# Prints yes when the requires rules run for package file $1, and no otherwise, under the check timeout
+bounded_rules_needed() {
+  # shellcheck disable=SC2016
+  bounded "$CHECK_TIMEOUT" bash -c 'source "$1/scripts/lib.sh" && requires_needed "$2"' _ "$AURTOMATOR_DIR" "$1"
 }
 
 # Errors keep their last bytes, since a server writes the stderr of git. With the line that
@@ -157,7 +168,11 @@ while [[ $# -gt 0 ]]; do
       MODE=update
       shift
       ;;
-    --prepare | --verify | --publish)
+    --rules-later)
+      RULES_LATER=1
+      shift
+      ;;
+    --prepare | --verify | --publish | --rules)
       if [[ -z "${2:-}" ]]; then
         echo "$1 needs a directory" >&2
         exit 1
@@ -171,7 +186,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '3,19p' "$0"
+      sed -n '3,23p' "$0"
       exit 0
       ;;
     *)
@@ -180,11 +195,15 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+if [[ -n "$RULES_LATER" && "$MODE" != check ]]; then
+  echo "--rules-later goes with a check run alone" >&2
+  exit 1
+fi
 
 # The memory of the hosts that did not answer in this run, for the requests of the checks, and
 # the run cache of archdb.sh; the modes that run no strategy keep neither
 unset AURTOMATOR_HOSTS_DIR AURTOMATOR_RUN_CACHE
-if [[ "$MODE" == check || "$MODE" == update ]]; then
+if [[ "$MODE" == check || "$MODE" == update || "$MODE" == rules ]]; then
   AURTOMATOR_HOSTS_DIR=$(mktemp -d)
   AURTOMATOR_RUN_CACHE=$(mktemp -d)
   export AURTOMATOR_HOSTS_DIR AURTOMATOR_RUN_CACHE
@@ -196,10 +215,10 @@ fi
 
 STATUS_DIR="${AURTOMATOR_DATA_DIR}/.status"
 
-# --prepare, --verify and --publish run no strategy: they take the statuses of
+# --prepare, --verify, --publish and --rules run no strategy: they take the statuses of
 # the check run, read here before the run clears .status/
 declare -A CHECKED=()
-if [[ "$MODE" == "prepare" || "$MODE" == "verify" || "$MODE" == "publish" ]] && [[ ! -L "$STATUS_DIR" ]]; then
+if [[ "$MODE" =~ ^(prepare|verify|publish|rules)$ ]] && [[ ! -L "$STATUS_DIR" ]]; then
   for status_file in "$STATUS_DIR"/*; do
     [[ -f "$status_file" && ! -L "$status_file" ]] || continue
     CHECKED["${status_file##*/}"]=$(<"$status_file")
@@ -281,6 +300,42 @@ if [[ "$MODE" == "verify" ]]; then
         status_text "update_failed: ${verify_err}" >"${WORK_DIR}/status/${pkg_name}"
         ;;
     esac
+  done
+  exit 0
+fi
+
+# The rules job of CI gets one package, whose requires rules download and parse its release without
+# the token and the statuses of the check job; the version and the lines of the rules, or error and the
+# reason, go to <dir>/<package>, and the statuses of the check run stay
+if [[ "$MODE" == rules ]]; then
+  mkdir -p "$WORK_DIR"
+  for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
+    [[ -f "$pkg_file" && ! -L "$pkg_file" ]] || continue
+    pkg_name=$(package_name "$pkg_file") || continue
+    found="${CHECKED[$pkg_name]:-}"
+    version=""
+    case "$found" in
+      "new_version: "* | "available_downgrade: "* | "new_build: "*) version="${found#*: }" ;;
+      "arch_back: "*) version=$(arch_status_version "${found#arch_back: }") || version="" ;;
+    esac
+    err_file=$(mktemp)
+    rules_rc=0
+    lines=""
+    if ! validate_pkgver "$version" 2>/dev/null; then
+      rules_rc=1
+      echo "no new version from the check run" >"$err_file"
+    else
+      lines=$(bounded_alerts "$pkg_file" "$(pkg_get "$pkg_file" '.current // ""')" "$version" requires 2>"$err_file") ||
+        rules_rc=$?
+    fi
+    if ((rules_rc != 0)); then
+      rules_err=$(script_error "$rules_rc" "$err_file" "$CHECK_TIMEOUT")
+      log_err "Failed to run the requires rules of $pkg_name: $(status_text "$rules_err")"
+      status_text "error"$'\n'"$rules_err" >"${WORK_DIR}/${pkg_name}"
+    else
+      printf 'version\t%s\n%s' "$version" "${lines:+$lines$'\n'}" >"${WORK_DIR}/${pkg_name}"
+    fi
+    rm -f "$err_file"
   done
   exit 0
 fi
@@ -469,14 +524,44 @@ companion_waits() {
 }
 
 # Prints the alert lines of package $1 for --prepare and --publish: the lines of the check run,
-# then those of offline rules in $2 that the check run lacks
+# those of the rules job in $3, then those of offline rules in $2 that the check run lacks
 publish_alerts() {
   local checked line
   checked=$(checked_alerts "$1")
   [[ -z "$checked" ]] || printf '%s\n' "$checked"
+  [[ -z "${3:-}" ]] || printf '%s\n' "$3"
   while IFS= read -r line; do
     [[ -z "$line" ]] || grep -qxF -e "$line" <<<"$checked" || printf '%s\n' "$line"
   done <<<"$2"
+}
+
+# Prints the lines of the rules job for package $1 of _rules from <dir>/rules as fired_alerts prints them,
+# nothing for another package; fails with the reason without a file of the version of the check run
+rules_handed() {
+  local dir="${WORK_DIR}/rules" file line message re=$'^(hold|notice|wait)\t[^\t]+$'
+  grep -qxF -e "$1" <<<"${CHECKED[_rules]:-}" || return 0
+  file="$dir/$1"
+  if [[ ! -d "$dir" || -L "$dir" || ! -f "$file" || -L "$file" ]] || _has_nul "$file" ||
+    (($(stat -c %s -- "$file") > 65536)); then
+    echo "the rules job handed over no result"
+    return 1
+  fi
+  if [[ "$(head -n 1 -- "$file")" == error ]]; then
+    message=$(tail -n +2 -- "$file" | shown_text)
+    echo "${message:-the rules job failed}"
+    return 1
+  fi
+  # Attempts of a run hand over the rules of the version of their check run
+  if [[ "$(head -n 1 -- "$file")" != "version"$'\t'"$(checked_version "$1" 2>/dev/null)" ]]; then
+    echo "the rules job handed over no result"
+    return 1
+  fi
+  # builder of the rules job writes the file, so lines of another form and with control characters drop
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ $re ]] && ! has_control "$line"; then
+      printf '%s\n' "$line"
+    fi
+  done < <(tail -n +2 -- "$file")
 }
 
 # Prints the lines of _alerts of the check run for package $1 as fired_alerts prints them.
@@ -617,8 +702,8 @@ find_arches() {
 run_package() {
   local pkg_file="$1" pass="$2"
   local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false in_flight
-  local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err
-  local stem yaml_name host
+  local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err needed
+  local stem yaml_name host rules_lines=""
   # The write-back of current takes regular files alone, so a linked YAML keeps its old current
   if [[ -L "$pkg_file" ]]; then
     stem="${pkg_file##*/}"
@@ -659,7 +744,20 @@ run_package() {
           echo "check_failed: invalid status from the check run" >"${STATUS_DIR}/${pkg_name}"
           return
         fi
+        # The rules job runs the requires rules of the packages of _rules beside prepare and verify
+        if ! rules_lines=$(rules_handed "$pkg_name"); then
+          log_err "Failed to check $pkg_name: $(status_text "$rules_lines")"
+          status_text "check_failed: ${rules_lines}" >"${STATUS_DIR}/${pkg_name}"
+          return
+        fi
         if [[ -L "${WORK_DIR}/prepared" || ! -d "${WORK_DIR}/prepared/${pkg_name}" ]]; then
+          # Its issue lists the notes of the rules, and their hold holds the update, as the hold of
+          # changed against the AUR does in prepare
+          record_alerts "$pkg_name" "$rules_lines"
+          if [[ $'\n'"$rules_lines" == *$'\nhold\t'* ]]; then
+            echo "held: $(checked_version "$pkg_name")" >"${STATUS_DIR}/${pkg_name}"
+            return
+          fi
           # The check run left it for a later run, past the 256 jobs of a run, or verify past its budget
           if grep -qxF -e "$pkg_name" <<<"${CHECKED[_deferred]:-}" || unverified "$pkg_name"; then
             printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
@@ -797,7 +895,10 @@ run_package() {
   check_rc=0
   if [[ "$MODE" == prepare || "$MODE" == publish ]]; then
     alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" offline 2>"$err_file") || check_rc=$?
-    ((check_rc != 0)) || alerts=$(publish_alerts "$pkg_name" "$alerts")
+    ((check_rc != 0)) || alerts=$(publish_alerts "$pkg_name" "$alerts" "$rules_lines")
+  elif [[ -n "$RULES_LATER" ]]; then
+    # The rules job of CI runs the requires rules, which download and parse releases
+    alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" offline 2>"$err_file") || check_rc=$?
   else
     alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" 2>"$err_file") || check_rc=$?
   fi
@@ -879,6 +980,21 @@ run_package() {
 
   case "$MODE" in
     check)
+      # The rules job of CI takes the packages of _rules
+      if [[ -n "$RULES_LATER" ]]; then
+        err_file=$(mktemp)
+        check_rc=0
+        needed=$(bounded_rules_needed "$pkg_file" 2>"$err_file") || check_rc=$?
+        if ((check_rc != 0)) || [[ "$needed" != yes && "$needed" != no ]]; then
+          check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT")
+          rm -f "$err_file"
+          log_err "Failed to check $pkg_name: $(status_text "${check_err:-the AUR .SRCINFO could not be read}")"
+          status_text "check_failed: ${check_err:-the AUR .SRCINFO could not be read}" >"${STATUS_DIR}/${pkg_name}"
+          return
+        fi
+        rm -f "$err_file"
+        [[ "$needed" != yes ]] || printf '%s\n' "$pkg_name" >>"${STATUS_DIR}/_rules"
+      fi
       echo "$available" >"${STATUS_DIR}/${pkg_name}"
       return
       ;;

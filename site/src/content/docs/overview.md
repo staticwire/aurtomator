@@ -22,6 +22,9 @@ flowchart TD
     C -->|all done| W{new version, README or statistics changed?}
     W -->|no| I
     W -->|new version| P[prepare job: no secrets, no token]
+    W -->|new version, Python or Ruby in depends| RU[rules job: no secrets, no token]
+    RU --> RU1[check-all.sh --rules: read the release, write the alert lines]
+    RU1 --> Q
     W -->|README or statistics only| Q
     P --> B2[check-all.sh --prepare]
     B2 --> H[update-pkg.sh --prepare for each new_version]
@@ -55,7 +58,7 @@ flowchart TD
 - One YAML per package, so each added or removed package is one file.
 - One script per kind of upstream source. New sources take a new script plus checks of their fields in `scripts/validate-pkg.sh`.
 - The PKGBUILD stays yours. aurtomator changes `pkgver`, `pkgrel`, checksums, `.SRCINFO`, the `upstream.asset_var` line, see [Values from release asset names](/features/asset-values/), and the `arch=(...)` line of versions without some arches, see [Versions without some arches](/features/missing-arches/). Build steps, dependencies and install files stay as they are.
-- One job of five holds the secrets. PKGBUILDs are code, and updates run them. `check` runs the strategies with the read-only token and runs no PKGBUILD. `prepare` runs the PKGBUILD of each package in a job of its own, without secrets and without a token, and hands over only the files of that package. `verify` downloads sources and checks checksums without secrets, as an unprivileged user. `publish` holds the SSH key, the GPG key and the write token, runs no PKGBUILD, no strategy and no download, and checks the prepared files before it pushes, see [Prepare and publish](/internals/update-process/#prepare-and-publish). `issues` can write issues and nothing else, see [Issues](/features/issues/).
+- One job of six holds the secrets. PKGBUILDs are code, and updates run them. `check` runs the strategies with the read-only token, runs no PKGBUILD and parses no release. `rules` runs the requires rules of each package that needs them in a job of its own, without secrets and without a token, since they download its release and parse its files. `prepare` runs the PKGBUILD of each package in a job of its own, without secrets and without a token, and hands over only the files of that package. `verify` downloads sources and checks checksums without secrets, as an unprivileged user. `publish` holds the SSH key, the GPG key and the write token, runs no PKGBUILD, no strategy and no download, and checks the prepared files before it pushes, see [Prepare and publish](/internals/update-process/#prepare-and-publish). `issues` can write issues and nothing else, see [Issues](/features/issues/).
 - Broken packages do not block the others. Their failure gets a log line and an issue, and per-package time limits stop packages that hang.
 
 ## The steps of an update

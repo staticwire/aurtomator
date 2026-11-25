@@ -3922,6 +3922,111 @@ alerts:
   [ ! -e "$CURL_ARGS_LOG" ]
 }
 
+# Helper: package zensical-bin of strategy pypi at 0.0.74, which the check run found at 0.1.3 and
+# listed in _rules, with the file $1 that the rules job handed over, for 0.1.3 unless it starts with
+# error, prepared unless $2 is unprepared
+rules_package() {
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74
+alerts:
+  - requires: changed
+    hold: true"
+  checked_status zensical-bin "new_version: 0.1.3"
+  echo zensical-bin >"$TEST_TMPDIR/.status/_rules"
+  # A publish before writes _alerts into the statuses that the next one reads
+  rm -f "$TEST_TMPDIR/.status/_alerts"
+  mkdir -p "$TEST_TMPDIR/out/rules"
+  [[ "${2:-}" == unprepared ]] || mkdir -p "$TEST_TMPDIR/out/prepared/zensical-bin"
+  if [[ "$1" == error* ]]; then
+    printf '%s' "$1" >"$TEST_TMPDIR/out/rules/zensical-bin"
+  else
+    printf 'version\t0.1.3\n%s' "$1" >"$TEST_TMPDIR/out/rules/zensical-bin"
+  fi
+}
+
+# The rules job runs the requires rules beside prepare and verify, and publish applies their lines
+@test "check-all --publish: holds an update on a line of the rules job and records its lines" {
+  rules_package $'hold\tdrops deepmerge\nnotice\tadds x\001y\nlater\tadds z\nnotice\tadds pathspec\n'
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge\nzensical-bin\tnotice\tadds pathspec' ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+  rules_package $'notice\tadds pathspec\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "updated: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\tnotice\tadds pathspec' ]
+}
+
+# No package of _rules goes out without the lines of its rules
+@test "check-all --publish: fails a package of _rules without a result of the rules job, or with its error" {
+  stub_script publish-pkg.sh 0
+  rules_package $'error\nzensical 0.1.3: PyPI holds no metadata that lists the requirements without running code\n'
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: zensical 0.1.3: PyPI holds no metadata that lists the requirements without running code" ]
+  rules_package ""
+  rm "$TEST_TMPDIR/out/rules/zensical-bin"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
+  echo "notice"$'\t'"elsewhere" >"$TEST_TMPDIR/elsewhere"
+  ln -s "$TEST_TMPDIR/elsewhere" "$TEST_TMPDIR/out/rules/zensical-bin"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
+  rm "$TEST_TMPDIR/out/rules/zensical-bin"
+  truncate -s $((64 * 1024 + 1)) "$TEST_TMPDIR/out/rules/zensical-bin"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
+  # An attempt of the run before a check run that found another version
+  printf 'version\t0.1.2\nnotice\tadds pathspec\n' >"$TEST_TMPDIR/out/rules/zensical-bin"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  # Packages off _rules need no result
+  rules_package ""
+  rm "$TEST_TMPDIR/out/rules/zensical-bin" "$TEST_TMPDIR/.status/_rules"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "updated: 0.1.3" ]
+}
+
+# Prepare runs changed with hold against the AUR and fails on a hold, and its issue lists the notes
+@test "check-all --publish: holds or records the lines of the rules job for a package that prepare dropped" {
+  stub_script publish-pkg.sh 0
+  rules_package $'notice\tadds pathspec\n' unprepared
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "update_failed: prepare and verify handed over no update" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\tnotice\tadds pathspec' ]
+  rules_package $'hold\tdrops deepmerge\n' unprepared
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\thold\tdrops deepmerge' ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+}
+
+# Companions run after the other packages, so they see the hold that publish writes
+@test "check-all --publish: a companion waits for its project package that the rules job holds" {
+  rules_package $'hold\tdrops deepmerge\n'
+  create_test_package "python-zensical-ui" "pypi" "upstream:
+  registry: zensical-ui
+  pin_from: zensical
+current: 0.0.41"
+  checked_status python-zensical-ui "new_version: 0.0.43"
+  mkdir -p "$TEST_TMPDIR/out/prepared/python-zensical-ui"
+  stub_script publish-pkg.sh 0
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "held: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/python-zensical-ui")" = "held: 0.0.43" ]
+  grep -qxF $'python-zensical-ui\twait\tWaits for the held update of zensical-bin' "$TEST_TMPDIR/.status/_alerts"
+}
+
 @test "check-all --publish: holds an update that the check run recorded a hold for" {
   create_test_package "zensical-bin" "pypi" "upstream:
   registry: zensical
