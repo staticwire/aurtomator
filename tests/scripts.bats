@@ -4024,7 +4024,8 @@ $1"
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   grep -qxF $'kube-diagrams\tnotice\tdiagrams: not in depends' "$TEST_TMPDIR/.status/_alerts"
-  ! grep -q -e adds -e drops -e 'has no release' "$TEST_TMPDIR/.status/_alerts"
+  run grep -q -e adds -e drops -e 'has no release' "$TEST_TMPDIR/.status/_alerts"
+  [ "$status" -ne 0 ]
   grep -q 'pypi.org/pypi/KubeDiagrams/json$' "$CURL_ARGS_LOG"
 }
 
