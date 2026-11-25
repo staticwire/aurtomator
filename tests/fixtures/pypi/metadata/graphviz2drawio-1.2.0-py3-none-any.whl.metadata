@@ -1,0 +1,32 @@
+Metadata-Version: 2.4
+Name: graphviz2drawio
+Version: 1.2.0
+Summary: Convert graphviz (dot) files to draw.io / lucid (mxGraph) format. Beautiful and editable graphs in your favorite editor.
+Keywords: graphviz,graph,agraph,dot,convert,conversion,diagrams,drawio,mxgraph,maxgraph,Lucidchart
+Author: Harold Martin
+Author-email: Harold Martin <harold.martin@gmail.com>
+License-Expression: GPL-3.0-or-later
+License-File: LICENSE.md
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: End Users/Desktop
+Classifier: Intended Audience :: Information Technology
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Multimedia :: Graphics
+Classifier: Topic :: Multimedia :: Graphics :: Graphics Conversion
+Classifier: Topic :: Scientific/Engineering :: Visualization
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Requires-Dist: puremagic
+Requires-Dist: pygraphviz
+Requires-Dist: svg-path<7.0
+Requires-Python: >=3.11
+Project-URL: Source, https://github.com/hbmartin/graphviz2drawio/
+Project-URL: Bug Reports, https://github.com/hbmartin/graphviz2drawio/issues
+Description-Content-Type: text/markdown
+
+# graphviz2drawio
+

@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "_last-serial": 33012157,
+    "api-version": "1.4"
+  },
+  "name": "ydiskarc",
+  "versions": [
+    "1.0.1",
+    "1.1.0"
+  ],
+  "files": [
+    {
+      "filename": "ydiskarc-1.0.1.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/e4/8c/89bf8e3ebda45a6fd2dd345c377be9c6fbf2d006cbd848934dddda817668/ydiskarc-1.0.1.tar.gz",
+      "hashes": {
+        "sha256": "0543c9a58b255db7ddbc204e6c6b0ec1401649393a4363ddfc94d998cb9f340d"
+      },
+      "core-metadata": false,
+      "size": 7906,
+      "yanked": false
+    },
+    {
+      "filename": "ydiskarc-1.1.0-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/c1/38/16a3ba9f717aa3633e0924b9b20c10fa3c203c23c94084b85ec477563fba/ydiskarc-1.1.0-py2.py3-none-any.whl",
+      "hashes": {
+        "sha256": "13f9cbdc1a1e7b825db64c5dbcbe7272adf911a5efca6c90663a632eb86b839d"
+      },
+      "core-metadata": {
+        "sha256": "5742b458eb3fa969174726b6381f12675234078a37124a9a78e02160b1829664"
+      },
+      "size": 15077,
+      "yanked": false
+    },
+    {
+      "filename": "ydiskarc-1.1.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/7a/44/7963c579e8c466725206d583b60487a6db9bae4a63ceec280b528e07ab7f/ydiskarc-1.1.0.tar.gz",
+      "hashes": {
+        "sha256": "204b6ea33dc670ea7088bb9668c8113e43a2bf866ff173c3129fcfd34c9b7ae3"
+      },
+      "core-metadata": false,
+      "size": 21904,
+      "yanked": false
+    }
+  ]
+}

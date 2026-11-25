@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "_last-serial": 38823440,
+    "api-version": "1.4"
+  },
+  "name": "graphviz2drawio",
+  "versions": [
+    "0.0.1",
+    "0.0.2",
+    "0.0.3",
+    "0.0.4",
+    "0.0.5",
+    "0.0.6",
+    "0.1.0",
+    "0.2.0",
+    "0.3.0",
+    "0.4.0",
+    "0.5.0",
+    "1.0.0",
+    "1.1.0",
+    "1.2.0"
+  ],
+  "files": [
+    {
+      "filename": "graphviz2drawio-1.2.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/78/32/4d681b91bffd60e84c068c7f4ebe1fceb77905e9f9625f232018591be9b6/graphviz2drawio-1.2.0-py3-none-any.whl",
+      "hashes": {
+        "sha256": "09e6d2277043c497b64a008286e7948392e5b79d72ffe54219ef8b709592591a"
+      },
+      "core-metadata": {
+        "sha256": "8b979f3bf2c0d512200ef983853de9cb4c26e1690165e8d633ef5c520dd51ee6"
+      },
+      "size": 52072,
+      "yanked": false
+    },
+    {
+      "filename": "graphviz2drawio-1.2.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/ac/5e/c83be8d5beed742079976c2b2bd75f3505166e0ef5aa2ffe67cbced0a94a/graphviz2drawio-1.2.0.tar.gz",
+      "hashes": {
+        "sha256": "75a4775dd975c932ff7e2bfa49cc5ec6c8f1dffe77a3b5b56d40ae3850af692b"
+      },
+      "core-metadata": false,
+      "size": 46130,
+      "yanked": false
+    }
+  ]
+}

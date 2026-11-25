@@ -1,0 +1,110 @@
+[
+  {
+    "Name": "python-svg.path",
+    "PackageBase": "python-svg.path",
+    "Version": "6.3-1",
+    "Depends": [
+      "python"
+    ],
+    "Provides": []
+  },
+  {
+    "Name": "graphviz2drawio",
+    "PackageBase": "graphviz2drawio",
+    "Version": "1.2.0-1",
+    "Depends": [
+      "python",
+      "python-puremagic",
+      "python-pygraphviz",
+      "python-svg.path<7"
+    ],
+    "Provides": []
+  },
+  {
+    "Name": "ydiskarc",
+    "PackageBase": "ydiskarc",
+    "Version": "1.1.0-2",
+    "Depends": [
+      "python",
+      "python-typer",
+      "python-yaml",
+      "python-requests",
+      "python-rich",
+      "python-urllib3",
+      "python-tqdm"
+    ],
+    "Provides": []
+  },
+  {
+    "Name": "python-zensical-ui",
+    "PackageBase": "python-zensical-ui",
+    "Version": "0.0.43-1",
+    "Depends": [
+      "python"
+    ],
+    "Provides": []
+  },
+  {
+    "Name": "kube-diagrams",
+    "PackageBase": "kube-diagrams",
+    "Version": "0.9.0-2",
+    "Depends": [
+      "bash",
+      "graphviz2drawio",
+      "python",
+      "python-diagrams",
+      "python-pygraphviz",
+      "python-yaml"
+    ],
+    "Provides": []
+  },
+  {
+    "Name": "kube-diagrams-git",
+    "PackageBase": "kube-diagrams-git",
+    "Version": "r675.70e1dda-2",
+    "Depends": [
+      "bash",
+      "graphviz2drawio",
+      "python",
+      "python-diagrams",
+      "python-pygraphviz",
+      "python-yaml"
+    ],
+    "Provides": [
+      "kube-diagrams"
+    ]
+  },
+  {
+    "Name": "python-liblinear",
+    "PackageBase": "liblinear",
+    "Version": "2.50-2",
+    "Depends": [
+      "glibc",
+      "libgcc",
+      "libstdc++",
+      "python",
+      "python-numpy",
+      "python-scipy"
+    ],
+    "Provides": []
+  },
+  {
+    "Name": "zensical",
+    "PackageBase": "zensical",
+    "Version": "0.1.0-1",
+    "Depends": [
+      "python",
+      "python-click",
+      "python-deepmerge",
+      "python-jinja",
+      "python-markdown",
+      "python-pandas",
+      "python-pygments",
+      "python-pymdown-extensions",
+      "python-tabulate",
+      "python-tomli",
+      "python-yaml"
+    ],
+    "Provides": []
+  }
+]

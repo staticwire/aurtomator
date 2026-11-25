@@ -1,0 +1,30 @@
+pkgbase = liblinear
+	pkgdesc = A Library for Large Linear Classification
+	pkgver = 2.50
+	pkgrel = 2
+	url = https://www.csie.ntu.edu.tw/~cjlin/liblinear/
+	arch = x86_64
+	license = BSD-3-Clause
+	makedepends = python-build
+	makedepends = python-installer
+	makedepends = python-setuptools
+	makedepends = python-wheel
+	source = https://www.csie.ntu.edu.tw/~cjlin/liblinear/liblinear-2.50.tar.gz
+	source = liblinear-use-makepkg-flags.patch
+	sha256sums = e5eeafe2159c41148b59304da2ba0ed12648e3d491ce2b9625058e174e96ca29
+	sha256sums = f9895c818447c60701e1ccc72f05285c7f12cc37e935b493a54139541be15e26
+
+pkgname = liblinear
+	depends = glibc
+	depends = libgcc
+	depends = libstdc++
+
+pkgname = python-liblinear
+	pkgdesc = Python bindings for liblinear
+	depends = glibc
+	depends = libgcc
+	depends = libstdc++
+	depends = python
+	depends = python-numpy
+	depends = python-scipy
+	optdepends = python-numba: for enabling JIT compiler

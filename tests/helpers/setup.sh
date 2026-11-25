@@ -4,6 +4,8 @@
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$(cd "$TESTS_DIR/.." && pwd)"
+# Answers of real services that the mocks serve, see tests/fixtures/pypi/README.md
+export FIXTURES_DIR="$TESTS_DIR/fixtures"
 
 # CI sets it for the repository of aurtomator, and update-readme.sh reads it
 unset GITHUB_REPOSITORY
@@ -26,6 +28,7 @@ setup_test_env() {
   # Symlink all scripts and strategies for bashcov coverage tracking
   ln -sf "$PROJECT_DIR/scripts/"*.sh "$TEST_TMPDIR/scripts/"
   ln -sf "$PROJECT_DIR/scripts/lib/"*.sh "$TEST_TMPDIR/scripts/lib/"
+  ln -sf "$PROJECT_DIR/scripts/lib/"*.py "$TEST_TMPDIR/scripts/lib/"
   ln -sf "$PROJECT_DIR/strategies/"*.sh "$TEST_TMPDIR/strategies/"
 
   # Mock curl first in PATH, the mock git of AUR clones after MOCK_DIR: git mocks that a test writes
@@ -54,6 +57,11 @@ setup_test_env() {
 
   # git of the tests reaches no host, except where a script sets GIT_ALLOW_PROTOCOL itself
   export GIT_ALLOW_PROTOCOL=file
+
+  # Files a test writes for mock curl: simple/<project>.json, files.pythonhosted.org files by
+  # their name, and aur-rpc.json, a list of the packages AUR RPC knows
+  export MOCK_FILES_DIR="$TEST_TMPDIR/mock-files"
+  mkdir -p "$MOCK_FILES_DIR"
 }
 
 # bashcov-bats.sh sets AURTOMATOR_KEEP_TEST_DIRS: bashcov reads the trace
@@ -109,6 +117,74 @@ add_canary() {
 # Succeeds when no code of a PKGBUILD of add_canary ran
 canary_untouched() {
   [ -d "$TEST_TMPDIR/canary" ] && [ -z "$(ls -A "$TEST_TMPDIR/canary")" ]
+}
+
+# Usage: pypi_fake_file <project> <version> <file> <core-metadata sha256 or false>. Adds a release of
+# file <file> of MOCK_FILES_DIR to the simple page of the project in MOCK_FILES_DIR.
+pypi_fake_file() {
+  local page norm=${1,,}
+  norm=$(sed -E 's/[-_.]+/-/g' <<<"$norm")
+  page="$MOCK_FILES_DIR/simple/$norm.json"
+  mkdir -p "$MOCK_FILES_DIR/simple"
+  [[ -f "$page" ]] || printf '{"meta": {"api-version": "1.4"}, "name": "%s", "versions": [], "files": []}\n' "$norm" >"$page"
+  V="$2" F="${3##*/}" S="$(sha256sum "$3" | cut -d' ' -f1)" C="$4" yq -i -o json '
+    .versions = (.versions + [strenv(V)] | unique) |
+    .files += [{"filename": strenv(F), "url": "https://files.pythonhosted.org/packages/fake/" + strenv(F),
+      "hashes": {"sha256": strenv(S)}, "core-metadata": (strenv(C) | select(. != "false") | {"sha256": .}) // false,
+      "size": 1, "yanked": false}]' "$page"
+}
+
+# Usage: pypi_fake_metadata <project> <version> <METADATA text>. Writes a wheel entry of the release
+# whose .metadata holds the text, served by mock curl from MOCK_FILES_DIR
+pypi_fake_metadata() {
+  local wheel="${1//-/_}-$2-py3-none-any.whl"
+  printf '%s' "$3" >"$MOCK_FILES_DIR/$wheel.metadata"
+  : >"$MOCK_FILES_DIR/$wheel"
+  pypi_fake_file "$1" "$2" "$MOCK_FILES_DIR/$wheel" "$(sha256sum "$MOCK_FILES_DIR/$wheel.metadata" | cut -d' ' -f1)"
+}
+
+# Usage: pypi_fake <project> <version> [Requires-Dist value]...
+pypi_fake() {
+  local text req
+  text=$(printf 'Metadata-Version: 2.4\nName: %s\nVersion: %s\n' "$1" "$2")$'\n'
+  for req in "${@:3}"; do
+    text+="Requires-Dist: $req"$'\n'
+  done
+  pypi_fake_metadata "$1" "$2" "$text"$'\nThe body of the description.\n'
+}
+
+# Usage: pypi_fake_sdist <project> <version> <PKG-INFO text>. Writes an sdist of the release that
+# holds <name>-<version>/PKG-INFO, with no metadata file of its own
+pypi_fake_sdist() {
+  local dir="$TEST_TMPDIR/sdist-$1-$2" stem="${1//-/_}-$2"
+  mkdir -p "$dir/$stem"
+  printf '%s' "$3" >"$dir/$stem/PKG-INFO"
+  printf 'print("setup")\n' >"$dir/$stem/setup.py"
+  bsdtar -czf "$MOCK_FILES_DIR/$stem.tar.gz" -C "$dir" "$stem"
+  pypi_fake_file "$1" "$2" "$MOCK_FILES_DIR/$stem.tar.gz" false
+}
+
+# Usage: python_aur <pkgbase>. The AUR serves the package with python in depends, so the requires rules
+# run for it, and the mock pacman answers with no files database and no package but python
+python_aur() {
+  use_mock_pacman
+  printf 'pkgbase = %s\n\tpkgver = 1.0\n\tpkgrel = 1\n\tarch = any\n\tdepends = python\n\npkgname = %s\n' "$1" "$1" \
+    >"$TEST_TMPDIR/aur-$1.SRCINFO"
+  aur_srcinfo_remote "$1" "$TEST_TMPDIR/aur-$1.SRCINFO"
+}
+
+# Usage: aur_srcinfo_remote <pkgbase> <.SRCINFO>. The mock git of AUR clones then serves a repo
+# with that .SRCINFO and a stub PKGBUILD for <pkgbase>; MOCK_DIR keeps its git.
+aur_srcinfo_remote() {
+  local work="$TEST_TMPDIR/aur-work-$1" remote="$TEST_TMPDIR/aur-remote/$1.git"
+  git init -q --bare -b master "$remote"
+  git init -q -b master "$work"
+  cp "$2" "$work/.SRCINFO"
+  printf 'pkgname=%s\n' "$1" >"$work/PKGBUILD"
+  git -C "$work" add .
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid \
+    -c commit.gpgsign=false commit -qm "aur state"
+  git -C "$work" push -q "$remote" master
 }
 
 make_aur_remote() {

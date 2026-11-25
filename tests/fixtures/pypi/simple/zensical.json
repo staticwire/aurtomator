@@ -1,0 +1,167 @@
+{
+  "meta": {
+    "_last-serial": 43939437,
+    "api-version": "1.4"
+  },
+  "name": "zensical",
+  "versions": [
+    "0.0.0",
+    "0.0.1",
+    "0.0.2",
+    "0.0.3",
+    "0.0.4",
+    "0.0.5",
+    "0.0.6",
+    "0.0.7",
+    "0.0.8",
+    "0.0.9",
+    "0.0.10",
+    "0.0.11",
+    "0.0.12",
+    "0.0.13",
+    "0.0.14",
+    "0.0.15",
+    "0.0.16",
+    "0.0.17",
+    "0.0.18",
+    "0.0.19",
+    "0.0.20",
+    "0.0.21",
+    "0.0.22",
+    "0.0.23",
+    "0.0.24",
+    "0.0.25",
+    "0.0.26",
+    "0.0.27",
+    "0.0.28",
+    "0.0.29",
+    "0.0.30",
+    "0.0.31",
+    "0.0.32",
+    "0.0.33",
+    "0.0.34",
+    "0.0.35",
+    "0.0.36",
+    "0.0.37",
+    "0.0.38",
+    "0.0.39",
+    "0.0.40",
+    "0.0.41",
+    "0.0.42",
+    "0.0.43",
+    "0.0.44",
+    "0.0.45",
+    "0.0.46",
+    "0.0.47",
+    "0.0.48",
+    "0.0.50",
+    "0.0.51",
+    "0.0.52",
+    "0.0.53",
+    "0.0.54",
+    "0.0.55",
+    "0.0.56",
+    "0.0.57",
+    "0.0.58",
+    "0.0.59",
+    "0.0.60",
+    "0.0.61",
+    "0.0.62",
+    "0.0.63",
+    "0.0.64",
+    "0.0.65",
+    "0.0.66",
+    "0.0.67",
+    "0.0.68",
+    "0.0.69",
+    "0.0.70",
+    "0.0.71",
+    "0.0.72",
+    "0.0.73",
+    "0.0.74",
+    "0.1.0",
+    "0.1.1",
+    "0.1.2",
+    "0.1.3"
+  ],
+  "files": [
+    {
+      "filename": "zensical-0.0.74-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/92/48/77a87b588801a6945a274415bffd0ffe7d7781424bec449d54422780784f/zensical-0.0.74-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "hashes": {
+        "sha256": "9da81ad4bb42bdd92a52d9e42623eaa25c936fa0df0d26e507dcd282e8bf85b2"
+      },
+      "core-metadata": {
+        "sha256": "2c4a0c61e2dc1b4044635e17402fbf93df41f37b66654deed71c34b3acf69a13"
+      },
+      "size": 9151632,
+      "yanked": false
+    },
+    {
+      "filename": "zensical-0.0.74.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/06/41/147eed1f072917de5d91e2aa0c2204edf87e5e9c7cd34c314177969d5281/zensical-0.0.74.tar.gz",
+      "hashes": {
+        "sha256": "f2ddd17daead93fdbcaa42b5bdc367f9a4808bad282fe706763cb52dba29d96b"
+      },
+      "core-metadata": false,
+      "size": 514731,
+      "yanked": false
+    },
+    {
+      "filename": "zensical-0.1.2-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/a1/bb/f747ff3e896913ddc0e76b7f8e840eb403681deb7b7b320b30e15bbd12d5/zensical-0.1.2-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "hashes": {
+        "sha256": "34b963f857512c47fe1c6b91e8b811ddf7aaed33cf7b903d249c412f3a679a76"
+      },
+      "core-metadata": {
+        "sha256": "23611c7bc0f9fb6fcbd13d5b9f983d41086b5823e487fb237730d9474f11384d"
+      },
+      "size": 9286344,
+      "yanked": false
+    },
+    {
+      "filename": "zensical-0.1.2.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/57/2c/995e041a4ff5b8a4fa6023db086d43ab71f7ac14aa88c2fe801e7243a91d/zensical-0.1.2.tar.gz",
+      "hashes": {
+        "sha256": "733c8bd5204c8fa5fbff9b0a3caa7fe134f711130cc343d26f386ac7d29d05bd"
+      },
+      "core-metadata": false,
+      "size": 535446,
+      "yanked": false
+    },
+    {
+      "filename": "zensical-0.1.3-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/36/ab/9ac4334f3cbb45ab48c8081afa18f24d170292aca5e6255a874b6e2186d0/zensical-0.1.3-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "hashes": {
+        "sha256": "a033f82e089abb76cc2c7531cf1702782472acceb14c96e7020edc8c3d8a736c"
+      },
+      "core-metadata": {
+        "sha256": "398eae04c469fc56f8c9f04d38d3bf548f063e9effbb70128832eb87f02e9094"
+      },
+      "size": 9364511,
+      "yanked": false
+    },
+    {
+      "filename": "zensical-0.1.3-cp311-abi3-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/e8/e3/6fa3ad09d055fa37533c2408f7aec462e2dbad1a48431b4579e69d70349f/zensical-0.1.3-cp311-abi3-win_amd64.whl",
+      "hashes": {
+        "sha256": "d93dc520a91340c44d5ff0b78d5e69858ec97dcbab6448e42d17b919da3e0ab3"
+      },
+      "core-metadata": {
+        "sha256": "57151dcc649521b66f6047d93e640ea0882d811c51e6a044279d9a3c0b7be2bf"
+      },
+      "size": 9576349,
+      "yanked": false
+    },
+    {
+      "filename": "zensical-0.1.3.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/06/d6/aa6d76195af77534fa5cdaca1dac490a37f6c1a510c8958437607191adaa/zensical-0.1.3.tar.gz",
+      "hashes": {
+        "sha256": "70db96f93c0cebba22c47e7480b51c2132a28e10360f648f2df3f40f6287d386"
+      },
+      "core-metadata": false,
+      "size": 547926,
+      "yanked": false
+    }
+  ]
+}

@@ -300,10 +300,19 @@ secret_lines() {
 }
 
 # The search of the CLI takes tests/coverage.bats for a report, by its name
-@test "ci: Codecov uploads coverage/coverage.xml alone" {
+@test "ci: Codecov uploads the reports of bashcov and coverage.py alone" {
   run yq -o=json -I=0 '.jobs.test.steps[] | select(.name == "Upload coverage to Codecov") | .with | [.files, .disable_search]' \
     "$GITHUB_DIR/workflows/ci.yml"
-  [ "$output" = '["coverage/coverage.xml",true]' ]
+  [ "$output" = '["coverage/coverage.xml,coverage/python.xml",true]' ]
+}
+
+# bashcov-bats.sh measures scripts/lib/py_imports.py with coverage.py of the image
+@test "ci: the test job installs coverage.py, and lint compiles the Python helpers" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs.test.steps[] | select(.name == "Install dependencies") | .run' "$ci"
+  [[ "$output" == *" python-coverage"* ]]
+  run yq '.jobs.lint.steps[] | select(.name == "Compile the Python helpers") | .run' "$ci"
+  [ "$output" = "python3 -m py_compile scripts/lib/*.py" ]
 }
 
 # Default setup of code scanning skips the pull requests of Dependabot, which move the pins of
@@ -4270,6 +4279,24 @@ close_files_step() {
   run stat -c '%n %a' "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands" "$mnt/temp/step.sh"
   [ "$output" = "$(printf '%s\n' "$mnt/home 700" "$mnt/workflow 700" "$mnt/temp 700" \
     "$mnt/temp/_runner_file_commands 755" "$mnt/temp/step.sh 644")" ]
+}
+
+# The requires rule imports parses the files of a release with scripts/lib/py_imports.py
+@test "check-updates: check installs python" {
+  run step_run check "Install dependencies"
+  [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq python"* ]]
+}
+
+# The requires rules of the check read the Python distributions and modules of the repositories
+@test "check-updates: check syncs the files databases after Add builder, before the checkouts" {
+  local at
+  at=$(step_index check "Sync the files databases")
+  [ "$at" -eq $(($(step_index check "Add builder") + 1)) ]
+  [ "$at" -lt "$(step_index check "Checkout")" ]
+  [ "$at" -lt "$(step_index check "Close files to builder")" ]
+  [ "$(step_run check "Sync the files databases")" = "pacman -Fy --noconfirm" ]
+  run yq '[.jobs[].steps[] | select(.name == "Sync the files databases")] | length' "$CHECK_UPDATES"
+  [ "$output" = 1 ]
 }
 
 @test "check-updates: each job with a checkout closes its files before downloads and builder" {

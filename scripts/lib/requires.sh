@@ -39,18 +39,26 @@ _requires_python() {
   done <<<"$info"
 }
 
-# Set REQ_NAME to the PEP 503 name of requirement $1, REQ_SPEC to its version clauses joined
-# by commas without blanks, or @ for a URL, and REQ_MARKER to its marker; fail outside PEP 508
+# Set REQ_NAME to the PEP 503 name of requirement $1, REQ_EXTRAS to its extras in that form, joined by
+# commas, REQ_SPEC to its clauses joined by commas without blanks, or @ for a URL, and REQ_MARKER
 requirement_split() {
-  local LC_ALL=C rest spec
+  local LC_ALL=C rest spec extras name extra
+  local -a list
   local head='^[[:blank:]]*([A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?)[[:blank:]]*(\[[^][]*\])?(.*)$'
   local url='^[[:blank:]]*@[[:blank:]]*[^[:blank:]]+([[:blank:]]+;[[:blank:]]*([^[:blank:]](.*[^[:blank:]])?))?[[:blank:]]*$'
   local clause='[[:blank:]]*(<=|<|!=|===|==|>=|>|~=)[[:blank:]]*[A-Za-z0-9._*+!-]+[[:blank:]]*'
   local parens='^[[:blank:]]*\((.*)\)[[:blank:]]*$' trimmed='^[[:blank:]]*([^[:blank:]](.*[^[:blank:]])?)[[:blank:]]*$'
-  REQ_NAME="" REQ_SPEC="" REQ_MARKER=""
+  REQ_NAME="" REQ_EXTRAS="" REQ_SPEC="" REQ_MARKER=""
   [[ "$1" =~ $head ]] || return 1
-  rest=${BASH_REMATCH[4]}
-  _pypi_norm "${BASH_REMATCH[1]}" || return 1
+  rest=${BASH_REMATCH[4]} extras=${BASH_REMATCH[3]} name=${BASH_REMATCH[1]}
+  extras=${extras#[}
+  IFS=, read -ra list <<<"${extras%]}"
+  for extra in "${list[@]}"; do
+    [[ "$extra" =~ $trimmed ]] || continue
+    _pypi_norm "${BASH_REMATCH[1]}" || return 1
+    REQ_EXTRAS+="${REQ_EXTRAS:+,}$PYPI_NORM"
+  done
+  _pypi_norm "$name" || return 1
   if [[ "$rest" =~ ^[[:blank:]]*@ ]]; then
     [[ "$rest" =~ $url ]] || return 1
     REQ_NAME=$PYPI_NORM REQ_SPEC=@ REQ_MARKER=${BASH_REMATCH[2]}
@@ -206,10 +214,26 @@ _marker_compare() {
       _requires_python
       _marker_version "$3" "$const" "$swapped" "$REQUIRES_PY_FULL"
       ;;
-    # The check asks for no extras, and the specification lets a tool reject extra !=
-    extra) if [[ "$3" == "!=" ]]; then _MK_VAL='?'; else _MK_VAL=0; fi ;;
+    extra) _marker_extra "$3" "$const" ;;
     *) _MK_VAL='?' ;;
   esac
+}
+
+# Set _MK_VAL for operator $1 between field extra and constant $2: the check asks for the extras of
+# MARKER_EXTRAS, none by default, and the specification lets a tool reject extra != without extras
+_marker_extra() {
+  local extra
+  if [[ -z "${MARKER_EXTRAS:-}" || ("$1" != "==" && "$1" != "!=") ]]; then
+    if [[ "$1" == "!=" ]]; then _MK_VAL='?'; else _MK_VAL=0; fi
+    return 0
+  fi
+  _MK_VAL=0
+  if _pypi_norm "$2"; then
+    for extra in ${MARKER_EXTRAS//,/ }; do
+      [[ "$extra" != "$PYPI_NORM" ]] || _MK_VAL=1
+    done
+  fi
+  [[ "$1" == "==" ]] || _MK_VAL=$((1 - _MK_VAL))
 }
 
 # Set _MK_VAL for operator $1 between a string field of value $4 and constant $2, where $3 is
@@ -235,126 +259,203 @@ _marker_string() {
   _MK_VAL=$hit
 }
 
-# Set _MK_VAL for operator $1 between a version field of value $4 and constant $2, where $3 is
-# set for a field right of the operator; in and not in are false, forms beyond the subset unknown
+# Set _MK_VAL for operator $1 between a version field of value $4 and constant $2, $3 set for a field
+# right of it: the left side meets the right as packaging tests markers, text outside PEP 440 is unknown
 _marker_version() {
-  local op=$1 const=$2 release
-  local re_version='^[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?$' re_release='^[0-9]+(\.[0-9]+)*$'
+  local rc=0
   _MK_VAL='?'
-  if [[ "$op" == in || "$op" == "not in" ]]; then
+  if [[ "$1" == in || "$1" == "not in" ]]; then
     _MK_VAL=0
     return 0
   fi
   [[ -n "$4" ]] || return 0
-  if [[ "$op" == "===" ]]; then
-    if [[ "${4,,}" == "${const,,}" ]]; then _MK_VAL=1; else _MK_VAL=0; fi
+  if [[ "$1" == "===" ]]; then
+    if [[ "${4,,}" == "${2,,}" ]]; then _MK_VAL=1; else _MK_VAL=0; fi
     return 0
   fi
+  [[ "$2" != *,* ]] || return 0
   if [[ -n "$3" ]]; then
-    case $op in
-      "<") op=">" ;;
-      ">") op="<" ;;
-      "<=") op=">=" ;;
-      ">=") op="<=" ;;
-      "~=") return 0 ;;
-    esac
-    [[ "$const" != *".*" ]] || return 0
+    pep440_holds "$2" "$1$4" || rc=$?
+  else
+    pep440_holds "$4" "$1$2" || rc=$?
   fi
-  [[ "$4" =~ $re_version ]] || return 0
-  if [[ "$const" == *".*" ]]; then
-    release=${const%".*"}
-    if [[ "$op" != "==" && "$op" != "!=" ]] || [[ ! "$release" =~ $re_release ]]; then
-      return 0
-    fi
-    if _pep440_prefix "$4" "$release"; then _MK_VAL=1; else _MK_VAL=0; fi
-    [[ "$op" == "==" ]] || _MK_VAL=$((1 - _MK_VAL))
-    return 0
-  fi
-  [[ "$const" =~ $re_version ]] || return 0
-  release=${const%%[abr]*}
-  [[ "$op" != "~=" || "$release" == *.* ]] || return 0
-  if _version_holds "$op" "$4" "$const"; then _MK_VAL=1; else _MK_VAL=0; fi
-}
-
-# Succeed when version $2 stands in relation $1 to version $3, both of the subset of _pep440_cmp
-_version_holds() {
-  local release=${3%%[abr]*}
-  _pep440_cmp "$2" "$3"
-  case $1 in
-    "==") ((PEP440_ORDER == 0)) ;;
-    "!=") ((PEP440_ORDER != 0)) ;;
-    "<") ((PEP440_ORDER < 0)) ;;
-    "<=") ((PEP440_ORDER <= 0)) ;;
-    ">") ((PEP440_ORDER > 0)) ;;
-    ">=") ((PEP440_ORDER >= 0)) ;;
-    *) ((PEP440_ORDER >= 0)) && _pep440_prefix "$2" "${release%.*}" ;;
+  case $rc in
+    0) _MK_VAL=1 ;;
+    1) _MK_VAL=0 ;;
   esac
 }
 
-# Set PEP440_ORDER to -1, 0 or 1 as version $1 sorts before, with or after version $2, both
-# N(.N)* with an optional a, b or rc and a number. vercmp puts 3.14.0 after 3.14.
-_pep440_cmp() {
-  local LC_ALL=C left=${1%%[abr]*} right=${2%%[abr]*} i n
-  local -a lparts rparts
-  IFS=. read -ra lparts <<<"$left"
-  IFS=. read -ra rparts <<<"$right"
-  n=$((${#lparts[@]} > ${#rparts[@]} ? ${#lparts[@]} : ${#rparts[@]}))
-  for ((i = 0; i < n; i++)); do
-    _number_order "${lparts[i]:-0}" "${rparts[i]:-0}"
-    ((PEP440_ORDER == 0)) || return 0
-  done
-  _pre_order "${1#"$left"}" "${2#"$right"}"
-}
+# The simple pages of PyPI projects that this process read, by PEP 503 name
+declare -gA _PYPI_SIMPLE
 
-# Set PEP440_ORDER for the numbers of digit strings $1 and $2, which can exceed bash integers
-_number_order() {
-  local a=${1#"${1%%[!0]*}"} b=${2#"${2%%[!0]*}"}
-  if ((${#a} != ${#b})); then
-    PEP440_ORDER=$((${#a} < ${#b} ? -1 : 1))
-  elif [[ "$a" < "$b" ]]; then
-    PEP440_ORDER=-1
-  elif [[ "$a" > "$b" ]]; then
-    PEP440_ORDER=1
-  else
-    PEP440_ORDER=0
+# Set PYPI_RELEASE to the version PyPI lists for release $2 of project $1 under PEP 440, PYPI_FILES to its
+# files not yanked (name, URL, sha256, metadata sha256 or -, size); return 3 when PyPI lists no such release
+pypi_release() {
+  local LC_ALL=C norm page version found="" line name url sha core size stem
+  local -a versions rows
+  PYPI_RELEASE="" PYPI_FILES=""
+  if ! _pypi_norm "$1"; then
+    log_err "$1 is not a PyPI project name"
+    return 1
   fi
-}
-
-# Set PEP440_ORDER for pre-release parts $1 and $2: none sorts after rc, rc after b, b after a
-_pre_order() {
-  local part
-  local -a rank=()
-  for part in "$1" "$2"; do
-    case $part in
-      "") rank+=(4) ;;
-      rc*) rank+=(3) ;;
-      b*) rank+=(2) ;;
-      *) rank+=(1) ;;
+  norm=$PYPI_NORM
+  if [[ -z "${_PYPI_SIMPLE[$norm]+set}" ]]; then
+    page=$(http_get_json "https://pypi.org/simple/$norm/" -H 'Accept: application/vnd.pypi.simple.v1+json') || return 1
+    _PYPI_SIMPLE[$norm]=$page
+  fi
+  page=${_PYPI_SIMPLE[$norm]}
+  if [[ "$(yq '.versions | tag' <<<"$page")" != '!!seq' ]]; then
+    log_err "https://pypi.org/simple/$norm/: the answer lists no versions"
+    return 1
+  fi
+  mapfile -t versions < <(yq -r '.versions[] | select(tag == "!!str")' <<<"$page")
+  for version in "${versions[@]}"; do
+    if [[ "$version" == "$2" ]]; then
+      found=$version
+      break
+    fi
+  done
+  if [[ -z "$found" ]]; then
+    for version in "${versions[@]}"; do
+      if pep440_cmp "$version" "$2" && ((PEP440_ORDER == 0)); then
+        found=$version
+        break
+      fi
+    done
+  fi
+  if [[ -z "$found" ]]; then
+    log_err "$1: PyPI has no release $2"
+    return 3
+  fi
+  # shellcheck disable=SC2034 # callers read it
+  PYPI_RELEASE=$found
+  mapfile -t rows < <(yq -r '.files[] | select((.yanked // false) == false) | [.filename, .url, (.hashes.sha256 // "-"),
+    ((."core-metadata" | select(tag == "!!map") | .sha256) // "-"), (.size // 0 | tostring)] | join("\t")' <<<"$page")
+  for line in "${rows[@]}"; do
+    IFS=$'\t' read -r name url sha core size <<<"$line"
+    [[ "$name" =~ ^[A-Za-z0-9._+!-]+$ && "$url" =~ ^https://[!-~]+$ && "$sha" =~ ^[0-9a-f]{64}$ &&
+      "$core" =~ ^([0-9a-f]{64}|-)$ && "$size" =~ ^[0-9]+$ ]] || continue
+    case $name in
+      *.whl) [[ "$name" == *"-$found-"* || "$name" == *"-${found//-/_}-"* ]] || continue ;;
+      *.tar.gz | *.zip)
+        stem=${name%.tar.gz}
+        stem=${stem%.zip}
+        [[ "$stem" == *"-$found" || "$stem" == *"-${found//-/_}" ]] || continue
+        ;;
+      *) continue ;;
     esac
+    PYPI_FILES+="$name"$'\t'"$url"$'\t'"$sha"$'\t'"$core"$'\t'"$size"$'\n'
   done
-  if ((rank[0] != rank[1])); then
-    PEP440_ORDER=$((rank[0] < rank[1] ? -1 : 1))
-  elif ((rank[0] == 4)); then
-    PEP440_ORDER=0
+  PYPI_FILES=${PYPI_FILES%$'\n'}
+}
+
+# Print the metadata headers of release $2 of project $1: .metadata of a wheel (none-any, linux x86_64, any),
+# else PKG-INFO of the sdist; return 3 without the release, 4 without metadata that lists the requirements
+pypi_metadata() {
+  local LC_ALL=C name url sha core size pick="" tmp rc=0
+  local -a linux=() other=() sdists=()
+  pypi_release "$1" "$2" || return
+  while IFS=$'\t' read -r name url sha core size; do
+    case $name in
+      "") ;;
+      *.whl)
+        [[ "$core" != - ]] || continue
+        if [[ "$name" == *-none-any.whl ]]; then
+          pick=${pick:-$name$'\t'$url.metadata$'\t'$core}
+        elif [[ "$name" == *linux* && "$name" == *x86_64* ]]; then
+          linux+=("$name.metadata"$'\t'"$url.metadata"$'\t'"$core")
+        else
+          other+=("$name.metadata"$'\t'"$url.metadata"$'\t'"$core")
+        fi
+        ;;
+      *) sdists+=("$name"$'\t'"$url"$'\t'"$sha") ;;
+    esac
+  done <<<"$PYPI_FILES"
+  if [[ -n "$pick" ]]; then
+    pick=${pick/$'\t'/.metadata$'\t'}
   else
-    _number_order "${1##*[a-z]}" "${2##*[a-z]}"
+    pick=${linux[0]:-${other[0]:-${sdists[0]:-}}}
   fi
+  if [[ -z "$pick" ]]; then
+    log_err "$1 $2: PyPI holds no metadata that lists the requirements without running code"
+    return 4
+  fi
+  IFS=$'\t' read -r name url sha <<<"$pick"
+  tmp=$(mktemp) || return 1
+  http_get "$url" -o "$tmp" || rc=1
+  if ((rc == 0)) && [[ "$(sha256sum "$tmp")" != "$sha "* ]]; then
+    log_err "$name does not match its sha256"
+    rc=1
+  fi
+  if ((rc == 0)); then
+    if [[ "$name" == *.metadata ]]; then
+      _metadata_headers "$tmp" "$name" || rc=1
+    else
+      _sdist_headers "$tmp" "$name" "$1 $2" || rc=$?
+    fi
+  fi
+  rm -f "$tmp"
+  return "$rc"
 }
 
-# Succeed when the release parts of version $1, padded with zeros, start with release $2
-_pep440_prefix() {
-  local LC_ALL=C i
-  local -a vparts pparts
-  IFS=. read -ra vparts <<<"${1%%[abr]*}"
-  IFS=. read -ra pparts <<<"$2"
-  for i in "${!pparts[@]}"; do
-    _number_order "${vparts[i]:-0}" "${pparts[i]}"
-    ((PEP440_ORDER == 0)) || return 1
-  done
+# Print the headers of PKG-INFO in the top directory of sdist $1, named as file name $2 without
+# its extension, when they list the requirements; return 4 with an error naming release $3 if not
+_sdist_headers() {
+  local LC_ALL=C member out headers="" version dynamic rc=0
+  member=${2%.tar.gz}
+  member="${member%.zip}/PKG-INFO"
+  out=$(mktemp) || return 1
+  # --fast-read stops at the first match, and an ignored SIGXFSZ makes a write past MAX_ANSWER_MB fail
+  if (trap '' XFSZ && ulimit -f $((${MAX_ANSWER_MB:-50} * 1024)) && bsdtar -xqOf "$1" -- "$member" >"$out" 2>/dev/null); then
+    headers=$(_metadata_headers "$out" "$2/$member") || rc=1
+  else
+    member=""
+  fi
+  rm -f "$out"
+  ((rc == 0)) || return 1
+  version=$(metadata_field "$headers" Metadata-Version)
+  dynamic=$(metadata_field "$headers" Dynamic)
+  if [[ -z "$member" ]] || ! pep440_cmp "${version:-0}" 2.2 2>/dev/null || ((PEP440_ORDER < 0)) ||
+    [[ $'\n'"${dynamic,,}"$'\n' == *$'\nrequires-dist\n'* ]]; then
+    log_err "$3: PyPI holds no metadata that lists the requirements without running code"
+    return 4
+  fi
+  printf '%s\n' "$headers"
 }
 
-# Print the PEP 503 names of the requirements in PyPI answer $1 whose markers are not false on
-# Arch, sorted; fail on requirements it cannot read, with errors that name release $2
+# Print the headers of metadata file $1, named $2 in errors: up to the first empty line, folded
+# lines joined with one space, CR at line ends dropped; fail on any other control character
+_metadata_headers() {
+  local LC_ALL=C line out=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=${line%$'\r'}
+    [[ -n "$line" ]] || break
+    if has_control "$line"; then
+      log_err "$2 holds a control character"
+      return 1
+    fi
+    if [[ "$line" == [[:blank:]]* && -n "$out" ]]; then
+      out+=" ${line#"${line%%[![:blank:]]*}"}"
+    else
+      out+=$'\n'"$line"
+    fi
+  done <"$1"
+  printf '%s\n' "${out#$'\n'}"
+}
+
+# Print the values of field $2 in metadata headers $1, one per line; field names match in any case
+metadata_field() {
+  local LC_ALL=C line name=${2,,}
+  while IFS= read -r line; do
+    [[ "${line,,}" == "$name:"* ]] || continue
+    line=${line:${#name}+1}
+    line=${line#"${line%%[![:blank:]]*}"}
+    printf '%s\n' "${line%"${line##*[![:blank:]]}"}"
+  done <<<"$1"
+}
+
+# Print the PEP 503 names of the requirements in metadata headers $1 whose markers are not false
+# on Arch, sorted; fail on requirements it cannot read, with errors that name release $2
 requires_names() {
   local req
   local -a names=()
@@ -368,7 +469,7 @@ requires_names() {
   fi
 }
 
-# Print the version that PyPI answer $1 of project $2 pins its requirement on project $3 to
+# Print the version that metadata headers $1 of project $2 pin its requirement on project $3 to
 # with ==; fail unless the requirements on $3 that apply on Arch pin one version
 requires_pin() {
   local req want joined
@@ -401,13 +502,13 @@ requires_pin() {
   printf '%s\n' "${pins[0]}"
 }
 
-# Print how the requirement names that apply on Arch change from release $2 to release $3 of
-# upstream.registry of package file $1, as adds a, b; drops c, and nothing when they match
+# Print how the requirement names that apply on Arch change from release $2 to release $3 of PyPI
+# project $4, upstream.registry of package file $1 by default, as adds a, b; drops c, or nothing
 requires_change() {
-  local registry err old new name added dropped
+  local registry err old new name added dropped rc=0
   local -A in_old=() in_new=()
   local -a adds=() drops=()
-  registry=$(pkg_get "$1" .upstream.registry) || return 1
+  registry=${4:-$(pkg_get "$1" .upstream.registry)} || return 1
   # shellcheck disable=SC2034 # _curl_get of common.sh reads it
   MAX_ANSWER_MB=$(max_answer_mb "$1") || return 1
   for name in "$2" "$3"; do
@@ -416,20 +517,24 @@ requires_change() {
       return 1
     fi
   done
-  # Only a publish moves current, so a release of current that PyPI lacks fires the rule
+  # Reads the simple page once for both releases
+  pypi_release "$registry" "$3" || return 1
+  # Only a publish moves current, so a release of current that PyPI cannot read fires the rule
   err=$(mktemp) || return 1
-  if ! old=$(http_get_json "https://pypi.org/pypi/${registry}/${2}/json" 2>"$err"); then
-    if grep -q ': The requested URL returned error: 404$' "$err"; then
-      rm -f "$err"
-      printf 'PyPI has no release %s of %s to compare with\n' "$2" "$registry"
-      return 0
-    fi
-    cat "$err" >&2
-    rm -f "$err"
-    return 1
-  fi
+  old=$(pypi_metadata "$registry" "$2" 2>"$err") || rc=$?
+  case $rc in
+    0) ;;
+    3) printf 'PyPI has no release %s of %s to compare with\n' "$2" "$registry" ;;
+    4) printf '%s %s: PyPI holds no metadata that lists the requirements without running code\n' "$registry" "$2" ;;
+    *) cat "$err" >&2 ;;
+  esac
   rm -f "$err"
-  new=$(http_get_json "https://pypi.org/pypi/${registry}/${3}/json") || return 1
+  case $rc in
+    0) ;;
+    3 | 4) return 0 ;;
+    *) return 1 ;;
+  esac
+  new=$(pypi_metadata "$registry" "$3") || return 1
   old=$(requires_names "$old" "$registry $2") || return 1
   new=$(requires_names "$new" "$registry $3") || return 1
   while IFS= read -r name; do
@@ -464,40 +569,18 @@ _requirement_read() {
   [[ -z "$REQ_MARKER" ]] || _marker_eval "$REQ_MARKER"
 }
 
-# Set REQUIRES_LIST to the items of info.requires_dist of PyPI answer $1, none for null; fail
-# with an error that names release $2 unless that list holds lines of text
+# Set REQUIRES_LIST to the Requires-Dist values of metadata headers $1 and REQUIRES_PYTHON to its
+# Requires-Python; fail with an error that names release $2 on a control character
 _requires_list() {
-  local tag dist counts count other req
-  REQUIRES_LIST=()
-  tag=$(yq -r 'if (.info | tag) == "!!map" and (.info | has("requires_dist")) then (.info.requires_dist | tag) else "none" end' <<<"$1" 2>/dev/null) || tag=none
-  case $tag in
-    "!!null") return 0 ;;
-    "!!seq") ;;
-    none)
-      log_err "$2: the PyPI answer holds no info.requires_dist"
-      return 1
-      ;;
-    *)
-      log_err "$2: info.requires_dist is $tag, not a list"
-      return 1
-      ;;
-  esac
-  dist=$(yq -o json -I0 '.info.requires_dist' <<<"$1") || return 1
-  counts=$(yq -r '(length | tostring) + " " + ([.[] | select(tag != "!!str")] | length | tostring)' <<<"$dist") || return 1
-  read -r count other <<<"$counts"
-  if ((other > 0)); then
-    log_err "$2: info.requires_dist holds an item that is not text: $(yq -o json -I0 '[.[] | select(tag != "!!str")][0]' <<<"$dist")"
-    return 1
-  fi
-  ((count > 0)) || return 0
-  mapfile -t REQUIRES_LIST < <(yq -r '.[]' <<<"$dist")
-  if ((${#REQUIRES_LIST[@]} != count)); then
-    log_err "$2: info.requires_dist holds an item with a line break"
-    return 1
-  fi
+  local req
+  local -a python
+  mapfile -t REQUIRES_LIST < <(metadata_field "$1" Requires-Dist)
+  mapfile -t python < <(metadata_field "$1" Requires-Python)
+  # shellcheck disable=SC2034 # pyrules.sh reads it
+  REQUIRES_PYTHON=${python[0]:-}
   for req in "${REQUIRES_LIST[@]}"; do
     if has_control "$req"; then
-      log_err "$2: info.requires_dist holds a control character: ${req@Q}"
+      log_err "$2: Requires-Dist holds a control character: ${req@Q}"
       return 1
     fi
   done

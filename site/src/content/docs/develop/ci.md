@@ -13,6 +13,7 @@ The job installs `shellcheck` from apt, and `shfmt` v3.14.1 and `actionlint` v1.
 ```bash
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
+python3 -m py_compile scripts/lib/*.py
 actionlint
 ```
 
@@ -31,15 +32,15 @@ Comments `# zizmor: ignore[<audit>]` skip findings on lines that the audits misr
 
 ## Test job
 
-The job runs in the image that the `image` job of `ci.yml` reads, the job of [Permissions and container](/internals/workflow/#permissions-and-container) without its pin check. It installs `bash bats git go-yq jq curl openssh namcap python ruby ruby-erb ruby-bundler`, and after the checkout `bundle install` installs `bashcov` and `simplecov-cobertura` with their dependencies from `ci-image/Gemfile.lock`. The lock holds each gem at its version with its SHA-256, bundler stops on a gem whose checksum differs, and the frozen mode stops on a lock that lags `ci-image/Gemfile`. Then the job runs the suite once, under bashcov:
+The job runs in the image that the `image` job of `ci.yml` reads, the job of [Permissions and container](/internals/workflow/#permissions-and-container) without its pin check. It installs `bash bats git go-yq jq curl openssh namcap python python-coverage ruby ruby-erb ruby-bundler`, and after the checkout `bundle install` installs `bashcov` and `simplecov-cobertura` with their dependencies from `ci-image/Gemfile.lock`. The lock holds each gem at its version with its SHA-256, bundler stops on a gem whose checksum differs, and the frozen mode stops on a lock that lags `ci-image/Gemfile`. Then the job runs the suite once, under bashcov:
 
 ```bash
 bundle exec bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 ```
 
-Failing tests fail the job, and the `coverage/coverage.xml` upload to Codecov never does. The upload runs the Codecov CLI that `ci-image/requirements.txt` pins with hashes, installed into `/opt/codecov`, and Dependabot updates those pins. bashcov exports `SHELLOPTS`, so every script the tests start, mocks included, runs with `errexit`, `nounset` and `pipefail`. bashcov alone loses trace lines: it resolves the path of a script when it reads a trace line, after the test may have removed its link to the script. `tests/helpers/bashcov-bats.sh` keeps the test directories until bashcov exits and passes on the lines of `.sh` files alone, and `tests/coverage.bats` checks the exact count of one line.
+Failing tests fail the job, and the upload of `coverage/coverage.xml` and `coverage/python.xml` to Codecov never does. The upload runs the Codecov CLI that `ci-image/requirements.txt` pins with hashes, installed into `/opt/codecov`, and Dependabot updates those pins. bashcov exports `SHELLOPTS`, so every script the tests start, mocks included, runs with `errexit`, `nounset` and `pipefail`. bashcov alone loses trace lines: it resolves the path of a script when it reads a trace line, after the test may have removed its link to the script. `tests/helpers/bashcov-bats.sh` keeps the test directories until bashcov exits and passes on the lines of `.sh` files alone, and `tests/coverage.bats` checks the exact count of one line. bashcov measures no Python, so `bashcov-bats.sh` puts `tests/helpers/cov-shims` first in `PATH`, whose `python3` runs `scripts/lib/py_imports.py` under coverage.py and every other call as given, and after bats it writes `coverage/python.xml` from the data of these runs.
 
-The two tests of the `namcap` check run the real `namcap`, and `tests/coverage.bats` runs the real `bashcov`. Without them the tests skip, and with `CI` set they fail.
+The two tests of the `namcap` check run the real `namcap`, and `tests/coverage.bats` runs the real `bashcov` and coverage.py. Without them the tests skip, and with `CI` set they fail.
 
 ## CI image updates
 
@@ -73,4 +74,4 @@ The pin by commit SHA fixes `action.yaml` of the action, and that file runs the 
 
 ## Spec watch
 
-`scripts/lib/requires.sh` reads the requirements of PyPI releases and their environment markers by four specifications of `pypa/packaging.python.org`: dependency specifiers, version specifiers, name normalization and core metadata. `.github/spec-watch.tsv` lists each file with the SHA of the last commit that the parser follows. `spec-watch.yml` asks the GitHub API for the last commit of each file on Tuesdays at 04:27 UTC and by hand, in `staticwire/aurtomator` alone. When one differs, it opens the issue `📜 PyPA specifications changed` with label `spec-watch`, both SHAs and a link to the history of each changed file. While that issue is open, runs write the list of changed files into its text and open no second one. Runs wait for each other, so two runs never open it twice. Read the commits, update `scripts/lib/requires.sh` and its tests when one changes the meaning of requirements or markers, and set the new SHAs in `.github/spec-watch.tsv`. The next run that finds every SHA of the list closes the issue. The job holds `contents: read` and `issues: write`, and errors of the API fail it.
+`scripts/lib/pep440.sh` and `scripts/lib/requires.sh` read the requirements of PyPI releases and their environment markers by four specifications of `pypa/packaging.python.org`: dependency specifiers, version specifiers, name normalization and core metadata. `.github/spec-watch.tsv` lists each file with the SHA of the last commit that the parser follows. `spec-watch.yml` asks the GitHub API for the last commit of each file on Tuesdays at 04:27 UTC and by hand, in `staticwire/aurtomator` alone. When one differs, it opens the issue `📜 PyPA specifications changed` with label `spec-watch`, both SHAs and a link to the history of each changed file. While that issue is open, runs write the list of changed files into its text and open no second one. Runs wait for each other, so two runs never open it twice. Read the commits, update `scripts/lib/requires.sh` and its tests when one changes the meaning of requirements or markers, and set the new SHAs in `.github/spec-watch.tsv`. The next run that finds every SHA of the list closes the issue. The job holds `contents: read` and `issues: write`, and errors of the API fail it.

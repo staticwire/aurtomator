@@ -1,0 +1,41 @@
+Metadata-Version: 2.4
+Name: zensical
+Version: 0.1.2
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Web Environment
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Rust
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Programming Language :: Python :: 3.15
+Classifier: Topic :: Documentation
+Classifier: Topic :: Software Development :: Documentation
+Classifier: Topic :: Text Processing :: Markup :: HTML
+Classifier: Topic :: Text Processing :: Markup :: Markdown
+Requires-Dist: click>=8.1.8
+Requires-Dist: jinja2>=3.1
+Requires-Dist: markdown>=3.7
+Requires-Dist: pathspec>=1.0.4
+Requires-Dist: pygments>=2.20
+Requires-Dist: pymdown-extensions>=11.0
+Requires-Dist: pyyaml>=6.0.2
+Requires-Dist: tomli>=2.4.0
+Requires-Dist: zensical-ui==0.0.42
+License-File: LICENSE.md
+Summary: A modern static site generator built by the creators of Material for MkDocs
+Home-Page: https://github.com/zensical/zensical
+Author-email: Zensical <contributors@zensical.org>
+License-Expression: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown; charset=UTF-8; variant=GFM
+Project-URL: Changelog, https://zensical.org/docs/changelog/
+Project-URL: Documentation, https://zensical.org/docs/
+Project-URL: Homepage, https://zensical.org/
+Project-URL: Issues, https://github.com/zensical/zensical/issues
+Project-URL: Source, https://github.com/zensical/zensical/
+
+<p align="center">
+  <picture>

@@ -1,0 +1,51 @@
+Metadata-Version: 2.4
+Name: KubeDiagrams
+Version: 0.9.0
+Summary: Generate Kubernetes architecture diagrams from Kubernetes manifest files, kustomization files, Helm charts, helmfiles, and actual cluster state
+Home-page: https://github.com/philippemerle/KubeDiagrams
+Author: Philippe Merle
+Author-email: philippe.merle@inria.fr
+Maintainer: Philippe Merle
+Maintainer-email: philippe.merle@inria.fr
+License: Apache-2.0
+Project-URL: Issues, https://github.com/philippemerle/KubeDiagrams/issues
+Project-URL: Discussions, https://github.com/philippemerle/KubeDiagrams/discussions
+Project-URL: Wiki, https://github.com/philippemerle/KubeDiagrams/wiki
+Keywords: kubernetes architecture diagrams
+Classifier: Topic :: Software Development :: Documentation
+Classifier: Topic :: Utilities
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Operating System :: OS Independent
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Information Technology
+Classifier: Natural Language :: English
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: PyYAML
+Requires-Dist: diagrams
+Requires-Dist: graphviz2drawio
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: keywords
+Dynamic: license
+Dynamic: license-file
+Dynamic: maintainer
+Dynamic: maintainer-email
+Dynamic: project-url
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# KubeDiagrams
+

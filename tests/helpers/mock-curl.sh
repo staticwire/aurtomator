@@ -2,12 +2,15 @@
 # Mock curl for the bats tests: answers by the pattern the URL matches.
 # Specific patterns come before the wildcard that covers them, or shellcheck reports SC2221/SC2222.
 
-# The URL is the last argument. curl takes the last -w.
+# The URL is the last argument. curl takes the last -w and the last -o.
 write_out=""
+out_file=""
 prev=""
 for arg in "$@"; do
   if [[ "$prev" == -w ]]; then
     write_out="$arg"
+  elif [[ "$prev" == -o ]]; then
+    out_file="$arg"
   fi
   prev="$arg"
   url="$arg"
@@ -15,10 +18,16 @@ done
 # Tests that check the options of a request name a file for them in CURL_ARGS_LOG
 [[ -z "${CURL_ARGS_LOG:-}" ]] || printf '%s\n' "$*" >>"$CURL_ARGS_LOG"
 
+# With -o the answer goes into that file, and the -w text to stdout
+exec {stdout_fd}>&1
+if [[ -n "$out_file" ]]; then
+  exec >"$out_file"
+fi
+
 # Failed requests, as curl -f writes them with the -w texts of http_get and
 # http_get_json: the URL on stdout for the latter, the error on stderr
 http_error() {
-  [[ "$write_out" != '\n%{url_effective}'* ]] || printf '\n%s' "$url"
+  [[ "$write_out" != '\n%{url_effective}'* ]] || printf '\n%s' "$url" >&"$stdout_fd"
   [[ "$write_out" != *'%{onerror}%{stderr}'* ]] ||
     printf '%s\tThe requested URL returned error: %s\t%s\t' "$url" "$1" "$1" >&2
   exit 22
@@ -61,48 +70,64 @@ case "$url" in
   *pypi.org/pypi/null-package/json)
     echo '{"info": {"version": null}}'
     ;;
-  # PyPI: requirements of a made-up project, one name for each case of pin_from
+  # PyPI: the version of a made-up project of pin_from, whose requirements the tests write
   *pypi.org/pypi/pin-cases/json)
-    echo '{"info": {"version": "1.0", "requires_dist": ["ranged>=1.0", "wild==0.0.*", "clauses==1.0,!=1.1", "url @ https://example.org/url.zip", "two==1.0", "two==2.0", "same==1.0", "Same==1.0; os_name == \"posix\"", "py==1.0; python_version < \"3.11\"", "py==2.0; python_version >= \"3.11\"", "win==1.0; sys_platform == \"win32\"", "test==1.0; extra == \"test\""]}}'
+    echo '{"info": {"version": "1.0"}}'
     ;;
   *pypi.org/pypi/pin-gone/json)
     http_error 404
     ;;
-  # PyPI: releases of made-up projects for the requires rule: a change both ways, a release of
-  # current that PyPI lacks, a new release that PyPI lacks, and a server error
-  *pypi.org/pypi/mixer/1.0/json)
-    echo '{"info": {"version": "1.0", "requires_dist": ["keep", "old-dep"]}}'
+  # PyPI: the newest release of zensical on 2026-11-23
+  *pypi.org/pypi/zensical/json)
+    echo '{"info": {"version": "0.1.3"}}'
     ;;
-  *pypi.org/pypi/mixer/2.0/json)
-    echo '{"info": {"version": "2.0", "requires_dist": ["keep>=2", "New_Dep>=1", "other-new; sys_platform == \"linux\"", "win-only; sys_platform == \"win32\""]}}'
-    ;;
-  *pypi.org/pypi/gone/0.1.2/json | *pypi.org/pypi/zensical/0.1.4/json)
-    http_error 404
-    ;;
-  *pypi.org/pypi/flaky/1.0/json)
+  # PyPI: a server error on the simple page of a project
+  *pypi.org/simple/flaky/)
     http_error 503
     ;;
-  # PyPI releases, with the requires_dist of PyPI on 2026-11-23
-  *pypi.org/pypi/zensical/json | *pypi.org/pypi/zensical/0.1.3/json)
-    echo '{"info": {"version": "0.1.3", "requires_dist": ["click>=8.1.8", "jinja2>=3.1", "markdown>=3.7", "pathspec>=1.0.4", "pygments>=2.20", "pymdown-extensions>=11.0", "pyyaml>=6.0.2", "tomli>=2.4.0", "zensical-ui==0.0.43"]}}'
+  # PyPI simple API: the page of a project that a test writes, then the fixture of tests/fixtures
+  *pypi.org/simple/*/)
+    project=${url%/}
+    project=${project##*/}
+    if [[ -f "$MOCK_FILES_DIR/simple/$project.json" ]]; then
+      cat "$MOCK_FILES_DIR/simple/$project.json"
+    elif [[ -f "$FIXTURES_DIR/pypi/simple/$project.json" ]]; then
+      cat "$FIXTURES_DIR/pypi/simple/$project.json"
+    else
+      http_error 404
+    fi
     ;;
-  *pypi.org/pypi/zensical/0.1.2/json)
-    echo '{"info": {"version": "0.1.2", "requires_dist": ["click>=8.1.8", "jinja2>=3.1", "markdown>=3.7", "pathspec>=1.0.4", "pygments>=2.20", "pymdown-extensions>=11.0", "pyyaml>=6.0.2", "tomli>=2.4.0", "zensical-ui==0.0.42"]}}'
+  # Files of PyPI releases: a file that a test writes, then a .metadata fixture
+  *files.pythonhosted.org/*)
+    file=${url##*/}
+    if [[ -f "$MOCK_FILES_DIR/$file" ]]; then
+      cat "$MOCK_FILES_DIR/$file"
+    elif [[ -f "$FIXTURES_DIR/pypi/metadata/$file" ]]; then
+      cat "$FIXTURES_DIR/pypi/metadata/$file"
+    else
+      http_error 404
+    fi
     ;;
-  *pypi.org/pypi/zensical/0.0.74/json)
-    echo '{"info": {"version": "0.0.74", "requires_dist": ["click>=8.1.8", "deepmerge>=2.0", "jinja2>=3.1", "markdown>=3.7", "pathspec>=1.0.4", "pygments>=2.20", "pymdown-extensions>=11.0", "pyyaml>=6.0.2", "tomli>=2.4.0", "zensical-ui==0.0.41"]}}'
-    ;;
-  *pypi.org/pypi/keyring/25.6.0/json)
-    echo '{"info": {"version": "25.6.0", "requires_dist": ["pywin32-ctypes>=0.2.0; sys_platform == \"win32\"", "SecretStorage>=3.2; sys_platform == \"linux\"", "jeepney>=0.4.2; sys_platform == \"linux\"", "importlib_metadata>=4.11.4; python_version < \"3.12\"", "jaraco.classes", "importlib_resources; python_version < \"3.9\"", "jaraco.functools", "jaraco.context", "pytest!=8.1.*,>=6; extra == \"test\"", "pyfakefs; extra == \"test\"", "sphinx>=3.5; extra == \"doc\"", "jaraco.packaging>=9.3; extra == \"doc\"", "rst.linker>=1.9; extra == \"doc\"", "furo; extra == \"doc\"", "sphinx-lint; extra == \"doc\"", "jaraco.tidelift>=1.4; extra == \"doc\"", "pytest-checkdocs>=2.4; extra == \"check\"", "pytest-ruff>=0.2.1; sys_platform != \"cygwin\" and extra == \"check\"", "pytest-cov; extra == \"cover\"", "pytest-enabler>=2.2; extra == \"enabler\"", "pytest-mypy; extra == \"type\"", "pygobject-stubs; extra == \"type\"", "shtab; extra == \"type\"", "types-pywin32; extra == \"type\"", "shtab>=1.1.0; extra == \"completion\""]}}'
-    ;;
-  *pypi.org/pypi/keyring/25.7.0/json)
-    echo '{"info": {"version": "25.7.0", "requires_dist": ["pywin32-ctypes>=0.2.0; sys_platform == \"win32\"", "SecretStorage>=3.2; sys_platform == \"linux\"", "jeepney>=0.4.2; sys_platform == \"linux\"", "importlib_metadata>=4.11.4; python_version < \"3.12\"", "jaraco.classes", "jaraco.functools", "jaraco.context", "pytest!=8.1.*,>=6; extra == \"test\"", "pyfakefs; extra == \"test\"", "sphinx>=3.5; extra == \"doc\"", "jaraco.packaging>=9.3; extra == \"doc\"", "rst.linker>=1.9; extra == \"doc\"", "furo; extra == \"doc\"", "sphinx-lint; extra == \"doc\"", "jaraco.tidelift>=1.4; extra == \"doc\"", "pytest-checkdocs>=2.4; extra == \"check\"", "pytest-ruff>=0.2.1; sys_platform != \"cygwin\" and extra == \"check\"", "pytest-cov; extra == \"cover\"", "pytest-enabler>=3.4; extra == \"enabler\"", "pytest-mypy>=1.0.1; extra == \"type\"", "pygobject-stubs; extra == \"type\"", "shtab; extra == \"type\"", "types-pywin32; extra == \"type\"", "shtab>=1.1.0; extra == \"completion\""]}}'
-    ;;
-  *pypi.org/pypi/black/26.1.0/json)
-    echo '{"info": {"version": "26.1.0", "requires_dist": ["click>=8.0.0", "mypy-extensions>=0.4.3", "packaging>=22.0", "pathspec>=1.0.0", "platformdirs>=2", "pytokens>=0.3.0", "tomli>=1.1.0; python_version < \"3.11\"", "typing-extensions>=4.0.1; python_version < \"3.11\"", "colorama>=0.4.3; extra == \"colorama\"", "aiohttp>=3.10; extra == \"d\"", "ipython>=7.8.0; extra == \"jupyter\"", "tokenize-rt>=3.2.0; extra == \"jupyter\"", "uvloop>=0.15.2; extra == \"uvloop\""]}}'
-    ;;
-  *pypi.org/pypi/black/26.10.1/json)
-    echo '{"info": {"version": "26.10.1", "requires_dist": ["click>=8.0.0", "mypy-extensions>=0.4.3", "packaging>=22.0", "pathspec>=1.0.0", "platformdirs>=2", "pytokens~=0.4.0", "tomli>=1.1.0; python_version < \"3.11\"", "typing-extensions>=4.0.1; python_version < \"3.11\"", "colorama>=0.4.3; extra == \"colorama\"", "aiohttp>=3.10; extra == \"d\"", "ipython>=7.8.0; extra == \"jupyter\"", "tokenize-rt>=3.2.0; extra == \"jupyter\"", "uvloop>=0.15.2; sys_platform != \"win32\" and extra == \"uvloop\"", "winloop>=0.5.0; sys_platform == \"win32\" and extra == \"uvloop\""]}}'
+  # AUR RPC: the packages of aur-rpc.json whose Name an arg[] of the URL names
+  *aur.archlinux.org/rpc/v5/info*)
+    names=""
+    IFS='&' read -ra params <<<"${url#*\?}"
+    for param in "${params[@]}"; do
+      case $param in
+        'arg[]='* | arg%5B%5D=* | arg%5b%5d=*) value=${param#*=} ;;
+        *) continue ;;
+      esac
+      value=${value//+/ }
+      printf -v value '%b' "${value//%/\\x}"
+      names+="$value"$'\n'
+    done
+    if [[ -f "$MOCK_FILES_DIR/aur-rpc.json" ]]; then
+      # shellcheck disable=SC2016 # $n is a variable of yq
+      NAMES=$names yq -o json -I0 '[.[] | select(.Name as $n | strenv(NAMES) | split("\n") | any_c(. == $n))] |
+        {"version": 5, "type": "multiinfo", "resultcount": length, "results": .}' "$MOCK_FILES_DIR/aur-rpc.json"
+    else
+      echo '{"version": 5, "type": "multiinfo", "resultcount": 0, "results": []}'
+    fi
     ;;
   # npm: null version
   *registry.npmjs.org/null-package/latest)
@@ -579,5 +604,5 @@ esac
 
 # http_get_json asks for the URL of the last answer after the body
 if [[ "$write_out" == '\n%{url_effective}'* ]]; then
-  printf '\n%s' "${effective_url:-$url}"
+  printf '\n%s' "${effective_url:-$url}" >&"$stdout_fd"
 fi

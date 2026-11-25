@@ -5,8 +5,8 @@ bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test_env
-  # Strategies need scripts/lib/common.sh, pypi.sh lib/requires.sh too, and nothing else of scripts/
-  find "$TEST_TMPDIR/scripts" -type l ! -name common.sh ! -name requires.sh -delete
+  # Strategies need scripts/lib/common.sh, pypi.sh lib/pep440.sh and lib/requires.sh too, and nothing else of scripts/
+  find "$TEST_TMPDIR/scripts" -type l ! -name common.sh ! -name pep440.sh ! -name requires.sh -delete
   cp "$TESTS_DIR/helpers/mock-git.sh" "$MOCK_DIR/git"
   chmod +x "$MOCK_DIR/git"
 }
@@ -735,6 +735,11 @@ run_pin() {
   create_test_package "test-pypi" "pypi" "upstream:
   registry: $1
   pin_from: $2"
+  # Requirements of a made-up project, one name for each case of pin_from
+  [[ "$2" != pin-cases ]] || pypi_fake pin-cases 1.0 "ranged>=1.0" "wild==0.0.*" "clauses==1.0,!=1.1" \
+    "url @ https://example.org/url.zip" "two==1.0" "two==2.0" "same==1.0" 'Same==1.0; os_name == "posix"' \
+    'py==1.0; python_version < "3.11"' 'py==2.0; python_version >= "3.11"' 'win==1.0; sys_platform == "win32"' \
+    'test==1.0; extra == "test"'
   run "$TEST_TMPDIR/strategies/pypi.sh" "test-pypi"
 }
 

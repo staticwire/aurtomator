@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# python3 of the tests under bashcov-bats.sh: with COVERAGE_FILE set, scripts/lib/py_imports.py runs under
+# coverage.py from the root of aurtomator, without -S, which hides site-packages; other calls run as given
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+helper=0
+if [[ -n "${COVERAGE_FILE:-}" ]]; then
+  for ((i = 1; i <= $#; i++)); do
+    if [[ "${!i}" == */scripts/lib/py_imports.py ]]; then
+      helper=$i
+      break
+    fi
+  done
+fi
+if ((helper == 0)); then
+  exec /usr/bin/python3 "$@"
+fi
+args=("${@:helper+1}")
+if ((${#args[@]} > 0)) && [[ "${args[0]}" != /* && "${args[0]}" != -* ]]; then
+  args[0]="$PWD/${args[0]}"
+fi
+cd "$root" || exit 2
+exec /usr/bin/python3 -I -m coverage run --parallel-mode --rcfile="$root/.coveragerc" \
+  "$root/scripts/lib/py_imports.py" "${args[@]}"

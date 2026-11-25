@@ -219,6 +219,8 @@ alerts:
     hold: true"
   write_pkgbuild "$OLD" 0.0.74 1 "sha256sums=('SKIP' 'SKIP')"
   write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 0.0.74 1 SKIP SKIP
+  # The requires rules run for packages with Python in depends
+  sed -i 's/^\tlicense = MIT$/&\n\tdepends = python/' "$TEST_TMPDIR/old.SRCINFO"
   make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
   mock_pkg_tools
   run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 0.1.3 --prepare "$TEST_TMPDIR/out"

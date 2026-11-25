@@ -20,6 +20,7 @@ Each package lives in `packages/<name>.yml`. `name` equals the file name and AUR
 | `pkgver_dash` | no | `_`, `.` or `''`: what stands for each `-` of upstream versions, see [pkgver_dash](#pkgver_dash) |
 | `pkgver_format` | no | upstream version with fixed text around it, `%s` in its place, as `4.%s`, see [pkgver_format](#pkgver_format) |
 | `alerts` | no | upstream steps that need hand edits, see [Update alerts](/features/update-alerts/) |
+| `python` | no | `none`, or the source of the requirements of a package with Python in `depends`: `pypi`, the PyPI project, with `release: newest` for the newest release, or `pyproject`, the path of `pyproject.toml` in the source archive. Also `map`, PyPI names of requirements and modules mapped to the Arch packages that meet them, as `svg-path: python-svg.path`, and `skip`, paths that `requires: imports` leaves out. See [Python packages](/features/update-alerts/#python-packages) |
 
 ```yaml
 name: my-package

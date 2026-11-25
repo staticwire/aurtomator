@@ -1,0 +1,42 @@
+{
+  "meta": {
+    "_last-serial": 43287048,
+    "api-version": "1.4"
+  },
+  "name": "kubediagrams",
+  "versions": [
+    "0.1.0",
+    "0.2.0",
+    "0.3.0",
+    "0.4.0",
+    "0.5.0",
+    "0.6.0",
+    "0.7.0",
+    "0.8.0",
+    "0.9.0"
+  ],
+  "files": [
+    {
+      "filename": "kubediagrams-0.9.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/40/67/e988683a4582146d4e305659682e14479bd0e5bf6496468f3f89881c8723/kubediagrams-0.9.0-py3-none-any.whl",
+      "hashes": {
+        "sha256": "9723c07c457f931372db4e9f8a7d584cf1d51a6cf7bde699de1270173b15249b"
+      },
+      "core-metadata": {
+        "sha256": "4e5648574c2f0ca2fdadabc8a10c77ab12111d304126a27272f8610374747324"
+      },
+      "size": 363316,
+      "yanked": false
+    },
+    {
+      "filename": "kubediagrams-0.9.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/ff/ee/ecea0b3e6c666f2f2010a461596352f6dd83cf482718031888bd97e7934e/kubediagrams-0.9.0.tar.gz",
+      "hashes": {
+        "sha256": "acdc4a6f455df2c6528f1e2fcdbe5539b163143fe920bea8044fbadfbcaf380d"
+      },
+      "core-metadata": false,
+      "size": 389516,
+      "yanked": false
+    }
+  ]
+}

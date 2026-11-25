@@ -62,6 +62,16 @@ demo_hits() {
     '[.[].coverage[$file].lines[$index]] | add' "$FIXTURE/coverage/.resultset.json"
 }
 
+# Helper: skip without coverage.py, except in CI, whose test job installs it
+require_coverage_py() {
+  python3 -I -m coverage --version &>/dev/null && return 0
+  if [[ -n "${CI:-}" ]]; then
+    echo "coverage.py is not installed, and the test job of CI installs it" >&2
+    return 1
+  fi
+  skip "coverage.py not installed"
+}
+
 @test "teardown_test_env keeps the directory while AURTOMATOR_KEEP_TEST_DIRS is set" {
   AURTOMATOR_KEEP_TEST_DIRS=1 teardown_test_env
   [ -d "$TEST_TMPDIR/scripts" ]
@@ -129,4 +139,33 @@ demo_hits() {
     echo "$output"
     return 1
   }
+}
+
+@test "bashcov-bats.sh: measures scripts/lib/py_imports.py with coverage.py into coverage/python.xml" {
+  require_bashcov
+  require_coverage_py
+  make_fixture 'printf "import json\\n" >"$TEST_TMPDIR/m.py" && python3 -I -S "$PROJECT_DIR/scripts/lib/py_imports.py" "$TEST_TMPDIR" m.py'
+  run_bashcov
+  [ "$status" -eq 0 ]
+  grep -q 'filename="[^"]*py_imports.py"' "$FIXTURE/coverage/python.xml"
+  grep -Eq '<line number="[0-9]+" hits="[1-9]' "$FIXTURE/coverage/python.xml"
+}
+
+@test "cov-shims/python3: passes --stdlib to py_imports.py under coverage.py" {
+  require_coverage_py
+  local shim="$PROJECT_DIR/tests/helpers/cov-shims/python3"
+  run env COVERAGE_FILE="$TEST_TMPDIR/.coverage" "$shim" -I -S "$PROJECT_DIR/scripts/lib/py_imports.py" --stdlib
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output"$'\n' == *$'\nsys\n'* ]]
+}
+
+@test "cov-shims/python3: runs every call as python3 without COVERAGE_FILE" {
+  local shim="$PROJECT_DIR/tests/helpers/cov-shims/python3"
+  run env -u COVERAGE_FILE "$shim" -I -S -c 'import sys; print(sys.flags.isolated, sys.flags.no_site)'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1 1" ]
+  printf 'import json\n' >"$TEST_TMPDIR/m.py"
+  run env -u COVERAGE_FILE "$shim" -I -S "$PROJECT_DIR/scripts/lib/py_imports.py" "$TEST_TMPDIR" m.py
+  [ "$status" -eq 0 ]
+  [ "$output" = import$'\t'm.py$'\t'json$'\t'module ]
 }

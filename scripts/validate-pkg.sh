@@ -20,7 +20,7 @@ done
 readonly VALID_STRATEGIES
 
 # The top-level keys that the scripts read
-readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump allow_missing_arch arch_wait arch_out cooldown_days alerts upstream"
+readonly PACKAGE_KEYS="name strategy current last_updated current_asset pkgver_dash pkgver_format allow_downgrade allow_version_jump allow_missing_arch arch_wait arch_out cooldown_days alerts upstream python"
 
 # The upstream keys that each strategy reads, in the order of the strategy
 # table of README.md. One test compares them with the keys the scripts name.
@@ -91,10 +91,91 @@ key_strategies() {
   esac
 }
 
+# Check the python key of package file $1 of strategy $2: none, or a map of the source keys pypi,
+# release and pyproject, map, from PyPI names to package names, and skip, paths that imports leaves out
+validate_python() {
+  local file="$1" shown="packages/${1##*/}" errors=0 key value unknown path pypi pyproject
+  case $(pkg_get "$file" '.python | tag') in
+    "!!null") return 0 ;;
+    "!!map") ;;
+    *)
+      [[ "$(pkg_get "$file" '.python | select(tag == "!!str")')" != none ]] || return 0
+      log_err "$shown: python must be none or a map"
+      return 1
+      ;;
+  esac
+  pypi=$(pkg_get "$file" '.python.pypi // ""')
+  pyproject=$(pkg_get "$file" '.python.pyproject // ""')
+  if [[ -n "$pypi" ]] && ! pypi_name "$pypi" >/dev/null; then
+    log_err "$shown: python.pypi must be a PyPI project name of A-Za-z0-9._- that starts and ends with a letter or digit: ${pypi@Q}"
+    errors=1
+  fi
+  value=$(pkg_get "$file" '.python.release // ""')
+  if [[ -n "$value" && "$value" != newest ]]; then
+    log_err "$shown: python.release must be newest: ${value@Q}"
+    errors=1
+  elif [[ -n "$value" && -z "$pypi" ]]; then
+    log_err "$shown: python.release applies with python.pypi alone"
+    errors=1
+  fi
+  if [[ -n "$pyproject" ]] && { ! (LC_ALL=C && [[ "$pyproject" =~ ^[A-Za-z0-9._/-]+\.toml$ ]]) ||
+    [[ "$pyproject" == /* || "/$pyproject/" == */../* ]]; }; then
+    log_err "$shown: python.pyproject must be a relative path to a .toml file without ..: ${pyproject@Q}"
+    errors=1
+  fi
+  if [[ -n "$pypi" && -n "$pyproject" ]]; then
+    log_err "$shown: python.pypi and python.pyproject exclude each other"
+    errors=1
+  fi
+  if [[ "$2" == pypi && -n "$pypi$pyproject$value" ]]; then
+    log_err "$shown: python.pypi, python.release and python.pyproject do not apply to the pypi strategy, which reads upstream.registry"
+    errors=1
+  fi
+  unknown=$(pkg_get "$file" '.python | [keys[] | select(. != "map" and . != "skip" and . != "pypi" and . != "release" and . != "pyproject")] | join(", ")')
+  if [[ -n "$unknown" ]]; then
+    log_err "$shown: python: unknown key: $unknown"
+    errors=1
+  fi
+  case $(pkg_get "$file" '.python.map | tag') in
+    "!!null") ;;
+    "!!map")
+      while IFS=$'\t' read -r key value; do
+        if ! pypi_name "$key" >/dev/null; then
+          log_err "$shown: python.map: ${key@Q} is not a PyPI name"
+          errors=1
+        elif ! (LC_ALL=C && [[ "$value" =~ ^[a-z0-9@_+][a-z0-9@._+-]*$ ]]); then
+          log_err "$shown: python.map.$key must be a package name of a-z, 0-9 and @ . _ + -: ${value@Q}"
+          errors=1
+        fi
+      done < <(pkg_get "$file" '.python.map | to_entries[] | [.key, ((.value | select(tag == "!!str")) // (.value | to_json(0)))] | join("\t")')
+      ;;
+    *)
+      log_err "$shown: python.map must be a map of PyPI names to package names"
+      errors=1
+      ;;
+  esac
+  case $(pkg_get "$file" '.python.skip | tag') in
+    "!!null") ;;
+    "!!seq")
+      while IFS= read -r path; do
+        if [[ -z "$path" || "$path" == /* || "/$path/" == */../* ]]; then
+          log_err "$shown: python.skip: ${path@Q} must be a relative path without .."
+          errors=1
+        fi
+      done < <(pkg_get "$file" '.python.skip[] | (select(tag == "!!str") // to_json(0))')
+      ;;
+    *)
+      log_err "$shown: python.skip must be a list of relative paths"
+      errors=1
+      ;;
+  esac
+  return "$errors"
+}
+
 # Check entry $2 of the alerts of package file $1, with pkgver_format $3 if any, strategy $4
 # and pkgver_dash set when $5 is true; the errors go to stderr
 validate_alert() {
-  local file="$1" i="$2" format="$3" rule="packages/${1##*/}: alerts[$2]" errors=0 unknown tag value
+  local file="$1" i="$2" format="$3" rule="packages/${1##*/}: alerts[$2]" errors=0 unknown tag value requires
   if [[ $(pkg_get "$file" ".alerts[$i] | tag") != "!!map" ]]; then
     log_err "$rule must be a map with note and one of when, from, match, requires"
     return 1
@@ -109,20 +190,24 @@ validate_alert() {
     errors=1
   fi
 
-  # requires compares the releases of current and the new version on PyPI, so current takes
+  # changed compares the releases of current and the new version on PyPI, so current takes
   # the spelling of PyPI, which pkgver_format and pkgver_dash change
   tag=$(pkg_get "$file" ".alerts[$i].requires | tag")
   value=$(pkg_get "$file" ".alerts[$i].requires")
-  if [[ "$tag" != "!!null" && "$value" != changed ]]; then
-    log_err "$rule.requires must be changed, got $value"
+  requires=$value
+  if [[ "$tag" != "!!null" && "$value" != changed && "$value" != unmet && "$value" != imports ]]; then
+    log_err "$rule.requires must be changed, unmet or imports, got $value"
     errors=1
-  elif [[ "$tag" != "!!null" && "$4" != pypi ]]; then
-    log_err "$rule: requires applies to the pypi strategy only"
+  elif [[ "$tag" != "!!null" && "$4" != pypi && -z "$(pkg_get "$file" '.python | select(tag == "!!map") | .pypi // .pyproject // ""')" ]]; then
+    log_err "$rule: requires needs strategy pypi, python.pypi or python.pyproject"
     errors=1
-  elif [[ "$tag" != "!!null" && -n "$format" ]]; then
+  elif [[ "$value" == changed && -n "$(pkg_get "$file" '.python | select(tag == "!!map") | .release // .pyproject // ""')" ]]; then
+    log_err "$rule: requires: changed does not apply with python.release or python.pyproject"
+    errors=1
+  elif [[ "$value" == changed && -n "$format" ]]; then
     log_err "$rule: requires does not apply with pkgver_format"
     errors=1
-  elif [[ "$tag" != "!!null" && "$5" == true ]]; then
+  elif [[ "$value" == changed && "$5" == true ]]; then
     log_err "$rule: requires does not apply with pkgver_dash"
     errors=1
   fi
@@ -161,6 +246,9 @@ validate_alert() {
 
   if ! flag_ok "$file" ".alerts[$i].hold"; then
     log_err "$rule.hold must be true or false"
+    errors=1
+  elif [[ "$requires" == imports && "$(pkg_bool "$file" ".alerts[$i].hold")" == true ]]; then
+    log_err "$rule.hold does not apply to requires: imports"
     errors=1
   fi
 
@@ -430,14 +518,22 @@ validate_pkg() {
     for ((i = 0; i < alert_count; i++)); do
       validate_alert "$file" "$i" "$pkgver_format" "$strategy" "$dash_set" || ((errors++))
     done
-    if (($(pkg_get "$file" '[.alerts[] | select(tag == "!!map" and has("requires"))] | length') > 1)); then
-      log_err "$shown: alerts: one requires rule at most"
-      ((errors++))
-    fi
+    local -A requires_seen=()
+    local value
+    while IFS=$'\t' read -r i value; do
+      [[ -n "$value" ]] || continue
+      if [[ -n "${requires_seen[$value]:-}" ]]; then
+        log_err "$shown: alerts[$i].requires: $value is set twice"
+        ((errors++))
+      fi
+      requires_seen[$value]=1
+    done < <(pkg_get "$file" '.alerts | to_entries[] | select((.value | tag) == "!!map" and (.value | has("requires")) and (.value.requires | tag) == "!!str") | [(.key | tostring), .value.requires] | join("\t")')
   elif [[ "$alerts_tag" != "!!null" ]]; then
     log_err "$shown: alerts must be a list"
     ((errors++))
   fi
+
+  validate_python "$file" "$strategy" || ((errors++))
 
   local branch
   if [[ $(pkg_get "$file" '.upstream.branch | tag') != "!!null" ]]; then
