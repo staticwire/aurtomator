@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  # Reads the pinned Arch image from ci-image/Dockerfile, whose dated tag and digest Dependabot updates
+  # Reads the pinned Arch image from ci-image/archlinux.Dockerfile, whose dated tag and digest Dependabot updates
   image:
     name: image
     runs-on: ubuntu-latest
@@ -49,9 +49,9 @@ jobs:
       - name: Read image
         id: read
         run: |
-          ref=$(sed -n 's/^FROM //p' ci-image/Dockerfile)
+          ref=$(sed -n 's/^FROM //p' ci-image/archlinux.Dockerfile)
           if [[ ! "$ref" =~ ^archlinux:base-devel-[0-9]{8}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::ci-image/Dockerfile must pin a dated tag of archlinux:base-devel by digest"
+            echo "::error::ci-image/archlinux.Dockerfile must pin a dated tag of archlinux:base-devel by digest"
             exit 1
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"

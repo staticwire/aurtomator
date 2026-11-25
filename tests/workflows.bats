@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 GITHUB_DIR="$BATS_TEST_DIRNAME/../.github"
-CI_IMAGE="$BATS_TEST_DIRNAME/../ci-image/Dockerfile"
+CI_IMAGE="$BATS_TEST_DIRNAME/../ci-image/archlinux.Dockerfile"
 
 # git reads and writes no config of the user running the tests, nor of the system
 setup() {
@@ -267,15 +267,15 @@ secret_lines() {
     "archlinux:$tag@sha256:${digest}a" "archlinux:$tag@sha256:${digest^^}" "archlinux:base-devel-20261108@sha256:$digest" \
     "archlinux:base-devel-2026110.0.623074@sha256:$digest" "archlinux:base-20261108.0.623074@sha256:$digest" \
     "evil/archlinux:$tag@sha256:$digest"; do
-    echo "FROM $from" >"$work/ci-image/Dockerfile"
+    echo "FROM $from" >"$work/ci-image/archlinux.Dockerfile"
     : >"$work/out"
     run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
     echo "$from: $output"
     [ "$status" -eq 1 ]
-    [ "$output" = "::error::ci-image/Dockerfile must pin a dated tag of archlinux:base-devel by digest" ]
+    [ "$output" = "::error::ci-image/archlinux.Dockerfile must pin a dated tag of archlinux:base-devel by digest" ]
     [ ! -s "$work/out" ]
   done
-  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:$tag@sha256:$digest" >"$work/ci-image/Dockerfile"
+  printf '%s\n' "# FROM archlinux:latest" "FROM archlinux:$tag@sha256:$digest" >"$work/ci-image/archlinux.Dockerfile"
   run env -C "$work" GITHUB_OUTPUT="$work/out" bash -e "$step"
   [ "$status" -eq 0 ]
   [ "$(cat "$work/out")" = "ref=archlinux:$tag@sha256:$digest" ]
@@ -747,7 +747,7 @@ step_index_in() {
   local value
   for value in '' false yes true merge; do
     echo "[$value]"
-    AUTO_MERGE="$value" GH_FILES="ci-image/Dockerfile" run_merge_step
+    AUTO_MERGE="$value" GH_FILES="ci-image/archlinux.Dockerfile" run_merge_step
     [ "$status" -eq 0 ]
     [[ "$output" == *"::notice::"* ]]
     [ ! -s "$GH_LOG" ]
@@ -781,7 +781,7 @@ EOF
 # main by dispatch
 @test "merge-image: merges the tested head when only files of ci-image/ changed, then starts ci.yml and release-please.yml on main" {
   local files
-  for files in ci-image/Dockerfile ci-image/lint.Dockerfile $'ci-image/Gemfile\nci-image/Gemfile.lock' ci-image/Gemfile.lock \
+  for files in ci-image/archlinux.Dockerfile ci-image/lint.Dockerfile $'ci-image/Gemfile\nci-image/Gemfile.lock' ci-image/Gemfile.lock \
     $'ci-image/requirements.in\nci-image/requirements.txt' ci-image/requirements.txt; do
     echo "$files"
     GH_FILES="$files" run_merge_step
@@ -795,7 +795,7 @@ EOF
 
 @test "merge-image: leaves a pull request that changes other files" {
   local files
-  for files in $'ci-image/Dockerfile\n.github/workflows/ci.yml' ci-image/setup.sh ci-image/Gemfile.local ''; do
+  for files in $'ci-image/archlinux.Dockerfile\n.github/workflows/ci.yml' ci-image/setup.sh ci-image/Gemfile.local ''; do
     echo "[$files]"
     GH_FILES="$files" run_merge_step
     [ "$status" -eq 0 ]
@@ -806,7 +806,7 @@ EOF
 }
 
 @test "merge-image: starts no workflow when the merge fails" {
-  GH_MERGE_RC=1 GH_FILES="ci-image/Dockerfile" run_merge_step
+  GH_MERGE_RC=1 GH_FILES="ci-image/archlinux.Dockerfile" run_merge_step
   [ "$status" -ne 0 ]
   run grep -c '^workflow run' "$GH_LOG"
   [ "$output" = "0" ]
@@ -925,7 +925,7 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
 }
 
 @test "merge-image: fails when the file list cannot be read" {
-  GH_FAIL=1 GH_FILES="ci-image/Dockerfile" run_merge_step
+  GH_FAIL=1 GH_FILES="ci-image/archlinux.Dockerfile" run_merge_step
   [ "$status" -ne 0 ]
   run grep -c '^pr merge' "$GH_LOG"
   [ "$output" = "0" ]
