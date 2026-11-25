@@ -98,7 +98,7 @@ jobs:
       issues: write
 ```
 
-`.github/workflows/validate.yml` runs `validate-pkg.sh --all` on every push to `main` and on pull requests, after the same job `pins`, and reads online what the requires rules need for each package that the push or the pull request adds or changes, see [Add a package](/add-a-package/#3-validate-the-yaml):
+`.github/workflows/validate.yml` runs `validate-pkg.sh --all` on every push to `main` and on pull requests, after the same job `pins`, and reads online what the requires rules need for each package that the push or the pull request adds or changes, and for every package when it moves the pins, see [Add a package](/add-a-package/#3-validate-the-yaml):
 
 ```yaml
 name: Validate packages

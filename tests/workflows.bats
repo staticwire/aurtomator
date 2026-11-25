@@ -5169,23 +5169,29 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   grep -qxF './aurtomator/scripts/validate-pkg.sh --all' <<<"$output"
 }
 
+OLD_PIN=1234567890abcdef1234567890abcdef12345678
+
 # Runs the step of validate.yml that checks the requirements of changed packages in a repository whose
-# first commit holds packages a, b and c and whose second adds d, changes a and deletes c, with $BASE as
-# the base and a validate-pkg.sh that logs each name with the copy it reads and fails for b. sudo logs
-# its calls to $BATS_TEST_TMPDIR/sudo.log and runs the command, and chown logs to chown.log.
+# first commit holds packages a, b and c and a workflow pinned to $OLD_PIN, and whose second adds d,
+# changes a, deletes c and pins $PIN, with $BASE as the base and a validate-pkg.sh that logs each name
+# with the copy it reads and fails for b. Root of the job does not own the checkout of the runner, which
+# git learns from GIT_TEST_ASSUME_DIFFERENT_OWNER. sudo logs its calls to $BATS_TEST_TMPDIR/sudo.log and
+# runs the command, and chown logs to chown.log.
 run_changed_step() {
-  local repo="$BATS_TEST_TMPDIR/repo" bin="$BATS_TEST_TMPDIR/bin" name
-  mkdir -p "$repo/packages" "$repo/aurtomator/scripts" "$bin"
+  local repo="$BATS_TEST_TMPDIR/repo" bin="$BATS_TEST_TMPDIR/bin" name pin="${PIN-$OLD_PIN}"
+  mkdir -p "$repo/packages" "$repo/aurtomator/scripts" "$repo/.github/workflows" "$bin"
   git -C "$repo" init -q
   for name in a b c; do
     echo "name: $name" >"$repo/packages/$name.yml"
   done
+  echo "    uses: owner/aurtomator/.github/workflows/validate.yml@$OLD_PIN # v1.0.0" >"$repo/.github/workflows/validate.yml"
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m base
   FIRST=$(git -C "$repo" rev-parse HEAD)
   echo "name: d" >"$repo/packages/d.yml"
   echo "current: '2'" >>"$repo/packages/a.yml"
   git -C "$repo" rm -q packages/c.yml
+  echo "    uses: owner/aurtomator/.github/workflows/validate.yml@$pin # v1.1.0" >"$repo/.github/workflows/validate.yml"
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m head
   printf '#!/bin/sh
@@ -5203,14 +5209,14 @@ echo "::warning::from $1"
   rm -rf "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/sudo.log" "$BATS_TEST_TMPDIR/chown.log"
   [[ -n "${KEEP_WORK:-}" ]] || rm -rf "$BATS_TEST_TMPDIR/work"
   run env -C "$repo" PATH="$bin:$PATH" GITHUB_WORKSPACE="$repo" WORK="$BATS_TEST_TMPDIR/work" BASE="${BASE-$FIRST}" \
-    TEST_X_RC="${TEST_X_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
+    PIN="$pin" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 TEST_X_RC="${TEST_X_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # The requires rules read the requirements of each new version, so validate-pkg.sh reads them online for
 # the packages that a push or a pull request adds or changes
 @test "validate: checks online the packages that the push or the pull request adds or changes" {
-  run yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env.BASE' "$VALIDATE"
-  [ "$output" = '${{ github.event.pull_request.base.sha || github.event.before }}' ]
+  run yq -o=json -I=0 '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env | del(.WORK)' "$VALIDATE"
+  [ "$output" = '{"BASE":"${{ github.event.pull_request.base.sha || github.event.before }}","PIN":"${{ job.workflow_sha }}"}' ]
   run_changed_step
   [ "$status" -eq 0 ]
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
@@ -5222,6 +5228,36 @@ echo "::warning::from $1"
     [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
+}
+
+# Packages of the base met the rules of the aurtomator it pinned, so a move of the pin checks them all
+@test "validate: checks every package online when the base pins another commit of aurtomator" {
+  local pin
+  for pin in abcdef0123456789abcdef0123456789abcdef01 ""; do
+    PIN=$pin run_changed_step
+    [ "$status" -ne 0 ]
+    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
+    rm -rf "$BATS_TEST_TMPDIR/repo"
+  done
+}
+
+# actions/checkout trusts the checkout in a git config of its own, and root of the job does not own it
+@test "validate: git in the steps trusts the checkout of the runner" {
+  local step line count=0 git_re='(^|[[:space:];&|(!$])git[[:space:]]'
+  local ws_git='git_ws() { git -c safe.directory="$PWD" "$@"; }'
+  mapfile -t steps < <(yq '.jobs[].steps[] | select(has("run") and .name != "Install dependencies") | .name' "$VALIDATE")
+  [ "${#steps[@]}" -gt 0 ]
+  for step in "${steps[@]}"; do
+    run yq ".jobs[].steps[] | select(.name == \"$step\") | .run" "$VALIDATE"
+    [ "$status" -eq 0 ]
+    for line in "${lines[@]}"; do
+      [[ ! "$line" =~ ^[[:space:]]*# && "$line" =~ $git_re ]] || continue
+      echo "$step: $line"
+      [ "${line#"${line%%[![:space:]]*}"}" = "$ws_git" ]
+      count=$((count + 1))
+    done
+  done
+  [ "$count" -eq 1 ]
 }
 
 # The rules download and parse releases, so builder reads copies of the YAMLs in a directory of its own,

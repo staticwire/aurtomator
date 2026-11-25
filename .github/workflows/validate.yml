@@ -83,11 +83,13 @@ jobs:
         run: ./aurtomator/scripts/validate-pkg.sh --all
 
       # The requires rules read the requirements of each new version, so validate-pkg.sh reads them online
-      # for the packages that the push or the pull request adds or changes, and for all without a base.
-      # builder downloads and parses the releases, with copies of their YAMLs in a directory of its own.
+      # for the packages that the push or the pull request adds or changes, and for all when the base is
+      # missing or pins another commit of aurtomator. builder downloads and parses the releases, with
+      # copies of their YAMLs in a directory of its own.
       - name: Check the requirements of changed packages
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          PIN: ${{ job.workflow_sha }}
           WORK: /work
         run: |
           set -o pipefail
@@ -102,8 +104,11 @@ jobs:
             echo "::error::$WORK exists already"
             exit 1
           fi
-          if [[ "$BASE" =~ ^[0-9a-f]{40}$ && ! "$BASE" =~ ^0+$ ]] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            files=$(git diff --name-only --diff-filter=AM "$BASE" HEAD -- packages)
+          # actions/checkout trusts the checkout in a git config of its own, and root does not own it
+          git_ws() { git -c safe.directory="$PWD" "$@"; }
+          if [[ "$BASE" =~ ^[0-9a-f]{40}$ && ! "$BASE" =~ ^0+$ && "$PIN" =~ ^[0-9a-f]{40}$ ]] &&
+            git_ws cat-file -e "$BASE^{commit}" 2>/dev/null && git_ws grep -qF "@$PIN" "$BASE" -- .github/workflows; then
+            files=$(git_ws diff --name-only --diff-filter=AM "$BASE" HEAD -- packages)
           else
             files=$(printf '%s\n' packages/*.yml)
           fi
