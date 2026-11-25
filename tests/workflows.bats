@@ -5172,7 +5172,8 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
 OLD_PIN=1234567890abcdef1234567890abcdef12345678
 
 # Runs the step of validate.yml that checks the requirements of changed packages in a repository whose
-# first commit holds packages a, b and c and a workflow pinned to $OLD_PIN, and whose second adds d,
+# first commit holds packages a, b and c and a workflow whose job validate calls validate.yml at
+# $OLD_PIN, followed by the text of $BASE_JOBS, and whose second adds d,
 # changes a, deletes c, or renames it to e with $RENAME, and pins $PIN, with $BASE as the base and a
 # validate-pkg.sh that logs each name
 # with the copy it reads and fails for b. Root of the job does not own the checkout of the runner, which
@@ -5185,7 +5186,8 @@ run_changed_step() {
   for name in a b c; do
     echo "name: $name" >"$repo/packages/$name.yml"
   done
-  echo "    uses: owner/aurtomator/.github/workflows/validate.yml@$OLD_PIN # v1.0.0" >"$repo/.github/workflows/validate.yml"
+  printf 'jobs:\n  validate:\n    uses: owner/aurtomator/.github/workflows/validate.yml@%s # v1.0.0\n%s' \
+    "$OLD_PIN" "${BASE_JOBS:-}" >"$repo/.github/workflows/validate.yml"
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m base
   FIRST=$(git -C "$repo" rev-parse HEAD)
@@ -5196,7 +5198,8 @@ run_changed_step() {
   else
     git -C "$repo" rm -q packages/c.yml
   fi
-  echo "    uses: owner/aurtomator/.github/workflows/validate.yml@$pin # v1.1.0" >"$repo/.github/workflows/validate.yml"
+  printf 'jobs:\n  validate:\n    uses: owner/aurtomator/.github/workflows/validate.yml@%s # v1.1.0\n' "$pin" \
+    >"$repo/.github/workflows/validate.yml"
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m head
   printf '#!/bin/sh
@@ -5244,13 +5247,27 @@ echo "::warning::from $1"
 
 # Packages of the base met the rules of the aurtomator it pinned, so a move of the pin checks them all
 @test "validate: checks every package online when the base pins another commit of aurtomator" {
-  local pin
-  for pin in abcdef0123456789abcdef0123456789abcdef01 ""; do
+  local pin new=abcdef0123456789abcdef0123456789abcdef01
+  for pin in "$new" ""; do
     PIN=$pin run_changed_step
     [ "$status" -ne 0 ]
     [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
+  # The base counts only when a job of its workflows calls validate.yml at the pin
+  local jobs
+  for jobs in "  check:"$'\n'"    uses: owner/aurtomator/.github/workflows/check-updates.yml@$new # v1.1.0"$'\n' \
+    "# uses: owner/aurtomator/.github/workflows/validate.yml@$new"$'\n' \
+    "  other:"$'\n'"    uses: owner/aurtomator/.github/workflows/validate.yml@$new-x"$'\n'; do
+    PIN=$new BASE_JOBS=$jobs run_changed_step
+    [ "$status" -ne 0 ]
+    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
+    rm -rf "$BATS_TEST_TMPDIR/repo"
+  done
+  # Any job of the base that calls validate.yml at the pin, of any repository, counts
+  PIN=$new BASE_JOBS="  again:"$'\n'"    uses: Owner/Fork/.github/workflows/validate.yml@$new # v1.1.0"$'\n' run_changed_step
+  [ "$status" -eq 0 ]
+  [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
 }
 
 # actions/checkout trusts the checkout in a git config of its own, and root of the job does not own it
