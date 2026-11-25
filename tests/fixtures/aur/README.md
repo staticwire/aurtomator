@@ -9,3 +9,5 @@ The `.SRCINFO` files of HEAD of these AUR repositories, cloned on 2026-11-24.
 - `python-zensical-ui.SRCINFO`: https://aur.archlinux.org/python-zensical-ui.git at 3f6b5885d2c2258fb56492e4f78d071d6cb7ce30
 - `ydiskarc.SRCINFO`: https://aur.archlinux.org/ydiskarc.git at 6a5a5b061a262e2e3d9fdef637f5f9af507b61ae
 - `rpc.json`: the packages of https://aur.archlinux.org/rpc/v5/info for the pkgnames above and python-svg.path, with `Name`, `PackageBase`, `Version`, `Depends` and `Provides`
+- `bashcov.SRCINFO`: https://aur.archlinux.org/bashcov.git at b3fc27ac00cd9533cba3c36825c0ecf5bbb908b9, cloned on 2026-11-25
+- `ruby-simplecov-cobertura.SRCINFO`: https://aur.archlinux.org/ruby-simplecov-cobertura.git at 880cc4bcfba995ccb67f3f41fb28442ef2825596, cloned on 2026-11-25

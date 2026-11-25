@@ -52,7 +52,7 @@ alert_note_error() {
 
 # Print the alerts of package file $1 that fire from current $2 to version $3 in file order, as hold or
 # notice, a tab and the note; fail on a broken rule. $4 offline skips requires rules, held those without hold.
-# The requires rules run for each package whose AUR depends hold Python, as notices unless the file lists them.
+# The requires rules run for each package whose AUR depends hold Python or Ruby, as notices unless listed.
 fired_alerts() {
   local rc=0
   if [[ -n "${AURTOMATOR_RUN_CACHE:-}" ]]; then
@@ -88,8 +88,9 @@ _fired_alerts() {
         log_err "alerts[$i].requires must be changed, unmet or imports, got $value"
         return 1
       fi
-      if [[ $(pkg_get "$file" .strategy) != pypi && -z "$(pkg_get "$file" '.python.pypi // .python.pyproject // ""' 2>/dev/null)" ]]; then
-        log_err "alerts[$i].requires needs strategy pypi, python.pypi or python.pyproject"
+      if [[ ! $(pkg_get "$file" .strategy) =~ ^(pypi|rubygems)$ &&
+      -z "$(pkg_get "$file" '(.python | select(tag == "!!map") | .pypi // .pyproject) // (.ruby | select(tag == "!!map") | .gem) // ""' 2>/dev/null)" ]]; then
+        log_err "alerts[$i].requires needs strategy pypi or rubygems, python.pypi, python.pyproject or ruby.gem"
         return 1
       fi
       note=""
@@ -98,7 +99,7 @@ _fired_alerts() {
         return 1
       fi
       listed[$value]=1
-      _fired_python "$value" "$hold" "$note" || return 1
+      _fired_requires "$value" "$hold" "$note" || return 1
       continue
     fi
     if ! note=$(alert_note "$file" "$i"); then
@@ -118,65 +119,95 @@ _fired_alerts() {
     printf '%s\t%s\n' "$action" "$note"
   done
   for value in changed unmet imports; do
-    [[ -n "${listed[$value]:-}" ]] || _fired_python "$value" "" "" || return 1
+    [[ -n "${listed[$value]:-}" ]] || _fired_requires "$value" "" "" || return 1
   done
 }
 
-# Print the line of requires rule $1, with hold $2 and note $3, for the call of _fired_alerts that
-# runs it: changed reads current, so prepare runs it with hold alone; unmet and imports run in the check
-_fired_python() {
-  local value=$1 hold=$2 note=$3 change action joined
+# Print the line of requires rule $1, with hold $2 and note $3, for the call of _fired_alerts: prepare runs
+# changed with hold alone, and unmet and imports run in the check
+_fired_requires() {
+  local value=$1 hold=$2 note=$3 lines="" part action joined line
   [[ "$offline" != offline ]] || return 0
   [[ "$offline" != held || ("$value" == changed && "$hold" == true) ]] || return 0
-  _python_state || return 1
-  [[ "$PY_STATE" == ready ]] || return 0
-  if [[ "$value" == changed ]]; then
-    # changed compares the release of current, which pkgver_format, pkgver_dash and newest change
-    [[ -n "$current" && "$PY_SOURCE" == pypi && -z "${PY_NEWEST:-}" ]] || return 0
-    [[ -z "$(pkg_get "$file" '.pkgver_format // ""')" && -z "$(pkgver_dash "$file")" ]] || return 0
-    change=$(requires_change "$file" "$current" "$latest" "$PY_PROJECT") || return 1
-    [[ -n "$change" ]] || return 0
-    action=notice
-    [[ "$hold" != true ]] || action=hold
-    printf '%s\t%s\n' "$action" "${note:+$note: }$change"
-    return 0
+  _requires_state || return 1
+  if [[ "$PY_STATE" == ready ]]; then
+    part=$(_python_rule "$value") || return 1
+    lines+="${part:+$part$'\n'}"
   fi
-  change=$("python_$value" "$file" "$PY_SRCINFO" "$PY_PROJECT" "$PY_VERSION") || return 1
-  [[ -n "$change" ]] || return 0
+  if [[ "$RB_STATE" == ready ]]; then
+    part=$(_ruby_rule "$value") || return 1
+    lines+="${part:+$part$'\n'}"
+  fi
+  [[ -n "$lines" ]] || return 0
   action=notice
-  [[ "$hold" != true || $'\n'"$change" != *$'\nhold\t'* ]] || action=hold
+  [[ "$hold" != true || $'\n'"$lines" != *$'\nhold\t'* ]] || action=hold
   joined=""
-  while IFS=$'\t' read -r _ change; do
-    joined+="${joined:+; }$change"
-  done <<<"$change"
+  while IFS=$'\t' read -r _ line; do
+    [[ -z "$line" ]] || joined+="${joined:+; }$line"
+  done <<<"$lines"
   printf '%s\t%s\n' "$action" "${note:+$note: }$joined"
 }
 
-# Set PY_STATE once per call of _fired_alerts: ready when the AUR .SRCINFO, PY_SRCINFO, has a pkgname
-# with Python in depends and python_source names a source, none otherwise; fail when it cannot tell
-_python_state() {
-  local name rc=0 pkgname format version
+# Print the lines of hold or notice, a tab and the note, of requires rule $1 on the Python side; changed
+# compares the release of current, which pkgver_format, pkgver_dash and newest change
+_python_rule() {
+  local change
+  if [[ "$1" == changed ]]; then
+    [[ -n "$current" && "$PY_SOURCE" == pypi && -z "${PY_NEWEST:-}" ]] || return 0
+    [[ -z "$(pkg_get "$file" '.pkgver_format // ""')" && -z "$(pkgver_dash "$file")" ]] || return 0
+    change=$(requires_change "$file" "$current" "$latest" "$PY_PROJECT") || return 1
+    [[ -z "$change" ]] || printf 'hold\t%s\n' "$change"
+    return 0
+  fi
+  "python_$1" "$file" "$REQ_SRCINFO" "$PY_PROJECT" "$PY_VERSION"
+}
+
+# Print the lines of requires rule $1 on the side of gems, as _python_rule does
+_ruby_rule() {
+  local change
+  case $1 in
+    changed)
+      [[ -n "$current" ]] || return 0
+      [[ -z "$(pkg_get "$file" '.pkgver_format // ""')" && -z "$(pkgver_dash "$file")" ]] || return 0
+      change=$(ruby_change "$file" "$RB_GEM" "$current" "$latest") || return 1
+      [[ -z "$change" ]] || printf 'hold\t%s\n' "$change"
+      ;;
+    unmet) ruby_unmet "$file" "$REQ_SRCINFO" "$RB_GEM" "$RB_VERSION" ;;
+    imports) ruby_imports "$file" "$REQ_SRCINFO" "$RB_GEM" "$RB_VERSION" ;;
+  esac
+}
+
+# Set REQ_SRCINFO, PY_STATE and RB_STATE once per call of _fired_alerts: a state is ready when the AUR
+# .SRCINFO has a pkgname with that language in depends and a source of requirements, none otherwise
+_requires_state() {
+  local name rc=0 pkgname python="" ruby="" format version
   [[ -z "$PY_STATE" ]] || return 0
-  PY_STATE=none
+  PY_STATE=none RB_STATE=none
   name=$(package_name "$file") || return 1
-  PY_SRCINFO=$(aur_srcinfo "$name") || rc=$?
+  REQ_SRCINFO=$(aur_srcinfo "$name") || rc=$?
   ((rc != 3)) || return 0
   ((rc == 0)) || return 1
   while IFS= read -r pkgname; do
-    if pkgname_has_python "$PY_SRCINFO" "$pkgname"; then
-      # The check gives the version after pkgver_format, and the sources take the upstream version
-      version=$latest
-      format=$(pkg_get "$file" '.pkgver_format // ""')
-      if [[ -n "$format" ]]; then
-        version=$(_unformat_version "$latest" "$format")
-        if [[ -z "$version" ]]; then
-          log_err "packages/${file##*/}: version $latest does not fit pkgver_format $format"
-          return 1
-        fi
-      fi
-      python_source "$file" "$version" "$PY_SRCINFO" || return 1
-      [[ "$PY_SOURCE" == none ]] || PY_STATE=ready
-      return 0
+    ! pkgname_has_python "$REQ_SRCINFO" "$pkgname" || python=1
+    ! pkgname_has_ruby "$REQ_SRCINFO" "$pkgname" || ruby=1
+  done < <(srcinfo_pkgnames "$REQ_SRCINFO")
+  [[ -n "$python$ruby" ]] || return 0
+  # The check gives the version after pkgver_format, and the sources take the upstream version
+  version=$latest
+  format=$(pkg_get "$file" '.pkgver_format // ""')
+  if [[ -n "$format" ]]; then
+    version=$(_unformat_version "$latest" "$format")
+    if [[ -z "$version" ]]; then
+      log_err "packages/${file##*/}: version $latest does not fit pkgver_format $format"
+      return 1
     fi
-  done < <(srcinfo_pkgnames "$PY_SRCINFO")
+  fi
+  if [[ -n "$python" ]]; then
+    python_source "$file" "$version" "$REQ_SRCINFO" || return 1
+    [[ "$PY_SOURCE" == none ]] || PY_STATE=ready
+  fi
+  if [[ -n "$ruby" ]]; then
+    ruby_source "$file" "$version" || return 1
+    [[ "$RB_SOURCE" == none ]] || RB_STATE=ready
+  fi
 }

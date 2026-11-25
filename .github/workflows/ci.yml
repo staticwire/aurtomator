@@ -65,9 +65,12 @@ jobs:
       - name: shfmt
         run: shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh
 
-      # The requires rule imports runs the parsers of scripts/lib/ in the check job
+      # The requires rules imports run the parsers of scripts/lib/ in the check job
       - name: Compile the Python helpers
         run: python3 -m py_compile scripts/lib/*.py
+
+      - name: Check the Ruby helpers
+        run: ruby -wc scripts/lib/*.rb
 
       # Checks the workflows, and the run blocks with shellcheck
       - name: actionlint
@@ -156,7 +159,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: coverage/coverage.xml,coverage/python.xml
+          files: coverage/coverage.xml,coverage/python.xml,coverage/ruby.xml
           # The search of the CLI would take tests/coverage.bats for a report
           disable_search: true
           fail_ci_if_error: false

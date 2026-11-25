@@ -2,7 +2,7 @@
 title: Strategies
 ---
 
-aurtomator has 16 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree: the streamrip PKGBUILD builds the git tag `v2.2.0` from GitHub while PyPI still holds `2.1.0`, so `pypi` would report a downgrade in every run. Vendor pages can also sit behind a bot check that their download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
+aurtomator has 17 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree: the streamrip PKGBUILD builds the git tag `v2.2.0` from GitHub while PyPI still holds `2.1.0`, so `pypi` would report a downgrade in every run. Vendor pages can also sit behind a bot check that their download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
 
 | Strategy | Source | Best for | Pre-releases |
 |---|---|---|---|
@@ -18,6 +18,7 @@ aurtomator has 16 version detection strategies. Pick the one that reads the sour
 | `pypi` | PyPI JSON API | Python packages | stable only |
 | `npm` | npm registry | Node.js packages | `latest` tag |
 | `crates` | crates.io API | Rust crates | stable only, or `prerelease: true` |
+| `rubygems` | rubygems.org API | Ruby gems | stable only |
 | `repology` | Repology API | fallback across distribution repositories, the AUR left out | by repository |
 | `archpkg` | Arch package search | official Arch packages | none |
 | `webpage-scrape` | any HTTPS page and a regex | upstreams without an API | as the regex reads |
@@ -498,6 +499,25 @@ upstream:
   prerelease: true
 pkgver_dash: .
 ```
+
+### rubygems
+
+**Upstream:** the rubygems.org API, `https://rubygems.org/api/v1/versions/{gem}.json`. **Version:** the highest `number` among the entries with `prerelease` false and `platform` `ruby`, in the order of RubyGems.
+
+| Field | Required | Description |
+|---|---|---|
+| `upstream.registry` | yes | gem name of A-Za-z0-9._- that starts with a letter or digit, such as `bashcov` |
+
+```yaml
+name: bashcov
+strategy: rubygems
+upstream:
+  registry: bashcov
+```
+
+Packages of this strategy with Ruby in their AUR `depends` run the requires rules `changed`, `unmet` and `imports` on `upstream.registry`, see [Gems](/features/update-alerts/#gems).
+
+Gems list each release once per platform, so nokogiri 1.19.7 appears eleven times in the answer and the strategy reads the entry for `ruby`. RubyGems puts letters before numbers: `4.0.0.rc1` of simplecov-cobertura sorts below `4.0.0`, where `vercmp` puts it above, and rubygems.org marks it as a pre-release.
 
 ### repology
 

@@ -5,8 +5,9 @@ bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test_env
-  # Strategies need scripts/lib/common.sh, pypi.sh lib/pep440.sh and lib/requires.sh too, and nothing else of scripts/
-  find "$TEST_TMPDIR/scripts" -type l ! -name common.sh ! -name pep440.sh ! -name requires.sh -delete
+  # Strategies need scripts/lib/common.sh, pypi.sh lib/pep440.sh and lib/requires.sh, rubygems.sh lib/gemver.sh, and
+  # nothing else of scripts/
+  find "$TEST_TMPDIR/scripts" -type l ! -name common.sh ! -name pep440.sh ! -name requires.sh ! -name gemver.sh -delete
   cp "$TESTS_DIR/helpers/mock-git.sh" "$MOCK_DIR/git"
   chmod +x "$MOCK_DIR/git"
 }
@@ -863,6 +864,64 @@ run_pin() {
     [ "$status" -eq 0 ]
     [ "$output" = "0.15.0" ]
   done
+}
+
+# === rubygems ===
+
+# Helper: runs rubygems.sh for a package of registry $1, with the upstream lines $2
+run_gem() {
+  create_test_package "test-gem" "rubygems" "upstream:
+  registry: $1${2:+$'\n'$2}"
+  run "$TEST_TMPDIR/strategies/rubygems.sh" "test-gem"
+}
+
+@test "rubygems: prints the newest stable release for the platform ruby" {
+  local pair
+  # simplecov-cobertura lists 4.0.0.rc1 as a pre-release, and nokogiri lists 1.19.7 for eleven platforms
+  for pair in "bashcov 4.0.3" "simplecov-cobertura 4.0.0" "nokogiri 1.19.7"; do
+    run_gem "${pair% *}"
+    [ "$status" -eq 0 ] && [ "$output" = "${pair#* }" ] || {
+      echo "$pair: $output"
+      return 1
+    }
+  done
+}
+
+@test "rubygems: takes the highest release in the order of RubyGems, not the first entry" {
+  mkdir -p "$MOCK_FILES_DIR/rubygems/versions"
+  echo '[{"number": "1.9", "prerelease": false, "platform": "ruby"}, {"number": "1.10", "prerelease": false, "platform": "ruby"},
+    {"number": "1.11", "prerelease": false, "platform": "java"}, {"number": "1.12.rc1", "prerelease": true, "platform": "ruby"},
+    {"number": "bad version", "prerelease": false, "platform": "ruby"}]' >"$MOCK_FILES_DIR/rubygems/versions/demo.json"
+  run_gem demo
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.10" ]
+}
+
+@test "rubygems: fails without a stable release, for a missing gem and on a bot check page" {
+  mkdir -p "$MOCK_FILES_DIR/rubygems/versions"
+  echo '[{"number": "1.0.rc1", "prerelease": true, "platform": "ruby"}, {"number": "2.0", "prerelease": false, "platform": "java"}]' \
+    >"$MOCK_FILES_DIR/rubygems/versions/pre-only.json"
+  run_gem pre-only
+  [ "$status" -eq 1 ]
+  [ "$output" = "No stable version of pre-only on rubygems.org" ]
+  run_gem none-such
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://rubygems.org/api/v1/versions/none-such.json: The requested URL returned error: 404"* ]]
+  [[ "$output" == *"Failed to fetch rubygems.org versions for none-such"* ]]
+  run_gem gated-pkg
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://rubygems.org/402.html: the answer is not JSON"* ]]
+}
+
+@test "rubygems: refuses a registry outside the name rule of gems and reads within max_answer_mb" {
+  run_gem "../x"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"upstream.registry must be a gem name of A-Za-z0-9._- that starts with a letter or digit: '../x'"* ]]
+  # check-update.sh exports the max_answer_mb of the package
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" MAX_ANSWER_MB=7
+  run_gem bashcov
+  [ "$status" -eq 0 ]
+  grep -q -- '--max-filesize 7M' "$CURL_ARGS_LOG"
 }
 
 # === repology ===

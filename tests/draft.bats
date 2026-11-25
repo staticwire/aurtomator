@@ -147,6 +147,17 @@ stub_git_latest() {
   expect_yaml nodejs-scoped 'name: nodejs-scoped' 'strategy: npm' 'upstream:' "  registry: '@scope/demo'" 'current: 1.0.0'
 }
 
+@test "draft: a gem of rubygems.org gives rubygems, from the source or the url" {
+  aur_package bashcov 4.0.3 'source = https://rubygems.org/downloads/bashcov-4.0.3.gem'
+  run "$TEST_TMPDIR/scripts/draft.sh" bashcov
+  [ "$status" -eq 0 ]
+  expect_yaml bashcov 'name: bashcov' 'strategy: rubygems' 'upstream:' '  registry: bashcov' 'current: 4.0.3'
+  aur_package ruby-simplecov-cobertura 4.0.0 'source = https://rubygems.org/gems/simplecov-cobertura-4.0.0.gem'
+  run "$TEST_TMPDIR/scripts/draft.sh" ruby-simplecov-cobertura
+  [ "$status" -eq 0 ]
+  expect_yaml ruby-simplecov-cobertura 'name: ruby-simplecov-cobertura' 'strategy: rubygems' 'upstream:' '  registry: simplecov-cobertura' 'current: 4.0.0'
+}
+
 @test "draft: a crate gives crates" {
   aur_package demo 1.0.0 'source = demo-1.0.0.tar.gz::https://static.crates.io/crates/demo-rs/demo-rs-1.0.0.crate'
   run "$TEST_TMPDIR/scripts/draft.sh" demo
@@ -203,6 +214,13 @@ stub_git_latest() {
     [ ! -e "$TEST_TMPDIR/packages/demo$i.yml" ]
     [[ "$output" == *"No rule matches"* && "$output" != *"bad array subscript"* ]]
   done
+}
+
+@test "draft: the url of a gem on rubygems.org gives rubygems when no source matches" {
+  aur_package ruby-demo 1.0.0 'url = https://rubygems.org/gems/simplecov-cobertura' 'source = https://demo.example.org/demo-1.0.0.tar.gz'
+  run "$TEST_TMPDIR/scripts/draft.sh" ruby-demo
+  [ "$status" -eq 0 ]
+  expect_yaml ruby-demo 'name: ruby-demo' 'strategy: rubygems' 'upstream:' '  registry: simplecov-cobertura' 'current: 1.0.0'
 }
 
 @test "draft: the url gives github-tag, gitlab-tag or gitea-tag when no source matches" {

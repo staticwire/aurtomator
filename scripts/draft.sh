@@ -151,6 +151,8 @@ from_source() {
     STRATEGY=npm FIELDS=("registry=${BASH_REMATCH[1]}")
   elif [[ "$src" =~ ^https://(static\.crates\.io/crates|crates\.io/api/v1/crates)/([A-Za-z0-9_-]+)/ ]]; then
     STRATEGY=crates FIELDS=("registry=${BASH_REMATCH[2]}")
+  elif [[ "$src" =~ ^https://rubygems\.org/(downloads|gems)/([A-Za-z0-9][A-Za-z0-9._-]*)-[0-9][0-9A-Za-z.]*\.gem$ ]]; then
+    STRATEGY=rubygems FIELDS=("registry=${BASH_REMATCH[2]}")
   else
     kde_source "$src"
   fi
@@ -164,6 +166,8 @@ from_url() {
     STRATEGY=github-tag FIELDS=("project=${BASH_REMATCH[1]%.git}")
   elif [[ "$url" =~ ^https://codeberg\.org/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(/|$) ]]; then
     STRATEGY=gitea-tag FIELDS=(host=codeberg.org "project=${BASH_REMATCH[1]%.git}")
+  elif [[ "$url" =~ ^https://rubygems\.org/gems/([A-Za-z0-9][A-Za-z0-9._-]*)$ ]]; then
+    STRATEGY=rubygems FIELDS=("registry=${BASH_REMATCH[1]}")
   elif [[ "$url" == https://gitlab.com/* ]]; then
     project="${url#https://gitlab.com/}"
     project="${project%%/-/*}"

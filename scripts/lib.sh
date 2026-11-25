@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # lib.sh - Sources the files of lib/ for the scripts; strategies source lib/common.sh, and
-# pypi.sh lib/pep440.sh and lib/requires.sh too
+# pypi.sh lib/pep440.sh and lib/requires.sh too, rubygems.sh lib/gemver.sh
 #
 # Usage: source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -11,6 +11,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 # shellcheck source=lib/pep440.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/pep440.sh"
+# shellcheck source=lib/gemver.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/gemver.sh"
 # shellcheck source=lib/requires.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/requires.sh"
 # shellcheck source=lib/config.sh
@@ -27,6 +29,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/arch.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/archdb.sh"
 # shellcheck source=lib/pyrules.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/pyrules.sh"
+# shellcheck source=lib/rbrules.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/rbrules.sh"
 # shellcheck source=lib/sums.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/sums.sh"
 # shellcheck source=lib/issue.sh

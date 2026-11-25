@@ -30,6 +30,15 @@ if python3 -I -m coverage --version >/dev/null 2>&1; then
   export COVERAGE_FILE="$PWD/coverage/.coverage"
   export PATH="$helpers/cov-shims:$PATH"
 fi
+# SimpleCov measures scripts/lib/rb_requires.rb through the ruby of cov-shims, in a directory of its
+# own, since it merges the results of the last 600 seconds alone by default
+unset SIMPLECOV_HELPER_DIR
+if ruby -e 'require "simplecov"; require "simplecov-cobertura"' >/dev/null 2>&1; then
+  mkdir -p coverage
+  rm -rf coverage/ruby coverage/ruby.xml
+  export SIMPLECOV_HELPER_DIR="$PWD/coverage/ruby"
+  [[ ":$PATH:" == *":$helpers/cov-shims:"* ]] || export PATH="$helpers/cov-shims:$PATH"
+fi
 
 # Every writer of a blocking pipe waits for bashcov, so only the records of .sh files reach it.
 # Records start with one or more + and BASHCOV> and the delimiter; the second field is BASH_SOURCE.
@@ -55,5 +64,15 @@ if [[ -n "${COVERAGE_FILE:-}" ]] && compgen -G "$COVERAGE_FILE.*" >/dev/null; th
   # The data names scripts/lib/py_imports.py relative to the root of aurtomator
   (cd "$helpers/../.." && python3 -I -m coverage combine --rcfile=.coveragerc &&
     python3 -I -m coverage xml --rcfile=.coveragerc -o "${COVERAGE_FILE%/*}/python.xml") >&2 || status=1
+fi
+if [[ -n "${SIMPLECOV_HELPER_DIR:-}" && -f "$SIMPLECOV_HELPER_DIR/.resultset.json" ]]; then
+  # shellcheck disable=SC2016 # the code is Ruby
+  ruby -e 'require "simplecov"; require "simplecov-cobertura"
+    SimpleCov.collate([File.join(ARGV[1], ".resultset.json")]) do
+      root ARGV[0]
+      coverage_dir ARGV[1]
+      formatter SimpleCov::Formatter::CoberturaFormatter
+    end' "$helpers/../.." "$SIMPLECOV_HELPER_DIR" >&2 &&
+    mv "$SIMPLECOV_HELPER_DIR/coverage.xml" "${SIMPLECOV_HELPER_DIR%/*}/ruby.xml" || status=1
 fi
 exit "$status"

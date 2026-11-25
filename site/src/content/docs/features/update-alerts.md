@@ -21,7 +21,7 @@ alerts:
 | `when` | one of `when`, `from`, `match`, `requires` | `major`: the first number of the new version is greater than that of `current`, as in `28+25 → 29+1` |
 | `from` | one of `when`, `from`, `match`, `requires` | version: the new version is at or above it, and `current` is below it |
 | `match` | one of `when`, `from`, `match`, `requires` | ERE: the new version matches it, and `current` does not |
-| `requires` | one of `when`, `from`, `match`, `requires` | `changed`: the names of the requirements that apply on Arch differ between the release in `current` and the new version. `unmet`: the `depends` of the AUR package do not meet a requirement of the new version. `imports`: the files of the new version import modules that `depends` and `optdepends` do not hold. Strategy `pypi`, `python.pypi` or `python.pyproject`, see [Python packages](#python-packages) |
+| `requires` | one of `when`, `from`, `match`, `requires` | `changed`: the names of the requirements that apply on Arch differ between the release in `current` and the new version. `unmet`: the `depends` of the AUR package do not meet a requirement of the new version. `imports`: the files of the new version import modules that `depends` and `optdepends` do not hold. Strategy `pypi` or `rubygems`, `python.pypi` or `python.pyproject`, see [Python packages](#python-packages) and [Gems](#gems) |
 | `note` | yes, optional with `requires` | one line of text without tabs for the maintainer. Numbers, booleans and dates go in quotes, as in `note: '2024'` |
 | `hold` | no | `true` holds the update. Default `false` |
 
@@ -102,4 +102,32 @@ Required imports whose package is not in `depends` note `import tqdm: python-tqd
 
 Releases of `current` that PyPI lacks fire the rule with `PyPI has no release <version> of <registry> to compare with`, and releases of `current` without metadata that lists their requirements fire it with `<registry> <version>: PyPI holds no metadata that lists the requirements without running code`, since only a publish moves `current`. New versions without such metadata fail the check. Other failed requests fail the check of the package with their URL, as failed strategies do. `--prepare` and `--publish` take the notes of these rules from the check run. `--prepare` asks PyPI again only for `changed` rules with `hold: true`, which it fires from the `pkgver` of the AUR, and `--publish` asks PyPI nothing.
 
-`validate-pkg.sh` refuses entries that break the table: other keys, not exactly one of `when`, `from`, `match` and `requires`, or values of the wrong kind. It also refuses `when: major` together with `pkgver_format`, because the fixed text of formats such as `4.%s` holds the first number of every version. Packages take one `requires` rule of each value, and `requires` rules need strategy `pypi`, `python.pypi` or `python.pyproject`. `changed` does not apply with `python.release` or `python.pyproject`, and `hold: true` does not apply to `imports`. Rules that the check cannot evaluate fail the check of the package, so broken rules never let a held update through. The rules of one package run under the time limit of its check, 120 seconds by default, and rules that take longer fail the check as well.
+## Gems
+
+Packages whose `.SRCINFO` on the AUR has a pkgname with `ruby` or `ruby-*` in `depends` run the three `requires` rules on a gem in every check, listed or not, and the rules that `alerts` does not list fire as notices, as for Python. The rules read the runtime requirements and `ruby_version` of `https://rubygems.org/api/v2/rubygems/{gem}/versions/{version}.json` for the gem that the package names:
+
+| Package | Key | Source |
+|---|---|---|
+| strategy `rubygems` | none | `upstream.registry` at the new version |
+| other strategies, gem on rubygems.org | `ruby: {gem: simplecov-cobertura}` | that gem at the new version |
+| `-git` package, or no gem | `ruby: none` | no rule |
+
+Packages with Ruby in `depends` and none of these keys fail their check with `packages/<name>.yml: its depends hold Ruby packages, so set ruby.gem or ruby: none`. `-git` packages take `ruby: none`, since rubygems.org has no release of their versions and gemspecs are Ruby code that the check does not run. `ruby.gem` does not apply to strategy `rubygems`, which reads `upstream.registry`. `changed` compares the names of the requirements of the release in `current` and of the new version, and fires with `rubygems.org has no release <version> of <gem> to compare with` for a release of `current` that rubygems.org lacks. It runs without `pkgver_format` and `pkgver_dash` alone, since their `current` is no release of the gem. `unmet` matches each requirement to an entry of `depends` as it does for Python: the package holds the gem in the files database of pacman, by its gemspec under `usr/lib/ruby/gems/` with the default gems of `ruby`, or the package, its name or a name it provides is `ruby-<gem>` or `<gem>`, or `ruby.map` names it. Under `hold: true` it holds the update for missing entries, for each clause that the version fails, since RubyGems checks every clause when a program loads the gem, and for a `ruby_version` that the `ruby` of Arch fails:
+
+```text
+! bashcov: update 3.3.0 → 4.0.3 held: simplecov ~> 1.1: ruby-simplecov has 0.22.0
+```
+
+`imports` reads the `.gem` of the new version from its `gem_uri`, within `upstream.max_answer_mb` and after its sha256 matches, and takes `bindir`, `executables` and `require_paths` from its `metadata.gz`. `scripts/lib/rb_requires.rb` parses the `.rb` files of the require paths and the executables with Prism, which the `check` job installs with `ruby`, and prints each `require`, `require_relative` and `load` of a string. Requires at file level and in class and module bodies are required when they run from `lib/<gem>.rb` or an executable through the files of the gem; requires inside methods and blocks of `define_method`, in `begin` blocks that rescue `LoadError`, `ScriptError` or `Exception`, and at file level of the other files are optional. Bare `rescue` catches `StandardError` alone, and `LoadError` descends from `ScriptError`, so requires under it stay required. Each require path belongs to `ruby`, to the package that holds it in `lib/` of an installed gem by the files database of pacman, to an entry of `depends` or `optdepends` named `ruby-<first part of the path>`, or to the package that `ruby.map` names, and features built into the interpreter, such as `enumerator`, need none. Notes follow those of Python, as `require simplecov: ruby-simplecov not in depends`.
+
+`ruby.skip` lists gems that the rules leave out, such as gems for Windows. `ruby.relax: true` marks a PKGBUILD that turns `~>` into `>=`, and upper bounds of `~>` that Arch exceeds then give notices. Versions outside the grammar of RubyGems give notices as well.
+
+```yaml
+ruby:
+  map:
+    simplecov: ruby-simplecov
+  skip: [win32ole]
+  relax: true
+```
+
+`validate-pkg.sh` refuses entries that break the table: other keys, not exactly one of `when`, `from`, `match` and `requires`, or values of the wrong kind. It also refuses `when: major` together with `pkgver_format`, because the fixed text of formats such as `4.%s` holds the first number of every version. Packages take one `requires` rule of each value, and `requires` rules need strategy `pypi` or `rubygems`, `python.pypi`, `python.pyproject` or `ruby.gem`. `changed` does not apply with `python.release` or `python.pyproject`, and `hold: true` does not apply to `imports`. Rules that the check cannot evaluate fail the check of the package, so broken rules never let a held update through. The rules of one package run under the time limit of its check, 120 seconds by default, and rules that take longer fail the check as well.
