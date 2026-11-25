@@ -237,11 +237,16 @@ _marker_extra() {
 }
 
 # Set _MK_VAL for operator $1 between a string field of value $4 and constant $2, where $3 is
-# set for a field right of the operator. > and < are false, and ~= === >= <= compare as ==.
+# set for a field right of the operator. > and < are false, >= and <= compare as ==, and ~= and ===
+# are unknown, since packaging raises UndefinedComparison for them
 _marker_string() {
   local hit=0
   if [[ "$1" == "<" || "$1" == ">" ]]; then
     _MK_VAL=0
+    return 0
+  fi
+  if [[ "$1" == "~=" || "$1" == "===" ]]; then
+    _MK_VAL='?'
     return 0
   fi
   if [[ -z "$4" ]]; then

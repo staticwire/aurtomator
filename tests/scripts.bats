@@ -2323,7 +2323,8 @@ check_holds() {
     "1.1 >=1.1 0" "1.0 >=1.1 1" "1.1+local >=1.1 0" "1.4.5 ~=1.4 0" "2.0 ~=1.4 1" "1.3 ~=1.4 1" \
     "1.4.5 ~=1.4.2 0" "1.5 ~=1.4.2 1" "1.4.2rc1 ~=1.4.2 1" "1.4.2rc2 ~=1.4.2rc1 0" \
     "1.44.9 <1.45.0,>=1.44.10 1" "1.44.10 <1.45.0,>=1.44.10 0" "1.4.1 <1.4,>=1.1.0 1" "1.0 ===1.0 0" \
-    "1.0.0 ===1.0 1" "1.0a1 ===1.0A1 0"
+    "1.0.0 ===1.0 1" "1.0a1 ===1.0A1 0" "1.2+abc.1 >1.2b0.post0 0" "1.2+abc >1.2 1" "1.2.post1+x >1.2 1" \
+    "1.2b0+x >1.2b0 1" "1.2.post1 >1.2b0 0" "1.2.post1 >1.2.dev0 0" "1.2b0.post1 >1.2b0 1" "1.2b1 >1.2b0 0"
 }
 
 @test "pep440.sh: pep440_holds returns 2 for a clause it cannot read, 0 for no clause" {
@@ -2543,7 +2544,7 @@ run_split() {
 @test "requires.sh: marker_value compares string fields as the specification says" {
   check_markers \
     1 'sys_platform != "win32"' 0 'sys_platform != "linux"' \
-    1 'sys_platform ~= "linux"' 1 'sys_platform === "linux"' \
+    '?' 'sys_platform ~= "linux"' '?' 'sys_platform === "linux"' \
     1 'sys_platform >= "linux"' 1 'sys_platform <= "linux"' 0 'sys_platform >= "a"' \
     0 'sys_platform > "a"' 0 'sys_platform < "z"' 0 'platform_machine > "a"' 0 'platform_machine < "z"' \
     1 '"lin" in sys_platform' 1 'sys_platform in "linux darwin"' 0 '"win" in sys_platform' \
