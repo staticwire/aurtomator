@@ -167,18 +167,19 @@ class Imports(ast.NodeVisitor):
     visit_AsyncWith = visit_With
 
     def visit_If(self, node):
-        if dotted(node.test) in ("TYPE_CHECKING", "typing.TYPE_CHECKING"):
+        # typing can be imported under another name, as in import typing as t
+        if (dotted(node.test) or "").split(".")[-1] == "TYPE_CHECKING":
             self.within("typing", node.body)
             for item in node.orelse:
                 self.visit(item)
             return
         value = evaluate(node.test)
-        if value is not False:
-            for item in node.body:
-                self.visit(item)
-        if value is not True:
-            for item in node.orelse:
-                self.visit(item)
+        # Either branch of a test this file cannot decide may never run
+        if value is None:
+            self.within("optional", node.body + node.orelse)
+            return
+        for item in node.body if value else node.orelse:
+            self.visit(item)
 
 
 def main(argv):

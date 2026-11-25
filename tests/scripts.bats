@@ -3209,7 +3209,19 @@ run_py_imports() {
   run_py_imports mod.py
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'import\tmod.py\t%s\n' 'sys	module' 'os	module' 'platform	module' 'tomllib	module' 'fcntl	module' \
-    'maybe	module' 'other	module')" ]
+    'maybe	optional' 'other	optional')" ]
+}
+
+# jinja2 tests t.TYPE_CHECKING after import typing as t, and requests imports simplejson under a
+# flag that a try sets
+@test "py_imports.py: reads any TYPE_CHECKING as typing and the branches of an unknown test as optional" {
+  py_file mod.py 'import typing as t' 'if t.TYPE_CHECKING:' '    import typing_extensions as te' \
+    'if has_simplejson:' '    from simplejson import JSONDecodeError' 'elif sys.platform == "win32":' '    import winreg' \
+    'else:' '    import json'
+  run_py_imports mod.py
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'import\tmod.py\t%s\n' 'typing	module' 'typing_extensions	typing' 'simplejson	optional' \
+    'simplejson.JSONDecodeError	optional' 'json	optional')" ]
 }
 
 @test "py_imports.py: resolves relative imports against the path of the file" {
