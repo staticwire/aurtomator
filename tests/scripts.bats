@@ -3742,6 +3742,34 @@ TOML=$'[build-system]\nrequires = ["setuptools"]\n\n[project]\nname = "demo"\nde
   [ "$output" = "pypi zensical 0.1.3" ]
 }
 
+# Releases without metadata that lists the requirements fail the check, and none is the way out
+@test "pyrules.sh: python_source takes python: none for strategy pypi too" {
+  unmet_env
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" demo python
+  create_test_package "demo" "pypi" "upstream:
+  registry: zensical
+python: none"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; python_source "$1" 0.1.3 "$2" && echo "$PY_SOURCE $PY_PROJECT $PY_VERSION"' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" "$TEST_TMPDIR/demo.SRCINFO"
+  [ "$status" -eq 0 ]
+  [ "$output" = "none  " ]
+}
+
+@test "rbrules.sh: ruby_source takes ruby: none for strategy rubygems too" {
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo
+ruby: none"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_source "$1" 1.0.0 && echo "$RB_SOURCE $RB_GEM $RB_VERSION"' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "none  1.0.0" ]
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_source "$1" 1.0.0 && echo "$RB_SOURCE $RB_GEM $RB_VERSION"' \
+    "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
+  [ "$output" = "gem demo 1.0.0" ]
+}
+
 # Helper: package kube-diagrams of a strategy that finds 1.1.0, at current 1.0.0 with the YAML lines
 # $1, whose AUR .SRCINFO has the depends after it
 python_package() {

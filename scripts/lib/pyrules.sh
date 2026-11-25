@@ -607,13 +607,13 @@ _python_join() {
 python_source() {
   local tag value json
   PY_SOURCE="" PY_PROJECT="" PY_VERSION="" PY_HEADERS="" PY_NEWEST="" PY_TREE_ARCHIVE="" PY_TREE_TOP=""
-  if [[ "$(pkg_get "$1" .strategy)" == pypi ]]; then
-    PY_SOURCE=pypi PY_PROJECT=$(pkg_get "$1" .upstream.registry) PY_VERSION=$2
-    return 0
-  fi
   tag=$(pkg_get "$1" '.python | tag')
   if [[ "$tag" == "!!str" && "$(pkg_get "$1" .python)" == none ]]; then
     PY_SOURCE=none
+    return 0
+  fi
+  if [[ "$(pkg_get "$1" .strategy)" == pypi ]]; then
+    PY_SOURCE=pypi PY_PROJECT=$(pkg_get "$1" .upstream.registry) PY_VERSION=$2
     return 0
   fi
   if [[ "$tag" == "!!map" ]]; then

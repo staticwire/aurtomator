@@ -104,17 +104,15 @@ gem_release() {
 # and RB_VERSION; fail for a package with Ruby in depends that names none
 ruby_source() {
   RB_SOURCE="" RB_GEM="" RB_VERSION=$2
+  if [[ "$(pkg_get "$1" '.ruby | tag')" == "!!str" && "$(pkg_get "$1" .ruby)" == none ]]; then
+    RB_SOURCE=none
+    return 0
+  fi
   if [[ "$(pkg_get "$1" .strategy)" == rubygems ]]; then
     RB_SOURCE=gem RB_GEM=$(pkg_get "$1" .upstream.registry)
     return 0
   fi
   case $(pkg_get "$1" '.ruby | tag') in
-    "!!str")
-      if [[ "$(pkg_get "$1" .ruby)" == none ]]; then
-        RB_SOURCE=none
-        return 0
-      fi
-      ;;
     "!!map")
       RB_GEM=$(pkg_get "$1" '.ruby.gem // ""')
       if [[ -n "$RB_GEM" ]]; then

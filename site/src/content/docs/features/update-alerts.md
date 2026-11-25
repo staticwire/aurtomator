@@ -46,7 +46,7 @@ Packages whose `.SRCINFO` on the AUR has a pkgname with `python` or `python-*` i
 | other strategies, project on PyPI | `python: {pypi: KubeDiagrams}` | that project at the new version |
 | `-git` package of a project on PyPI | `python: {pypi: KubeDiagrams, release: newest}` | the newest release on PyPI, also for `imports` |
 | no release on PyPI | `python: {pyproject: pyproject.toml}` | the `[project]` table of that file in the first https archive among the sources of the `.SRCINFO`, at the new version |
-| Python in `depends`, no project | `python: none` | no rule |
+| Python in `depends`, no project | `python: none` | no rule, for strategy `pypi` too |
 
 `python.pyproject` reads `name`, `requires-python` and `dependencies` of the `[project]` table, and `imports` reads the files of the same archive. It fails the check with `packages/<name>.yml: python.pyproject reads no static dependencies from <file>` when `dynamic` names `dependencies`, when the table has no `dependencies`, and when the sources hold no https archive, as with a git source. Packages with Python in `depends` and none of these keys fail their check with `packages/<name>.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none`. `changed` runs where it can compare the release of `current` with the new version: not with `python.release`, `python.pyproject`, `pkgver_format` or `pkgver_dash`.
 
@@ -110,7 +110,7 @@ Packages whose `.SRCINFO` on the AUR has a pkgname with `ruby` or `ruby-*` in `d
 |---|---|---|
 | strategy `rubygems` | none | `upstream.registry` at the new version |
 | other strategies, gem on rubygems.org | `ruby: {gem: simplecov-cobertura}` | that gem at the new version |
-| `-git` package, or no gem | `ruby: none` | no rule |
+| `-git` package, or no gem | `ruby: none` | no rule, for strategy `rubygems` too |
 
 Packages with Ruby in `depends` and none of these keys fail their check with `packages/<name>.yml: its depends hold Ruby packages, so set ruby.gem or ruby: none`. `-git` packages take `ruby: none`, since rubygems.org has no release of their versions and gemspecs are Ruby code that the check does not run. `ruby.gem` does not apply to strategy `rubygems`, which reads `upstream.registry`. `changed` compares the names of the requirements of the release in `current` and of the new version, and fires with `rubygems.org has no release <version> of <gem> to compare with` for a release of `current` that rubygems.org lacks. It runs without `pkgver_format` and `pkgver_dash` alone, since their `current` is no release of the gem. `unmet` matches each requirement to an entry of `depends` as it does for Python: the package holds the gem in the files database of pacman, by its gemspec under `usr/lib/ruby/gems/` with the default gems of `ruby`, or the package, its name or a name it provides is `ruby-<gem>` or `<gem>`, or `ruby.map` names it. Under `hold: true` it holds the update for missing entries, for each clause that the version fails, since RubyGems checks every clause when a program loads the gem, and for a `ruby_version` that the `ruby` of Arch fails:
 
