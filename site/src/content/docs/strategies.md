@@ -476,7 +476,7 @@ upstream:
 
 ### crates
 
-**Upstream:** the crates.io API, `https://crates.io/api/v1/crates/{crate}`. **Version:** `.crate.max_stable_version`, or `.crate.max_version` with `prerelease: true`. The request sends `User-Agent: aurtomator/1.0`, as the crates.io API policy requires.
+**Upstream:** the sparse index of crates.io, `https://index.crates.io/{path}`, where the path is the lower-case crate name under its first letters: `1/a`, `2/ab`, `3/a/abc`, `se/rd/serde`. The index states no rate limit, and the API allows one request a second. **Version:** the newest version by SemVer 2.0 among those not yanked, outside pre-releases, or among all with `prerelease: true`; build metadata after `+` takes no part in the order. The request sends `User-Agent: aurtomator/1.0`.
 
 | Field | Required | Description |
 |---|---|---|

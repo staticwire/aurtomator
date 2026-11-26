@@ -504,6 +504,36 @@ _newest_release_tag() {
   fi
 }
 
+# Print the newest semantic version on stdin, one a line, by SemVer 2.0, with pre-releases only when $1
+# is true; build metadata after + takes no part in the order
+semver_newest() {
+  LC_ALL=C awk -v pre="${1:-false}" '
+    # 1 when version a ranks below version b
+    function below(a, b,   ca, cb, pa, pb, x, y, n, m, i, nx, ny) {
+      sub(/\+.*/, "", a)
+      sub(/\+.*/, "", b)
+      ca = a; pa = ""; if (i = index(a, "-")) { ca = substr(a, 1, i - 1); pa = substr(a, i + 1) }
+      cb = b; pb = ""; if (i = index(b, "-")) { cb = substr(b, 1, i - 1); pb = substr(b, i + 1) }
+      split(ca, x, "."); split(cb, y, ".")
+      for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) return x[i] + 0 < y[i] + 0
+      if (pa == pb || pa == "") return 0
+      if (pb == "") return 1
+      n = split(pa, x, "."); m = split(pb, y, ".")
+      for (i = 1; i <= n && i <= m; i++) {
+        if (x[i] == y[i]) continue
+        nx = x[i] ~ /^[0-9]+$/; ny = y[i] ~ /^[0-9]+$/
+        if (nx && ny) return x[i] + 0 < y[i] + 0
+        if (nx || ny) return nx
+        return x[i] < y[i]
+      }
+      return n < m
+    }
+    $0 == "" { next }
+    pre != "true" && /^[^+]*-/ { next }
+    best == "" || below(best, $0) { best = $0 }
+    END { if (best != "") print best }'
+}
+
 # Print the tag on stdin, one per line, that gives the newest version
 # Args: $1=tag_version_regex, $2=tag_version_replace
 _newest_tag() {

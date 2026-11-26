@@ -46,7 +46,7 @@ case "$url" in
     ;;
   # The same page in front of a registry or of archlinux.org
   *registry.npmjs.org/gated-pkg/latest | *pypi.org/pypi/gated-pkg/json | *rubygems.org/api/v1/versions/gated-pkg.json | \
-    *crates.io/api/v1/crates/gated-pkg | *repology.org/api/v1/project/gated-pkg | \
+    *index.crates.io/ga/te/gated-pkg | *repology.org/api/v1/project/gated-pkg | \
     *archlinux.org/packages/search/json/?name=gated-pkg)
     host="${url#https://}"
     effective_url="https://${host%%/*}/402.html"
@@ -200,9 +200,9 @@ case "$url" in
   *registry.npmjs.org/null-package/latest)
     echo '{"version": null}'
     ;;
-  # crates.io: null version
-  *crates.io/api/v1/crates/null-crate)
-    echo '{"crate": {"max_stable_version": null}}'
+  # crates.io index: a crate whose every version is yanked
+  *index.crates.io/nu/ll/null-crate)
+    echo '{"name":"null-crate","vers":"1.0.0","deps":[],"cksum":"00","features":{},"yanked":true}'
     ;;
   # Repology: the AUR alone is newest, and a second AUR package lags behind it.
   # vercmp puts 1.140.10 above 1.140.9, a string sort does not.
@@ -637,13 +637,20 @@ case "$url" in
   *registry.npmjs.org/*/latest)
     echo '{"version": "4.0.0"}'
     ;;
-  # Crate whose highest version is a pre-release, as pijul
-  *crates.io/api/v1/crates/pre-crate)
-    echo '{"crate": {"max_version": "1.0.0-beta.24", "max_stable_version": "0.15.0"}}'
+  # Crate whose highest version is a pre-release, as pijul; beta.24 sorts above beta.3 by number
+  *index.crates.io/pr/e-/pre-crate)
+    for vers in 0.14.9 1.0.0-alpha 1.0.0-beta.24 0.15.0 1.0.0-beta.3; do
+      printf '{"name":"pre-crate","vers":"%s","deps":[{"name":"vers","req":"^9.9"}],"cksum":"00","features":{},"yanked":false}\n' "$vers"
+    done
     ;;
-  # crates.io API
-  *crates.io/api/v1/crates/*)
-    echo '{"crate": {"max_stable_version": "1.0.204"}}'
+  # crates.io index: one line for each version, a yanked one and build metadata included
+  *index.crates.io/se/rd/serde)
+    printf '{"name":"serde","vers":"%s","deps":[],"cksum":"00","features":{},"yanked":false}\n' 1.0.9 1.0.203+build.7 1.0.204 2.0.0-alpha.1
+    echo '{"name":"serde","vers":"1.0.205","deps":[],"cksum":"00","features":{"x":["yanked"]},"yanked":true}'
+    ;;
+  # crates.io index of any other crate
+  *index.crates.io/*)
+    printf '{"name":"%s","vers":"1.0.204","deps":[],"cksum":"00","features":{},"yanked":false}\n' "${url##*/}"
     ;;
   # Repology API
   *repology.org/api/v1/project/*)
