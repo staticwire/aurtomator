@@ -2344,6 +2344,10 @@ check_holds() {
     "1.44.9 <1.45.0,>=1.44.10 1" "1.44.10 <1.45.0,>=1.44.10 0" "1.4.1 <1.4,>=1.1.0 1" "1.0 ===1.0 0" \
     "1.0.0 ===1.0 1" "1.0a1 ===1.0A1 0" "1.2+abc.1 >1.2b0.post0 0" "1.2+abc >1.2 1" "1.2.post1+x >1.2 1" \
     "1.2b0+x >1.2b0 1" "1.2.post1 >1.2b0 0" "1.2.post1 >1.2.dev0 0" "1.2b0.post1 >1.2b0 1" "1.2b1 >1.2b0 0"
+  # packaging 26 reads <V as <V.dev0 for a V of no pre-release, and === against the normal form of the version
+  check_holds "1.0a1 <1.0.post1 0" "1.0.dev1 <1.0.post0 0" "1.0rc1.post1 <1.0.post1 0" "1.0.post1.dev1 <1.0.post1 1" \
+    "1.0.post0.dev5 <1.0.post1 0" "1.0+x <1.0.post1 0" "1.0.post1 <1.0.post1 1" "1.0a1 <1.0 1" "1.0-1 ===1.0.post1 0" \
+    "1.0.post1 ===1.0-1 1" "v1.0 ===1.0 0" "1.0+01 ===1.0+1 0" "01.0 ===1.0 0" "1!1.0 ===1!1.0 0" "1.0_alpha_1 ===1.0a1 0"
 }
 
 @test "pep440.sh: pep440_holds returns 2 for a clause it cannot read, 0 for no clause" {

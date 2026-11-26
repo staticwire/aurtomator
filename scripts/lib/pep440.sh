@@ -86,7 +86,8 @@ _pep440_clause() {
   case $op in
     ===)
       [[ "$x" != *[[:space:]]* ]] || return 2
-      [[ "${1,,}" == "${x,,}" ]]
+      _pep440_text _PEP440_V
+      [[ "$PEP440_TEXT" == "${x,,}" ]]
       return
       ;;
     == | !=)
@@ -127,12 +128,11 @@ _pep440_clause() {
       ((PEP440_ORDER >= 0))
       ;;
     "<")
-      _pep440_order _PEP440_V _PEP440_X
-      ((PEP440_ORDER < 0)) || return 1
-      # Pre-releases of the release of the clause are not lower, unless the clause is one too
-      if [[ -z "${_PEP440_X[2]}${_PEP440_X[5]}" && -n "${_PEP440_V[2]}${_PEP440_V[5]}" ]] && _pep440_same_base; then
-        return 1
-      fi
+      # <V reads as <V.dev0 unless V is a pre-release, so pre-releases of the release of V are not lower
+      _PEP440_Q=("${_PEP440_X[@]}")
+      [[ -n "${_PEP440_X[2]}${_PEP440_X[5]}" ]] || _PEP440_Q[5]=0
+      _pep440_order _PEP440_V _PEP440_Q
+      ((PEP440_ORDER < 0))
       ;;
     ">")
       # Local versions compare by their public version, and >V leaves out the post-releases of V
@@ -160,12 +160,26 @@ _pep440_prefix() {
   done
 }
 
-# Succeed when _PEP440_V and _PEP440_X have the same epoch and release
-_pep440_same_base() {
-  _PEP440_P=("${_PEP440_V[0]}" "${_PEP440_V[1]}" "" "" "" "" "")
-  _PEP440_Q=("${_PEP440_X[0]}" "${_PEP440_X[1]}" "" "" "" "" "")
-  _pep440_order _PEP440_P _PEP440_Q
-  ((PEP440_ORDER == 0))
+# Set PEP440_TEXT to the normal form, as packaging prints it, of the version in the array named $1
+_pep440_text() {
+  local -n _pep440_t=$1
+  local part local_part=""
+  local -a parts
+  PEP440_TEXT=""
+  [[ "${_pep440_t[0]}" == 0 ]] || PEP440_TEXT="${_pep440_t[0]}!"
+  PEP440_TEXT+="${_pep440_t[1]}${_pep440_t[2]}${_pep440_t[3]}"
+  [[ -z "${_pep440_t[4]}" ]] || PEP440_TEXT+=".post${_pep440_t[4]}"
+  [[ -z "${_pep440_t[5]}" ]] || PEP440_TEXT+=".dev${_pep440_t[5]}"
+  [[ -n "${_pep440_t[6]}" ]] || return 0
+  IFS=. read -ra parts <<<"${_pep440_t[6]}"
+  for part in "${parts[@]}"; do
+    if [[ "$part" =~ ^[0-9]+$ ]]; then
+      _pep440_int "$part"
+      part=$PEP440_INT
+    fi
+    local_part+=".$part"
+  done
+  PEP440_TEXT+="+${local_part#.}"
 }
 
 # Succeed when _PEP440_P and _PEP440_X have the same epoch, release and pre-release
