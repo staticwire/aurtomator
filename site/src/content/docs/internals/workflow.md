@@ -101,12 +101,16 @@ While `packages/` holds no package, the script writes nothing, so repositories f
 | `.status/<name>` | `arch_back: 28+23 aarch64` | arches out are back, not pushed yet |
 | `.status/<name>` | `arch_added: 28+23 aarch64` | arches put back at the AUR version, pushed |
 | `.status/<name>` | `check_failed: <error>` | check failed |
+| `.status/<name>` | `unchecked: <reason>` | not checked in this run, since the check ran out of its minutes or the package waits for the second check of the package of its project; its issues stay as they are |
 | `.status/<name>` | `update_failed: <error>` | update failed |
 | `.status/_alerts` | package, `hold`, `notice` or `wait`, note | one line for each alert that fired, and `wait` for packages with `upstream.pin_from` that wait for the package of their project, with the note `Waits for the held update of <name>` or `Waits for the update of <name>`; `--publish` copies the lines of the check run |
 | `.status/_assets` | package, asset value | one line for each value found |
 | `.status/_arches` | package, version, arches out or those a wait waits for, start of the wait, and for waits the AUR commit that builds them | see [Versions without some arches](/features/missing-arches/) |
 | `.status/_hosts` | package, host | one line for each check that failed on a request, with the host of that request |
 | `.status/_without` | package, `current`, arches out | written by `--publish` for each package with `arch_out` |
+| `.status/_rules` | package | packages with a new version whose AUR `.SRCINFO` has Python or Ruby in `depends`, which `--rules-later` lists and the step `Decide` keeps for the jobs of `rules` |
+| `.status/_deferred` | package | packages with a new version past the 256 jobs of `prepare`, which the step `Decide` leaves for a later run |
+| `.status/_packages` | package | one line for each package YAML of the run; the issues step closes the issues of names this list lacks |
 | `.status/_upstream` | `newer: 0.7.0` or `current: 0.6.0` | latest aurtomator release against `VERSION` |
 
 Fields of the shared files are split by tabs.
