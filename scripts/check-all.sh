@@ -1141,7 +1141,8 @@ if [[ "$MODE" == check ]]; then
     exit 1
   fi
   if ((${#repology_files[@]} > budget)); then
-    run_number=0
+    # Runs by hand take the hour in place of the run number, as verify does
+    run_number=$(($(date -u +%s) / 3600))
     ! (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]) || run_number=$GITHUB_RUN_NUMBER
     offset=$((run_number * budget % ${#repology_files[@]}))
     for ((i = budget; i < ${#repology_files[@]}; i++)); do

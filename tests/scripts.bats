@@ -4429,6 +4429,17 @@ current: '1.0.0'"
   # The budget covers the whole run
   AURTOMATOR_REPOLOGY_BUDGET=3 run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$(cat "$TEST_TMPDIR/.status/r3")" = "new_version: 5.0.0" ]
+  # Runs by hand have no run number, so each hour takes the next packages
+  local bin="$BATS_TEST_TMPDIR/bin" real
+  real=$(command -v date)
+  mkdir -p "$bin"
+  printf '#!/bin/sh\n[ "$*" = "-u +%%s" ] && echo "$FAKE_NOW" && exit 0\nexec %s "$@"\n' "$real" >"$bin/date"
+  chmod +x "$bin/date"
+  PATH="$bin:$PATH" FAKE_NOW=32400 AURTOMATOR_REPOLOGY_BUDGET=2 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/r3")" = "$reason" ]
+  PATH="$bin:$PATH" FAKE_NOW=36000 AURTOMATOR_REPOLOGY_BUDGET=2 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/r3")" = "new_version: 5.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/r2")" = "$reason" ]
 }
 
 # One request holds 50 repositories
