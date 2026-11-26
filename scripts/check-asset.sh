@@ -89,19 +89,28 @@ if ! release=$(github_api "${api}/releases/tags/$(url_path "$tag")" 2>"$err_file
     log_err "Failed to read the release of tag ${tag} of ${project}"
     exit 1
   fi
-  # commits/<ref> would also take a branch of that name; annotated tags point at a tag object
-  object=""
+  # commits/<ref> would also take a branch of that name; annotated tags point at a tag object, which
+  # carries the time of the tag
+  object="" date=""
   if ref=$(github_api "${api}/git/ref/tags/$(url_path "$tag")"); then
     object=$(yq -r '.object.type + " " + .object.sha' <<<"$ref")
     if [[ "$object" =~ ^tag\ ([0-9a-f]{40})$ ]] && ref=$(github_api "${api}/git/tags/${BASH_REMATCH[1]}"); then
       object=$(yq -r '.object.type + " " + .object.sha' <<<"$ref")
+      date=$(yq -r '.tagger.date // ""' <<<"$ref")
     fi
   fi
-  if [[ ! "$object" =~ ^commit\ ([0-9a-f]{40})$ ]] || ! commit=$(github_api "${api}/git/commits/${BASH_REMATCH[1]}"); then
+  if [[ ! "$object" =~ ^commit\ ([0-9a-f]{40})$ ]]; then
     log_err "Failed to read the commit of tag ${tag} of ${project}"
     exit 1
   fi
-  wait_or_fail "$(yq -r '.committer.date // ""' <<<"$commit")" "tag ${tag} has no release"
+  if [[ -z "$date" ]]; then
+    if ! commit=$(github_api "${api}/git/commits/${BASH_REMATCH[1]}"); then
+      log_err "Failed to read the commit of tag ${tag} of ${project}"
+      exit 1
+    fi
+    date=$(yq -r '.committer.date // ""' <<<"$commit")
+  fi
+  wait_or_fail "$date" "tag ${tag} has no release"
 fi
 
 published=$(yq -r '.published_at // ""' <<<"$release")

@@ -175,7 +175,12 @@ check_published() {
   code=${answer##*$'\n'} body=${answer%$'\n'*}
   if [[ "$code" != 200 && "$code" != 404 ]]; then
     message=$(yq -p json -r '.message // ""' <<<"$body" 2>/dev/null) || message=""
-    echo "The GitHub API answered HTTP $code for the release $1 of $repo${message:+: ${message%%$'\n'*}}" >&2
+    message="${message:+: ${message%%$'\n'*}}"
+    # GitHub limits requests without a token by address, and answers 403 or 429 past the limit
+    if [[ -z "${GITHUB_TOKEN:-}" && ("$code" == 403 || "$code" == 429) ]]; then
+      message+="; set GITHUB_TOKEN to a GitHub token for a higher limit"
+    fi
+    echo "The GitHub API answered HTTP $code for the release $1 of $repo$message" >&2
     exit 1
   fi
   if [[ "$code" == 404 || "$(T="$1" yq -p json -r '.tag_name == strenv(T) and .draft == false' <<<"$body" 2>/dev/null)" != true ]]; then
@@ -189,8 +194,8 @@ check_published() {
   fi
 }
 
-# Stop unless the pin $3 on the uses: line $2 of file $1 is the commit of the release written
-# after it, since GitHub serves the commits of every fork under the name of its parent
+# Stop unless the pin $3 on the uses: line $2 of file $1 is the commit of the release written after
+# it, since GitHub serves the commits of every fork under the name of its parent; $4 tags skips the API
 check_release() {
   local release_re="@${3}[[:space:]]+#[[:space:]]*(v[0-9]+[.][0-9]+[.][0-9]+)([[:space:]]|\$)" tag tagged
   if [[ ! "$2" =~ $release_re ]]; then
@@ -206,7 +211,7 @@ check_release() {
     echo "The pin $3 in $1 is not the commit of $tag of $repo; ./aurtomator.sh pin vX.Y.Z pins the commit of a release" >&2
     exit 1
   fi
-  check_published "$tag"
+  [[ "${4:-}" == tags ]] || check_published "$tag"
 }
 
 if [[ "${1:-}" == pin ]]; then
@@ -270,6 +275,10 @@ if [[ "${1:-}" == check-pins ]]; then
       exit 1
     fi
   fi
+  # Runners share the addresses that the GitHub API limits without a token, and the job image of
+  # each workflow checks the release with the token of the run
+  scope=api
+  [[ -n "${GITHUB_TOKEN:-}" ]] || scope=tags
   checked=()
   for file in "$workflow" .github/workflows/validate.yml; do
     [[ -f "$file" ]] || continue
@@ -321,7 +330,7 @@ if [[ "${1:-}" == check-pins ]]; then
         echo "$file runs ${values[i]}, which names no commit SHA" >&2
         exit 1
       fi
-      check_release "$file" "${lines[i]}" "${BASH_REMATCH[1]}"
+      check_release "$file" "${lines[i]}" "${BASH_REMATCH[1]}" "$scope"
       # Older releases miss the fixes made since, and the jobs with the secrets would run them
       if [[ -n "$base_release" && "${lines[i]}" =~ $release_re ]] &&
         [[ "$(printf '%s\n' "${BASH_REMATCH[1]}" "$base_release" | sort -V | head -n 1)" != "$base_release" ]]; then

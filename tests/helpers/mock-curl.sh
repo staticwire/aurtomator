@@ -561,15 +561,16 @@ case "$url" in
   *api.github.com/repos/asset-owner/asset-repo/releases/tags/*)
     http_error 404
     ;;
-  # Tag refs to commit cccc..., or to tag object cccc... of commit dddd... with MOCK_TAG_TYPE=tag, dated
-  # MOCK_TAG_DATE or MOCK_TAG_AGE hours back (48 by default); MOCK_COMMIT_STATUS=500 fails each request
+  # Tag refs to commit cccc..., or to tag object cccc... of commit dddd... with MOCK_TAG_TYPE=tag, dated MOCK_TAG_DATE,
+  # MOCK_TAG_AGE hours back (48) or MOCK_TAGGER_AGE for the tag object; MOCK_COMMIT_STATUS=500 fails each request
   *api.github.com/repos/asset-owner/asset-repo/git/ref/tags/*)
     [[ "${MOCK_COMMIT_STATUS:-200}" == 200 ]] || http_error "$MOCK_COMMIT_STATUS"
     printf '{"object": {"type": "%s", "sha": "%s"}}\n' "${MOCK_TAG_TYPE:-commit}" "$(printf 'c%.0s' {1..40})"
     ;;
   *api.github.com/repos/asset-owner/asset-repo/git/tags/*)
     [[ "${MOCK_COMMIT_STATUS:-200}" == 200 ]] || http_error "$MOCK_COMMIT_STATUS"
-    printf '{"object": {"type": "commit", "sha": "%s"}}\n' "$(printf 'd%.0s' {1..40})"
+    printf '{"object": {"type": "commit", "sha": "%s"}, "tagger": {"date": "%s"}}\n' "$(printf 'd%.0s' {1..40})" \
+      "$(date -u -d "-${MOCK_TAGGER_AGE:-${MOCK_TAG_AGE:-48}} hours" +%Y-%m-%dT%H:%M:%SZ)"
     ;;
   *api.github.com/repos/asset-owner/asset-repo/git/commits/*)
     [[ "${MOCK_COMMIT_STATUS:-200}" == 200 ]] || http_error "$MOCK_COMMIT_STATUS"

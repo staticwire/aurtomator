@@ -136,9 +136,14 @@ require_simplecov() {
   chmod +x "$TEST_TMPDIR/bin/bats"
   # bash run by root takes no PS4 from the environment, so bashcov passes it in BASH_ENV
   printf "export PS4='%s'\n" "$ps4" >"$TEST_TMPDIR/ps4"
-  run env PATH="$TEST_TMPDIR/bin:$PATH" TMPDIR="$TEST_TMPDIR/tmp" SHELLOPTS=xtrace BASH_XTRACEFD=7 \
+  # The script clears coverage/ of its working directory, which in the root holds the results of bashcov
+  mkdir -p "$TEST_TMPDIR/cwd"
+  run env -C "$TEST_TMPDIR/cwd" PATH="$TEST_TMPDIR/bin:$PATH" TMPDIR="$TEST_TMPDIR/tmp" SHELLOPTS=xtrace BASH_XTRACEFD=7 \
     BASH_ENV="$TEST_TMPDIR/ps4" PS4="$ps4" timeout 30 "$script" 7>"$TEST_TMPDIR/trace"
   [ "$status" -eq 3 ]
+  if python3 -I -m coverage --version &>/dev/null || ruby -e 'require "simplecov"; require "simplecov-cobertura"' &>/dev/null; then
+    [ -d "$TEST_TMPDIR/cwd/coverage" ]
+  fi
   bats_line=$(grep -n 'bats "\$@"' "$script" | cut -d: -f1)
   run gawk -v d="$d" -v script="$script" -v last="$bats_line" '
     BEGIN { RS = "[+]+BASHCOV>" d }

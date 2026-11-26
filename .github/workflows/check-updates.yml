@@ -38,6 +38,34 @@ jobs:
             exit 1
           fi
 
+      # Pins name the commit of a published release. The token of the run reads it under the limit of
+      # the calling repository, and runners share the addresses that limit requests without a token.
+      - name: Check the release
+        if: github.repository != job.workflow_repository
+        env:
+          REPO: ${{ job.workflow_repository }}
+          SHA: ${{ job.workflow_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! tags=$(git ls-remote --tags "https://github.com/$REPO"); then
+            echo "::error::Could not list the tags of $REPO"
+            exit 1
+          fi
+          tag=$(awk -v sha="$SHA" '$1 == sha && $2 ~ /^refs\/tags\/v[0-9]+\.[0-9]+\.[0-9]+(\^\{\})?$/ {
+            sub(/^refs\/tags\//, "", $2); sub(/\^\{\}$/, "", $2); print $2 }' <<<"$tags" | sort -V | tail -n 1)
+          if [[ -z "$tag" ]]; then
+            echo "::error::$SHA is the commit of no release tag of $REPO; ./aurtomator.sh pin vX.Y.Z pins the commit of a release"
+            exit 1
+          fi
+          if ! release=$(gh api "repos/$REPO/releases/tags/$tag"); then
+            echo "::error::GitHub answers no release $tag of $REPO"
+            exit 1
+          fi
+          if [[ "$(jq -r --arg tag "$tag" '.tag_name == $tag and .draft == false and .immutable == true' <<<"$release")" != true ]]; then
+            echo "::error::$tag of $REPO is no published immutable release"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,8 +84,8 @@ jobs:
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
 
-  # Runs the strategies with the read-only token and decides what the run does. No PKGBUILD runs
-  # and no release is parsed here, so the jobs after it trust the statuses this job hands over.
+  # Runs the strategies with the read-only token and decides what the run does. No PKGBUILD runs, and
+  # only the wheel metadata of pin_from is parsed, so the jobs after it trust the statuses it hands over.
   check:
     name: check
     needs: image

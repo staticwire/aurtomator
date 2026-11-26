@@ -3937,6 +3937,7 @@ alerts:
   # A publish before writes _alerts into the statuses that the next one reads
   rm -f "$TEST_TMPDIR/.status/_alerts"
   mkdir -p "$TEST_TMPDIR/out/rules"
+  rm -f "$TEST_TMPDIR/out/rules/zensical-bin"
   [[ "${2:-}" == unprepared ]] || mkdir -p "$TEST_TMPDIR/out/prepared/zensical-bin"
   if [[ "$1" == error* ]]; then
     printf '%s' "$1" >"$TEST_TMPDIR/out/rules/zensical-bin"
@@ -3947,7 +3948,7 @@ alerts:
 
 # The rules job runs the requires rules beside prepare and verify, and publish applies their lines
 @test "check-all --publish: holds an update on a line of the rules job and records its lines" {
-  rules_package $'hold\tdrops deepmerge\nnotice\tadds x\001y\nlater\tadds z\nnotice\tadds pathspec\n'
+  rules_package $'hold\tdrops deepmerge\nnotice\tadds pathspec\n'
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
   stub_script publish-pkg.sh 0
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
@@ -3970,19 +3971,31 @@ alerts:
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: zensical 0.1.3: PyPI holds no metadata that lists the requirements without running code" ]
+  # Each case starts from the statuses of the check run, since publish keeps a check_failed of them
   rules_package ""
   rm "$TEST_TMPDIR/out/rules/zensical-bin"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
-  echo "notice"$'\t'"elsewhere" >"$TEST_TMPDIR/elsewhere"
+  rules_package ""
+  rm "$TEST_TMPDIR/out/rules/zensical-bin"
+  printf 'version\t0.1.3\nnotice\telsewhere\n' >"$TEST_TMPDIR/elsewhere"
   ln -s "$TEST_TMPDIR/elsewhere" "$TEST_TMPDIR/out/rules/zensical-bin"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
-  rm "$TEST_TMPDIR/out/rules/zensical-bin"
-  truncate -s $((64 * 1024 + 1)) "$TEST_TMPDIR/out/rules/zensical-bin"
+  rules_package ""
+  {
+    printf 'version\t0.1.3\n'
+    printf 'notice\tadds pathspec\n%.0s' {1..4096}
+  } >"$TEST_TMPDIR/out/rules/zensical-bin"
+  [ "$(stat -c %s "$TEST_TMPDIR/out/rules/zensical-bin")" -gt $((64 * 1024)) ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
+  rules_package ""
+  printf 'version\t0.1.3\nnotice\tadds\0pathspec\n' >"$TEST_TMPDIR/out/rules/zensical-bin"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
   # An attempt of the run before a check run that found another version
+  rules_package ""
   printf 'version\t0.1.2\nnotice\tadds pathspec\n' >"$TEST_TMPDIR/out/rules/zensical-bin"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
@@ -3992,6 +4005,38 @@ alerts:
   rm "$TEST_TMPDIR/out/rules/zensical-bin" "$TEST_TMPDIR/.status/_rules"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "updated: 0.1.3" ]
+}
+
+@test "check-all --publish: fails a package whose rules job handed over a line it cannot read" {
+  stub_script publish-pkg.sh 0
+  local line
+  for line in $'later\tadds z' $'notice\tadds x\001y' $'notice\tadds x\ty' $'notice\tadds x\xc2\x9by'; do
+    rules_package $'notice\tadds pathspec\n'"$line"$'\n'
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over a line it cannot read" ]
+  done
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+}
+
+@test "check-all --publish: fails a package whose line of _alerts from the check run it cannot read" {
+  stub_script publish-pkg.sh 0
+  create_test_package "zensical-bin" "pypi" "upstream:
+  registry: zensical
+current: 0.0.74"
+  mkdir -p "$TEST_TMPDIR/out/prepared/zensical-bin"
+  checked_status zensical-bin "new_version: 0.1.3"
+  printf '%s\n' $'zensical-bin\tnotice\tadds pathspec' $'zensical-bin\tnotice\tadds x\001y' >"$TEST_TMPDIR/.status/_alerts"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the check run handed over a line of _alerts it cannot read" ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  # Lines of another package fail that package alone
+  checked_status zensical-bin "new_version: 0.1.3"
+  printf '%s\n' $'zensical-bin\tnotice\tadds pathspec' $'other\tnotice\tadds x\001y' >"$TEST_TMPDIR/.status/_alerts"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "updated: 0.1.3" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'zensical-bin\tnotice\tadds pathspec' ]
 }
 
 # Prepare runs changed with hold against the AUR and fails on a hold, and its issue lists the notes
@@ -4058,17 +4103,24 @@ current: 0.0.41"
   [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'python-zensical-ui\twait\tWaits for the held update of zensical-bin' ]
 }
 
-@test "check-all --publish: drops alert lines of the check run outside package, action and note" {
+@test "check-all --publish: fails a held package on a line of _alerts outside action and note" {
   create_test_package "held" "github-release" "upstream:
   project: owner/repo
 current: 28+25"
-  checked_status held "held: 29+1"
-  printf '%s\n' $'held\thold' $'held\tbogus\tNote' $'held\thold\tNote\textra' $'held\thold\t' \
-    $'held\tnotice\tRed \e[31mnote' $' held\thold\tNote' $'heldx\thold\tNote' $'held\thold\tKept note' \
-    >"$TEST_TMPDIR/.status/_alerts"
   stub_script publish-pkg.sh 0
+  local line
+  for line in $'held\thold' $'held\tbogus\tNote' $'held\thold\tNote\textra' $'held\thold\t' $'held\tnotice\tRed \e[31mnote'; do
+    checked_status held "held: 29+1"
+    printf '%s\n' "$line" $'held\thold\tKept note' >"$TEST_TMPDIR/.status/_alerts"
+    run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TMPDIR/.status/held")" = "check_failed: the check run handed over a line of _alerts it cannot read" ]
+  done
+  # Lines of other packages
+  checked_status held "held: 29+1"
+  printf '%s\n' $' held\thold\tNote' $'heldx\thold\tNote' $'held\thold\tKept note' >"$TEST_TMPDIR/.status/_alerts"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
-  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/held")" = "held: 29+1" ]
   [ "$(cat "$TEST_TMPDIR/.status/_alerts")" = $'held\thold\tKept note' ]
 }
 

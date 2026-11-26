@@ -144,6 +144,8 @@ _fired_requires() {
   while IFS=$'\t' read -r _ line; do
     [[ -z "$line" ]] || joined+="${joined:+; }$line"
   done <<<"$lines"
+  # Text of upstream and the AUR: a tab would split the line, and a terminal acts on control characters
+  joined=$(printf '%s' "$joined" | LC_ALL=C sed 's/[\x01-\x1f\x7f]/ /g; s/\xc2[\x80-\x9f]/ /g')
   printf '%s\t%s\n' "$action" "${note:+$note: }$joined"
 }
 

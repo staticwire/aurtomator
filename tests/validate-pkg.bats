@@ -843,23 +843,28 @@ EOF
 
 # The runs check such a package and then drop its status; the AUR allows no such name
 @test "validate: fails on a name outside the characters of an AUR package name" {
-  local name shown
+  local name shown file
   # Names beyond ASCII meet the check of every value first
   printf "name: 'fée'\nstrategy: github-release\nupstream:\n  project: owner/repo\n" >"$TEST_TMPDIR/packages/fée.yml"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
   [ "$status" -eq 1 ]
-  [[ "$output" == *"packages/fée.yml: a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]]
+  [[ "$output" == *"packages/\$'f\\303\\251e.yml': a key or a value outside alerts[].note holds a character other than printable ASCII and tab"* ]]
   for name in "space name" -dash 'quo"te' _assets @demo +demo Demo de@mo; do
     rm -f "$TEST_TMPDIR"/packages/*.yml
     printf 'name: %s\nstrategy: github-release\nupstream:\n  project: owner/repo\n' "'$name'" >"$TEST_TMPDIR/packages/$name.yml"
-    # validate-pkg.sh quotes the name in the C locale
+    # validate-pkg.sh quotes the name and the file name in the C locale
     shown=$(
       LC_ALL=C
       printf '%s' "${name@Q}"
     )
+    file=$(
+      LC_ALL=C
+      file="$name.yml"
+      printf '%s' "${file@Q}"
+    )
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
     [ "$status" -eq 1 ]
-    [[ "$output" == *"packages/$name.yml: name $shown must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"* ]] || {
+    [[ "$output" == *"packages/$file: name $shown must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"* ]] || {
       echo "taken: $name"
       return 1
     }
@@ -914,6 +919,21 @@ EOF
   mv "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/a.yaml"
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
   [ "$status" -eq 1 ]
+}
+
+# Pull requests can name a file with a line break and a workflow command
+@test "validate --all: quotes a file name outside the pattern of package names" {
+  local name=$'x\n::notice title=forged::text.yml'
+  printf 'name: [x\n' >"$TEST_TMPDIR/packages/$name"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid YAML syntax: packages/\$'x\\n::notice title=forged::text.yml'"* ]]
+  [[ "$output" != *$'\n::notice'* ]]
+  printf 'name: x\nstrategy: github-release\nupstream:\n  project: owner/repo\n' >"$TEST_TMPDIR/packages/$name"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/\$'x\\n::notice title=forged::text.yml': name 'x' must equal the file name \$'x\\n::notice title=forged::text'"* ]]
+  [[ "$output" != *$'\n::notice'* ]]
 }
 
 # The runs read regular files alone, and the write-back of current takes no link

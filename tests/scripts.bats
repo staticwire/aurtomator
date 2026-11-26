@@ -1457,7 +1457,9 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = '--globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --retry-max-time 75 --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
+  # The answer goes to a file, which curl truncates before a retry
+  [ "${output%% -o *}" = '--globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --retry-max-time 75 --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated}' ]
+  [[ "${output#* -o }" =~ ^/[^\ ]+\ --max-redirs\ 5\ https://example\.invalid/a$ ]]
 }
 
 # Helper: a curl that writes $CURL_STDERR to stderr, as its -w does on a
@@ -1799,6 +1801,23 @@ arch_out:
   [ "$status" -eq 28 ]
   [ "$(wc -l <"$TEST_TMPDIR/curl.log")" -eq 2 ]
   [ ! -e "$TEST_TMPDIR/none" ]
+}
+
+# curl retries a transfer that its time limit cut, and on stdout the retry follows the piece of the cut one
+@test "lib.sh: http_get prints the answer of a retry alone" {
+  local port i
+  port=$(shuf -i 20000-40000 -n 1)
+  python3 -I "$TESTS_DIR/helpers/cut-server.py" "$port" "$TEST_TMPDIR/ready" >/dev/null 2>&1 3>&- &
+  for i in $(seq 50); do
+    [[ ! -e "$TEST_TMPDIR/ready" ]] || break
+    sleep 0.1
+  done
+  printf '#!/bin/sh\nexec /usr/bin/curl "$@"\n' >"$MOCK_DIR/curl"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get "http://127.0.0.1:$port/" --proto =http --proto-redir =http --max-time 2 --retry-delay 1
+  wait
+  [ "$status" -eq 0 ]
+  [ "$output" = BBBBBBBBBB ]
 }
 
 @test "lib.sh: http_get_json asks curl for the URL of the last answer" {
@@ -2325,6 +2344,10 @@ check_holds() {
     "1.44.9 <1.45.0,>=1.44.10 1" "1.44.10 <1.45.0,>=1.44.10 0" "1.4.1 <1.4,>=1.1.0 1" "1.0 ===1.0 0" \
     "1.0.0 ===1.0 1" "1.0a1 ===1.0A1 0" "1.2+abc.1 >1.2b0.post0 0" "1.2+abc >1.2 1" "1.2.post1+x >1.2 1" \
     "1.2b0+x >1.2b0 1" "1.2.post1 >1.2b0 0" "1.2.post1 >1.2.dev0 0" "1.2b0.post1 >1.2b0 1" "1.2b1 >1.2b0 0"
+  # packaging 26 reads <V as <V.dev0 for a V of no pre-release, and === against the normal form of the version
+  check_holds "1.0a1 <1.0.post1 0" "1.0.dev1 <1.0.post0 0" "1.0rc1.post1 <1.0.post1 0" "1.0.post1.dev1 <1.0.post1 1" \
+    "1.0.post0.dev5 <1.0.post1 0" "1.0+x <1.0.post1 0" "1.0.post1 <1.0.post1 1" "1.0a1 <1.0 1" "1.0-1 ===1.0.post1 0" \
+    "1.0.post1 ===1.0-1 1" "v1.0 ===1.0 0" "1.0+01 ===1.0+1 0" "01.0 ===1.0 0" "1!1.0 ===1!1.0 0" "1.0_alpha_1 ===1.0a1 0"
 }
 
 @test "pep440.sh: pep440_holds returns 2 for a clause it cannot read, 0 for no clause" {
@@ -2827,6 +2850,31 @@ run_split() {
   [ "$output" = $'Metadata-Version: 2.2\nName: demo\nVersion: 1.0\nRequires-Dist: click\nDynamic: Summary' ]
 }
 
+# Checks that their timeout kills leave their files behind, and check-all.sh removes the run cache at its end
+@test "lib.sh: http_get, pypi_metadata and remote_tags download into the run cache" {
+  export AURTOMATOR_RUN_CACHE="$TEST_TMPDIR/run-cache" CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  mkdir -p "$AURTOMATOR_RUN_CACHE"
+  pypi_fake_sdist demo 1.0 $'Metadata-Version: 2.2\nName: demo\nVersion: 1.0\nRequires-Dist: click\n'
+  run_requires 'pypi_metadata demo 1.0'
+  [ "$status" -eq 0 ]
+  grep -o -- ' -o [^ ]*' "$CURL_ARGS_LOG" | cut -d' ' -f3 >"$TEST_TMPDIR/paths"
+  [ "$(wc -l <"$TEST_TMPDIR/paths")" -ge 2 ]
+  run grep -cv -- "^$AURTOMATOR_RUN_CACHE/" "$TEST_TMPDIR/paths"
+  [ "$output" = 0 ]
+  printf '#!/usr/bin/env bash\nreadlink "/proc/$$/fd/1" >>"%s"\nprintf "abc\\trefs/tags/v1.0.0\\n"\n' "$TEST_TMPDIR/refs-path" \
+    >"$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/git"
+  run_requires 'remote_tags https://git.example/repo.git'
+  [ "$status" -eq 0 ]
+  [ "$output" = v1.0.0 ]
+  [[ "$(<"$TEST_TMPDIR/refs-path")" == "$AURTOMATOR_RUN_CACHE/"* ]]
+  # Outside a run the files go to TMPDIR
+  : >"$TEST_TMPDIR/refs-path"
+  run env -u AURTOMATOR_RUN_CACHE bash -c 'source "$0/scripts/lib.sh"; remote_tags https://git.example/repo.git' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$(dirname "$(<"$TEST_TMPDIR/refs-path")")" = "${TMPDIR:-/tmp}" ]
+}
+
 @test "requires.sh: pypi_metadata fails with 4 for an sdist whose requirements are dynamic or unknown" {
   local text
   for text in $'Metadata-Version: 2.2\nName: demo\nDynamic: requires-dist\n' $'Metadata-Version: 2.1\nName: demo\nRequires-Dist: click\n' \
@@ -3155,6 +3203,21 @@ python_files_db() {
   run_archdb 'aur_packages $(seq -f "pkg%g" 150)'
   [ "$status" -eq 0 ]
   [ "$(grep -c aur.archlinux.org/rpc "$CURL_ARGS_LOG")" -eq 2 ]
+}
+
+@test "archdb.sh: aur_packages fails on an AUR version other than epoch, pkgver and pkgrel" {
+  local version
+  for version in '0.0.41\u0001-1' '0.0.41' '1.0-x' 'abc-1' 'x:1.0-1' "$(printf '1%.0s' {1..65})-1"; do
+    rm -rf "$TEST_TMPDIR/run-cache"
+    printf '[{"Name": "python-bad", "Version": "%s"}]\n' "$version" >"$MOCK_FILES_DIR/aur-rpc.json"
+    run_archdb 'aur_packages python-bad'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"python-bad has version "*", not epoch:pkgver-pkgrel"* ]]
+  done
+  printf '[{"Name": "python-ok", "Version": "2:1.0+r3.ab_c-1.2"}]\n' >"$MOCK_FILES_DIR/aur-rpc.json"
+  run_archdb 'aur_packages python-ok && aur_package python-ok && echo "$PKG_VERSION"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0+r3.ab_c" ]
 }
 
 @test "archdb.sh: arch_package takes the repositories first, then the AUR" {
@@ -3871,6 +3934,25 @@ EOF
   [ "$output" = $'notice\timports: pacman has no files database, not read' ]
 }
 
+# Readers block on a FIFO until a writer opens it; the python3 here lists what py_imports.py would meet
+@test "pyrules.sh: python_imports drops members of the archive that are no regular file or directory" {
+  imports_env
+  local s="$TEST_TMPDIR/sdist-demo-1.0/demo-1.0"
+  mkdir -p "$s/demo"
+  printf 'import tqdm\n' >"$s/demo/__init__.py"
+  mkfifo "$s/demo/pipe.py" "$s/demo/pipe"
+  pypi_fake_sdist demo 1.0 $'Metadata-Version: 2.2\nName: demo\nVersion: 1.0\n'
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  printf '#!/usr/bin/env bash\n[[ "$4" == --stdlib ]] || find "$4" ! -type f ! -type d >>"%s/special"\nexec /usr/bin/python3 "$@"\n' \
+    "$TEST_TMPDIR" >"$MOCK_DIR/python3"
+  chmod +x "$MOCK_DIR/python3"
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timport tqdm: python-tqdm not in depends' ]
+  [ -e "$TEST_TMPDIR/special" ]
+  [ ! -s "$TEST_TMPDIR/special" ]
+}
+
 @test "lib.sh: fired_alerts fires requires: imports as a notice" {
   imports_env
   demo_wheel
@@ -4135,6 +4217,9 @@ $1"
   [ "$status" -eq 0 ]
   [[ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" == "check_failed: "* ]]
   [ ! -e "$TEST_TMPDIR/.status/_rules" ]
+  # The issues count the failure under the host of the AUR, and the check runs again
+  [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'kube-diagrams\taur.archlinux.org' ]
+  [[ "$output" == *"Checking 1 failed package(s) again"* ]]
 }
 
 @test "check-all: --rules writes the requires lines of the version of the check run, or error and the reason" {
@@ -4317,11 +4402,20 @@ run_rb_requires() {
   rb_file lib/demo.rb 'if RUBY_ENGINE == "jruby"' '  require "demo.jar"' 'elsif RUBY_PLATFORM =~ /mswin|mingw|windows/i' \
     '  require "win32/process"' 'else' '  require "demo.so"' 'end' 'require "posix" unless Gem.win_platform?' \
     'require "java" if ::RUBY_PLATFORM.include?("java") || RUBY_ENGINE != "ruby"' 'if !(/darwin/ =~ RUBY_PLATFORM)' \
-    '  require "linux"' 'end' 'if RUBY_PLATFORM.start_with?("x86_64") && ENV["X"]' '  require "maybe"' 'else' '  require "other"' 'end'
+    '  require "linux"' 'end' 'if RUBY_PLATFORM.start_with?("x86_64") && ENV["X"]' '  require "maybe"' 'else' '  require "other"' 'end' \
+    'require "win32/registry" if Gem.win_platform?'
   run_rb_requires lib/demo.rb
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'require\tlib/demo.rb\trequire\t%s\n' 'demo.so	module' 'posix	module' 'linux	module' 'maybe	module' \
     'other	module')" ]
+}
+
+# The rules split the lines of the helper at tabs and line breaks
+@test "rb_requires.rb: leaves out a require whose feature holds a tab or a line break" {
+  rb_file lib/demo.rb 'require "a\tb"' 'require "c\nd"' 'require "e\rf"' 'require "json"'
+  run_rb_requires lib/demo.rb
+  [ "$status" -eq 0 ]
+  [ "$output" = $'require\tlib/demo.rb\trequire\tjson\tmodule' ]
 }
 
 # File.expand_path reads a leading ~ as a home directory and fails for an unknown user
@@ -4700,6 +4794,41 @@ ruby:
   [ "$output" = $'notice\trequire missing: no package owns it' ]
 }
 
+# Entries of extensions: name files of the tree, and .. would name one beside it
+@test "rbrules.sh: ruby_imports reads no entry of extensions: with .. in its path" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/ext"
+  mkdir -p "$g/lib" "$g/ext" "$g/ext2"
+  printf '%s\n' 'require "evil_ext"' >"$g/lib/demo.rb"
+  printf '%s\n' 'x = 1' >"$g/ext/other.rb"
+  printf '%s\n' 'create_makefile("evil_ext")' >"$g/ext2/extconf.rb"
+  gem_build demo 1.0 "$g" $'name: demo\nextensions:\n- ext/../ext2/extconf.rb\nrequire_paths:\n- lib\n'
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" ruby-demo ruby
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_imports "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" \
+    "$TEST_TMPDIR/d.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire evil_ext: no package owns it' ]
+}
+
+# Readers block on a FIFO until a writer opens it
+@test "rbrules.sh: ruby_imports drops members of the gem that are no regular file or directory" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/ext"
+  mkdir -p "$g/lib" "$g/ext/demo_ext"
+  printf '%s\n' 'require "demo_ext.so"' 'require "missing"' >"$g/lib/demo.rb"
+  mkfifo "$g/ext/demo_ext/extconf.rb"
+  gem_build demo 1.0 "$g" $'name: demo\nextensions:\n- ext/demo_ext/extconf.rb\nrequire_paths:\n- lib\n'
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" ruby-demo ruby
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo"
+  run --separate-stderr timeout 20 bash -c 'source "$0/scripts/lib.sh"; ruby_imports "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" \
+    "$TEST_TMPDIR/d.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire missing: no package owns it' ]
+}
+
 @test "rbrules.sh: ruby_map compares the keys of ruby.map with a gem name as written" {
   create_test_package "pkg" "rubygems" 'upstream:
   registry: demo
@@ -4725,6 +4854,34 @@ alerts:
   run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 4.0.3' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/bashcov.yml"
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\trequire erb (optional): ruby-erb in neither depends nor optdepends' ]
+}
+
+@test "lib.sh: fired_alerts prints a space for each control character of a requires rule" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/ctl"
+  mkdir -p "$g/lib"
+  printf '%s\n' 'require "simplecov"' >"$g/lib/demo.rb"
+  printf '$%s = 1\n' "$(printf '\033')" >"$g/lib/bad.rb"
+  gem_build demo 1.0 "$g" $'name: demo\nrequire_paths:\n- lib\n' 'simplecov|>= 0'
+  printf 'extra\truby-simplecov\t1-1\tusr/lib/ruby/gems/3.4.0/gems/simplecov-1.3.2/lib/simplecov.rb\n' >>"$MOCK_PACMAN_FILES"
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" demo ruby ruby-simplecov
+  aur_srcinfo_remote demo "$TEST_TMPDIR/d.SRCINFO"
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo
+alerts:
+  - requires: imports"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == $'notice\timports: lib/bad.rb does not parse: \'$ \' is not allowed as a global variable name'* ]]
+  [[ "${output#*$'\t'}" != *[[:cntrl:]]* ]]
+}
+
+@test "alerts.sh: _fired_requires prints a space for each byte that publish refuses" {
+  export NOTE=$'a\001b\tc\177d\xc2\x9be\xc3\x82'
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; _python_rule() { printf "notice\t%s\n" "$NOTE"; }
+    offline="" PY_STATE=ready RB_STATE=none; _fired_requires unmet "" ""' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\ta b c d e\xc3\x82' ]
 }
 
 # === ruby sources ===
@@ -7885,7 +8042,19 @@ pkgver_dash: ''"
   MOCK_TAG_TYPE=tag MOCK_TAG_AGE=1 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
   [ "$status" -eq 3 ]
   grep -q "repos/asset-owner/asset-repo/git/tags/$(printf 'c%.0s' {1..40})\$" "$CURL_ARGS_LOG"
-  grep -q "repos/asset-owner/asset-repo/git/commits/$(printf 'd%.0s' {1..40})\$" "$CURL_ARGS_LOG"
+}
+
+# Annotated tags carry the time they were made, which can come long after their commit
+@test "check-asset: dates an annotated tag without a release by its tagger" {
+  liquidsoap_package
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  MOCK_TAG_TYPE=tag MOCK_TAG_AGE=48 MOCK_TAGGER_AGE=1 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 3 ]
+  run grep -c '/git/commits/' "$CURL_ARGS_LOG"
+  [ "$output" = 0 ]
+  MOCK_TAG_TYPE=tag MOCK_TAG_AGE=1 MOCK_TAGGER_AGE=30 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tag v2.5.0-rc2 has no release"* ]]
 }
 
 # bash expands a tilde at the start of an assignment

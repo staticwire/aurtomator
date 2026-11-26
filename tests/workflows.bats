@@ -352,7 +352,7 @@ secret_lines() {
 }
 
 # ci.yml checks out its own commit and a called workflow the pinned one, so the comparison
-# leaves out the pin check and the repository and ref of the checkout
+# leaves out the checks of the pin and of its release and the repository and ref of the checkout
 @test "workflows: the image job is the same in every workflow" {
   local workflow expected count=0
   run yq '.jobs.image' "$GITHUB_DIR/workflows/ci.yml"
@@ -364,7 +364,7 @@ secret_lines() {
     [ "$status" -eq 0 ]
     [ "$output" = "true" ] || continue
     echo "$workflow"
-    run yq '.jobs.image | del(.steps[] | select(.name == "Check the pin")) |
+    run yq '.jobs.image | del(.steps[] | select(.name == "Check the pin" or .name == "Check the release")) |
       del(.steps[] | select(.uses | test("^actions/checkout@")) | .with | (.repository, .ref))' "$workflow"
     [ "$status" -eq 0 ]
     [ "$output" = "$expected" ]
@@ -1380,7 +1380,7 @@ action_run() {
   run yq -o=json -I=0 '.jobs.image.steps[0] | [.name, .env.SHA]' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [ "$output" = '["Check the pin","${{ job.workflow_sha }}"]' ]
-  run yq '.jobs.image.steps[1].uses' "$CHECK_UPDATES"
+  run yq '.jobs.image.steps[2].uses' "$CHECK_UPDATES"
   [[ "$output" == actions/checkout@* ]]
   step_run image "Check the pin" >"$step"
   run env SHA= bash -e "$step"
@@ -5166,7 +5166,25 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   [ "$output" = '[{"persist-credentials":false,"fetch-depth":0},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
   run yq '.jobs.packages.steps[] | select(has("run")) | .run' "$VALIDATE"
   [ "$status" -eq 0 ]
-  grep -qxF './aurtomator/scripts/validate-pkg.sh --all' <<<"$output"
+  grep -qxF './aurtomator/scripts/validate-pkg.sh --all || rc=$?' <<<"$output"
+}
+
+# File names of a pull request can hold a line break and a workflow command
+@test "validate: no line of validate-pkg.sh --all reaches the runner as a command" {
+  local ws="$BATS_TEST_TMPDIR/ws" rc
+  mkdir -p "$ws/aurtomator/scripts"
+  printf '#!/bin/sh\necho "::notice title=forged::text"\n[ "$1" = --all ] || exit 2\nexit "$TEST_RC"\n' \
+    >"$ws/aurtomator/scripts/validate-pkg.sh"
+  chmod +x "$ws/aurtomator/scripts/validate-pkg.sh"
+  yq '.jobs.packages.steps[] | select(.name == "Validate packages") | .run' "$VALIDATE" >"$BATS_TEST_TMPDIR/step.sh"
+  for rc in 0 1; do
+    run env -C "$ws" TEST_RC="$rc" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    [ "$status" -eq "$rc" ]
+    [ "${#lines[@]}" -eq 3 ]
+    [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
+    [ "${lines[1]}" = "::notice title=forged::text" ]
+    [ "${lines[2]}" = "::${BASH_REMATCH[1]}::" ]
+  done
 }
 
 OLD_PIN=1234567890abcdef1234567890abcdef12345678
@@ -5191,7 +5209,12 @@ run_changed_step() {
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m base
   FIRST=$(git -C "$repo" rev-parse HEAD)
-  echo "name: d" >"$repo/packages/d.yml"
+  if [[ -n "${LINK:-}" ]]; then
+    echo "name: d" >"$BATS_TEST_TMPDIR/outside.yml"
+    ln -s "$BATS_TEST_TMPDIR/outside.yml" "$repo/packages/d.yml"
+  else
+    echo "name: d" >"$repo/packages/d.yml"
+  fi
   echo "current: '2'" >>"$repo/packages/a.yml"
   if [[ -n "${RENAME:-}" ]]; then
     git -C "$repo" mv packages/c.yml packages/e.yml
@@ -5238,6 +5261,14 @@ echo "::warning::from $1"
   done
 }
 
+# Root copies the YAMLs for builder, and a link would bring in the file it names
+@test "validate: copies no link of packages/ for the check of the requirements" {
+  LINK=1 run_changed_step
+  [ "$status" -eq 0 ]
+  [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = a ]
+  [ ! -e "$BATS_TEST_TMPDIR/work/packages/d.yml" ]
+}
+
 # git diff reports a rename as R, so a renamed package would miss the check
 @test "validate: checks online the packages that the push or the pull request renames" {
   RENAME=1 run_changed_step
@@ -5270,11 +5301,12 @@ echo "::warning::from $1"
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
 }
 
-# actions/checkout trusts the checkout in a git config of its own, and root of the job does not own it
+# actions/checkout trusts the checkout in a git config of its own, and root of the job packages does
+# not own it; the image job lists tags before its checkout, outside a container
 @test "validate: git in the steps trusts the checkout of the runner" {
   local step line count=0 git_re='(^|[[:space:];&|(!$])git[[:space:]]'
   local ws_git='git_ws() { git -c safe.directory="$PWD" "$@"; }'
-  mapfile -t steps < <(yq '.jobs[].steps[] | select(has("run") and .name != "Install dependencies") | .name' "$VALIDATE")
+  mapfile -t steps < <(yq '.jobs.packages.steps[] | select(has("run") and .name != "Install dependencies") | .name' "$VALIDATE")
   [ "${#steps[@]}" -gt 0 ]
   for step in "${steps[@]}"; do
     run yq ".jobs[].steps[] | select(.name == \"$step\") | .run" "$VALIDATE"
@@ -5347,6 +5379,49 @@ echo "::warning::from $1"
   run yq '.jobs.image' "$VALIDATE"
   [ "$status" -eq 0 ]
   [ "$output" = "$expected" ]
+}
+
+# Runs the step of the image job that checks the release of job.workflow_sha, with a git that prints
+# $TAGS for ls-remote and fails with $GIT_RC, and a gh that prints $RELEASE for the release of $WANT
+run_pin_release_step() {
+  local bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$bin"
+  printf '#!/bin/sh\n[ "$1 $2 $3" = "ls-remote --tags https://github.com/owner/aurtomator" ] || exit 2\nprintf "%%s" "$TAGS"\nexit "${GIT_RC:-0}"\n' >"$bin/git"
+  printf '#!/bin/sh\n[ "$GH_TOKEN" = token ] || exit 3\n[ "$1 $2" = "api repos/owner/aurtomator/releases/tags/$WANT" ] || exit 1\nprintf "%%s\\n" "$RELEASE"\n' >"$bin/gh"
+  chmod +x "$bin/git" "$bin/gh"
+  yq '.jobs.image.steps[] | select(.name == "Check the release") | .run' "$CHECK_UPDATES" >"$BATS_TEST_TMPDIR/release.sh"
+  run env PATH="$bin:$PATH" REPO=owner/aurtomator SHA="$SHA" GH_TOKEN=token bash -e "$BATS_TEST_TMPDIR/release.sh"
+}
+
+# Pins name the commit of a published release, and the token of the run reads it under the limit of the
+# calling repository; aurtomator runs its workflows at commits of no release
+@test "workflows: the image job checks that the pinned commit is a published immutable release" {
+  run yq -o=json -I=0 '.jobs.image.steps[] | select(.name == "Check the release") | [.if, .env]' "$CHECK_UPDATES"
+  [ "$output" = '["github.repository != job.workflow_repository",{"REPO":"${{ job.workflow_repository }}","SHA":"${{ job.workflow_sha }}","GH_TOKEN":"${{ github.token }}"}]' ]
+  export SHA=1111111111111111111111111111111111111111 WANT=v1.2.0
+  export RELEASE='{"tag_name": "v1.2.0", "draft": false, "immutable": true}'
+  TAGS=$(printf '%s\t%s\n' "$SHA" refs/tags/v1.1.0 2222222222222222222222222222222222222222 refs/tags/v1.2.0 \
+    "$SHA" 'refs/tags/v1.2.0^{}' 3333333333333333333333333333333333333333 refs/tags/v1.2.1)
+  export TAGS
+  run_pin_release_step
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  local release
+  for release in '{"tag_name": "v1.2.0", "draft": true, "immutable": true}' \
+    '{"tag_name": "v1.2.0", "draft": false, "immutable": false}' '{"tag_name": "v1.2.1", "draft": false, "immutable": true}'; do
+    RELEASE=$release run_pin_release_step
+    [ "$status" -eq 1 ]
+    [ "$output" = "::error::v1.2.0 of owner/aurtomator is no published immutable release" ]
+  done
+  WANT=v9.9.9 run_pin_release_step
+  [ "$status" -eq 1 ]
+  [ "${lines[-1]}" = "::error::GitHub answers no release v1.2.0 of owner/aurtomator" ]
+  SHA=4444444444444444444444444444444444444444 run_pin_release_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::4444444444444444444444444444444444444444 is the commit of no release tag of owner/aurtomator; ./aurtomator.sh pin vX.Y.Z pins the commit of a release" ]
+  GIT_RC=128 run_pin_release_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::Could not list the tags of owner/aurtomator" ]
 }
 
 @test "validate: the packages job runs in the image, after it" {
