@@ -1034,7 +1034,8 @@ jobs:
     if: "!cancelled() && needs.check.result == 'success'"
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
-    timeout-minutes: 10
+    # The issue writes go one a second, and 450 of them take about eight minutes
+    timeout-minutes: 20
     permissions:
       contents: read
       issues: write # opens issues for the statuses and closes resolved ones
@@ -1103,6 +1104,12 @@ jobs:
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
+          # The steps of the job count their writes to issues in one file, and closes past the writes
+          # of the run wait for the next run
+          export ISSUE_WRITES="$RUNNER_TEMP/issue-writes"
+          close_issue() {
+            lib issue_write issue close "$1" --comment "$2" || (($? == 3))
+          }
 
           # Read once, and each issue looks up the status of the package its title names
           declare -A statuses=()
@@ -1133,9 +1140,28 @@ jobs:
               *) continue ;;
             esac
             comment=$(lib close_comment "$status_file" "$RUN_URL")
-            gh issue close "$number" --comment "$comment"
+            close_issue "$number" "$comment"
           done <<<"$open
           $held"
+
+          # The issue of the failed packages that a run had no writes for closes once each of them
+          # recovered or has an issue of its own; unchecked packages keep it open
+          group_re='^❌ [0-9]+ failed packages of run [0-9]+$'
+          own=$(cut -d ' ' -f 2- <<<"$open")
+          while read -r number title; do
+            [[ -n "$number" && "$title" =~ $group_re ]] || continue
+            left=""
+            # shellcheck disable=SC2016 # the backticks are Markdown code of the list
+            while IFS= read -r pkg_name; do
+              [[ -n "$pkg_name" ]] || continue
+              case "${statuses[$pkg_name]:-unchecked:}" in
+                check_failed:* | update_failed:* | unchecked:*)
+                  grep -qxF -e "❌ $pkg_name: check failed" -e "❌ $pkg_name: update failed" <<<"$own" || left=1
+                  ;;
+              esac
+            done < <(gh issue view "$number" --json body --jq .body | sed -n 's/^- `\([a-z0-9][a-z0-9.+_-]*\)`: .*/\1/p')
+            [[ -n "$left" ]] || close_issue "$number" "Each package of this issue recovered or has an issue of its own in $RUN_URL."
+          done <<<"$open"
 
           # The issues of a package whose YAML is gone close, since no check of it closes them; a
           # run without the list of packages closes none
@@ -1151,7 +1177,7 @@ jobs:
               pkg_name=${BASH_REMATCH[1]}
               grep -qxF -e "$pkg_name" "$STATUS_DIR/_packages" && continue
               comment=$(lib retired_close_comment "$pkg_name" "$RUN_URL")
-              gh issue close "$number" --comment "$comment"
+              close_issue "$number" "$comment"
             done <<<"$open
           $held
           $arched"
@@ -1161,7 +1187,7 @@ jobs:
           if [[ "$RUN_OK" == true ]]; then
             while read -r number title; do
               [[ "$title" == "❌ Check AUR Package Updates failed" ]] || continue
-              gh issue close "$number" --comment "Run $RUN_URL succeeded."
+              close_issue "$number" "Run $RUN_URL succeeded."
             done <<<"$open"
           fi
 
@@ -1175,7 +1201,7 @@ jobs:
               pkg_name=${BASH_REMATCH[1]}
               awk -F'\t' -v p="$pkg_name" '$1 "" == p "" { found = 1 } END { exit !found }' "$STATUS_DIR/_without" && continue
               comment=$(lib arch_close_comment "$pkg_name" "$RUN_URL")
-              gh issue close "$number" --comment "$comment"
+              close_issue "$number" "$comment"
             done <<<"$arched"
           fi
 
@@ -1186,7 +1212,7 @@ jobs:
             releases=$(gh issue list --label "aurtomator-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
             while read -r number title; do
               [[ -n "$number" && "$title" != "🚀 aurtomator ${upstream#newer: } available" ]] || continue
-              gh issue close "$number" --comment "The aurtomator release status is \`$upstream\` in $RUN_URL."
+              close_issue "$number" "The aurtomator release status is \`$upstream\` in $RUN_URL."
             done <<<"$releases"
           fi
 
@@ -1217,6 +1243,7 @@ jobs:
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
+          export ISSUE_WRITES="$RUNNER_TEMP/issue-writes"
 
           # Host issues close when fewer than HOST_ISSUE_MIN packages of the host failed to check
           hosts=$(lib failed_hosts "$STATUS_DIR")
@@ -1227,7 +1254,7 @@ jobs:
             host=${BASH_REMATCH[1]}
             grep -qxF -e "$host" <<<"$failing" && continue
             comment=$(lib host_close_comment "$host" "$RUN_URL")
-            gh issue close "$number" --comment "$comment"
+            lib issue_write issue close "$number" --comment "$comment" || (($? == 3))
           done <<<"$open"
 
       - name: Create issues
@@ -1262,23 +1289,31 @@ jobs:
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
+          # The steps of the job count their writes to issues in one file, and failed packages past the
+          # writes of the run go to grouped
+          export ISSUE_WRITES="$RUNNER_TEMP/issue-writes"
+          grouped=()
 
           # Creates label $1 with color $2 and description $3 when it is
           # missing and lists the titles of its open issues, once per label
           declare -A titles=()
           use_label() {
             [[ -z "${titles[$1]+set}" ]] || return 0
-            gh label create "$1" --color "$2" --description "$3" 2>/dev/null || true
+            lib issue_write label create "$1" --color "$2" --description "$3" 2>/dev/null || true
             titles[$1]=$(gh issue list --label "$1" --state open --limit 100000 --json title --jq '.[].title')
           }
 
           # Opens an issue with label $1, title $2 and body $3, which goes on stdin since Linux refuses
-          # one argument over 128 KiB, and turns a refusal of GitHub into a warning and created=false
+          # one argument over 128 KiB; created=false after a refusal of GitHub, later past the writes
           create_issue() {
-            local out
+            local out rc=0
             created=true
-            if out=$(printf '%s' "$3" | gh issue create --title "$2" --label "$1" --body-file - 2>&1); then
+            out=$(printf '%s' "$3" | lib issue_write issue create --title "$2" --label "$1" --body-file - 2>&1) || rc=$?
+            if ((rc == 0)); then
               echo "$out"
+            elif ((rc == 3)); then
+              created=later
+              echo "No writes left in this run for the issue $2"
             else
               created=false
               echo "::warning::Could not create the issue $2: ${out//$'\n'/ }"
@@ -1314,7 +1349,7 @@ jobs:
             body=$(lib host_issue_body "$STATUS_DIR" "$host" "$RUN_URL" "${list[@]}")
             create_issue auto-update "❌ $host: ${#list[@]} packages failed to check" "$body"
             # The packages of a refused host issue get issues of their own below
-            if [[ "$created" == false ]]; then
+            if [[ "$created" != true ]]; then
               for pkg_name in "${list[@]}"; do
                 unset 'shared[$pkg_name]'
               done
@@ -1347,6 +1382,7 @@ jobs:
 
                 body=$(lib failure_issue_body "$status_file" "$RUN_URL")
                 create_issue auto-update "❌ $pkg_name: ${kind//_/ }" "$body"
+                [[ "$created" != later ]] || grouped+=("$pkg_name")
                 ;;
               "held: "*)
                 if lib only_waits "$status_file"; then
@@ -1392,7 +1428,8 @@ jobs:
               --jq '.[] | "\(.number) \(.title)"' | awk -v t="$title" 'substr($0, index($0, " ") + 1) == t { print $1 }')
             if [[ -z "$body" ]]; then
               for number in $numbers; do
-                gh issue close "$number" --comment "No package misses the source of its requirements in $RUN_URL."
+                lib issue_write issue close "$number" --comment "No package misses the source of its requirements in $RUN_URL." ||
+                  (($? == 3))
               done
             elif [[ -z "$numbers" ]]; then
               use_label missing-key fbca04 "Package YAML needs a python or ruby key"
@@ -1400,8 +1437,22 @@ jobs:
             else
               for number in $numbers; do
                 if [[ "$(gh issue view "$number" --json body --jq .body)" != "$body" ]]; then
-                  printf '%s' "$body" | gh issue edit "$number" --body-file -
+                  printf '%s' "$body" | lib issue_write issue edit "$number" --body-file - || (($? == 3))
                 fi
               done
             fi
+          fi
+
+          # Failed packages past the writes of the run share one issue, beyond the limit of the other
+          # writes, and the run summary of the step holds each whole error
+          if ((${#grouped[@]} > 0)); then
+            for pkg_name in "${grouped[@]}"; do
+              {
+                lib failure_issue_body "$STATUS_DIR/$pkg_name" "$RUN_URL"
+                echo
+              } >>"$GITHUB_STEP_SUMMARY"
+            done
+            body=$(lib grouped_issue_body "$STATUS_DIR" "$RUN_URL" "${grouped[@]}")
+            export ISSUE_WRITE_MAX=$((${ISSUE_WRITE_MAX:-450} + 10))
+            create_issue auto-update "❌ ${#grouped[@]} failed packages of run $GITHUB_RUN_NUMBER" "$body"
           fi

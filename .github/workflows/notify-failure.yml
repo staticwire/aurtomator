@@ -47,7 +47,7 @@ jobs:
             .status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested" or
             (.conclusion == "cancelled" and .runner_name != null and .started_at != null and .completed_at != null and
               (.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601) >= 60 *
-              ({"image": 5, "check": 30, "prepare": 30, "rules": 30, "verify": 30, "publish": 30, "status": 10, "pins": 5}[.name | sub("^.* / "; "") | sub(" [(].*$"; "")] // 1e9) - 60)) | .name'
+              ({"image": 5, "check": 30, "prepare": 30, "rules": 30, "verify": 30, "publish": 30, "status": 20, "pins": 5}[.name | sub("^.* / "; "") | sub(" [(].*$"; "")] // 1e9) - 60)) | .name'
 
           # Runs without a failed job were canceled and get no issue; job lists that cannot be
           # read open the issue without the names

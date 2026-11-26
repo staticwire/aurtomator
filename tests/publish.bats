@@ -5386,6 +5386,43 @@ EOF
   [[ "$output" == *$'\nManual update: https://github.com/someone/aurtomator/blob/main/site/src/content/docs/setup.md#the-calling-workflows\n'* ]]
 }
 
+# === issue_write ===
+
+# GitHub allows 80 writes of content a minute and 500 an hour, and the run keeps the rest of the hour
+@test "issue_write: writes one a second, and fails with 3 past ISSUE_WRITE_MAX" {
+  local bin="$BATS_TEST_TMPDIR/bin" start end
+  mkdir -p "$bin"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s/gh.log"\n' "$BATS_TEST_TMPDIR" >"$bin/gh"
+  chmod +x "$bin/gh"
+  export ISSUE_WRITES="$BATS_TEST_TMPDIR/writes" ISSUE_WRITE_MAX=3 PATH="$bin:$PATH"
+  start=${EPOCHREALTIME/[.,]/}
+  issue_write issue close 1 --comment a
+  issue_write issue close 2 --comment b
+  issue_write issue create --title t --body-file - <<<"body"
+  end=${EPOCHREALTIME/[.,]/}
+  (((end - start) >= 2000000))
+  run issue_write issue close 4 --comment d
+  [ "$status" -eq 3 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/gh.log")" = $'issue close 1 --comment a\nissue close 2 --comment b\nissue create --title t --body-file -' ]
+  # The count holds across the steps of the job, which share the file
+  ISSUE_WRITE_MAX=4 run issue_write issue close 4 --comment d
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$BATS_TEST_TMPDIR/gh.log")" = 4 ]
+}
+
+# Errors hold text of upstream, so each goes in a code span without backticks, where @ mentions no one
+@test "grouped_issue_body: lists each package with the first line of its error" {
+  mkdir -p "$TEST_TMPDIR/st"
+  printf 'check_failed: `boom` @octocat [x](https://evil.example)\nsecond line\n' >"$TEST_TMPDIR/st/c"
+  echo "update_failed: $(printf 'x%.0s' {1..300})" >"$TEST_TMPDIR/st/d"
+  run grouped_issue_body "$TEST_TMPDIR/st" https://example.invalid/run c d
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "GitHub allows a run about 450 writes to issues an hour, so these packages failed without an issue of their own in https://example.invalid/run. The run summary of its step Create issues holds each whole error." ]
+  [ "${lines[1]}" = "- \`c\`: \`'boom' @octocat [x](https://evil.example)\`" ]
+  [ "${lines[2]}" = "- \`d\`: \`$(printf 'x%.0s' {1..200})\`" ]
+  [ "${lines[3]}" = "Auto-created by update workflow, which closes it once each of these packages recovered or has an issue of its own." ]
+}
+
 # === requirements_issue_body ===
 
 # The body holds no run, so a run with the same list leaves the issue as it is

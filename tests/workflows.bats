@@ -3196,12 +3196,15 @@ EOF
   : >"$GH_LOG"
   : >"$BODY_LOG"
   : >"$GH_BODY_LOG"
+  rm -rf "$BATS_TEST_TMPDIR/runner-temp" "$BATS_TEST_TMPDIR/summary"
+  mkdir -p "$BATS_TEST_TMPDIR/runner-temp"
   step_run issues "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GH_CREATE_FAIL_HOST="${GH_CREATE_FAIL_HOST:-}" GITHUB_REPOSITORY=owner/fork \
     GH_BODY_LOG="$GH_BODY_LOG" BIG_BODY="${BIG_BODY:-}" GH_BODY="${GH_BODY:-}" RUN_URL=https://example.invalid/run \
-    sh -e "$BATS_TEST_TMPDIR/step.sh"
+    RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
+    GITHUB_RUN_NUMBER=7 GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # The list of every check run opens, edits or closes one issue
@@ -3591,6 +3594,7 @@ case "$cmd" in
     json=$({ grep "^[0-9]* $emoji" <<<"${GH_OPEN:-}" || true; } | head -n "$limit" |
       jq -Rn '[inputs | capture("^(?<number>[0-9]+) (?<title>.*)$") | .number |= tonumber]')
     ;;
+  "issue view") json=$(jq -n --arg b "${GH_BODY:-}" '{body: $b}') ;;
   *) exit 0 ;;
 esac
 if [[ -n "$filter" ]]; then
@@ -3605,8 +3609,11 @@ EOF
   : >"$GH_LOG"
   : >"$BODY_LOG"
   step_run issues "${CLOSE_STEP:-Close resolved issues}" >"$BATS_TEST_TMPDIR/step.sh"
+  rm -rf "$BATS_TEST_TMPDIR/runner-temp"
+  mkdir -p "$BATS_TEST_TMPDIR/runner-temp"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
-    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" \
+    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" GH_BODY="${GH_BODY:-}" \
+    RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
@@ -4269,6 +4276,35 @@ run_bare_issues_step() {
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# GitHub allows 500 writes of content an hour, and no failed package goes unreported
+@test "check-updates: puts the failed packages past the writes of the run into one issue" {
+  ISSUE_WRITE_MAX=3 run_issue_step a="check_failed: boom a" b="check_failed: boom b" c="check_failed: \`boom\` @octocat" \
+    d="update_failed: boom d"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^issue create' "$GH_LOG" | sed 's/ --label.*//')" = $'issue create --title ❌ a: check failed\nissue create --title ❌ b: check failed\nissue create --title ❌ 2 failed packages of run 7' ]
+  # The run summary holds the whole text of each of them
+  grep -qF 'failure_issue_body .status/c' "$BATS_TEST_TMPDIR/body.log"
+  grep -qF 'failure_issue_body .status/d' "$BATS_TEST_TMPDIR/body.log"
+  grep -qx body "$BATS_TEST_TMPDIR/summary"
+}
+
+# The issue of a run closes once each of its packages recovered or has an issue of its own
+@test "check-updates: closes the issue of the failed packages of a run once each has recovered or its own issue" {
+  local group=$'- `c`: `boom`\n- `d`: `boom`'
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7\n6 ❌ d: check failed' \
+    run_close_step c=up_to_date d="check_failed: boom"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 5 --comment Each package of this issue recovered or has an issue of its own in https://example.invalid/run.' "$GH_LOG"
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="check_failed: boom"
+  ! grep -q '^issue close 5' "$GH_LOG"
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="unchecked: out of time"
+  ! grep -q '^issue close 5' "$GH_LOG"
+  # Closes past the writes of the run wait for the next run
+  GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' ISSUE_WRITE_MAX=1 run_close_step foo=up_to_date bar=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^issue close' "$GH_LOG")" = 1 ]
 }
 
 # Repositories of 3000 packages can hold more than 1000 open issues of one label
@@ -5015,7 +5051,7 @@ EOF
     {"name":"pins","conclusion":"cancelled","runner_name":"GitHub Actions 2","started_at":"2026-11-13T09:55:00Z","completed_at":"2026-11-13T09:59:10Z"},
     {"name":"check-updates / check","conclusion":"cancelled","runner_name":"GitHub Actions 3","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:30:40Z"},
     {"name":"check-updates / prepare (demo)","conclusion":"cancelled","runner_name":"GitHub Actions 4","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:02:00Z"},
-    {"name":"check-updates / status","conclusion":"cancelled","runner_name":"GitHub Actions 5","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:09:10Z"}]}' run_notify_step
+    {"name":"check-updates / status","conclusion":"cancelled","runner_name":"GitHub Actions 5","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:19:10Z"}]}' run_notify_step
   [ "$status" -eq 0 ]
   grep -qF 'failed in `pins`, `check-updates / check`, `check-updates / status`.' "$GH_LOG"
   grep -q -- '--paginate' "$GH_LOG"
