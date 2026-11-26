@@ -4373,11 +4373,20 @@ run_rb_requires() {
   rb_file lib/demo.rb 'if RUBY_ENGINE == "jruby"' '  require "demo.jar"' 'elsif RUBY_PLATFORM =~ /mswin|mingw|windows/i' \
     '  require "win32/process"' 'else' '  require "demo.so"' 'end' 'require "posix" unless Gem.win_platform?' \
     'require "java" if ::RUBY_PLATFORM.include?("java") || RUBY_ENGINE != "ruby"' 'if !(/darwin/ =~ RUBY_PLATFORM)' \
-    '  require "linux"' 'end' 'if RUBY_PLATFORM.start_with?("x86_64") && ENV["X"]' '  require "maybe"' 'else' '  require "other"' 'end'
+    '  require "linux"' 'end' 'if RUBY_PLATFORM.start_with?("x86_64") && ENV["X"]' '  require "maybe"' 'else' '  require "other"' 'end' \
+    'require "win32/registry" if Gem.win_platform?'
   run_rb_requires lib/demo.rb
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'require\tlib/demo.rb\trequire\t%s\n' 'demo.so	module' 'posix	module' 'linux	module' 'maybe	module' \
     'other	module')" ]
+}
+
+# The rules split the lines of the helper at tabs and line breaks
+@test "rb_requires.rb: leaves out a require whose feature holds a tab or a line break" {
+  rb_file lib/demo.rb 'require "a\tb"' 'require "c\nd"' 'require "e\rf"' 'require "json"'
+  run_rb_requires lib/demo.rb
+  [ "$status" -eq 0 ]
+  [ "$output" = $'require\tlib/demo.rb\trequire\tjson\tmodule' ]
 }
 
 # File.expand_path reads a leading ~ as a home directory and fails for an unknown user
@@ -4754,6 +4763,24 @@ ruby:
     "$TEST_TMPDIR/d.SRCINFO" demo 1.0
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\trequire missing: no package owns it' ]
+}
+
+# Entries of extensions: name files of the tree, and .. would name one beside it
+@test "rbrules.sh: ruby_imports reads no entry of extensions: with .. in its path" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/ext"
+  mkdir -p "$g/lib" "$g/ext" "$g/ext2"
+  printf '%s\n' 'require "evil_ext"' >"$g/lib/demo.rb"
+  printf '%s\n' 'x = 1' >"$g/ext/other.rb"
+  printf '%s\n' 'create_makefile("evil_ext")' >"$g/ext2/extconf.rb"
+  gem_build demo 1.0 "$g" $'name: demo\nextensions:\n- ext/../ext2/extconf.rb\nrequire_paths:\n- lib\n'
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" ruby-demo ruby
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_imports "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" \
+    "$TEST_TMPDIR/d.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire evil_ext: no package owns it' ]
 }
 
 # Readers block on a FIFO until a writer opens it

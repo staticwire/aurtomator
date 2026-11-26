@@ -5209,7 +5209,12 @@ run_changed_step() {
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m base
   FIRST=$(git -C "$repo" rev-parse HEAD)
-  echo "name: d" >"$repo/packages/d.yml"
+  if [[ -n "${LINK:-}" ]]; then
+    echo "name: d" >"$BATS_TEST_TMPDIR/outside.yml"
+    ln -s "$BATS_TEST_TMPDIR/outside.yml" "$repo/packages/d.yml"
+  else
+    echo "name: d" >"$repo/packages/d.yml"
+  fi
   echo "current: '2'" >>"$repo/packages/a.yml"
   if [[ -n "${RENAME:-}" ]]; then
     git -C "$repo" mv packages/c.yml packages/e.yml
@@ -5254,6 +5259,14 @@ echo "::warning::from $1"
     [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
+}
+
+# Root copies the YAMLs for builder, and a link would bring in the file it names
+@test "validate: copies no link of packages/ for the check of the requirements" {
+  LINK=1 run_changed_step
+  [ "$status" -eq 0 ]
+  [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = a ]
+  [ ! -e "$BATS_TEST_TMPDIR/work/packages/d.yml" ]
 }
 
 # git diff reports a rename as R, so a renamed package would miss the check
