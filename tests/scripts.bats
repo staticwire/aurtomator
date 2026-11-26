@@ -4246,6 +4246,103 @@ $1"
   ! grep -q packages-meta "$CURL_ARGS_LOG"
 }
 
+# Writes the GraphQL answer for github-release packages a, at current 1.0.0 with no regex, and b, at
+# 1.0.0 with a regex, of owner/a and owner/b; the mock answers REST /releases/latest with v2.0.0
+graphql_packages() {
+  create_test_package a github-release "upstream:
+  project: owner/a
+current: '1.0.0'"
+  create_test_package b github-release "upstream:
+  project: owner/b
+  tag_version_regex: '^v([0-9.]+)\$'
+current: '1.0.0'"
+  local node='{"name":"x","isDraft":false,"isPrerelease":false,"publishedAt":"2026-01-02T00:00:00Z","createdAt":"2026-01-01T00:00:00Z"'
+  printf '%s\n' "{\"data\":{\"r0\":{\"latestRelease\":$node,\"tagName\":\"v3.0.0\",\"description\":\"notes\"},\"releases\":{\"totalCount\":0,\"nodes\":[]}},\"r1\":{\"latestRelease\":null,\"releases\":{\"totalCount\":2,\"nodes\":[$node,\"tagName\":\"v5.0.0\"},$node,\"tagName\":\"v4.0.0\"}]}}}}" \
+    >"$MOCK_FILES_DIR/graphql.json"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+}
+
+# 79% of the REST requests of a check run of 3000 packages read /releases/latest, against 1000 an
+# hour for GITHUB_TOKEN, and GraphQL answers 50 repositories in one request
+@test "check-all: reads the releases of github-release packages over GraphQL with a token" {
+  graphql_packages
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 3.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/b")" = "new_version: 5.0.0" ]
+  [ "$(grep -c api.github.com/graphql "$CURL_ARGS_LOG")" = 1 ]
+  ! grep -q -e repos/owner/a/releases -e repos/owner/b/releases "$CURL_ARGS_LOG"
+  ! grep -q test-token "$CURL_ARGS_LOG"
+  grep -qF 'r0: repository(owner: \"owner\", name: \"a\")' "$MOCK_FILES_DIR/graphql.log"
+  grep -qF 'r1: repository(owner: \"owner\", name: \"b\")' "$MOCK_FILES_DIR/graphql.log"
+  # Without a token the run asks REST alone
+  rm "$CURL_ARGS_LOG"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
+  ! grep -q api.github.com/graphql "$CURL_ARGS_LOG"
+}
+
+# Renamed or removed repositories, lists past one page and failed requests go to REST as without GraphQL
+@test "check-all: asks REST for what GraphQL does not answer" {
+  graphql_packages
+  echo '{"data":{"r0":null,"r1":{"latestRelease":null,"releases":{"totalCount":101,"nodes":[]}}},"errors":[{"type":"NOT_FOUND"}]}' \
+    >"$MOCK_FILES_DIR/graphql.json"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
+  grep -qF 'repos/owner/b/releases?per_page=100&page=1' "$CURL_ARGS_LOG"
+  # A repository without a release outside pre-releases has no latestRelease, and REST tells why
+  rm "$CURL_ARGS_LOG"
+  echo '{"data":{"r0":{"latestRelease":null,"releases":{"totalCount":101,"nodes":[]}},"r1":null}}' >"$MOCK_FILES_DIR/graphql.json"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  grep -qF 'repos/owner/a/releases/latest' "$CURL_ARGS_LOG"
+  rm "$MOCK_FILES_DIR/graphql.json" "$CURL_ARGS_LOG"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
+  [[ "$output" == *"GraphQL did not answer, so the checks read the GitHub releases over REST"* ]]
+  # github-nightly reads the notes of releases in a list, which the answers of GraphQL leave out
+  rm "$CURL_ARGS_LOG" "$MOCK_FILES_DIR/graphql.log"
+  create_test_package c github-nightly "upstream:
+  project: owner/a
+  nightly_tag: latest"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  grep -qF 'name: \"b\"' "$MOCK_FILES_DIR/graphql.log"
+  ! grep -qF 'name: \"a\"' "$MOCK_FILES_DIR/graphql.log"
+}
+
+# The issues count a failed check under the host of its own failed request, which check-all.sh reads
+# from the memory of hosts after the check
+@test "github_prefetch: leaves no failed request to the first check" {
+  graphql_packages
+  rm "$MOCK_FILES_DIR/graphql.json"
+  run bash -c 'source "$0/scripts/lib.sh"
+    export AURTOMATOR_HOSTS_DIR AURTOMATOR_RUN_CACHE GITHUB_TOKEN=test-token
+    AURTOMATOR_HOSTS_DIR=$(mktemp -d) AURTOMATOR_RUN_CACHE=$(mktemp -d)
+    : >"$AURTOMATOR_HOSTS_DIR/silent"
+    : >"$AURTOMATOR_HOSTS_DIR/request"
+    : >"$AURTOMATOR_HOSTS_DIR/failed"
+    github_prefetch "$0"/packages/*.yml 2>/dev/null
+    wc -c <"$AURTOMATOR_HOSTS_DIR/failed"
+    wc -c <"$AURTOMATOR_HOSTS_DIR/request"' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'0\n0' ]
+}
+
+# One request holds 50 repositories
+@test "check-all: asks GraphQL for 50 repositories a request" {
+  local i
+  for i in $(seq 1 51); do
+    create_test_package "p$i" github-release "upstream:
+  project: owner/p$i"
+  done
+  echo '{"data":{}}' >"$MOCK_FILES_DIR/graphql.json"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c api.github.com/graphql "$CURL_ARGS_LOG")" = 2 ]
+}
+
 # The issues job reads the statuses of publish when it ran
 @test "check-all: --prepare and --publish carry the _requirements of the check run" {
   local mode

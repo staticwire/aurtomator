@@ -1105,6 +1105,10 @@ check_files=()
 for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   [[ ! -f "$pkg_file" && ! -L "$pkg_file" ]] || check_files+=("$pkg_file")
 done
+# GITHUB_TOKEN allows 1000 REST requests an hour, and GraphQL reads 50 repositories in one
+if [[ "$MODE" == check || "$MODE" == update ]]; then
+  github_prefetch "${check_files[@]}"
+fi
 # Packages with upstream.pin_from wait for held updates of the project that pins them, so
 # they run after the other packages, whose statuses are known then
 plain_files=()

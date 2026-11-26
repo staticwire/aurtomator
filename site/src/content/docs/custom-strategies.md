@@ -67,7 +67,7 @@ echo "$version"
 | `require_cmd <cmd>` | exits 1 when the command is not in `PATH` |
 | `http_get <url> [curl option]...` | sends requests, see above |
 | `http_get_json <url> [curl option]...` | `http_get` that also fails on answers that are no JSON object or array, such as bot check HTML pages |
-| `github_api <url>` | `http_get` with the `Authorization` of `GITHUB_TOKEN` when it is set |
+| `github_api <url>` | `http_get` with the `Authorization` of `GITHUB_TOKEN` when it is set, or the answer that `check-all.sh` read over GraphQL for that URL in the run |
 | `github_tags <owner/repo>` | `remote_tags` for GitHub repositories |
 | `github_release_matching <api> <ere> <pages> [stable] [version] [template]` | prints the release whose tag matches the ERE as JSON: the one published last, or with `version` the one with the newest version. `stable` leaves out pre-releases. Arguments keep their place, so calls with `version` and without `stable` pass an empty fourth one |
 | `remote_tags <url>` | prints every tag of a git repository, from `git ls-remote` over `https`, and fails on a listing of more than `MAX_ANSWER_MB` megabytes |

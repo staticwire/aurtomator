@@ -358,11 +358,97 @@ http_get_json() {
 # GET a GitHub API URL with GITHUB_TOKEN when it is set. curl reads the header
 # from stdin, since ps shows every argument to every local user.
 github_api() {
-  local auth=()
+  local auth=() cached
+  if [[ -n "${AURTOMATOR_RUN_CACHE:-}" && -d "$AURTOMATOR_RUN_CACHE/github" ]]; then
+    cached=$(_github_cached "$1")
+    if [[ -f "$cached" ]]; then
+      cat -- "$cached"
+      return 0
+    fi
+  fi
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     auth=(-H @-)
   fi
   http_get "$1" "${auth[@]}" <<<"Authorization: Bearer ${GITHUB_TOKEN:-}"
+}
+
+# Print the path in the run cache of the answer that github_prefetch keeps for URL $1
+_github_cached() {
+  local key
+  key=$(printf '%s' "$1" | sha256sum)
+  printf '%s/github/%s\n' "$AURTOMATOR_RUN_CACHE" "${key%% *}"
+}
+
+# Keep /releases/latest, and /releases of at most 100 releases, of the github-release packages of files
+# $@ from GraphQL in the run cache for github_api; github-nightly reads notes in lists, so it keeps REST
+github_prefetch() {
+  local LC_ALL=C file rows strategy project regex repo dir header query body answer lines i n kind json
+  local -A latest=() list=() nightly=()
+  local -a files=() repos=() batch=()
+  [[ -n "${GITHUB_TOKEN:-}" && -n "${AURTOMATOR_RUN_CACHE:-}" ]] || return 0
+  for file in "$@"; do
+    [[ ! -f "$file" || -L "$file" ]] || files+=("$file")
+  done
+  ((${#files[@]} > 0)) || return 0
+  rows=$(yq -N -r '[.strategy // "", .upstream.project // "", .upstream.tag_version_regex // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
+  while IFS=$'\t' read -r strategy project regex; do
+    [[ "$project" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || continue
+    case $strategy in
+      github-release) if [[ -n "$regex" ]]; then list[$project]=1; else latest[$project]=1; fi ;;
+      github-nightly) nightly[$project]=1 ;;
+    esac
+  done <<<"$rows"
+  for repo in "${!latest[@]}" "${!list[@]}"; do
+    [[ -z "${nightly[$repo]:-}" ]] && repos+=("$repo")
+  done
+  ((${#repos[@]} > 0)) || return 0
+  mapfile -t repos < <(printf '%s\n' "${repos[@]}" | sort -u)
+  dir="$AURTOMATOR_RUN_CACHE/github"
+  mkdir -p "$dir"
+  header=$(download_temp) || return 0
+  printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN" >"$header"
+  for ((i = 0; i < ${#repos[@]}; i += 50)); do
+    batch=("${repos[@]:i:50}")
+    query="query {"
+    for ((n = 0; n < ${#batch[@]}; n++)); do
+      repo=${batch[n]}
+      query+=" r$n: repository(owner: \"${repo%%/*}\", name: \"${repo#*/}\") { latestRelease { ...R description }"
+      query+=" releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { totalCount nodes { ...R } } }"
+    done
+    query+=" } fragment R on Release { tagName name isDraft isPrerelease publishedAt createdAt }"
+    body=$(Q=$query yq -n -o json -I0 '{"query": strenv(Q)}')
+    if ! answer=$(http_get https://api.github.com/graphql -X POST -H "@$header" -H 'Content-Type: application/json' \
+      --data-binary @- <<<"$body"); then
+      log_warn "GraphQL did not answer, so the checks read the GitHub releases over REST"
+      # check-all.sh counts a failed check under the host of the failed request it finds after it
+      if host_memory; then
+        : >"$AURTOMATOR_HOSTS_DIR/failed"
+      fi
+      break
+    fi
+    # The alias rN gives the place of the repository in the batch, and a missing one has null. yq 4.54.1
+    # lets every value through a select after "as", so the expression binds no variable.
+    lines=$(yq -r -p json '.data // {} | to_entries | .[] | select(.value != null) |
+      ((select(.value.latestRelease != null) | .key + "\tlatest\t" + (.value.latestRelease | {"tag_name": .tagName,
+        "name": .name, "draft": .isDraft, "prerelease": .isPrerelease, "published_at": .publishedAt,
+        "created_at": .createdAt, "body": .description} | to_json(0))),
+      (select(.value.releases.totalCount != null and .value.releases.totalCount <= 100) | .key + "\tlist\t" +
+        ([.value.releases.nodes[] | {"tag_name": .tagName, "name": .name, "draft": .isDraft, "prerelease": .isPrerelease,
+          "published_at": .publishedAt, "created_at": .createdAt}] | to_json(0))))' <<<"$answer" 2>/dev/null) || lines=""
+    while IFS=$'\t' read -r n kind json; do
+      n=${n#r}
+      if [[ ! "$n" =~ ^[0-9]+$ ]] || ((n >= ${#batch[@]})); then
+        continue
+      fi
+      repo=${batch[n]}
+      if [[ "$kind" == latest && -n "${latest[$repo]:-}" ]]; then
+        printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases/latest")"
+      elif [[ "$kind" == list && -n "${list[$repo]:-}" ]]; then
+        printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases?per_page=100&page=1")"
+      fi
+    done <<<"$lines"
+  done
+  rm -f -- "$header"
 }
 
 # Print published_at<TAB>tag of each release in JSON $1 that passes yq filter $3

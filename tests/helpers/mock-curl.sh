@@ -153,6 +153,15 @@ case "$url" in
       http_error 404
     fi
     ;;
+  # GitHub GraphQL: the body of each request goes on a line of graphql.log, and graphql.json is the answer
+  *api.github.com/graphql)
+    { cat && echo; } >>"$MOCK_FILES_DIR/graphql.log"
+    if [[ -f "$MOCK_FILES_DIR/graphql.json" ]]; then
+      cat "$MOCK_FILES_DIR/graphql.json"
+    else
+      http_error 502
+    fi
+    ;;
   # AUR metadata file of every package, as aur_meta of setup.sh writes it
   *aur.archlinux.org/packages-meta-ext-v1.json.gz)
     if [[ -f "$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz" ]]; then
