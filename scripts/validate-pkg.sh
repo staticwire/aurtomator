@@ -1110,6 +1110,24 @@ requirements_ok() {
   return 1
 }
 
+# Check package file number $1 of CHECKED, and its requirements with a non-empty $2, into CHECK_OUT;
+# the exit code goes into a file beside it after the text
+check_package() {
+  local rc=0
+  { validate_pkg "${CHECKED[$1]}" && { [[ -z "$2" ]] || requirements_ok "${CHECKED[$1]}"; }; } >"$CHECK_OUT/$1" 2>&1 || rc=$?
+  printf '%s\n' "$rc" >"$CHECK_OUT/$1.rc.part"
+  mv -- "$CHECK_OUT/$1.rc.part" "$CHECK_OUT/$1.rc"
+}
+
+# Print the text of each check that ended, from number NEXT on and in order, and count failed
+print_done() {
+  while ((NEXT < ${#CHECKED[@]})) && [[ -f "$CHECK_OUT/$NEXT.rc" ]]; do
+    cat -- "$CHECK_OUT/$NEXT" >&2
+    [[ $(<"$CHECK_OUT/$NEXT.rc") == 0 ]] || failed=$((failed + 1))
+    NEXT=$((NEXT + 1))
+  done
+}
+
 # === MAIN ===
 
 USAGE="Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list>"
@@ -1135,7 +1153,6 @@ if [[ "${1:-}" == --all || "${1:-}" == --changed ]]; then
       pkg_files+=("${AURTOMATOR_DATA_DIR}/$path")
     done <"$2"
   fi
-  total=0
   failed=0
   strays=0
   while IFS= read -r -d '' path; do
@@ -1146,13 +1163,38 @@ if [[ "${1:-}" == --all || "${1:-}" == --changed ]]; then
     log_err "packages/$entry: no run reads it, as the runs read the regular files packages/<name>.yml alone"
     ((strays++)) || true
   done < <(find "${AURTOMATOR_DATA_DIR}/packages" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+  CHECKED=()
   for pkg_file in "${pkg_files[@]}"; do
-    [[ -f "$pkg_file" && ! -L "$pkg_file" ]] || continue
-    ((total++)) || true
-    if ! validate_pkg "$pkg_file" || { [[ "${2:-}" == --online ]] && ! requirements_ok "$pkg_file"; }; then
-      ((failed++)) || true
+    if [[ -f "$pkg_file" && ! -L "$pkg_file" ]]; then
+      CHECKED+=("$pkg_file")
     fi
   done
+  total=${#CHECKED[@]}
+  online=""
+  if [[ "$1" == --all && "${2:-}" == --online ]]; then
+    online=1
+  fi
+  CHECK_OUT=$(mktemp -d)
+  trap 'rm -rf -- "$CHECK_OUT"' EXIT
+  cores=$(nproc)
+  running=0
+  NEXT=0
+  for i in "${!CHECKED[@]}"; do
+    if ((running >= cores)); then
+      wait -n
+      running=$((running - 1))
+    fi
+    check_package "$i" "$online" &
+    running=$((running + 1))
+    print_done
+  done
+  wait
+  print_done
+  # Subshells that end early, as set -u ends them, write no result
+  if ((NEXT < total)); then
+    log_err "$(shown_file "${CHECKED[NEXT]}"): its check ended without a result"
+    exit 1
+  fi
   if [[ "$total" -eq 0 && "$strays" -eq 0 ]]; then
     if [[ "$1" == --changed ]]; then
       log_ok "No package changed"

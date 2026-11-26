@@ -1638,6 +1638,76 @@ last_updated: '2026-01-02'"
   (($(wc -l <"$BATS_TEST_TMPDIR/yq.log") - one <= 16))
 }
 
+# validate.yml checks every package when the pins move, so the packages spread over the cores
+@test "validate --all: checks as many packages at once as nproc prints" {
+  local real bin="$BATS_TEST_TMPDIR/bin" cores i
+  real=$(command -v yq)
+  mkdir -p "$bin" "$BATS_TEST_TMPDIR/running"
+  # Each yq of a tag query waits, and logs how many yq run at that moment
+  printf '#!/bin/bash
+[[ "$*" == "-r tag "* ]] || exec "%s" "$@"
+: >"%s/running/$$"
+ls "%s/running" | wc -l >>"%s/at-once"
+sleep 0.3
+rm "%s/running/$$"
+exec "%s" "$@"
+' "$real" "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" "$real" >"$bin/yq"
+  chmod +x "$bin/yq"
+  for i in 1 2 3 4 5 6; do
+    create_test_package "p$i" github-release "upstream:
+  project: owner/p$i"
+  done
+  for cores in 1 3; do
+    printf '#!/bin/sh\necho %s\n' "$cores" >"$bin/nproc"
+    chmod +x "$bin/nproc"
+    : >"$BATS_TEST_TMPDIR/at-once"
+    PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"All 6 packages valid"* ]]
+    [ "$(sort -n "$BATS_TEST_TMPDIR/at-once" | tail -n 1)" = "$cores" ]
+  done
+}
+
+# Each check runs in a subshell, and one that ends without its result fails the run
+@test "validate --all: fails when a check gives no result" {
+  local real bin="$BATS_TEST_TMPDIR/bin"
+  real=$(command -v yq)
+  mkdir -p "$bin" "$BATS_TEST_TMPDIR/tmp"
+  printf '#!/bin/bash\n[[ "$*" != "-r tag "*/b.yml ]] || rm -rf "%s"/tmp/*\nexec "%s" "$@"\n' \
+    "$BATS_TEST_TMPDIR" "$real" >"$bin/yq"
+  printf '#!/bin/sh\necho 1\n' >"$bin/nproc"
+  chmod +x "$bin/yq" "$bin/nproc"
+  create_test_package a github-release "upstream:
+  project: owner/a"
+  create_test_package b github-release "upstream:
+  project: owner/b"
+  PATH="$bin:$PATH" TMPDIR="$BATS_TEST_TMPDIR/tmp" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/b.yml: its check ended without a result"* ]]
+  [[ "$output" != *"packages valid"* ]]
+}
+
+# The lines of one package stay together, and the packages keep the order of their files
+@test "validate --all: prints the result of each package whole and in order" {
+  local i expected=""
+  for i in 01 02 03 04 05 06 07 08 09 10 11 12; do
+    if ((10#$i % 3 == 0)); then
+      create_test_package "p$i" github-release "upstream:
+  project: owner/p$i
+  tag_version_regex: '(x'
+cooldown_days: -1"
+      expected+="packages/p$i.yml: cooldown_days,packages/p$i.yml: upstream.tag_version_regex,"
+    else
+      create_test_package "p$i" github-release "upstream:
+  project: owner/p$i"
+    fi
+  done
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [ "$(grep -o 'packages/p[0-9]*\.yml: [a-z_.]*' <<<"$output" | tr '\n' ,)" = "$expected" ]
+  [[ "${lines[-1]}" == *"Validation failed: 4/12 packages have errors" ]]
+}
+
 # Merge keys bring keys that the keys of a map do not list
 @test "validate: reads the keys that a merge key brings" {
   create_test_package a github-release "upstream:
