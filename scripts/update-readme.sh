@@ -153,7 +153,7 @@ readonly CARD='<a href="stats/events.csv">
 table_rows=""
 table_header=$'<table>\n<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>'
 # The rows, names, status marks and the rows that need attention, for a README past its limit
-row_list=() name_list=() mark_list=() attention=""
+row_list=() name_list=() mark_list=() attention=()
 
 pkg_count=0
 for pkg_file in "${pkg_files[@]}"; do
@@ -193,9 +193,9 @@ for pkg_file in "${pkg_files[@]}"; do
   # Failed, waiting and updated packages, and those without some arches
   case "$raw" in
     check_failed:* | update_failed:* | held:* | pending:* | updated:* | downgrade:* | rebuilt:* | arch_added:*)
-      attention+=$row
+      attention+=("$row")
       ;;
-    *) [[ "$status" != "❌ failed" && "$status" != "⚠️ "* ]] || attention+=$row ;;
+    *) [[ "$status" != "❌ failed" && "$status" != "⚠️ "* ]] || attention+=("$row") ;;
   esac
   ((pkg_count++)) || true
 done
@@ -260,7 +260,20 @@ if (($(wc -c <"$new_readme") > readme_max * 1024)); then
     links+=" [$letter](table/$letter.md)"
   done
   block="${CARD}"$'\n\n'"${summary%,}"
-  [[ -z "$attention" ]] || block+=$'\n\nNeeds attention:\n\n'"${table_header}${attention}"$'\n</table>'
+  if ((${#attention[@]} > 0)); then
+    # Runs where most packages fail list most rows here, so the rows stop where the limit would pass
+    write_readme "$block"$'\n\n'"$links"
+    room=$((readme_max * 1024 - $(wc -c <"$new_readme") - ${#table_header} - 200))
+    rm -f -- "$new_readme"
+    rows="" kept=0
+    for row in "${attention[@]}"; do
+      (($(LC_ALL=C && printf '%s' "$rows$row" | wc -c) <= room)) || break
+      rows+=$row
+      kept=$((kept + 1))
+    done
+    block+=$'\n\nNeeds attention:\n\n'"${table_header}${rows}"$'\n</table>'
+    ((kept == ${#attention[@]})) || block+=$'\n\n'"$((${#attention[@]} - kept)) more packages need attention, in the pages below"
+  fi
   write_readme "$block"$'\n\n'"$links"
 fi
 replace_readme "$new_readme"

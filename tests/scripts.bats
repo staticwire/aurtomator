@@ -5335,7 +5335,7 @@ $1"
 # GitHub cuts a README past 500 KiB, and a row takes about 198 bytes
 @test "update-readme: splits the table into pages by first letter past AURTOMATOR_README_MAX_KIB" {
   local name
-  for name in alpha avocado beta 0ad zeta; do
+  for name in alpha avocado beta 0ad zeta aa0 aa1 aa2 aa3 aa4 aa5 aa6 aa7 aa8 aa9; do
     create_test_package "$name" github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
   done
   mkdir -p "$TEST_TMPDIR/.status" "$TEST_TMPDIR/table"
@@ -5346,11 +5346,11 @@ $1"
   echo "notes of the user" >"$TEST_TMPDIR/table/notes.txt"
   printf '%s\n' '# Packages' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' 'end' >"$TEST_TMPDIR/README.md"
   git -C "$TEST_TMPDIR" init -q
-  AURTOMATOR_README_MAX_KIB=1 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
   # The README keeps the card, the counts, the packages that need attention and the links
   grep -qF 'src="stats/card.svg"' "$TEST_TMPDIR/README.md"
-  grep -qxF '5 packages: ✅ 3, ❌ 1, 📦 1' "$TEST_TMPDIR/README.md"
+  grep -qxF '15 packages: ✅ 13, ❌ 1, 📦 1' "$TEST_TMPDIR/README.md"
   grep -qF '>alpha</a>' "$TEST_TMPDIR/README.md"
   grep -qF '>beta</a>' "$TEST_TMPDIR/README.md"
   ! grep -qF '>avocado</a>' "$TEST_TMPDIR/README.md"
@@ -5368,6 +5368,25 @@ $1"
   [ "$status" -eq 0 ]
   grep -qF '>avocado</a>' "$TEST_TMPDIR/README.md"
   [ "$(cd "$TEST_TMPDIR/table" && ls)" = notes.txt ]
+}
+
+# Runs where most packages fail, as when the network of the runner is down, put most rows in the
+# table of packages that need attention
+@test "update-readme: keeps the table of packages that need attention within the limit" {
+  local i
+  mkdir -p "$TEST_TMPDIR/.status"
+  for i in $(seq 10 39); do
+    create_test_package "p$i" github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+    echo "check_failed: boom" >"$TEST_TMPDIR/.status/p$i"
+  done
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  (($(wc -c <"$TEST_TMPDIR/README.md") <= 2048))
+  [[ "$(cat "$TEST_TMPDIR/README.md")" =~ $'\n'([0-9]+)" more packages need attention, in the pages below"$'\n' ]]
+  [ "$((BASH_REMATCH[1] + $(grep -c '<tr><td>' "$TEST_TMPDIR/README.md")))" = 30 ]
+  [ "$(grep -c '<tr><td>' "$TEST_TMPDIR/table/p.md")" = 30 ]
 }
 
 @test "update-readme: writes the version under the package table" {
