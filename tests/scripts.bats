@@ -4727,6 +4727,26 @@ alerts:
   [ "$output" = $'notice\trequire erb (optional): ruby-erb in neither depends nor optdepends' ]
 }
 
+@test "lib.sh: fired_alerts prints a space for each control character of a requires rule" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/ctl"
+  mkdir -p "$g/lib"
+  printf '%s\n' 'require "simplecov"' >"$g/lib/demo.rb"
+  printf '$%s = 1\n' "$(printf '\033')" >"$g/lib/bad.rb"
+  gem_build demo 1.0 "$g" $'name: demo\nrequire_paths:\n- lib\n' 'simplecov|>= 0'
+  printf 'extra\truby-simplecov\t1-1\tusr/lib/ruby/gems/3.4.0/gems/simplecov-1.3.2/lib/simplecov.rb\n' >>"$MOCK_PACMAN_FILES"
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" demo ruby ruby-simplecov
+  aur_srcinfo_remote demo "$TEST_TMPDIR/d.SRCINFO"
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo
+alerts:
+  - requires: imports"
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; fired_alerts "$1" "" 1.0' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == $'notice\timports: lib/bad.rb does not parse: \'$ \' is not allowed as a global variable name'* ]]
+  [[ "${output#*$'\t'}" != *[[:cntrl:]]* ]]
+}
+
 # === ruby sources ===
 
 # Helper: package ruby-simplecov-cobertura of a strategy that finds 4.0.0, at current 3.2.0 with the YAML
