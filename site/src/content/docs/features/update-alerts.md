@@ -76,7 +76,7 @@ python:
     svg-path: python-svg.path
 ```
 
-The rule resolves names of `provides` with `pacman -Sddp` for the repositories and with the AUR RPC for the AUR. Versions come from the distribution in the files database, which the `rules` job downloads with `pacman -Fy`, and otherwise from `pkgver`, which the note marks with `(pkgver)` or `(AUR pkgver)`. Packages of the same repository whose `upstream.pin_from` names the project count with the pin of the new version, since the run publishes them beside it. Extras of a requirement, as in `httpx[http2]`, need the requirements that the extra adds to that dependency, read from its metadata at its version in Arch. `Requires-Python` has to hold for the version that `pacman -Si python` prints.
+The rule resolves names of `provides` with `pacman -Sddp` for the repositories and with the AUR RPC for the AUR. Versions come from the distribution in the files database, which the `rules` job downloads with `pacman -Fy`, and otherwise from `pkgver`, which the note marks with `(pkgver)` or `(AUR pkgver)`. AUR versions other than `epoch:pkgver-pkgrel`, with a `pkgver` of the characters `A-Za-z0-9._+`, fail the check. Packages of the same repository whose `upstream.pin_from` names the project count with the pin of the new version, since the run publishes them beside it. Extras of a requirement, as in `httpx[http2]`, need the requirements that the extra adds to that dependency, read from its metadata at its version in Arch. `Requires-Python` has to hold for the version that `pacman -Si python` prints.
 
 ```text
 ! ydiskarc: update 1.0.1 → 1.1.0 held: rich: not in depends

@@ -185,7 +185,7 @@ repo_package() {
 # Read the AUR packages of names $@ that the run did not ask for yet into aur-pkgs, lines of the
 # name, the version and the provides, joined by commas, through AUR RPC info in batches of 100
 aur_packages() {
-  local LC_ALL=C file name answer query count=0 line
+  local LC_ALL=C file name answer query count=0 version provides lines out
   local -A known=()
   local -a batch=()
   archdb_cache || return 1
@@ -211,17 +211,23 @@ aur_packages() {
       log_err "https://aur.archlinux.org/rpc/v5/info: $(yq -r '.error // "the answer holds no packages"' <<<"$answer")"
       return 1
     fi
-    {
-      yq -r '.results[] | [.Name, .Version, ((.Provides // []) | map(sub("[<>=].*$"; "")) | join(","))] | join("\t")' <<<"$answer" |
-        while IFS=$'\t' read -r name line; do
-          [[ "$name" =~ ^[a-z0-9@_+][a-z0-9@._+-]*$ ]] || continue
-          printf '%s\t%s\n' "$name" "$line"
-        done
-      # Names the AUR lacks get a line of their own, so the run asks for them once
-      for name in "${batch[@]:count:100}"; do
-        printf '%s\t-\t\n' "$name"
-      done
-    } >>"$file"
+    lines=$(yq -r '.results[] | [.Name, .Version, ((.Provides // []) | map(sub("[<>=].*$"; "")) | join(","))] | join("\t")' <<<"$answer") ||
+      return 1
+    out=""
+    while IFS=$'\t' read -r name version provides; do
+      [[ "$name" =~ ^[a-z0-9@_+][a-z0-9@._+-]*$ ]] || continue
+      # The rules print the pkgver in their notes
+      if [[ ! "$version" =~ ^([0-9]+:)?([^:-]+)-[0-9]+(\.[0-9]+)?$ ]] || ! validate_pkgver "${BASH_REMATCH[2]}" 2>/dev/null; then
+        log_err "https://aur.archlinux.org/rpc/v5/info: $name has version ${version@Q}, not epoch:pkgver-pkgrel"
+        return 1
+      fi
+      out+="$name"$'\t'"$version"$'\t'"$provides"$'\n'
+    done <<<"$lines"
+    # Names the AUR lacks get a line of their own, so the run asks for them once
+    for name in "${batch[@]:count:100}"; do
+      out+="$name"$'\t-\t\n'
+    done
+    printf '%s' "$out" >>"$file"
     count=$((count + 100))
   done
 }

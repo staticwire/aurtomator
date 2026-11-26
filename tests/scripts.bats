@@ -3157,6 +3157,21 @@ python_files_db() {
   [ "$(grep -c aur.archlinux.org/rpc "$CURL_ARGS_LOG")" -eq 2 ]
 }
 
+@test "archdb.sh: aur_packages fails on an AUR version other than epoch, pkgver and pkgrel" {
+  local version
+  for version in '0.0.41\u0001-1' '0.0.41' '1.0-x' 'abc-1' 'x:1.0-1' "$(printf '1%.0s' {1..65})-1"; do
+    rm -rf "$TEST_TMPDIR/run-cache"
+    printf '[{"Name": "python-bad", "Version": "%s"}]\n' "$version" >"$MOCK_FILES_DIR/aur-rpc.json"
+    run_archdb 'aur_packages python-bad'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"python-bad has version "*", not epoch:pkgver-pkgrel"* ]]
+  done
+  printf '[{"Name": "python-ok", "Version": "2:1.0+r3.ab_c-1.2"}]\n' >"$MOCK_FILES_DIR/aur-rpc.json"
+  run_archdb 'aur_packages python-ok && aur_package python-ok && echo "$PKG_VERSION"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0+r3.ab_c" ]
+}
+
 @test "archdb.sh: arch_package takes the repositories first, then the AUR" {
   export MOCK_PACMAN_SYNC="$TEST_TMPDIR/pacman-sync"
   printf '%s\n' 'python-rich 14.2.0-1 extra' >"$MOCK_PACMAN_SYNC"
