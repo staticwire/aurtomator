@@ -1003,11 +1003,16 @@ run_package() {
         err_file=$(mktemp)
         check_rc=0
         needed=$(bounded_rules_needed "$pkg_file" 2>"$err_file") || check_rc=$?
+        in_flight=$(request_done "$check_rc")
         if ((check_rc != 0)) || [[ "$needed" != yes && "$needed" != no ]]; then
-          check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT")
+          check_err=$(script_error "$check_rc" "$err_file" "$CHECK_TIMEOUT" "$in_flight")
           rm -f "$err_file"
           log_err "Failed to check $pkg_name: $(status_text "${check_err:-the AUR .SRCINFO could not be read}")"
           status_text "check_failed: ${check_err:-the AUR .SRCINFO could not be read}" >"${STATUS_DIR}/${pkg_name}"
+          note_failed_host "$pkg_name" "$in_flight"
+          if ((pass == 1)) && [[ -n "$in_flight" ]] && second_pass "$check_rc" "$in_flight"; then
+            RECHECK+=("$pkg_file")
+          fi
           return
         fi
         rm -f "$err_file"

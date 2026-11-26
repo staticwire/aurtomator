@@ -4150,6 +4150,9 @@ $1"
   [ "$status" -eq 0 ]
   [[ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" == "check_failed: "* ]]
   [ ! -e "$TEST_TMPDIR/.status/_rules" ]
+  # The issues count the failure under the host of the AUR, and the check runs again
+  [ "$(cat "$TEST_TMPDIR/.status/_hosts")" = $'kube-diagrams\taur.archlinux.org' ]
+  [[ "$output" == *"Checking 1 failed package(s) again"* ]]
 }
 
 @test "check-all: --rules writes the requires lines of the version of the check run, or error and the reason" {
