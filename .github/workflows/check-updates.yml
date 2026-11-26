@@ -13,6 +13,9 @@ on:
         required: false
       AUR_GIT_EMAIL:
         required: false
+      # gitlab-tag sends it to GitLab.com, which counts the requests of a token apart from the runner
+      GITLAB_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -135,9 +138,10 @@ jobs:
         uses: ./aurtomator/.github/actions/run-as-builder # zizmor: ignore[self-repository] run-as-builder runs the scripts of the aurtomator/ checkout
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
         with:
           args: --rules-later
-          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER
+          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER,GITLAB_TOKEN
           readme: "true"
 
       - name: Stop builder

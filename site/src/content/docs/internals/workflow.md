@@ -4,7 +4,7 @@ title: The workflow
 
 ## Trigger
 
-`check-updates.yml` of aurtomator runs only when another workflow calls it, `on: workflow_call`. It takes no inputs and declares the secrets `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME` and `AUR_GIT_EMAIL` with `required: false`. Only `publish` reads them, and it stops on an empty `AUR_SSH_KEY` when packages go to the AUR.
+`check-updates.yml` of aurtomator runs only when another workflow calls it, `on: workflow_call`. It takes no inputs and declares the secrets `AUR_SSH_KEY`, `GPG_SIGNING_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and `GITLAB_TOKEN` with `required: false`. Only `publish` reads the first four, and it stops on an empty `AUR_SSH_KEY` when packages go to the AUR. `check` gives `GITLAB_TOKEN`, a token that reads GitLab, to `builder` for `gitlab-tag`.
 
 The calling workflow of your repository, shown in [The calling workflows](/setup/#the-calling-workflows), carries the schedule `cron: "17 * * * *"` and `workflow_dispatch` for runs by hand. Its job `pins` runs `./aurtomator.sh check-pins` before job `check-updates` calls aurtomator. GitHub delays scheduled runs at the start of each hour, when its load is highest, so the schedule avoids minute 0, and it starts only part of them: in October 2026 a repository with this schedule got about five runs a day. The concurrency group `check-updates` with `cancel-in-progress: false` makes new runs wait for the running one, the `notify` job of [Failed runs](/features/issues/#failed-runs) included.
 
@@ -16,7 +16,7 @@ Every job checks out aurtomator at `job.workflow_sha`, the commit that the calli
 
 | Job | Permissions | Secrets |
 |---|---|---|
-| `check-updates` of your calling workflow | `contents: write` and `issues: write`, the most any job below gets | passes the four secrets by name |
+| `check-updates` of your calling workflow | `contents: write` and `issues: write`, the most any job below gets | passes the five secrets by name |
 | `image` | `contents: read` | none |
 | `check` | `contents: read` | none |
 | `prepare` | `contents: read` | none |

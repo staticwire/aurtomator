@@ -537,6 +537,33 @@ EOF
 }
 
 # mesa names its releases mesa-26.2.5
+# GitLab.com plans 60 requests an hour for the traffic of one address without a token, and the
+# token is for GitLab.com alone; curl reads the header from stdin, off the command line
+@test "gitlab-tag: sends GITLAB_TOKEN to gitlab.com alone, from stdin" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: group/project"
+  GITLAB_TOKEN=glpat-test run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "3.1.0" ]
+  grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+  ! grep -q glpat-test "$CURL_ARGS_LOG"
+  rm "$CURL_ARGS_LOG"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.gnome.org
+  project: group/project"
+  GITLAB_TOKEN=glpat-test run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+  rm "$CURL_ARGS_LOG"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: group/project"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+}
+
 @test "gitlab-tag: tag_version_regex extracts from prefixed tags" {
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com

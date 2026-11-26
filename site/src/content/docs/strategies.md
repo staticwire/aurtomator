@@ -294,6 +294,8 @@ upstream:
 
 **Upstream:** the GitLab Tags API, `/api/v4/projects/{id}/repository/tags`, on gitlab.com or a self-hosted instance.
 
+**Authentication:** with the secret `GITLAB_TOKEN`, which the calling workflow passes by name as the [Setup](/setup/#the-calling-workflows) page shows, the strategy sends the token as `PRIVATE-TOKEN` to gitlab.com alone, and curl reads it from stdin, so it never appears on a command line. GitLab.com then counts the requests of that token apart from the traffic of the address that runners share. Self-hosted instances get no token. Without the secret, check runs keep the pace of gitlab.com for requests without a token.
+
 **YAML fields:**
 
 | Field | Required | Description |
