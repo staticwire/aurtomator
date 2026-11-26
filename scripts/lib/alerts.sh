@@ -145,7 +145,7 @@ _fired_requires() {
     [[ -z "$line" ]] || joined+="${joined:+; }$line"
   done <<<"$lines"
   # Text of upstream and the AUR: a tab would split the line, and a terminal acts on control characters
-  joined=$(printf '%s' "$joined" | LC_ALL=C tr '\001-\037\177' ' ')
+  joined=$(printf '%s' "$joined" | LC_ALL=C sed 's/[\x01-\x1f\x7f]/ /g; s/\xc2[\x80-\x9f]/ /g')
   printf '%s\t%s\n' "$action" "${note:+$note: }$joined"
 }
 

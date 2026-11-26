@@ -4747,6 +4747,14 @@ alerts:
   [[ "${output#*$'\t'}" != *[[:cntrl:]]* ]]
 }
 
+@test "alerts.sh: _fired_requires prints a space for each byte that publish refuses" {
+  export NOTE=$'a\001b\tc\177d\xc2\x9be\xc3\x82'
+  run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; _python_rule() { printf "notice\t%s\n" "$NOTE"; }
+    offline="" PY_STATE=ready RB_STATE=none; _fired_requires unmet "" ""' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\ta b c d e\xc3\x82' ]
+}
+
 # === ruby sources ===
 
 # Helper: package ruby-simplecov-cobertura of a strategy that finds 4.0.0, at current 3.2.0 with the YAML

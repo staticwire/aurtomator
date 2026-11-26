@@ -27,7 +27,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 | Threat | Comes from | Counter |
 |---|---|---|
 | Crafted answers of upstream APIs and pages | Hostile or compromised upstreams | HTTPS only, limits on size and time, the check of the version characters, and no use of answers as code |
-| Crafted release archives and metadata | Hostile or compromised upstreams | Parsed only as `builder`, in the job `rules`, one job for each package without secrets or a token, and in the requirements check of `validate.yml`, with limits on size, time and files, and lines that `publish` filters before it uses them |
+| Crafted release archives and metadata | Hostile or compromised upstreams | Parsed only as `builder`, in the job `rules`, one job for each package without secrets or a token, and in the requirements check of `validate.yml`, with limits on size, time and files, and lines that `publish` checks before it uses them |
 | Hostile PKGBUILD code | Anyone with push access to the AUR repository of a package | Runs only as `builder` in jobs without secrets, and `verify` and `publish` never source it |
 | Crafted package YAML | Pull requests to a user repository | `validate-pkg.sh` with allow lists of keys and values |
 | Tampered downloads | Network attackers | `verify` downloads every source again over HTTPS and refuses checksums that do not match |

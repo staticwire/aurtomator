@@ -527,7 +527,10 @@ companion_waits() {
 # those of the rules job in $3, then those of offline rules in $2 that the check run lacks
 publish_alerts() {
   local checked line
-  checked=$(checked_alerts "$1")
+  if ! checked=$(checked_alerts "$1"); then
+    printf '%s\n' "$checked" >&2
+    return 1
+  fi
   [[ -z "$checked" ]] || printf '%s\n' "$checked"
   [[ -z "${3:-}" ]] || printf '%s\n' "$3"
   while IFS= read -r line; do
@@ -538,7 +541,7 @@ publish_alerts() {
 # Prints the lines of the rules job for package $1 of _rules from <dir>/rules as fired_alerts prints them,
 # nothing for another package; fails with the reason without a file of the version of the check run
 rules_handed() {
-  local dir="${WORK_DIR}/rules" file line message re=$'^(hold|notice|wait)\t[^\t]+$'
+  local dir="${WORK_DIR}/rules" file line message lines="" re=$'^(hold|notice|wait)\t[^\t]+$'
   grep -qxF -e "$1" <<<"${CHECKED[_rules]:-}" || return 0
   file="$dir/$1"
   if [[ ! -d "$dir" || -L "$dir" || ! -f "$file" || -L "$file" ]] || _has_nul "$file" ||
@@ -556,23 +559,31 @@ rules_handed() {
     echo "the rules job handed over no result"
     return 1
   fi
-  # builder of the rules job writes the file, so lines of another form and with control characters drop
+  # builder of the rules job writes the file, and a line it cannot read could hold a hold
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ $re ]] && ! has_control "$line"; then
-      printf '%s\n' "$line"
+    [[ -n "$line" ]] || continue
+    if [[ ! "$line" =~ $re ]] || has_control "$line"; then
+      echo "the rules job handed over a line it cannot read"
+      return 1
     fi
+    lines+="$line"$'\n'
   done < <(tail -n +2 -- "$file")
+  printf '%s' "$lines"
 }
 
-# Prints the lines of _alerts of the check run for package $1 as fired_alerts prints them.
-# builder of check writes _alerts, so lines of another form and lines with control characters drop.
+# Prints the lines of _alerts of the check run for package $1 as fired_alerts prints them; fails with
+# the reason on a line of $1 of another form or with control characters, as builder of check writes it
 checked_alerts() {
-  local line re=$'^([^\t]+)\t(hold|notice|wait)\t([^\t]+)$'
+  local line lines="" re=$'^([^\t]+)\t(hold|notice|wait)\t([^\t]+)$'
   while IFS= read -r line; do
-    if [[ "$line" =~ $re && "${BASH_REMATCH[1]}" == "$1" ]] && ! has_control "$line"; then
-      printf '%s\t%s\n' "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+    [[ "$line" == "$1"$'\t'* ]] || continue
+    if [[ ! "$line" =~ $re ]] || has_control "$line"; then
+      echo "the check run handed over a line of _alerts it cannot read"
+      return 1
     fi
+    lines+="${BASH_REMATCH[2]}"$'\t'"${BASH_REMATCH[3]}"$'\n'
   done <<<"${CHECKED[_alerts]:-}"
+  printf '%s' "$lines"
 }
 
 # Sets ASSET_VALUE from check-asset.sh, or from the check run in --prepare and
@@ -703,7 +714,7 @@ run_package() {
   local pkg_file="$1" pass="$2"
   local pkg_name found check_cmd err_file check_rc latest check_err current asset_regex arches_read=false in_flight
   local is_downgrade cmp alerts fired line held action note push_day available pushed cmd update_rc update_err needed
-  local stem yaml_name host rules_lines=""
+  local stem yaml_name host rules_lines="" held_lines
   # The write-back of current takes regular files alone, so a linked YAML keeps its old current
   if [[ -L "$pkg_file" ]]; then
     stem="${pkg_file##*/}"
@@ -789,7 +800,14 @@ run_package() {
         printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
         # The issue of a held update lists the notes of the check run, since rules can read
         # upstream answers, which the job with the AUR key never asks for
-        [[ "$found" != "held: "* ]] || record_alerts "$pkg_name" "$(checked_alerts "$pkg_name")"
+        if [[ "$found" == "held: "* ]]; then
+          if ! held_lines=$(checked_alerts "$pkg_name"); then
+            log_err "Failed to check $pkg_name: $held_lines"
+            echo "check_failed: ${held_lines}" >"${STATUS_DIR}/${pkg_name}"
+            return
+          fi
+          record_alerts "$pkg_name" "$held_lines"
+        fi
         [[ "$found" != "pending: "* ]] || keep_arch_wait "$pkg_file" "$(arch_record_line "$pkg_name")" "${found#pending: }"
         return
         ;;
@@ -895,7 +913,7 @@ run_package() {
   check_rc=0
   if [[ "$MODE" == prepare || "$MODE" == publish ]]; then
     alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" offline 2>"$err_file") || check_rc=$?
-    ((check_rc != 0)) || alerts=$(publish_alerts "$pkg_name" "$alerts" "$rules_lines")
+    ((check_rc != 0)) || alerts=$(publish_alerts "$pkg_name" "$alerts" "$rules_lines" 2>"$err_file") || check_rc=$?
   elif [[ -n "$RULES_LATER" ]]; then
     # The rules job of CI runs the requires rules, which download and parse releases
     alerts=$(bounded_alerts "$pkg_file" "$current" "$latest" offline 2>"$err_file") || check_rc=$?
