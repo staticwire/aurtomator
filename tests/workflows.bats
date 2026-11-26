@@ -3630,7 +3630,10 @@ case "$cmd" in
     json=$({ grep "^[0-9]* $emoji" <<<"${GH_OPEN:-}" || true; } | head -n "$limit" |
       jq -Rn '[inputs | capture("^(?<number>[0-9]+) (?<title>.*)$") | .number |= tonumber]')
     ;;
-  "issue view") json=$(jq -n --arg b "${GH_BODY:-}" '{body: $b}') ;;
+  "issue view")
+    [[ -z "${GH_VIEW_FAIL:-}" ]] || exit 1
+    json=$(jq -n --arg b "${GH_BODY:-}" '{body: $b}')
+    ;;
   *) exit 0 ;;
 esac
 if [[ -n "$filter" ]]; then
@@ -3647,7 +3650,7 @@ EOF
   step_run issues "${CLOSE_STEP:-Close resolved issues}" >"$BATS_TEST_TMPDIR/step.sh"
   rm -rf "$BATS_TEST_TMPDIR/runner-temp"
   mkdir -p "$BATS_TEST_TMPDIR/runner-temp"
-  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" GH_VIEW_FAIL="${GH_VIEW_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" GH_BODY="${GH_BODY:-}" \
     RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -4350,6 +4353,18 @@ run_bare_issues_step() {
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="check_failed: boom"
   no_call '^issue close 5'
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="unchecked: out of time"
+  no_call '^issue close 5'
+  # Cut issues name some of their packages, so they close once no package fails without an issue
+  local cut=$'- `c`: `boom`\n- and 2 more packages, which the run summary of the step Create issues lists'
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="check_failed: boom"
+  no_call '^issue close 5'
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="unchecked: out of time"
+  no_call '^issue close 5'
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7\n6 ❌ e: check failed' run_close_step c=up_to_date e="check_failed: boom"
+  grep -q '^issue close 5' "$GH_LOG"
+  # Unread bodies stop the step and close nothing
+  GH_VIEW_FAIL=1 GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d=up_to_date
+  [ "$status" -ne 0 ]
   no_call '^issue close 5'
   # Closes past the writes of the run wait for the next run
   GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' ISSUE_WRITE_MAX=1 run_close_step foo=up_to_date bar=up_to_date
