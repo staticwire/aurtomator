@@ -56,8 +56,8 @@ jobs:
           fi
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
 
-  # Runs the strategies with the read-only token and decides what the run does. No PKGBUILD runs
-  # and no release is parsed here, so the jobs after it trust the statuses this job hands over.
+  # Runs the strategies with the read-only token and decides what the run does. No PKGBUILD runs, and
+  # only the wheel metadata of pin_from is parsed, so the jobs after it trust the statuses it hands over.
   check:
     name: check
     needs: image
