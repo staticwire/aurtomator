@@ -5321,6 +5321,44 @@ $1"
   [ ! -e "$TEST_TMPDIR/.status/_upstream" ]
 }
 
+# GitHub cuts a README past 500 KiB, and a row takes about 198 bytes
+@test "update-readme: splits the table into pages by first letter past AURTOMATOR_README_MAX_KIB" {
+  local name
+  for name in alpha avocado beta 0ad zeta; do
+    create_test_package "$name" github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+  done
+  mkdir -p "$TEST_TMPDIR/.status" "$TEST_TMPDIR/table"
+  echo "check_failed: boom" >"$TEST_TMPDIR/.status/alpha"
+  echo "updated: 2.0.0" >"$TEST_TMPDIR/.status/beta"
+  echo up_to_date >"$TEST_TMPDIR/.status/avocado"
+  echo "an old page" >"$TEST_TMPDIR/table/q.md"
+  echo "notes of the user" >"$TEST_TMPDIR/table/notes.txt"
+  printf '%s\n' '# Packages' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' 'end' >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  AURTOMATOR_README_MAX_KIB=1 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  # The README keeps the card, the counts, the packages that need attention and the links
+  grep -qF 'src="stats/card.svg"' "$TEST_TMPDIR/README.md"
+  grep -qxF '5 packages: ✅ 3, ❌ 1, 📦 1' "$TEST_TMPDIR/README.md"
+  grep -qF '>alpha</a>' "$TEST_TMPDIR/README.md"
+  grep -qF '>beta</a>' "$TEST_TMPDIR/README.md"
+  ! grep -qF '>avocado</a>' "$TEST_TMPDIR/README.md"
+  grep -qxF 'Every package: [0-9](table/0-9.md) [a](table/a.md) [b](table/b.md) [z](table/z.md)' "$TEST_TMPDIR/README.md"
+  [ "$(tail -n 1 "$TEST_TMPDIR/README.md")" = end ]
+  # Each page holds the rows of its letter
+  grep -qF '>alpha</a>' "$TEST_TMPDIR/table/a.md"
+  grep -qF '>avocado</a>' "$TEST_TMPDIR/table/a.md"
+  ! grep -qF '>beta</a>' "$TEST_TMPDIR/table/a.md"
+  grep -qF '>0ad</a>' "$TEST_TMPDIR/table/0-9.md"
+  grep -qxF '[Back to the README](../README.md)' "$TEST_TMPDIR/table/z.md"
+  [ ! -e "$TEST_TMPDIR/table/q.md" ]
+  # Under the limit the README holds every row again, and the pages go
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  grep -qF '>avocado</a>' "$TEST_TMPDIR/README.md"
+  [ "$(cd "$TEST_TMPDIR/table" && ls)" = notes.txt ]
+}
+
 @test "update-readme: writes the version under the package table" {
   create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   echo "0.6.0" >"$TEST_TMPDIR/VERSION"

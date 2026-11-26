@@ -70,6 +70,8 @@ The defenses of the workflow sit in a few steps that several jobs share, through
 1. The badges between `<!-- BADGES:START -->` and `<!-- BADGES:END -->`: `Validate packages` and `Check AUR Package Updates`, the status of `validate.yml` and `check-updates.yml` of the repository that `GITHUB_REPOSITORY` or the GitHub `origin` names, and `maintained with aurtomator`.
 2. The package table between `<!-- PACKAGES:START -->` and `<!-- PACKAGES:END -->`: the statistics card, a row for each package with its name, `current`, strategy, `last_updated` and status label, and the version of aurtomator, see [Updates of aurtomator](/features/aurtomator-updates/). Packages without a status show `✨ new` without `current` and `✅ tracking` with it. Each name links to `https://aur.archlinux.org/pkgbase/<name>`.
 
+GitHub cuts a README past 500 KiB, and a row takes about 200 bytes, so a README with the whole table stays under 400 KiB up to about 2000 packages. Past 400 KiB, `update-readme.sh` writes the rows to pages `table/<letter>.md`, one for each first letter of the package names and `table/0-9.md` for names that start with a digit, and the README holds the statistics card, one line with the count of packages for each status mark, a table `Needs attention` with the packages that failed, wait, lack some arches or were updated in the run, and the links to the pages. Pages of letters without packages go, and so does every page once the README is under the limit again.
+
 While `packages/` holds no package, the script writes nothing, so repositories from the template keep their setup steps in the README. Each marker is a line of its own, once, with the start above the end. Otherwise the script leaves README.md as it is and ends with code 3, as it does when README.md is missing or a link, and the builder step turns that code into a warning, so the run goes on. The table is HTML, because Markdown cells take no attributes, and `nowrap` keeps Strategy, Updated and Status on one line:
 
 ```html
@@ -120,7 +122,7 @@ Fields of the shared files are split by tabs.
 
 `git push` from the workflow would show as unverified, so `publish` commits through the GitHub Git Data API with the workflow token:
 
-1. Compare the copies of the run with the checkout: `README.md`, every `packages/<name>.yml` the checkout holds, the files of `stats/`, and `aurtomator.sh` against `aurtomator/aurtomator.sh` of the release the run uses. Stop when nothing differs. No other file is committed.
+1. Compare the copies of the run with the checkout: `README.md`, every `packages/<name>.yml` the checkout holds, the pages `table/<letter>.md`, the files of `stats/`, and `aurtomator.sh` against `aurtomator/aurtomator.sh` of the release the run uses. Pages of the checkout that a run with the copy of `README.md` did not write are removed. Stop when nothing differs. No other file is committed.
 2. Read the head of the branch. When a commit was pushed during the run and changed one of these files, print a notice and commit nothing, since the new tree replaces each file as a whole; the next run writes the statuses again. Otherwise commit on the new head.
 3. Create a blob for each changed file, a tree on the base tree and a commit. `aurtomator.sh` gets the mode `100755`. git runs as root only in the checkout, which `builder` never writes.
 4. Move the branch ref with `force=false`.

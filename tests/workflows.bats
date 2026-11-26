@@ -2919,6 +2919,30 @@ make_handoff() {
   [ "$(stat -c %a "$results")" = "700" ]
 }
 
+# update-readme.sh writes a page of the package table for each first letter past the limit of the README
+@test "check-updates: Hand over copies the pages of the package table alone" {
+  local work="$BATS_TEST_TMPDIR/work" results="$BATS_TEST_TMPDIR/results"
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  mkdir -p "$work/table/sub"
+  for page in a.md 0-9.md z.md A.md ab.md notes.txt sub/b.md; do
+    echo "page $page" >"$work/table/$page"
+  done
+  ln -s "$BATS_TEST_TMPDIR/secret" "$work/table/c.md"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  run env LC_ALL=C ls -A "$results/table"
+  [ "$output" = $'0-9.md\na.md\nz.md' ]
+  [ "$(<"$results/table/a.md")" = "page a.md" ]
+  # A link to the directory reaches nothing
+  rm -rf "$work/table" "$results"
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+  echo "page" >"$BATS_TEST_TMPDIR/elsewhere/a.md"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$work/table"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  [ ! -e "$results/table" ]
+}
+
 # builder no longer runs, and it reads each file, so a link swapped in
 # after the test reaches nothing that builder cannot read
 @test "check-updates: Hand over reads every file as builder" {
@@ -3848,6 +3872,34 @@ no_commit() {
   [ "$status" -eq 0 ]
   jq -e '[.tree[].path] == ["README.md", "stats/events.csv", "stats/card.svg", "stats/card-dark.svg"]' "$GH_LOG.tree"
   grep -qF -- "-f message=chore: update package statuses [skip ci] " "$GH_LOG"
+}
+
+# update-readme.sh writes table/<letter>.md past the limit of the README, and none under it
+@test "check-updates: the commit step adds, changes and removes the pages of the package table" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_commit_repo README.md="short table" table/a.md="page a" table/b.md="new page b"
+  mkdir "$ws/table"
+  echo "old page b" >"$ws/table/b.md"
+  echo "old page c" >"$ws/table/c.md"
+  echo "notes" >"$ws/table/notes.txt"
+  git -C "$ws" add table
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m pages
+  echo other >"$BATS_TEST_TMPDIR/results/table/notes.txt"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[] | [.path, .sha == null]] == [["README.md", false], ["table/a.md", false], ["table/b.md", false], ["table/c.md", true]]' \
+    "$GH_LOG.tree"
+  # Runs without the copy of README.md wrote no pages, so they remove none
+  rm -rf "$ws" "$BATS_TEST_TMPDIR/results"
+  make_commit_repo packages/foo.yml="current: 2.0"
+  rm "$BATS_TEST_TMPDIR/results/README.md"
+  mkdir "$ws/table"
+  echo "old page c" >"$ws/table/c.md"
+  git -C "$ws" add table
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m pages
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["packages/foo.yml"]' "$GH_LOG.tree"
 }
 
 @test "check-updates: a commit of stats/ alone is a commit of the statistics" {

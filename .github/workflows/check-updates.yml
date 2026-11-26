@@ -215,6 +215,14 @@ jobs:
               take "packages/$name" "$RESULTS/packages/$name" "$results_max"
             done
           fi
+          # Past its limit, the README leaves the package table to a page for each first letter
+          if [[ -d "$WORK/table" && ! -L "$WORK/table" ]]; then
+            for f in "$WORK"/table/*.md; do
+              name=${f##*/}
+              [[ "$name" =~ ^(0-9|[a-z])\.md$ ]] || continue
+              take "table/$name" "$RESULTS/table/$name" "$results_max"
+            done
+          fi
 
       - name: Decide
         id: decide
@@ -869,20 +877,22 @@ jobs:
           BRANCH: ${{ github.ref_name }}
           RESULTS: /results
         run: |
-          # The commit takes README.md and the package YAMLs from the copies of Hand over, and
-          # stats/ from Record statistics
+          # The commit takes README.md, the package YAMLs and the pages of the package table from the
+          # copies of Hand over, and stats/ from Record statistics
           changed=()
-          for copy in "$RESULTS/README.md" "$RESULTS"/packages/*.yml \
+          declare -A removed=()
+          for copy in "$RESULTS/README.md" "$RESULTS"/packages/*.yml "$RESULTS"/table/*.md \
             "$RESULTS/stats/events.csv" "$RESULTS/stats/card.svg" "$RESULTS/stats/card-dark.svg"; do
             [[ -f "$copy" ]] || continue
             file=${copy#"$RESULTS"/}
-            if [[ "$file" == stats/* ]]; then
+            [[ "$file" != table/* || "$file" =~ ^table/(0-9|[a-z])\.md$ ]] || continue
+            if [[ "$file" == stats/* || "$file" == table/* ]]; then
               # Paths under a file would replace the file, and those under a link would follow it
-              if [[ -L stats || (-e stats && ! -d stats) ]]; then
-                echo "::warning::$file is left out of the commit, stats is a link or no directory"
+              if [[ -L "${file%%/*}" || (-e "${file%%/*}" && ! -d "${file%%/*}") ]]; then
+                echo "::warning::$file is left out of the commit, ${file%%/*} is a link or no directory"
                 continue
               fi
-              # The first run with statistics adds the files of stats/
+              # The first run with statistics or pages adds their files
               if [[ ! -e "$file" && ! -L "$file" ]]; then
                 changed+=("$file")
                 continue
@@ -891,6 +901,15 @@ jobs:
             [[ -f "$file" && ! -L "$file" ]] || continue
             cmp -s -- "$copy" "$file" || changed+=("$file")
           done
+          # Runs that wrote README.md wrote every page that it links, so the pages without a copy go
+          if [[ -f "$RESULTS/README.md" && -d table && ! -L table ]]; then
+            for file in table/*.md; do
+              if [[ "$file" =~ ^table/(0-9|[a-z])\.md$ && -f "$file" && ! -L "$file" && ! -e "$RESULTS/$file" ]]; then
+                changed+=("$file")
+                removed[$file]=1
+              fi
+            done
+          fi
           # aurtomator/aurtomator.sh replaces a regular aurtomator.sh that differs from it. The
           # step leaves a link and adds no missing file.
           release_runner=aurtomator/aurtomator.sh repo_runner=aurtomator.sh
@@ -944,6 +963,12 @@ jobs:
 
           TREE_ENTRIES="[]"
           for file in "${changed[@]}"; do
+            # The Git Data API removes a path whose entry has no sha
+            if [[ -n "${removed[$file]:-}" ]]; then
+              TREE_ENTRIES=$(echo "$TREE_ENTRIES" | jq --arg path "$file" \
+                '. + [{"path": $path, "mode": "100644", "type": "blob", "sha": null}]')
+              continue
+            fi
             from="$RESULTS/$file" mode=100644
             if [[ "$file" == "$repo_runner" ]]; then
               from=$release_runner mode=100755

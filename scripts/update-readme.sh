@@ -152,11 +152,14 @@ readonly CARD='<a href="stats/events.csv">
 
 table_rows=""
 table_header=$'<table>\n<tr><th>Package</th><th>Version</th><th>Strategy</th><th>Updated</th><th>Status</th></tr>'
+# The rows, names, status marks and the rows that need attention, for a README past its limit
+row_list=() name_list=() mark_list=() attention=""
 
 pkg_count=0
 for pkg_file in "${pkg_files[@]}"; do
   name=${pkg_file##*/}
   name=${name%.yml}
+  raw=""
   # Rows go by the file name, as the statuses do. The runs fail a link and a YAML whose name is
   # not its file name, a YAML that yq cannot read among them.
   if [[ -L "$pkg_file" ]] || ! package_name "$pkg_file" >/dev/null 2>&1; then
@@ -170,7 +173,8 @@ for pkg_file in "${pkg_files[@]}"; do
     arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")' 2>/dev/null) || arches_out=""
     status_file="${STATUS_DIR}/${name}"
     if [[ -f "$status_file" ]]; then
-      status=$(status_label "$(cat "$status_file")" "$arches_out" "$current")
+      raw=$(cat "$status_file")
+      status=$(status_label "$raw" "$arches_out" "$current")
     elif [[ "$current" == "-" || "$current" == "null" ]]; then
       status="✨ new"
       current="-"
@@ -180,29 +184,93 @@ for pkg_file in "${pkg_files[@]}"; do
   fi
 
   link="<a href=\"https://aur.archlinux.org/pkgbase/$(html_text "$name")\">$(html_text "$name")</a>"
-  table_rows+=$(table_row "$link" "$(html_text "$current")" "$(html_text "$strategy")" \
+  row=$(table_row "$link" "$(html_text "$current")" "$(html_text "$strategy")" \
     "$(html_text "$last_updated")" "$(html_text "$status")")
+  table_rows+=$row
+  row_list+=("$row")
+  name_list+=("$name")
+  mark_list+=("${status%% *}")
+  # Failed, waiting and updated packages, and those without some arches
+  case "$raw" in
+    check_failed:* | update_failed:* | held:* | pending:* | updated:* | downgrade:* | rebuilt:* | arch_added:*)
+      attention+=$row
+      ;;
+    *) [[ "$status" != "❌ failed" && "$status" != "⚠️ "* ]] || attention+=$row ;;
+  esac
   ((pkg_count++)) || true
 done
 
-table="${CARD}"$'\n\n'"${table_header}${table_rows}"$'\n</table>'
-
 # The version of aurtomator, and the newer release the check run found
+version_line=""
 version=$(aurtomator_version)
 if [[ -n "$version" ]]; then
   upstream=""
   [[ ! -f "${STATUS_DIR}/_upstream" ]] || upstream=$(<"${STATUS_DIR}/_upstream")
-  table+=$'\n\n'"aurtomator ${version}"
+  version_line="aurtomator ${version}"
   if [[ "$upstream" =~ ^newer:\ ([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-    table+=" ([${BASH_REMATCH[1]} available](https://github.com/${AURTOMATOR_UPSTREAM}/releases/tag/v${BASH_REMATCH[1]}))"
+    version_line+=" ([${BASH_REMATCH[1]} available](https://github.com/${AURTOMATOR_UPSTREAM}/releases/tag/v${BASH_REMATCH[1]}))"
   fi
 fi
 
-new_readme=$(mktemp "${README}.XXXXXX")
-{
-  sed -n "0,/^${PKG_START}\$/p" "$README"
-  echo "$table"
-  sed -n "/^${PKG_END}\$/,\$p" "$README"
-} >"$new_readme"
+# Write README.md with text $1 between the package markers
+write_readme() {
+  new_readme=$(mktemp "${README}.XXXXXX")
+  {
+    sed -n "0,/^${PKG_START}\$/p" "$README"
+    printf '%s\n' "$1${version_line:+$'\n\n'$version_line}"
+    sed -n "/^${PKG_END}\$/,\$p" "$README"
+  } >"$new_readme"
+}
+
+# GitHub cuts a README past 500 KiB. Past the limit, the table goes to pages table/<letter>.md,
+# and the README keeps the packages that need attention.
+readonly PAGES="${AURTOMATOR_DATA_DIR}/table"
+readme_max=${AURTOMATOR_README_MAX_KIB:-400}
+if [[ ! "$readme_max" =~ ^[1-9][0-9]{0,5}$ ]]; then
+  log_err "AURTOMATOR_README_MAX_KIB must be a number of KiB from 1: ${readme_max@Q}"
+  exit 1
+fi
+write_readme "${CARD}"$'\n\n'"${table_header}${table_rows}"$'\n</table>'
+declare -A pages=()
+if (($(wc -c <"$new_readme") > readme_max * 1024)); then
+  if [[ -L "$PAGES" || (-e "$PAGES" && ! -d "$PAGES") ]]; then
+    log_err "table is a link or no directory, so the pages of the package table have no place"
+    exit 1
+  fi
+  mkdir -p "$PAGES"
+  declare -A page_rows=() counts=()
+  marks=()
+  for i in "${!row_list[@]}"; do
+    letter=${name_list[i]:0:1}
+    [[ "$letter" != [0-9] ]] || letter=0-9
+    page_rows[$letter]+=${row_list[i]}
+    [[ -n "${counts[${mark_list[i]}]:-}" ]] || marks+=("${mark_list[i]}")
+    counts[${mark_list[i]}]=$((${counts[${mark_list[i]}]:-0} + 1))
+  done
+  summary="$pkg_count packages:"
+  for mark in "${marks[@]}"; do
+    summary+=" $mark ${counts[$mark]},"
+  done
+  links="Every package:"
+  for letter in 0-9 {a..z}; do
+    [[ -n "${page_rows[$letter]:-}" ]] || continue
+    pages["$letter.md"]=1
+    printf '# Packages: %s\n\n[Back to the README](../README.md)\n\n%s%s\n</table>\n' "$letter" "$table_header" \
+      "${page_rows[$letter]}" >"$PAGES/$letter.md"
+    links+=" [$letter](table/$letter.md)"
+  done
+  block="${CARD}"$'\n\n'"${summary%,}"
+  [[ -z "$attention" ]] || block+=$'\n\nNeeds attention:\n\n'"${table_header}${attention}"$'\n</table>'
+  write_readme "$block"$'\n\n'"$links"
+fi
 replace_readme "$new_readme"
+# Pages of letters without packages, and every page under the limit, go
+if [[ -d "$PAGES" && ! -L "$PAGES" ]]; then
+  for page in "$PAGES"/*.md; do
+    file=${page##*/}
+    if [[ -f "$page" && ! -L "$page" && "$file" =~ ^(0-9|[a-z])\.md$ && -z "${pages[$file]:-}" ]]; then
+      rm -f -- "$page"
+    fi
+  done
+fi
 log_ok "README.md updated ($pkg_count packages)"
