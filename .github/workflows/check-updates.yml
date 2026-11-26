@@ -13,7 +13,7 @@ on:
         required: false
       AUR_GIT_EMAIL:
         required: false
-      # gitlab-tag sends it to GitLab.com, which counts the requests of a token apart from the runner
+      # The check job asks GitLab.com with it as root, for the gitlab-tag packages
       GITLAB_TOKEN:
         required: false
 
@@ -132,17 +132,24 @@ jobs:
       - name: Add builder
         uses: ./aurtomator/.github/actions/add-builder # zizmor: ignore[self-repository] add-builder runs from the aurtomator/ checkout
 
+      # GitLab.com counts the requests of a token apart from the runner. Root parses none of the answers,
+      # and builder, which parses them, never holds the token.
+      - name: Fetch GitLab tags
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: bash -c 'source ./aurtomator/scripts/lib.sh && gitlab_prefetch /data/gitlab packages/*.yml'
+
       # builder works in /work, and the workspace and aurtomator/ stay root's. The job rules runs the
       # requires rules of the packages that _rules lists.
       - name: Check updates
         uses: ./aurtomator/.github/actions/run-as-builder # zizmor: ignore[self-repository] run-as-builder runs the scripts of the aurtomator/ checkout
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
         with:
           args: --rules-later
-          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER,GITLAB_TOKEN
+          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER
           readme: "true"
+          gitlab: /data/gitlab
 
       - name: Stop builder
         id: stop

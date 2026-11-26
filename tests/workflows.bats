@@ -143,7 +143,7 @@ secret_lines() {
     secret_lines "$workflow"
   done >"$BATS_TEST_TMPDIR/actual"
   printf '%s\n' \
-    'check-updates.yml check/Check updates GITLAB_TOKEN' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN' \
     'check-updates.yml publish/Setup workspace AUR_GIT_NAME' \
     'check-updates.yml publish/Setup workspace AUR_GIT_EMAIL' \
     'check-updates.yml publish/Setup AUR SSH AUR_SSH_KEY' \
@@ -2190,16 +2190,29 @@ builder_steps() {
   [ "${#lines[@]}" -eq 5 ]
 }
 
+# builder parses the answers of upstreams in check, so the token stays with root, which parses none
+@test "check-updates: root fetches the GitLab tags with GITLAB_TOKEN before builder checks" {
+  local step='.jobs.check.steps[] | select(.name == "Fetch GitLab tags")'
+  run yq -o=json -I=0 "$step | .env" "$CHECK_UPDATES"
+  [ "$output" = '{"GITLAB_TOKEN":"${{ secrets.GITLAB_TOKEN }}"}' ]
+  run yq "$step | .run" "$CHECK_UPDATES"
+  [ "$output" = "bash -c 'source ./aurtomator/scripts/lib.sh && gitlab_prefetch /data/gitlab packages/*.yml'" ]
+  [ "$(step_index check "Add builder")" -lt "$(step_index check "Fetch GitLab tags")" ]
+  [ "$(step_index check "Fetch GitLab tags")" -lt "$(step_index check "Check updates")" ]
+  run yq '.jobs.check.steps[] | select(.name == "Check updates") | .with.gitlab' "$CHECK_UPDATES"
+  [ "$output" = /data/gitlab ]
+}
+
 @test "run-as-builder: takes its inputs through the environment" {
   run yq -o=json -I=0 '.runs.steps[0].env' "$BUILDER_ACTION"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"ARGS":"${{ inputs.args }}","COMPANIONS":"${{ inputs.companions }}","HANDOFF":"${{ inputs.handoff }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","STATUSES":"${{ inputs.statuses }}","WORK":"/work"}' ]
+  [ "$output" = '{"ARGS":"${{ inputs.args }}","COMPANIONS":"${{ inputs.companions }}","GITLAB_ANSWERS":"${{ inputs.gitlab }}","HANDOFF":"${{ inputs.handoff }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","STATUSES":"${{ inputs.statuses }}","WORK":"/work"}' ]
   run yq '.inputs.readme.default' "$BUILDER_ACTION"
   [ "$output" = "false" ]
   run yq '.inputs.companions.default' "$BUILDER_ACTION"
   [ "$output" = "false" ]
   local input
-  for input in package statuses handoff; do
+  for input in package statuses handoff gitlab; do
     run yq ".inputs.$input.default" "$BUILDER_ACTION"
     [ "$output" = "" ]
   done
@@ -2210,7 +2223,7 @@ builder_steps() {
 # their calls
 run_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep readme package
-  local statuses handoff companions
+  local statuses handoff companions gitlab
   local action_dir="$BATS_TEST_TMPDIR/ws/aurtomator/.github/actions/run-as-builder"
   mkdir -p "$bin" "$action_dir"
   printf '#!/bin/sh\necho "$*" >>"$CALL_LOGS/chown.log"\n' >"$bin/chown"
@@ -2245,13 +2258,15 @@ EOF
   package=${PACKAGE_INPUT-$package}
   statuses=$(yq "$step | .with.statuses // \"\"" "$CHECK_UPDATES")
   handoff=$(yq "$step | .with.handoff // \"\"" "$CHECK_UPDATES")
+  gitlab=$(yq "$step | .with.gitlab // \"\"" "$CHECK_UPDATES")
   statuses=${statuses/#\/data\//$BATS_TEST_TMPDIR/data/}
   handoff=${handoff/#\/data\//$BATS_TEST_TMPDIR/data/}
+  gitlab=${gitlab/#\/data\//$BATS_TEST_TMPDIR/data/}
   rm -f "$SUDO_LOG"
   run env -C "$ws" PATH="$bin:$PATH" GITHUB_WORKSPACE="$ws" CALL_LOGS="$BATS_TEST_TMPDIR" \
     GITHUB_ACTION_PATH="${ACTION_PATH:-$action_dir}" SUDO_LOG="$SUDO_LOG" TEST_X_RC="${TEST_X_RC:-0}" \
     ARGS="$args" KEEP_ENV="$keep" PACKAGE="$package" README_TOO="$readme" COMPANIONS="$companions" WORK="$BATS_TEST_TMPDIR/work" \
-    STATUSES="$statuses" HANDOFF="$handoff" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+    STATUSES="$statuses" HANDOFF="$handoff" GITLAB_ANSWERS="$gitlab" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Prints the command lines that sudo recorded, without the environments
@@ -2263,7 +2278,7 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER,GITLAB_TOKEN -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
     "rules${tab}Run the requires rules${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --rules rules cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
@@ -2409,6 +2424,27 @@ make_builder_inputs() {
   [ "$status" -eq 0 ]
   [ -d "$work" ]
   [ -z "$(ls -A "$work")" ]
+}
+
+# Root fetched the answers of GitLab.com with GITLAB_TOKEN, and each is named by the SHA-256 of its URL
+@test "run-as-builder: gives builder the GitLab answers named by 64 hex digits alone" {
+  local work="$BATS_TEST_TMPDIR/work" gl="$BATS_TEST_TMPDIR/data/gitlab" key big
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  key=$(printf 'a%.0s' {1..64})
+  big=$(printf 'c%.0s' {1..64})
+  mkdir -p "$gl/$(printf 'd%.0s' {1..64})"
+  echo '[]' >"$gl/$key"
+  echo '[]' >"$gl/${key}0"
+  echo '[]' >"$gl/.part.x"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$gl/$(printf 'b%.0s' {1..64})"
+  truncate -s $((16 * 1024 * 1024 + 1)) "$gl/$big"
+  SUDO_OUT=ok run_builder_step check "Check updates"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::.gitlab/$big is larger than 16777216 bytes"* ]]
+  run bash -c 'cd "$1/.gitlab" && find . -mindepth 1' _ "$work"
+  [ "$output" = "./$key" ]
+  [ "$(stat -c %a "$work/.gitlab/$key")" = 644 ]
 }
 
 # check-all.sh and update-readme.sh then fail the YAML by its file name, so its issues stay open

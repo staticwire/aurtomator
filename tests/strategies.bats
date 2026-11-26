@@ -564,6 +564,28 @@ EOF
   ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
 }
 
+# In the workflow root asks GitLab.com with GITLAB_TOKEN, and builder gets the answers in .gitlab/
+@test "gitlab-tag: reads the answer that the workflow fetched for it" {
+  local key
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: group/project"
+  key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100' | sha256sum)
+  mkdir "$TEST_TMPDIR/.gitlab"
+  echo '[{"name": "v9.0.0"}]' >"$TEST_TMPDIR/.gitlab/${key%% *}"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "9.0.0" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+  # Answers other than JSON fail as fetched ones do
+  echo '<html>' >"$TEST_TMPDIR/.gitlab/${key%% *}"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100: the answer is not JSON"* ]]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
 @test "gitlab-tag: tag_version_regex extracts from prefixed tags" {
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com

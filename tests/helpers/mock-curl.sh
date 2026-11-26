@@ -62,6 +62,10 @@ case "$url" in
   *gitlab.com/api/v4/projects/empty-group%2Fempty-project/repository/tags"?per_page=100")
     echo '[]'
     ;;
+  # GitLab Tags: a project that GitLab.com does not know
+  *gitlab.com/api/v4/projects/missing-group%2F*/repository/tags"?per_page=100")
+    http_error 404
+    ;;
   # Gitea Tags: empty array
   *codeberg.org/api/v1/repos/empty-owner/empty-repo/tags"?limit=50")
     echo '[]'

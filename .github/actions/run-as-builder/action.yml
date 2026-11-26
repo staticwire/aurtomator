@@ -39,6 +39,10 @@ inputs:
     description: Directory of the prepared updates and the files of the rules jobs that builder gets as handoff/
     required: false
     default: ""
+  gitlab:
+    description: Directory of the answers of GitLab.com that root fetched with GITLAB_TOKEN, which builder gets as .gitlab/
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -47,6 +51,7 @@ runs:
       env:
         ARGS: ${{ inputs.args }}
         COMPANIONS: ${{ inputs.companions }}
+        GITLAB_ANSWERS: ${{ inputs.gitlab }}
         HANDOFF: ${{ inputs.handoff }}
         KEEP_ENV: ${{ inputs.keep-env }}
         PACKAGE: ${{ inputs.package }}
@@ -144,6 +149,13 @@ runs:
                   take "$HANDOFF/$f" "handoff/$f" "$(handoff_max "$f")"
                 fi
               done
+          fi
+          # Each answer is named by the SHA-256 of its URL
+          if dir_ok "$GITLAB_ANSWERS"; then
+            for f in "$GITLAB_ANSWERS"/*; do
+              [[ "${f##*/}" =~ ^[0-9a-f]{64}$ ]] || continue
+              take "$f" ".gitlab/${f##*/}" "$results_max"
+            done
           fi
         fi
         chown -R builder:builder "$WORK"

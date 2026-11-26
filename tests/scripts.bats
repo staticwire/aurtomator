@@ -4350,6 +4350,41 @@ current: '1.0.0'"
   [ "$output" = $'0\n0' ]
 }
 
+# The workflow runs it as root, which parses no answer, so builder parses them without the token
+@test "gitlab_prefetch: keeps the answers of GitLab.com to the gitlab-tag packages, asked with GITLAB_TOKEN" {
+  local key
+  create_test_package a gitlab-tag "upstream:
+  host: gitlab.com
+  project: group/a"
+  create_test_package b gitlab-tag "upstream:
+  host: gitlab.gnome.org
+  project: group/b"
+  create_test_package c github-release "upstream:
+  project: owner/c"
+  create_test_package d gitlab-tag "upstream:
+  host: gitlab.com
+  project: missing-group/d"
+  printf '%s\n' 'name: l' 'strategy: gitlab-tag' 'upstream:' '  host: gitlab.com' '  project: group/l' >"$TEST_TMPDIR/l.yml"
+  ln -s "$TEST_TMPDIR/l.yml" "$TEST_TMPDIR/packages/l.yml"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"missing-group%2Fd/repository/tags?per_page=100: The requested URL returned error: 404"* ]]
+  key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fa/repository/tags?per_page=100' | sha256sum)
+  [ "$(ls -A "$TEST_TMPDIR/answers")" = "${key%% *}" ]
+  [ "$(cat "$TEST_TMPDIR/answers/${key%% *}")" = '[{"name": "v3.1.0"}, {"name": "v3.0.0"}, {"name": "v2.0.0"}]' ]
+  # curl reads the header from stdin, and asks gitlab.com alone
+  [ "$(grep -c -- ' -H @- ' "$CURL_ARGS_LOG")" = 2 ]
+  [ "$(wc -l <"$CURL_ARGS_LOG")" = 2 ]
+  run ! grep -q glpat-test "$CURL_ARGS_LOG"
+  # Without the token it asks nothing
+  rm "$CURL_ARGS_LOG"
+  run bash -c 'source "$0/scripts/lib.sh" && gitlab_prefetch "$0/none" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/none" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
 # GITHUB_TOKEN allows 1000 REST requests an hour for the repository, and publish and the issues job
 # need some after the check job
 @test "check-all: leaves the GitHub packages unchecked when 400 REST requests are left" {

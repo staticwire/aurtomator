@@ -371,18 +371,91 @@ http_get() {
 # GET a URL that answers JSON. Bot checks answer HTML with HTTP 200, and yq reads YAML too, so answers
 # other than a JSON object or array, which opens with { or [, fail and name the URL they came from.
 http_get_json() {
-  local answer url lead
+  local answer url
   answer=$(http_get "$@" -w "\n%{url_effective}${HTTP_FAILURE}") || return
   url=${answer##*$'\n'}
   answer=${answer%$'\n'*}
-  lead=${answer#"${answer%%[![:space:]]*}"}
-  if [[ "${lead:0:1}" != "{" && "${lead:0:1}" != "[" ]] ||
-    [[ ! "$(yq 'tag' <<<"$answer" 2>/dev/null)" =~ ^!!(map|seq)$ ]]; then
-    printf '%s: the answer is not JSON\n' "$url" >&2
+  if ! _json_answer "$url" "$answer"; then
     request_failed "$1"
     return 1
   fi
-  printf '%s\n' "$answer"
+}
+
+# Print answer $2 when it is a JSON object or array, and fail naming URL $1 otherwise
+_json_answer() {
+  local lead
+  lead=${2#"${2%%[![:space:]]*}"}
+  if [[ "${lead:0:1}" != "{" && "${lead:0:1}" != "[" ]] ||
+    [[ ! "$(yq 'tag' <<<"$2" 2>/dev/null)" =~ ^!!(map|seq)$ ]]; then
+    printf '%s: the answer is not JSON\n' "$1" >&2
+    return 1
+  fi
+  printf '%s\n' "$2"
+}
+
+# Print the name of the file that keeps the answer to URL $1, its SHA-256
+url_key() {
+  local key
+  key=$(printf '%s' "$1" | sha256sum)
+  printf '%s\n' "${key%% *}"
+}
+
+# Print the URL of the newest 100 tags of GitLab project $2 on host $1, whose API takes the path URL-encoded
+gitlab_tags_url() {
+  printf 'https://%s/api/v4/projects/%s/repository/tags?per_page=100\n' "$1" "${2//\//%2F}"
+}
+
+# GET a GitLab API URL. In the workflow builder reads the answer that root fetched with GITLAB_TOKEN,
+# and other runs send the token to GitLab.com alone, from stdin.
+gitlab_api() {
+  local file auth=()
+  file="${AURTOMATOR_DATA_DIR}/.gitlab/$(url_key "$1")"
+  if [[ -f "$file" && ! -L "$file" ]]; then
+    if ! _json_answer "$1" "$(<"$file")"; then
+      request_failed "$1"
+      return 1
+    fi
+    return 0
+  fi
+  if [[ -n "${GITLAB_TOKEN:-}" && "$(url_host "$1")" == gitlab.com ]]; then
+    auth=(-H @-)
+  fi
+  http_get_json "$1" "${auth[@]}" <<<"PRIVATE-TOKEN: ${GITLAB_TOKEN:-}"
+}
+
+# Keep in directory $1 the answers of GitLab.com to the gitlab-tag packages of files $2..., asked with
+# GITLAB_TOKEN. The workflow runs it as root, which parses none of them, and builder never holds the token.
+gitlab_prefetch() {
+  local LC_ALL=C dir=$1 file rows strategy host project url part
+  local -a files=()
+  local -A seen=()
+  local -x AURTOMATOR_HOSTS_DIR
+  shift
+  [[ -n "${GITLAB_TOKEN:-}" ]] || return 0
+  for file in "$@"; do
+    [[ ! -f "$file" || -L "$file" ]] || files+=("$file")
+  done
+  ((${#files[@]} > 0)) || return 0
+  rows=$(yq -N -r '[.strategy // "", .upstream.host // "", .upstream.project // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
+  mkdir -p "$dir"
+  # The memory of hosts keeps the pace of GitLab.com and stops asking it once it does not answer
+  AURTOMATOR_HOSTS_DIR=$(mktemp -d) || return 1
+  : >"$AURTOMATOR_HOSTS_DIR/silent"
+  : >"$AURTOMATOR_HOSTS_DIR/request"
+  : >"$AURTOMATOR_HOSTS_DIR/failed"
+  while IFS=$'\t' read -r strategy host project; do
+    [[ "$strategy" == gitlab-tag && "${host,,}" == gitlab.com && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
+    url=$(gitlab_tags_url "$host" "$project")
+    [[ -z "${seen[$url]:-}" ]] || continue
+    seen[$url]=1
+    part=$(mktemp -p "$dir" .part.XXXXXX) || break
+    if http_get "$url" -H @- -o "$part" <<<"PRIVATE-TOKEN: $GITLAB_TOKEN"; then
+      mv -- "$part" "$dir/$(url_key "$url")"
+    else
+      rm -f -- "$part"
+    fi
+  done <<<"$rows"
+  rm -rf -- "$AURTOMATOR_HOSTS_DIR"
 }
 
 # GET a GitHub API URL with GITHUB_TOKEN when it is set. curl reads the header
@@ -404,9 +477,7 @@ github_api() {
 
 # Print the path in the run cache of the answer that github_prefetch keeps for URL $1
 _github_cached() {
-  local key
-  key=$(printf '%s' "$1" | sha256sum)
-  printf '%s/github/%s\n' "$AURTOMATOR_RUN_CACHE" "${key%% *}"
+  printf '%s/github/%s\n' "$AURTOMATOR_RUN_CACHE" "$(url_key "$1")"
 }
 
 # Keep /releases/latest, and /releases of at most 100 releases, of the github-release packages of files
