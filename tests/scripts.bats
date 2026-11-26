@@ -4381,6 +4381,56 @@ current: '1.0.0'"
   [ "$(grep -c api.github.com/rate_limit "$CURL_ARGS_LOG")" = 3 ]
 }
 
+# Prints the milliseconds that three requests to URL $1 take to begin in a check run
+paced_ms() {
+  bash -c 'source "$0/scripts/lib.sh"
+    AURTOMATOR_HOSTS_DIR=$(mktemp -d)
+    : >"$AURTOMATOR_HOSTS_DIR/silent"
+    start=${EPOCHREALTIME/[.,]/}
+    for i in 1 2 3; do request_begin "$1/$i"; done
+    end=${EPOCHREALTIME/[.,]/}
+    echo $(((end - start) / 1000))' "$TEST_TMPDIR" "$1"
+}
+
+# rubygems.org takes 10 requests a second, repology.org one, and pypi.org states no limit
+@test "request_begin: keeps the pace of each host between its requests" {
+  local ms
+  ms=$(paced_ms https://rubygems.org/api)
+  echo "rubygems.org: $ms ms"
+  ((ms >= 200 && ms < 1000))
+  ms=$(paced_ms https://example.org/page)
+  echo "example.org: $ms ms"
+  ((ms >= 400 && ms < 1500))
+  ms=$(paced_ms https://pypi.org/pypi)
+  echo "pypi.org: $ms ms"
+  ((ms < 150))
+  ms=$(paced_ms https://repology.org/api/v1/project)
+  echo "repology.org: $ms ms"
+  ((ms >= 2000 && ms < 3500))
+}
+
+# Repology counts more than 1000 requests a day as bulk, and the next run starts where this one stopped
+@test "check-all: gives the packages of repology.org the checks of its budget, the next ones in the next run" {
+  local reason="unchecked: repology.org takes 2 checks a run, so this package gets its check in a later run" n
+  for n in 1 2 3; do
+    create_test_package "r$n" repology "upstream:
+  repology: r$n
+current: '1.0.0'"
+  done
+  AURTOMATOR_REPOLOGY_BUDGET=2 GITHUB_RUN_NUMBER=0 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/r1")" = "new_version: 5.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/r2")" = "new_version: 5.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/r3")" = "$reason" ]
+  AURTOMATOR_REPOLOGY_BUDGET=2 GITHUB_RUN_NUMBER=1 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/r3")" = "new_version: 5.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/r1")" = "new_version: 5.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/r2")" = "$reason" ]
+  # The budget covers the whole run
+  AURTOMATOR_REPOLOGY_BUDGET=3 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/r3")" = "new_version: 5.0.0" ]
+}
+
 # One request holds 50 repositories
 @test "check-all: asks GraphQL for 50 repositories a request" {
   local i

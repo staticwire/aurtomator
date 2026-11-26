@@ -1115,18 +1115,39 @@ fi
 readonly REST_RESERVE=400
 REST_LEFT="" REST_SINCE=10
 declare -A REST_FILES=()
-if [[ "$MODE" == check && -n "${GITHUB_TOKEN:-}" ]]; then
-  rest_scan=()
+# Checks of a run for the packages of a strategy whose host caps the requests of a day: repology.org
+# counts more than 1000 a day as bulk, and a run each hour gives 40
+declare -A HOST_BUDGET=([repology]="${AURTOMATOR_REPOLOGY_BUDGET:-40}")
+declare -A HOST_OF=([repology]=repology.org) HELD_FILES=()
+declare -a repology_files=()
+if [[ "$MODE" == check ]]; then
+  scan=()
   for pkg_file in "${check_files[@]}"; do
-    [[ ! -f "$pkg_file" || -L "$pkg_file" ]] || rest_scan+=("$pkg_file")
+    [[ ! -f "$pkg_file" || -L "$pkg_file" ]] || scan+=("$pkg_file")
   done
   while IFS=$'\t' read -r pkg_file strategy asset; do
     case $strategy in
       github-release | github-nightly | github-asset) REST_FILES[$pkg_file]=1 ;;
       github-tag) [[ -z "$asset" ]] || REST_FILES[$pkg_file]=1 ;;
+      repology) repology_files+=("$pkg_file") ;;
     esac
-  done < <(((${#rest_scan[@]} == 0)) ||
-    yq -N -r '[filename, .strategy // "", .upstream.asset_regex // ""] | map(tostring) | join("\t")' "${rest_scan[@]}" 2>/dev/null || true)
+  done < <(((${#scan[@]} == 0)) ||
+    yq -N -r '[filename, .strategy // "", .upstream.asset_regex // ""] | map(tostring) | join("\t")' "${scan[@]}" 2>/dev/null || true)
+  [[ -n "${GITHUB_TOKEN:-}" ]] || REST_FILES=()
+  # Each run takes the next packages after those of the run before, by its number
+  budget=${HOST_BUDGET[repology]}
+  if [[ ! "$budget" =~ ^[1-9][0-9]{0,4}$ ]]; then
+    log_err "AURTOMATOR_REPOLOGY_BUDGET must be a number of checks from 1: ${budget@Q}"
+    exit 1
+  fi
+  if ((${#repology_files[@]} > budget)); then
+    run_number=0
+    ! (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]) || run_number=$GITHUB_RUN_NUMBER
+    offset=$((run_number * budget % ${#repology_files[@]}))
+    for ((i = budget; i < ${#repology_files[@]}; i++)); do
+      HELD_FILES[${repology_files[(offset + i) % ${#repology_files[@]}]}]=repology
+    done
+  fi
 fi
 
 # Succeeds while the check of package file $1 may ask GitHub REST: it asks none, or GET /rate_limit,
@@ -1144,6 +1165,13 @@ rest_left() {
   fi
   REST_SINCE=$((REST_SINCE + 1))
   [[ ! "$REST_LEFT" =~ ^[0-9]+$ ]] || ((REST_LEFT >= REST_RESERVE))
+}
+
+# Gives status unchecked to package $1, whose host gives the run fewer checks than it has packages
+mark_held_unchecked() {
+  local host=${HOST_OF[$2]} budget=${HOST_BUDGET[$2]}
+  log_warn "$1: $host takes $budget checks a run, so this package gets its check in a later run"
+  echo "unchecked: $host takes $budget checks a run, so this package gets its check in a later run" >"${STATUS_DIR}/$1"
 }
 
 # Gives status unchecked to package $1, which rest_left kept from GitHub
@@ -1185,7 +1213,9 @@ if [[ "$MODE" == publish ]]; then
   [[ -s "${STATUS_DIR}/_hosts" ]] || rm -f "${STATUS_DIR}/_hosts"
 fi
 for pkg_file in "${plain_files[@]:check_start}" "${plain_files[@]:0:check_start}" "${companion_files[@]}"; do
-  if check_time_left && rest_left "$pkg_file"; then
+  if [[ -n "${HELD_FILES[$pkg_file]:-}" ]]; then
+    ! pkg_name=$(package_name "$pkg_file") || mark_held_unchecked "$pkg_name" "${HELD_FILES[$pkg_file]}"
+  elif check_time_left && rest_left "$pkg_file"; then
     run_package "$pkg_file" 1
   elif pkg_name=$(package_name "$pkg_file"); then
     if check_time_left; then

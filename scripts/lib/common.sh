@@ -236,7 +236,37 @@ request_begin() {
     request_failed "$1"
     return 1
   fi
+  request_pace "$host"
   printf '%s\n%s\n' "$1" "${2:-$1}" >"$AURTOMATOR_HOSTS_DIR/request"
+}
+
+# Set PACE_MS to the milliseconds between two requests to host $1: the pace that the host states,
+# none for hosts that ask for none or count elsewhere, as api.github.com does, and 200 for the rest
+host_pace() {
+  case $1 in
+    repology.org | crates.io) PACE_MS=1000 ;;
+    gitlab.com) PACE_MS=120 ;;
+    rubygems.org) PACE_MS=100 ;;
+    pypi.org | files.pythonhosted.org | api.github.com | index.crates.io) PACE_MS=0 ;;
+    *) PACE_MS=200 ;;
+  esac
+}
+
+# Wait until the pace of host $1 allows a request, and note the time of this one in the host memory
+request_pace() {
+  local file now last wait
+  host_pace "$1"
+  ((PACE_MS > 0)) || return 0
+  file="$AURTOMATOR_HOSTS_DIR/paced-$1"
+  now=${EPOCHREALTIME/[.,]/}
+  if [[ -f "$file" ]] && read -r last <"$file" && [[ "$last" =~ ^[0-9]+$ ]]; then
+    wait=$((last + PACE_MS * 1000 - now))
+    if ((wait > 0)); then
+      sleep "$((wait / 1000000)).$(printf '%06d' "$((wait % 1000000))")"
+      now=${EPOCHREALTIME/[.,]/}
+    fi
+  fi
+  printf '%s\n' "$now" >"$file"
 }
 
 # request_begin for git URL $1: the HEAD check asks the first URL that git asks
