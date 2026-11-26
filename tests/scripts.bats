@@ -1457,7 +1457,9 @@ MOCKCURL
   source "$TEST_TMPDIR/scripts/lib.sh"
   run http_get https://example.invalid/a --max-redirs 5
   [ "$status" -eq 0 ]
-  [ "$output" = '--globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --retry-max-time 75 --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated} --max-redirs 5 https://example.invalid/a' ]
+  # The answer goes to a file, which curl truncates before a retry
+  [ "${output%% -o *}" = '--globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --retry-max-time 75 --proto =https --proto-redir =https --max-filesize 50M -A aurtomator/1.0 -w %{onerror}%{stderr}%{url_effective}\t%{errormsg}\t%{http_code}\t%header{cf-mitigated}' ]
+  [[ "${output#* -o }" =~ ^/[^\ ]+\ --max-redirs\ 5\ https://example\.invalid/a$ ]]
 }
 
 # Helper: a curl that writes $CURL_STDERR to stderr, as its -w does on a
@@ -1799,6 +1801,23 @@ arch_out:
   [ "$status" -eq 28 ]
   [ "$(wc -l <"$TEST_TMPDIR/curl.log")" -eq 2 ]
   [ ! -e "$TEST_TMPDIR/none" ]
+}
+
+# curl retries a transfer that its time limit cut, and on stdout the retry follows the piece of the cut one
+@test "lib.sh: http_get prints the answer of a retry alone" {
+  local port i
+  port=$(shuf -i 20000-40000 -n 1)
+  python3 -I "$TESTS_DIR/helpers/cut-server.py" "$port" "$TEST_TMPDIR/ready" >/dev/null 2>&1 3>&- &
+  for i in $(seq 50); do
+    [[ ! -e "$TEST_TMPDIR/ready" ]] || break
+    sleep 0.1
+  done
+  printf '#!/bin/sh\nexec /usr/bin/curl "$@"\n' >"$MOCK_DIR/curl"
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  run http_get "http://127.0.0.1:$port/" --proto =http --proto-redir =http --max-time 2 --retry-delay 1
+  wait
+  [ "$status" -eq 0 ]
+  [ "$output" = BBBBBBBBBB ]
 }
 
 @test "lib.sh: http_get_json asks curl for the URL of the last answer" {

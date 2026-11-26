@@ -274,6 +274,27 @@ remember_host() {
 # Args: $1=URL, the rest: curl options, which come after these and win. curl waits the
 # Retry-After of a server before a retry, so no retry starts 75 s after the first try.
 _curl_get() {
+  local arg body out rc=0
+  for arg in "${@:2}"; do
+    if [[ "$arg" == -o || "$arg" == --output ]]; then
+      _curl_try "$@"
+      return
+    fi
+  done
+  # Retries truncate a file of -o, and on stdout they follow the piece of the try that failed
+  body=$(mktemp) || return 1
+  out=$(mktemp) || {
+    rm -f -- "$body"
+    return 1
+  }
+  _curl_try "$1" -o "$body" "${@:2}" >"$out" || rc=$?
+  cat -- "$body" "$out"
+  rm -f -- "$body" "$out"
+  return "$rc"
+}
+
+# Args: as _curl_get, whose options come before the rest
+_curl_try() {
   curl --globoff -sfL --max-time 30 --retry 2 --retry-delay 5 --retry-connrefused --retry-max-time 75 \
     --proto '=https' --proto-redir '=https' --max-filesize "${MAX_ANSWER_MB:-50}M" \
     -A "$USER_AGENT" -w "$HTTP_FAILURE" "${@:2}" "$1"
