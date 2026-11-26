@@ -426,35 +426,48 @@ gitlab_api() {
 # Keep in directory $1 the answers of GitLab.com to the gitlab-tag packages of files $2..., asked with
 # GITLAB_TOKEN. The workflow runs it as root, which parses none of them, and builder never holds the token.
 gitlab_prefetch() {
-  local LC_ALL=C dir=$1 file rows strategy host project url part
-  local -a files=()
+  local LC_ALL=C dir=$1 file rows strategy host project url part budget end i
+  local -a files=() urls=()
   local -A seen=()
   local -x AURTOMATOR_HOSTS_DIR
   shift
   [[ -n "${GITLAB_TOKEN:-}" ]] || return 0
+  # The time of the step counts in the budget of the checks, which ask gitlab.com for the rest
+  budget=$(env_seconds GITLAB_PREFETCH_BUDGET 300) || return 1
+  end=$((SECONDS + budget))
   for file in "$@"; do
     [[ ! -f "$file" || -L "$file" ]] || files+=("$file")
   done
   ((${#files[@]} > 0)) || return 0
   rows=$(yq -N -r '[.strategy // "", .upstream.host // "", .upstream.project // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
+  while IFS=$'\t' read -r strategy host project; do
+    [[ "$strategy" == gitlab-tag && "${host,,}" == gitlab.com && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
+    url=$(gitlab_tags_url "$host" "$project")
+    [[ -z "${seen[$url]:-}" ]] || continue
+    seen[$url]=1
+    urls+=("$url")
+  done <<<"$rows"
+  ((${#urls[@]} > 0)) || return 0
   mkdir -p "$dir"
   # The memory of hosts keeps the pace of GitLab.com and stops asking it once it does not answer
   AURTOMATOR_HOSTS_DIR=$(mktemp -d) || return 1
   : >"$AURTOMATOR_HOSTS_DIR/silent"
   : >"$AURTOMATOR_HOSTS_DIR/request"
   : >"$AURTOMATOR_HOSTS_DIR/failed"
-  while IFS=$'\t' read -r strategy host project; do
-    [[ "$strategy" == gitlab-tag && "${host,,}" == gitlab.com && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
-    url=$(gitlab_tags_url "$host" "$project")
-    [[ -z "${seen[$url]:-}" ]] || continue
-    seen[$url]=1
+  for ((i = 0; i < ${#urls[@]}; i++)); do
+    if ((SECONDS >= end)); then
+      printf '::warning::Fetch GitLab tags stopped after %s s, so the checks ask gitlab.com without GITLAB_TOKEN for %s of its %s projects\n' \
+        "$budget" "$((${#urls[@]} - i))" "${#urls[@]}"
+      break
+    fi
+    url=${urls[i]}
     part=$(mktemp -p "$dir" .part.XXXXXX) || break
     if http_get "$url" -H @- -o "$part" <<<"PRIVATE-TOKEN: $GITLAB_TOKEN"; then
       mv -- "$part" "$dir/$(url_key "$url")"
     else
       rm -f -- "$part"
     fi
-  done <<<"$rows"
+  done
   rm -rf -- "$AURTOMATOR_HOSTS_DIR"
 }
 

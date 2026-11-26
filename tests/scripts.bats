@@ -4385,6 +4385,26 @@ current: '1.0.0'"
   [ ! -e "$CURL_ARGS_LOG" ]
 }
 
+# The time of the step counts in the budget of the checks, which ask gitlab.com for the rest without the token
+@test "gitlab_prefetch: starts no request past GITLAB_PREFETCH_BUDGET" {
+  create_test_package a gitlab-tag "upstream:
+  host: gitlab.com
+  project: group/a"
+  create_test_package b gitlab-tag "upstream:
+  host: gitlab.com
+  project: group/b"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test GITLAB_PREFETCH_BUDGET=0 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "::warning::Fetch GitLab tags stopped after 0 s, so the checks ask gitlab.com without GITLAB_TOKEN for 2 of its 2 projects" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+  [ -z "$(ls -A "$TEST_TMPDIR/answers")" ]
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test GITLAB_PREFETCH_BUDGET=1.5 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GITLAB_PREFETCH_BUDGET must be a whole number of seconds from 0 to 999999: '1.5'"* ]]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
 # GITHUB_TOKEN allows 1000 REST requests an hour for the repository, and publish and the issues job
 # need some after the check job
 @test "check-all: leaves the GitHub packages unchecked when 400 REST requests are left" {

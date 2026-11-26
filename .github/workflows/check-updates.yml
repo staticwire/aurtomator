@@ -135,9 +135,14 @@ jobs:
       # GitLab.com counts the requests of a token apart from the runner. Root parses none of the answers,
       # and builder, which parses them, never holds the token.
       - name: Fetch GitLab tags
+        id: gitlab
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-        run: bash -c 'source ./aurtomator/scripts/lib.sh && gitlab_prefetch /data/gitlab packages/*.yml'
+        run: |
+          start=$SECONDS
+          bash -c 'source ./aurtomator/scripts/lib.sh && gitlab_prefetch /data/gitlab packages/*.yml'
+          # The seconds of this step count in the budget of the checks, so the job ends within its 30 minutes
+          echo "spent=$((SECONDS - start))" >>"$GITHUB_OUTPUT"
 
       # builder works in /work, and the workspace and aurtomator/ stay root's. The job rules runs the
       # requires rules of the packages that _rules lists.
@@ -145,9 +150,10 @@ jobs:
         uses: ./aurtomator/.github/actions/run-as-builder # zizmor: ignore[self-repository] run-as-builder runs the scripts of the aurtomator/ checkout
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          AURTOMATOR_CHECK_SPENT: ${{ steps.gitlab.outputs.spent }}
         with:
           args: --rules-later
-          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER
+          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT
           readme: "true"
           gitlab: /data/gitlab
 

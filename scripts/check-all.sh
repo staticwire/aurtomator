@@ -45,6 +45,8 @@ VERIFY_BUDGET=$(env_seconds AURTOMATOR_VERIFY_BUDGET 1200) || exit 1
 # Time budget of the loop of a check run, in seconds: no check and no step of a check starts
 # after it, so the check job ends within its 30 minutes
 CHECK_BUDGET=$(env_seconds AURTOMATOR_CHECK_BUDGET 1200) || exit 1
+# Seconds of that budget that steps before this script spent, as Fetch GitLab tags of the workflow
+CHECK_SPENT=$(env_seconds AURTOMATOR_CHECK_SPENT 0) || exit 1
 
 # Time budget of the publish loop, in seconds: no publish starts after it,
 # so the publish job ends within its 30 minutes
@@ -1197,7 +1199,7 @@ check_start=0
 if [[ "$MODE" == check && ${#plain_files[@]} -gt 0 ]] && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
   check_start=$((GITHUB_RUN_NUMBER % ${#plain_files[@]}))
 fi
-CHECK_END=$(($(date -u +%s) + CHECK_BUDGET))
+CHECK_END=$(($(date -u +%s) + CHECK_BUDGET - CHECK_SPENT))
 
 RECHECK=()
 declare -A FAILED_HOSTS=()

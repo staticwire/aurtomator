@@ -2192,15 +2192,24 @@ builder_steps() {
 
 # builder parses the answers of upstreams in check, so the token stays with root, which parses none
 @test "check-updates: root fetches the GitLab tags with GITLAB_TOKEN before builder checks" {
-  local step='.jobs.check.steps[] | select(.name == "Fetch GitLab tags")'
-  run yq -o=json -I=0 "$step | .env" "$CHECK_UPDATES"
-  [ "$output" = '{"GITLAB_TOKEN":"${{ secrets.GITLAB_TOKEN }}"}' ]
-  run yq "$step | .run" "$CHECK_UPDATES"
-  [ "$output" = "bash -c 'source ./aurtomator/scripts/lib.sh && gitlab_prefetch /data/gitlab packages/*.yml'" ]
+  local step='.jobs.check.steps[] | select(.name == "Fetch GitLab tags")' ws="$BATS_TEST_TMPDIR/ws"
+  run yq -o=json -I=0 "$step | [.id, .env]" "$CHECK_UPDATES"
+  [ "$output" = '["gitlab",{"GITLAB_TOKEN":"${{ secrets.GITLAB_TOKEN }}"}]' ]
   [ "$(step_index check "Add builder")" -lt "$(step_index check "Fetch GitLab tags")" ]
   [ "$(step_index check "Fetch GitLab tags")" -lt "$(step_index check "Check updates")" ]
   run yq '.jobs.check.steps[] | select(.name == "Check updates") | .with.gitlab' "$CHECK_UPDATES"
   [ "$output" = /data/gitlab ]
+  # The seconds of the step count in the budget of the checks
+  run yq '.jobs.check.steps[] | select(.name == "Check updates") | .env.AURTOMATOR_CHECK_SPENT' "$CHECK_UPDATES"
+  [ "$output" = '${{ steps.gitlab.outputs.spent }}' ]
+  mkdir -p "$ws/aurtomator/scripts"
+  printf '%s\n' 'gitlab_prefetch() { printf "%s\n" "$*" >"$CALLS"; }' >"$ws/aurtomator/scripts/lib.sh"
+  step_run check "Fetch GitLab tags" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" CALLS="$BATS_TEST_TMPDIR/calls" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
+    bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/calls")" = "/data/gitlab packages/*.yml" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/output")" = "spent=0" ]
 }
 
 @test "run-as-builder: takes its inputs through the environment" {
@@ -2278,7 +2287,7 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
     "rules${tab}Run the requires rules${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --rules rules cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"

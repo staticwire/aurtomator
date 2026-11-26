@@ -4662,6 +4662,18 @@ EOF
   [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 0 minutes in this run" ]
 }
 
+# Fetch GitLab tags of the workflow runs before check-all.sh, within the same budget
+@test "check-all: takes the seconds that AURTOMATOR_CHECK_SPENT names from the time budget of the loop" {
+  flaky_check flaky
+  AURTOMATOR_CHECK_BUDGET=120 AURTOMATOR_CHECK_SPENT=120 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/checks" ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 2 minutes in this run" ]
+  AURTOMATOR_CHECK_BUDGET=120 AURTOMATOR_CHECK_SPENT=60 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady' ]
+}
+
 @test "check-all: checks no package again after the time budget of the loop" {
   flaky_check flaky 1
   # Each read of the clock moves it 100 s on
@@ -4692,7 +4704,7 @@ EOF
   local name value
   flaky_check flaky
   for name in AURTOMATOR_CHECK_TIMEOUT AURTOMATOR_UPDATE_TIMEOUT AURTOMATOR_VERIFY_BUDGET \
-    AURTOMATOR_CHECK_BUDGET AURTOMATOR_PUBLISH_BUDGET AURTOMATOR_RECHECK_DELAY; do
+    AURTOMATOR_CHECK_BUDGET AURTOMATOR_CHECK_SPENT AURTOMATOR_PUBLISH_BUDGET AURTOMATOR_RECHECK_DELAY; do
     for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 010 1.5 -1 1000000 " 5"; do
       run env "$name=$value" "$TEST_TMPDIR/scripts/check-all.sh"
       [ "$status" -eq 1 ]
