@@ -285,6 +285,14 @@ jobs:
           if [[ -f "$RESULTS/README.md" ]] && ! cmp -s "$RESULTS/README.md" README.md; then
             work=true
           fi
+          # Past its limit, the README links pages of the package table, which can change alone
+          if [[ -f "$RESULTS/README.md" ]]; then
+            for page in "$RESULTS"/table/*.md table/*.md; do
+              name=${page##*/}
+              [[ -f "$page" && "$name" =~ ^(0-9|[a-z])\.md$ && ! -L "table/$name" ]] || continue
+              cmp -s "$RESULTS/table/$name" "table/$name" 2>/dev/null || work=true
+            done
+          fi
           # publish commits aurtomator/aurtomator.sh over a regular aurtomator.sh that differs
           release_runner=aurtomator/aurtomator.sh repo_runner=aurtomator.sh
           if [[ -f "$release_runner" && -f "$repo_runner" && ! -L "$repo_runner" ]] &&

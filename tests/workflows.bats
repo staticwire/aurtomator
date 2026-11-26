@@ -1541,6 +1541,38 @@ run_decide_step() {
   [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
 }
 
+# Past the limit of the README a status can change on a page of the package table alone, such as the
+# date of a cooldown
+@test "check-updates: Decide publishes a changed, new or removed page of the package table" {
+  local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results" case
+  for case in same changed new removed; do
+    rm -rf "$ws" "$results"
+    mkdir -p "$ws/table" "$results/table"
+    echo "page a" >"$ws/table/a.md"
+    echo "page a" >"$results/table/a.md"
+    echo notes >"$ws/table/notes.txt"
+    case $case in
+      changed) echo "new page a" >"$results/table/a.md" ;;
+      new) echo "page b" >"$results/table/b.md" ;;
+      removed) echo "page c" >"$ws/table/c.md" ;;
+    esac
+    run run_decide_step pkg="cooldown: 2026-11-12"
+    [ "$status" -eq 0 ]
+    if [[ "$case" == same ]]; then
+      [[ "$output" == *$'\nwork=false\n'* ]]
+    else
+      [[ "$output" == *$'\nwork=true\n'* ]] || {
+        echo "no publish for a $case page"
+        return 1
+      }
+    fi
+  done
+  # Without the copy of README.md, the run wrote no page
+  rm -f "$results/README.md"
+  NO_README_COPY=1 run run_decide_step pkg="cooldown: 2026-11-12"
+  [[ "$output" == *$'\nwork=false\n'* ]]
+}
+
 @test "check-updates: Decide counts a missing copy of the README as unchanged" {
   NO_README_COPY=1 run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
