@@ -5,8 +5,10 @@
 #
 # Usage: ./scripts/validate-pkg.sh <package-name>
 #        ./scripts/validate-pkg.sh --all [--online]
+#        ./scripts/validate-pkg.sh --changed <list>
 #
 # --all checks the syntax of every package alone, and with --online the requirements too.
+# --changed checks the syntax of the packages that <list> names, as git diff -z prints them.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -56,6 +58,27 @@ in_words() {
     [[ "$word" != "$1" ]] || return 0
   done
   return 1
+}
+
+# The keys of package file KEYS_FILE, and those of its upstream map after upstream., which
+# validate_pkg reads
+KEYS_FILE=""
+declare -A FILE_KEYS=()
+
+# pkg_get of lib.sh, which prints for a key that KEYS_FILE lacks what yq prints, with no yq
+pkg_get() {
+  local re='^(explode\(\.\) \| )?\.((upstream\.)?[a-z_]+)( \| tag| // "")?$'
+  if [[ "$1" == "$KEYS_FILE" && "$2" =~ $re ]]; then
+    if [[ ! -v "FILE_KEYS[${BASH_REMATCH[2]}]" ]]; then
+      case "${BASH_REMATCH[4]}" in
+        " | tag") echo '!!null' ;;
+        ' // ""') echo ;;
+        *) echo null ;;
+      esac
+      return 0
+    fi
+  fi
+  yq -r "$2" "$1"
 }
 
 # Succeeds when field $2 of package file $1 is missing or a boolean that pkg_bool reads
@@ -346,6 +369,8 @@ validate_pkg() {
   # The messages name the file in the data directory, as the user sees it
   local shown
   shown=$(shown_file "$file")
+  KEYS_FILE=""
+  FILE_KEYS=()
 
   # --- YAML syntax ---
   if ! yq '.' "$file" >/dev/null 2>&1; then
@@ -435,9 +460,10 @@ validate_pkg() {
 
   # --- Keys that no script reads ---
 
-  local keys key unknown=() list strategy_keys where
+  local keys key unknown=() list strategy_keys where text=""
   mapfile -t keys < <(pkg_get "$file" 'keys | .[]')
   for key in "${keys[@]}"; do
+    FILE_KEYS["$key"]=1
     in_words "$key" "$PACKAGE_KEYS" || unknown+=("$key")
   done
   if ((${#unknown[@]} > 0)); then
@@ -452,6 +478,12 @@ validate_pkg() {
     log_err "$shown: upstream must be a map"
     return 1
   fi
+  for key in "${keys[@]}"; do
+    FILE_KEYS["upstream.$key"]=1
+  done
+  # Anchors, aliases, merge keys and tags can bring keys that keys does not list
+  IFS= read -r -d '' text <"$file" || true
+  [[ "$text" == *[\*\&\!]* || "$text" == *"<<"* ]] || KEYS_FILE=$file
   if ((${#keys[@]} > 0)) && ! strategy_keys=$(upstream_keys "$strategy"); then
     log_err "$shown: validate-pkg.sh lists no upstream keys for the strategy $strategy"
     ((errors++))
@@ -1078,16 +1110,151 @@ requirements_ok() {
   return 1
 }
 
+# Check package file number $1 of CHECKED, and its requirements with a non-empty $2, into CHECK_OUT;
+# the exit code goes into a file beside it after the text
+check_package() {
+  local rc=0
+  { validate_pkg "${CHECKED[$1]}" && { [[ -z "$2" ]] || requirements_ok "${CHECKED[$1]}"; }; } >"$CHECK_OUT/$1" 2>&1 || rc=$?
+  printf '%s\n' "$rc" >"$CHECK_OUT/$1.rc.part"
+  mv -- "$CHECK_OUT/$1.rc.part" "$CHECK_OUT/$1.rc"
+}
+
+# Print the text of each check that ended, from number NEXT on and in order, and count failed ones in
+# failed and FAILED_FILES
+print_done() {
+  while ((NEXT < ${#CHECKED[@]})) && [[ -f "$CHECK_OUT/$NEXT.rc" ]]; do
+    cat -- "$CHECK_OUT/$NEXT" >&2
+    if [[ $(<"$CHECK_OUT/$NEXT.rc") != 0 ]]; then
+      failed=$((failed + 1))
+      FAILED_FILES+=("${CHECKED[NEXT]}")
+    fi
+    NEXT=$((NEXT + 1))
+  done
+}
+
+# Set ENDED to the number of checks that wrote their exit code into CHECK_OUT
+ended_checks() {
+  local codes=("$CHECK_OUT"/*.rc)
+  ENDED=0
+  [[ ! -e "${codes[0]}" ]] || ENDED=${#codes[@]}
+}
+
+# Check the files of CHECKED, $1 at a time, and their requirements with a non-empty $2, and start no
+# check after second $3 of the script, when set; LAUNCHED counts the checks started
+check_files() {
+  local i
+  CHECK_OUT=$(mktemp -d)
+  trap 'rm -rf -- "$CHECK_OUT"' EXIT
+  NEXT=0 LAUNCHED=0
+  for i in "${!CHECKED[@]}"; do
+    # Ended checks leave their .rc whatever wait -n saw, and 127 means that no check runs
+    while ended_checks && ((i - ENDED >= $1)); do
+      wait -n || (($? != 127)) || break
+    done
+    [[ -z "$3" ]] || ((SECONDS < $3)) || break
+    check_package "$i" "$2" &
+    LAUNCHED=$((i + 1))
+    print_done
+  done
+  wait
+  print_done
+  # Subshells that end early, as set -u ends them, write no result
+  if ((NEXT < LAUNCHED)); then
+    log_err "$(shown_file "${CHECKED[NEXT]}"): its check ended without a result"
+    exit 1
+  fi
+}
+
 # === MAIN ===
 
-USAGE="Usage: validate-pkg.sh <package-name> | --all [--online]"
-if [[ "${1:-}" == --online || ("${1:-}" == --all && $# -gt 1 && "${2:-}" != --online) || $# -gt 2 ]]; then
+USAGE="Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list> | --requirements <names> [<results>]"
+if [[ "${1:-}" == --online || ("${1:-}" == --all && $# -gt 1 && "${2:-}" != --online) ||
+  ("${1:-}" == --changed && $# -ne 2) || ("${1:-}" == --requirements && ($# -lt 2 || $# -gt 3)) ||
+  ("${1:-}" != --requirements && $# -gt 2) ]]; then
   echo "$USAGE" >&2
   exit 1
 fi
 
-if [[ "${1:-}" == "--all" ]]; then
-  total=0
+# The online check of validate.yml: the packages that file $2 names, one a line, in order
+if [[ "${1:-}" == --requirements ]]; then
+  budget=${AURTOMATOR_VALIDATE_BUDGET:-1200}
+  [[ "$budget" =~ ^[0-9]+$ ]] || {
+    log_err "AURTOMATOR_VALIDATE_BUDGET must be a number of seconds: ${budget@Q}"
+    exit 1
+  }
+  names=()
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]; then
+      log_err "$2: ${name@Q} is no package name"
+      exit 1
+    fi
+    names+=("$name")
+  done <"$2"
+  if ((${#names[@]} == 0)); then
+    log_ok "No package to check"
+    exit 0
+  fi
+  declare -A screened=()
+  if needed=$(aur_screen "$2"); then
+    for name in "${names[@]}"; do
+      screened[$name]=1
+    done
+    while IFS= read -r name; do
+      [[ -z "$name" ]] || unset "screened[$name]"
+    done <<<"$needed"
+  else
+    log_warn "https://aur.archlinux.org/packages-meta-ext-v1.json.gz could not be read, so every package gets the full check"
+  fi
+  CHECKED=()
+  for name in "${names[@]}"; do
+    [[ -z "${screened[$name]:-}" ]] || continue
+    file=$(pkg_file "$name") || exit 1
+    CHECKED+=("$file")
+  done
+  failed=0
+  FAILED_FILES=()
+  check_files 8 1 "$budget"
+  for name in "${CHECKED[@]:LAUNCHED}"; do
+    log_err "$(shown_file "$name"): not checked, as the check of requirements used its $budget s"
+  done
+  # validate.yml reads the names of the file of results
+  if [[ -n "${3:-}" ]]; then
+    {
+      for file in "${FAILED_FILES[@]}"; do
+        file=${file##*/}
+        printf 'failed\t%s\n' "${file%.yml}"
+      done
+      for file in "${CHECKED[@]:LAUNCHED}"; do
+        file=${file##*/}
+        printf 'unchecked\t%s\n' "${file%.yml}"
+      done
+    } >"$3"
+  fi
+  if ((failed > 0 || LAUNCHED < ${#CHECKED[@]})); then
+    log_err "Requirements failed: $failed/${#names[@]} packages have errors, and $((${#CHECKED[@]} - LAUNCHED)) were not checked"
+    exit 1
+  fi
+  log_ok "Requirements of ${#names[@]} packages read: ${#CHECKED[@]} with Python or Ruby in AUR depends"
+  exit 0
+fi
+
+if [[ "${1:-}" == --all || "${1:-}" == --changed ]]; then
+  pkg_files=("${AURTOMATOR_DATA_DIR}"/packages/*.yml)
+  what=packages
+  if [[ "$1" == --changed ]]; then
+    if [[ ! -f "$2" ]]; then
+      log_err "$2: no list of changed files"
+      exit 1
+    fi
+    pkg_files=()
+    what="changed packages"
+    # The list holds paths of the data directory, each ended by a NUL, as git diff -z prints them
+    while IFS= read -r -d '' path; do
+      [[ "$path" == packages/*.yml && "$path" != packages/*/* && "$path" != packages/.* ]] || continue
+      pkg_files+=("${AURTOMATOR_DATA_DIR}/$path")
+    done <"$2"
+  fi
   failed=0
   strays=0
   while IFS= read -r -d '' path; do
@@ -1098,15 +1265,24 @@ if [[ "${1:-}" == "--all" ]]; then
     log_err "packages/$entry: no run reads it, as the runs read the regular files packages/<name>.yml alone"
     ((strays++)) || true
   done < <(find "${AURTOMATOR_DATA_DIR}/packages" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
-  for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
-    [[ -f "$pkg_file" && ! -L "$pkg_file" ]] || continue
-    ((total++)) || true
-    if ! validate_pkg "$pkg_file" || { [[ "${2:-}" == --online ]] && ! requirements_ok "$pkg_file"; }; then
-      ((failed++)) || true
+  CHECKED=()
+  for pkg_file in "${pkg_files[@]}"; do
+    if [[ -f "$pkg_file" && ! -L "$pkg_file" ]]; then
+      CHECKED+=("$pkg_file")
     fi
   done
+  total=${#CHECKED[@]}
+  online=""
+  if [[ "$1" == --all && "${2:-}" == --online ]]; then
+    online=1
+  fi
+  check_files "$(nproc)" "$online" ""
   if [[ "$total" -eq 0 && "$strays" -eq 0 ]]; then
-    log_warn "No packages found in packages/"
+    if [[ "$1" == --changed ]]; then
+      log_ok "No package changed"
+    else
+      log_warn "No packages found in packages/"
+    fi
     exit 0
   fi
   if [[ "$failed" -gt 0 ]]; then
@@ -1114,7 +1290,7 @@ if [[ "${1:-}" == "--all" ]]; then
     exit 1
   fi
   ((strays == 0)) || exit 1
-  log_ok "All $total packages valid"
+  log_ok "All $total $what valid"
   exit 0
 fi
 

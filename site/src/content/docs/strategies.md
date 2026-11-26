@@ -26,7 +26,8 @@ aurtomator has 17 version detection strategies. Pick the one that reads the sour
 
 ## Strategy limitations
 
-- The GitHub strategies send `GITHUB_TOKEN` when it is set. The workflow sets it to the workflow token, which allows 1,000 requests per hour per repository, and local runs without a token get 60. `github-tag` reads tags with `git ls-remote`, outside this limit.
+- The GitHub strategies send `GITHUB_TOKEN` when it is set. The workflow sets it to the workflow token, which allows 1,000 requests per hour per repository, and local runs without a token get 60. `github-tag` reads tags with `git ls-remote`, outside this limit. With a token, `check-all.sh` first reads the releases of the `github-release` packages over GraphQL, which has a budget of its own, 50 repositories in one request: `/releases/latest`, and the release list of each repository with at most 100 releases. The strategy then reads these answers in place of REST requests, and asks REST for what GraphQL did not answer, such as a renamed repository. These answers hold no assets, which `check-asset.sh` reads over REST. Repositories of `github-nightly` packages stay with REST, since that strategy can read the notes of releases in a list. Before every tenth check that asks REST, the check run reads `GET /rate_limit`, which counts against no limit, and gives such packages `unchecked:` once fewer than 400 requests of the hour are left, since `publish` commits and the issues job writes over the same limit.
+- Check runs keep a pace between the requests to each host, as the host states it: one a second to `repology.org` and `crates.io`, ten a second to `rubygems.org`, about eight a second to `gitlab.com`, five a second to hosts that state none, and no pause for `pypi.org`, which asks for none, and `api.github.com`, which counts above. Repology counts more than 1000 requests a day as bulk, so a check run gives the `repology` packages 40 checks and the rest `unchecked:`, and the next run takes the 40 after them, so each package gets its check within a known number of runs. Runs by hand have no run number and take the next 40 each hour.
 - Requests with curl retry timeouts, refused connections and HTTP 408, 429, 500, 502, 503, 504, 522 and 524 answers twice, 5 seconds apart or after the wait of a `Retry-After` header, and start no retry later than 75 seconds after the first attempt. The git calls of `git-latest`, `github-tag` and `git-tag` make one attempt and stop when they receive less than 100 KiB/s for 60 seconds. Checks that fail within their time limit run once more after the other packages and a pause of 60 seconds.
 - Answers can hold at most 50 MB, and `webpage-scrape` pages 5 MB, unless `upstream.max_answer_mb` sets another limit, see [Package YAML](/package-yaml/).
 - Without `tag_version_regex`, the tag strategies keep only tags of the form `v1.2.3` or `1.2.3`, so `latest`, `1.0.0-rc1` and `1.0.0rc1` are left out. They pick the newest version by `vercmp`, the order of pacman, which puts `1.0.0rc1` and `1.0.0-rc1` below `1.0.0`, so regexes that let pre-release tags through pick the release once it is out. Repositories that tag releases `13` and `14` and builds `2026102100` give the build, which `check-all.sh` holds as a version jump, see [Downgrades and version jumps](/features/downgrades/); `tag_version_regex: '^([0-9]{1,3})$'` keeps the releases.
@@ -293,6 +294,8 @@ upstream:
 
 **Upstream:** the GitLab Tags API, `/api/v4/projects/{id}/repository/tags`, on gitlab.com or a self-hosted instance.
 
+**Authentication:** with the secret `GITLAB_TOKEN`, which the calling workflow passes by name as the [Setup](/setup/#the-calling-workflows) page shows, the check job asks gitlab.com for the tags of these packages as root before the checks, with the token as `PRIVATE-TOKEN`, and the strategy reads those answers as `builder`, which never gets the token. GitLab.com then counts the requests of that token apart from the traffic of the address that runners share. Self-hosted instances get no token, and the strategy asks again without the token for tags that root could not fetch or did not reach in the 300 s of its step. Local runs send `GITLAB_TOKEN` of the environment to gitlab.com alone, curl reads it from stdin, so it never appears on a command line, and `check-update.sh` takes it out of the environment of every other strategy. Without the secret, check runs keep the pace of gitlab.com for requests without a token.
+
 **YAML fields:**
 
 | Field | Required | Description |
@@ -475,7 +478,7 @@ upstream:
 
 ### crates
 
-**Upstream:** the crates.io API, `https://crates.io/api/v1/crates/{crate}`. **Version:** `.crate.max_stable_version`, or `.crate.max_version` with `prerelease: true`. The request sends `User-Agent: aurtomator/1.0`, as the crates.io API policy requires.
+**Upstream:** the sparse index of crates.io, `https://index.crates.io/{path}`, where the path is the lower-case crate name under its first letters: `1/a`, `2/ab`, `3/a/abc`, `se/rd/serde`. The index states no rate limit, and the API allows one request a second. **Version:** the newest version by SemVer 2.0 among those not yanked, outside pre-releases, or among all with `prerelease: true`; build metadata after `+` takes no part in the order. The request sends `User-Agent: aurtomator/1.0`.
 
 | Field | Required | Description |
 |---|---|---|

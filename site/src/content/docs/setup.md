@@ -88,6 +88,7 @@ jobs:
       GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
       AUR_GIT_NAME: ${{ secrets.AUR_GIT_NAME }}
       AUR_GIT_EMAIL: ${{ secrets.AUR_GIT_EMAIL }}
+      GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
 
   notify:
     needs: check-updates
@@ -98,7 +99,7 @@ jobs:
       issues: write
 ```
 
-`.github/workflows/validate.yml` runs `validate-pkg.sh --all` on every push to `main` and on pull requests, after the same job `pins`, and reads online what the requires rules need for each package that the push or the pull request adds or changes, and for every package when it moves the pins, see [Add a package](/add-a-package/#3-validate-the-yaml):
+`.github/workflows/validate.yml` runs on every push to `main` and on pull requests, after the same job `pins`. It checks each package that the push or the pull request adds or changes with `validate-pkg.sh`, offline and online for what the requires rules need, and every package when it moves the pins, see [Add a package](/add-a-package/#3-validate-the-yaml):
 
 ```yaml
 name: Validate packages
@@ -133,7 +134,7 @@ jobs:
 
 The pin after `@` is the SHA of an aurtomator release tag, and the comment names the release. The three `uses:` lines of aurtomator carry the same pin. Tags can move and SHAs cannot, so runs always get the code of that release.
 
-`./aurtomator.sh pin vX.Y.Z` moves the three pins to that release, see [The aurtomator.sh script](#the-aurtomatorsh-script). By hand, `git ls-remote https://github.com/staticwire/aurtomator refs/tags/vX.Y.Z` prints the tag SHA for the three lines. Dependabot opens one pull request for the three lines at its next weekly check: the template groups them as `aurtomator` and excludes them from the cooldown. Insights > Dependency graph > Dependabot > "Recent update jobs" > "Check for updates" runs the check at once. Tags of aurtomator stand before their release is published, so `pins` fails on a pull request whose release is still a draft and passes when rerun after the release is published. `Validate packages` checks your packages with the validator of the new release on that pull request. After the merge, `./aurtomator.sh` runs the scripts of the new release, and the first run on the new pin updates `aurtomator.sh` itself.
+`./aurtomator.sh pin vX.Y.Z` moves the three pins to that release, see [The aurtomator.sh script](#the-aurtomatorsh-script). By hand, `git ls-remote https://github.com/staticwire/aurtomator refs/tags/vX.Y.Z` prints the tag SHA for the three lines. Dependabot opens one pull request for the three lines at its next weekly check: the template groups them as `aurtomator` and excludes them from the cooldown. Insights > Dependency graph > Dependabot > "Recent update jobs" > "Check for updates" runs the check at once. Tags of aurtomator stand before their release is published, so `pins` fails on a pull request whose release is still a draft and passes when rerun after the release is published. `Validate packages` checks your packages with the validator of the new release on that pull request. Packages that the pull request does not change and whose requirements the requires rules of the new release cannot read get a warning on their file, and the check passes, since they met the rules of the release before; their next new version fails its check until the YAML gains the key that the log of the step names. After the merge, `./aurtomator.sh` runs the scripts of the new release, and the first run on the new pin updates `aurtomator.sh` itself.
 
 GitHub serves commits of any aurtomator fork under the name `staticwire/aurtomator` too, so pins can name code that no release holds, and the jobs on GitHub run that code with the secrets of your repository. Job `pins` runs `./aurtomator.sh check-pins` with the token of the run, see [The aurtomator.sh script](#the-aurtomatorsh-script), and fails when an aurtomator pin in the two files is not the commit of the release its comment names, or when GitHub shows no published release of that tag. Job `image` of both called workflows checks the release of its own commit as well, with the token of the run. `check-updates` and `validate` start only after `pins` passes. Pull requests with such a pin therefore fail their checks, and scheduled runs with one stop before any job gets the secrets. Pull requests run `pins` with their own `aurtomator.sh` and workflows, so changes to these files can skip the check, see [Pull requests to your repository](#pull-requests-to-your-repository). `notify` runs without the secrets and opens the issue of the failed run. `./aurtomator.sh` makes the same check before it fetches a pin.
 
@@ -241,6 +242,7 @@ In your repository, open Settings > Secrets and variables > Actions > New reposi
 | `AUR_GIT_EMAIL` | your email, as `jane@example.com` |
 | `AUR_SSH_KEY` | whole private key, `~/.ssh/aur_ed25519` |
 | `GPG_SIGNING_KEY` | with GPG signing: the output of `gpg --export-secret-subkeys --armor '<subkey-id>!'` |
+| `GITLAB_TOKEN` | optional, for `gitlab-tag` packages on gitlab.com: a GitLab personal access token with the scope `read_api` and an expiry date. The check job sends it to gitlab.com as root, in a step that reads none of the answers |
 
 That GPG output works in CI only for keys without a passphrase. For keys with one, `./aurtomator.sh setup gpg secrets` prints a copy without it, see [Passphrase stripping](/gpg-signing/#passphrase-stripping-3-pinentry-dialogs).
 

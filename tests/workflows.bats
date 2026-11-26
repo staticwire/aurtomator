@@ -143,13 +143,14 @@ secret_lines() {
     secret_lines "$workflow"
   done >"$BATS_TEST_TMPDIR/actual"
   printf '%s\n' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN' \
     'check-updates.yml publish/Setup workspace AUR_GIT_NAME' \
     'check-updates.yml publish/Setup workspace AUR_GIT_EMAIL' \
     'check-updates.yml publish/Setup AUR SSH AUR_SSH_KEY' \
     'check-updates.yml publish/Setup GPG GPG_SIGNING_KEY' \
     'check-updates.yml publish/Publish updates AUR_GIT_NAME' \
     'check-updates.yml publish/Publish updates AUR_GIT_EMAIL' \
-    'check-updates.yml 6' \
+    'check-updates.yml 7' \
     'ci.yml merge-image/Merge image update CI_IMAGE_AUTO_MERGE' \
     'ci.yml 1' \
     'codeql.yml 0' \
@@ -175,7 +176,7 @@ secret_lines() {
     printf '%s %s\n' "${workflow##*/}" "$(yq -o=json -I=0 '.on' "$workflow")"
   done >"$BATS_TEST_TMPDIR/actual"
   printf '%s\n' \
-    'check-updates.yml {"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false}}}}' \
+    'check-updates.yml {"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN":{"required":false}}}}' \
     'ci.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"workflow_dispatch":null}' \
     'codeql.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"schedule":[{"cron":"41 3 * * 1"}]}' \
     'docs.yml {"push":{"branches":["main"],"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"pull_request":{"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"workflow_dispatch":null}' \
@@ -1337,10 +1338,10 @@ action_run() {
   [ "$output" = "::error::Start the run from a branch: it commits its results to the branch it runs on" ]
 }
 
-@test "check-updates: runs only when called, with the four secrets optional" {
+@test "check-updates: runs only when called, with the five secrets optional" {
   run yq -o=json -I=0 '.on' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false}}}}' ]
+  [ "$output" = '{"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN":{"required":false}}}}' ]
   run yq '.concurrency' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [ "$output" = "null" ]
@@ -1538,6 +1539,38 @@ run_decide_step() {
   run run_decide_step pkg=up_to_date
   [ "$status" -eq 0 ]
   [ "$output" = $'prepare=false\nwork=false\npackages=false\nto-prepare=[]\nrules=false\nto-rules=[]' ]
+}
+
+# Past the limit of the README a status can change on a page of the package table alone, such as the
+# date of a cooldown
+@test "check-updates: Decide publishes a changed, new or removed page of the package table" {
+  local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results" case
+  for case in same changed new removed; do
+    rm -rf "$ws" "$results"
+    mkdir -p "$ws/table" "$results/table"
+    echo "page a" >"$ws/table/a.md"
+    echo "page a" >"$results/table/a.md"
+    echo notes >"$ws/table/notes.txt"
+    case $case in
+      changed) echo "new page a" >"$results/table/a.md" ;;
+      new) echo "page b" >"$results/table/b.md" ;;
+      removed) echo "page c" >"$ws/table/c.md" ;;
+    esac
+    run run_decide_step pkg="cooldown: 2026-11-12"
+    [ "$status" -eq 0 ]
+    if [[ "$case" == same ]]; then
+      [[ "$output" == *$'\nwork=false\n'* ]]
+    else
+      [[ "$output" == *$'\nwork=true\n'* ]] || {
+        echo "no publish for a $case page"
+        return 1
+      }
+    fi
+  done
+  # Without the copy of README.md, the run wrote no page
+  rm -f "$results/README.md"
+  NO_README_COPY=1 run run_decide_step pkg="cooldown: 2026-11-12"
+  [[ "$output" == *$'\nwork=false\n'* ]]
 }
 
 @test "check-updates: Decide counts a missing copy of the README as unchanged" {
@@ -2157,16 +2190,38 @@ builder_steps() {
   [ "${#lines[@]}" -eq 5 ]
 }
 
+# builder parses the answers of upstreams in check, so the token stays with root, which parses none
+@test "check-updates: root fetches the GitLab tags with GITLAB_TOKEN before builder checks" {
+  local step='.jobs.check.steps[] | select(.name == "Fetch GitLab tags")' ws="$BATS_TEST_TMPDIR/ws"
+  run yq -o=json -I=0 "$step | [.id, .env]" "$CHECK_UPDATES"
+  [ "$output" = '["gitlab",{"GITLAB_TOKEN":"${{ secrets.GITLAB_TOKEN }}"}]' ]
+  [ "$(step_index check "Add builder")" -lt "$(step_index check "Fetch GitLab tags")" ]
+  [ "$(step_index check "Fetch GitLab tags")" -lt "$(step_index check "Check updates")" ]
+  run yq '.jobs.check.steps[] | select(.name == "Check updates") | .with.gitlab' "$CHECK_UPDATES"
+  [ "$output" = /data/gitlab ]
+  # The seconds of the step count in the budget of the checks
+  run yq '.jobs.check.steps[] | select(.name == "Check updates") | .env.AURTOMATOR_CHECK_SPENT' "$CHECK_UPDATES"
+  [ "$output" = '${{ steps.gitlab.outputs.spent }}' ]
+  mkdir -p "$ws/aurtomator/scripts"
+  printf '%s\n' 'gitlab_prefetch() { printf "%s\n" "$*" >"$CALLS"; }' >"$ws/aurtomator/scripts/lib.sh"
+  step_run check "Fetch GitLab tags" >"$BATS_TEST_TMPDIR/step.sh"
+  run env -C "$ws" CALLS="$BATS_TEST_TMPDIR/calls" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
+    bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/calls")" = "/data/gitlab packages/*.yml" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/output")" = "spent=0" ]
+}
+
 @test "run-as-builder: takes its inputs through the environment" {
   run yq -o=json -I=0 '.runs.steps[0].env' "$BUILDER_ACTION"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"ARGS":"${{ inputs.args }}","COMPANIONS":"${{ inputs.companions }}","HANDOFF":"${{ inputs.handoff }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","STATUSES":"${{ inputs.statuses }}","WORK":"/work"}' ]
+  [ "$output" = '{"ARGS":"${{ inputs.args }}","COMPANIONS":"${{ inputs.companions }}","GITLAB_ANSWERS":"${{ inputs.gitlab }}","HANDOFF":"${{ inputs.handoff }}","KEEP_ENV":"${{ inputs.keep-env }}","PACKAGE":"${{ inputs.package }}","README_TOO":"${{ inputs.readme }}","STATUSES":"${{ inputs.statuses }}","WORK":"/work"}' ]
   run yq '.inputs.readme.default' "$BUILDER_ACTION"
   [ "$output" = "false" ]
   run yq '.inputs.companions.default' "$BUILDER_ACTION"
   [ "$output" = "false" ]
   local input
-  for input in package statuses handoff; do
+  for input in package statuses handoff gitlab; do
     run yq ".inputs.$input.default" "$BUILDER_ACTION"
     [ "$output" = "" ]
   done
@@ -2177,7 +2232,7 @@ builder_steps() {
 # their calls
 run_builder_step() {
   local bin="$BATS_TEST_TMPDIR/bin" ws="$BATS_TEST_TMPDIR/ws" step=".jobs.$1.steps[] | select(.name == \"$2\")" args keep readme package
-  local statuses handoff companions
+  local statuses handoff companions gitlab
   local action_dir="$BATS_TEST_TMPDIR/ws/aurtomator/.github/actions/run-as-builder"
   mkdir -p "$bin" "$action_dir"
   printf '#!/bin/sh\necho "$*" >>"$CALL_LOGS/chown.log"\n' >"$bin/chown"
@@ -2212,13 +2267,15 @@ EOF
   package=${PACKAGE_INPUT-$package}
   statuses=$(yq "$step | .with.statuses // \"\"" "$CHECK_UPDATES")
   handoff=$(yq "$step | .with.handoff // \"\"" "$CHECK_UPDATES")
+  gitlab=$(yq "$step | .with.gitlab // \"\"" "$CHECK_UPDATES")
   statuses=${statuses/#\/data\//$BATS_TEST_TMPDIR/data/}
   handoff=${handoff/#\/data\//$BATS_TEST_TMPDIR/data/}
+  gitlab=${gitlab/#\/data\//$BATS_TEST_TMPDIR/data/}
   rm -f "$SUDO_LOG"
   run env -C "$ws" PATH="$bin:$PATH" GITHUB_WORKSPACE="$ws" CALL_LOGS="$BATS_TEST_TMPDIR" \
     GITHUB_ACTION_PATH="${ACTION_PATH:-$action_dir}" SUDO_LOG="$SUDO_LOG" TEST_X_RC="${TEST_X_RC:-0}" \
     ARGS="$args" KEEP_ENV="$keep" PACKAGE="$package" README_TOO="$readme" COMPANIONS="$companions" WORK="$BATS_TEST_TMPDIR/work" \
-    STATUSES="$statuses" HANDOFF="$handoff" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+    STATUSES="$statuses" HANDOFF="$handoff" GITLAB_ANSWERS="$gitlab" bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # Prints the command lines that sudo recorded, without the environments
@@ -2230,7 +2287,7 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
     "rules${tab}Run the requires rules${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --rules rules cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
@@ -2376,6 +2433,27 @@ make_builder_inputs() {
   [ "$status" -eq 0 ]
   [ -d "$work" ]
   [ -z "$(ls -A "$work")" ]
+}
+
+# Root fetched the answers of GitLab.com with GITLAB_TOKEN, and each is named by the SHA-256 of its URL
+@test "run-as-builder: gives builder the GitLab answers named by 64 hex digits alone" {
+  local work="$BATS_TEST_TMPDIR/work" gl="$BATS_TEST_TMPDIR/data/gitlab" key big
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  make_builder_inputs
+  key=$(printf 'a%.0s' {1..64})
+  big=$(printf 'c%.0s' {1..64})
+  mkdir -p "$gl/$(printf 'd%.0s' {1..64})"
+  echo '[]' >"$gl/$key"
+  echo '[]' >"$gl/${key}0"
+  echo '[]' >"$gl/.part.x"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$gl/$(printf 'b%.0s' {1..64})"
+  truncate -s $((16 * 1024 * 1024 + 1)) "$gl/$big"
+  SUDO_OUT=ok run_builder_step check "Check updates"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::.gitlab/$big is larger than 16777216 bytes"* ]]
+  run bash -c 'cd "$1/.gitlab" && find . -mindepth 1' _ "$work"
+  [ "$output" = "./$key" ]
+  [ "$(stat -c %a "$work/.gitlab/$key")" = 644 ]
 }
 
 # check-all.sh and update-readme.sh then fail the YAML by its file name, so its issues stay open
@@ -2636,7 +2714,8 @@ run_add_builder_step() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   [ "$(cat "$CALLS/useradd")" = "-m -u 2000 builder" ]
-  [ "$(cat "$CALLS/find")" = "/__w /__e /__t ( -user builder -o -group builder ) -print -quit" ]
+  # Close files to builder closes the tool cache, so the search reads /__t and nothing under it
+  [ "$(cat "$CALLS/find")" = "/__w /__e /__t ( -user builder -o -group builder ) -print -quit -o -path /__t -prune" ]
 }
 
 @test "check-updates: Add builder fails when the uid of builder is taken" {
@@ -2917,6 +2996,30 @@ make_handoff() {
   [ "$(stat -c %a "$results")" = "700" ]
 }
 
+# update-readme.sh writes a page of the package table for each first letter past the limit of the README
+@test "check-updates: Hand over copies the pages of the package table alone" {
+  local work="$BATS_TEST_TMPDIR/work" results="$BATS_TEST_TMPDIR/results"
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  mkdir -p "$work/table/sub"
+  for page in a.md 0-9.md z.md A.md ab.md notes.txt sub/b.md; do
+    echo "page $page" >"$work/table/$page"
+  done
+  ln -s "$BATS_TEST_TMPDIR/secret" "$work/table/c.md"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  run env LC_ALL=C ls -A "$results/table"
+  [ "$output" = $'0-9.md\na.md\nz.md' ]
+  [ "$(<"$results/table/a.md")" = "page a.md" ]
+  # A link to the directory reaches nothing
+  rm -rf "$work/table" "$results"
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+  echo "page" >"$BATS_TEST_TMPDIR/elsewhere/a.md"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$work/table"
+  run_hand_over_step
+  [ "$status" -eq 0 ]
+  [ ! -e "$results/table" ]
+}
+
 # builder no longer runs, and it reads each file, so a link swapped in
 # after the test reaches nothing that builder cannot read
 @test "check-updates: Hand over reads every file as builder" {
@@ -3087,6 +3190,7 @@ run_stats_step() {
 # $GH_TITLES and logs to $GH_LOG, and the issue functions log to $BODY_LOG
 run_issue_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
+  rm -rf "$ws/.status"
   mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
   printf 'set -euo pipefail\nsource %q\n' "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" >"$ws/aurtomator/scripts/lib.sh"
   cat >>"$ws/aurtomator/scripts/lib.sh" <<'EOF'
@@ -3100,7 +3204,6 @@ host_issue_body() {
 }
 arch_issue_body() { echo "arch_issue_body $*" >>"$BODY_LOG" && echo body; }
 EOF
-  rm -f "$ws/.status/_hosts"
   for pair in "$@"; do
     # Each failed check adds its line to _hosts
     if [[ "${pair%%=*}" == _hosts ]]; then
@@ -3129,6 +3232,10 @@ if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_FAIL_HOST:-}" && "$*" == *" p
   printf 'GraphQL: body is too long (maximum is 65536 characters)\n' >&2
   exit 1
 fi
+if [[ "$1 $2" == "issue view" ]]; then
+  printf '%s\n' "${GH_BODY:-}"
+  exit 0
+fi
 [[ "$1 $2" == "issue list" ]] || exit 0
 [[ -z "${GH_FAIL:-}" ]] || exit 1
 limit=30 jq_expr="" emoji=""
@@ -3142,7 +3249,8 @@ while (($#)); do
         update-held) emoji="✋" ;;
         update-notice) emoji="🔔" ;;
         aurtomator-update) emoji="🚀" ;;
-        arch-missing) emoji="⚠️" ;;
+        arch-missing) emoji="⚠️ [a-z0-9]" ;;
+        missing-key) emoji="⚠️ Packages" ;;
       esac
       shift
       ;;
@@ -3152,6 +3260,8 @@ done
 titles=$(grep "^$emoji" <<<"${GH_TITLES:-}" | head -n "$limit") || true
 case "$jq_expr" in
   ".[].title") [[ -z "$titles" ]] || printf '%s\n' "$titles" ;;
+  # Issue numbers start at 41
+  '.[] | "\(.number) \(.title)"') [[ -z "$titles" ]] || awk '{ print NR + 40 " " $0 }' <<<"$titles" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -3163,11 +3273,49 @@ EOF
   : >"$GH_LOG"
   : >"$BODY_LOG"
   : >"$GH_BODY_LOG"
+  rm -rf "$BATS_TEST_TMPDIR/runner-temp" "$BATS_TEST_TMPDIR/summary"
+  mkdir -p "$BATS_TEST_TMPDIR/runner-temp"
   step_run issues "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GH_CREATE_FAIL_HOST="${GH_CREATE_FAIL_HOST:-}" GITHUB_REPOSITORY=owner/fork \
-    GH_BODY_LOG="$GH_BODY_LOG" BIG_BODY="${BIG_BODY:-}" RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
+    GH_BODY_LOG="$GH_BODY_LOG" BIG_BODY="${BIG_BODY:-}" GH_BODY="${GH_BODY:-}" RUN_URL=https://example.invalid/run \
+    RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
+    GITHUB_RUN_NUMBER=7 GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" sh -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+# The list of every check run opens, edits or closes one issue
+@test "check-updates: keeps one issue for the packages whose YAML names no source of their requirements" {
+  local title="⚠️ Packages need a python or ruby key" body
+  run_issue_step _requirements=$'foo\tpython'
+  [ "$status" -eq 0 ]
+  grep -qxF "issue create --title $title --label missing-key --body-file -" "$GH_LOG"
+  # An open issue with the same list stays as it is
+  printf 'foo\tpython\n' >"$BATS_TEST_TMPDIR/req"
+  body=$(bash -c 'source "$1" && requirements_issue_body "$2"' _ "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" "$BATS_TEST_TMPDIR/req")
+  GH_BODY=$body GH_TITLES="$title" run_issue_step _requirements=$'foo\tpython'
+  [ "$status" -eq 0 ]
+  no_call '^issue create'
+  no_call '^issue edit'
+  no_call '^issue close'
+  # Another list edits it
+  GH_BODY=$body GH_TITLES="$title" run_issue_step _requirements=$'foo\tpython\nbar\truby'
+  [ "$status" -eq 0 ]
+  grep -qxF "issue edit 41 --body-file -" "$GH_LOG"
+  no_call '^issue create'
+  no_call '^issue close'
+  # An empty list closes it, and a run without the list leaves it
+  GH_BODY=$body GH_TITLES="$title" run_issue_step _requirements=
+  [ "$status" -eq 0 ]
+  grep -qxF "issue close 41 --comment No package misses the source of its requirements in https://example.invalid/run." "$GH_LOG"
+  GH_BODY=$body GH_TITLES="$title" run_issue_step foo=up_to_date
+  [ "$status" -eq 0 ]
+  no_call missing-key
+  no_call '^issue close'
+  # Repositories with Issues turned off get the notice of every issue step
+  GH_HAS_ISSUES=false run_issue_step _requirements=$'foo\tpython'
+  [ "$status" -eq 0 ]
+  [ "$output" = "::notice::Issues are disabled in owner/fork, so the run opens no issue" ]
 }
 
 @test "check-updates: an open issue of another package holds back no issue" {
@@ -3485,13 +3633,13 @@ host_failures() {
 # issues of $GH_OPEN and logs to $GH_LOG, and the issue functions log to $BODY_LOG
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
+  rm -rf "$ws/.status"
   mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
   printf 'set -euo pipefail\nsource %q\n' "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" >"$ws/aurtomator/scripts/lib.sh"
   cat >>"$ws/aurtomator/scripts/lib.sh" <<'EOF'
 close_comment() { echo "close_comment $*" >>"$BODY_LOG" && echo comment; }
 arch_close_comment() { echo "arch_close_comment $*" >>"$BODY_LOG" && echo comment; }
 EOF
-  rm -f "$ws/.status/_hosts"
   for pair in "$@"; do
     # Each failed check adds its line to _hosts
     if [[ "${pair%%=*}" == _hosts ]]; then
@@ -3527,6 +3675,10 @@ case "$cmd" in
     json=$({ grep "^[0-9]* $emoji" <<<"${GH_OPEN:-}" || true; } | head -n "$limit" |
       jq -Rn '[inputs | capture("^(?<number>[0-9]+) (?<title>.*)$") | .number |= tonumber]')
     ;;
+  "issue view")
+    [[ -z "${GH_VIEW_FAIL:-}" ]] || exit 1
+    json=$(jq -n --arg b "${GH_BODY:-}" '{body: $b}')
+    ;;
   *) exit 0 ;;
 esac
 if [[ -n "$filter" ]]; then
@@ -3541,8 +3693,11 @@ EOF
   : >"$GH_LOG"
   : >"$BODY_LOG"
   step_run issues "${CLOSE_STEP:-Close resolved issues}" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" \
-    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" \
+  rm -rf "$BATS_TEST_TMPDIR/runner-temp"
+  mkdir -p "$BATS_TEST_TMPDIR/runner-temp"
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" GH_VIEW_FAIL="${GH_VIEW_FAIL:-}" \
+    GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" GH_BODY="${GH_BODY:-}" \
+    RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
@@ -3808,6 +3963,34 @@ no_commit() {
   [ "$status" -eq 0 ]
   jq -e '[.tree[].path] == ["README.md", "stats/events.csv", "stats/card.svg", "stats/card-dark.svg"]' "$GH_LOG.tree"
   grep -qF -- "-f message=chore: update package statuses [skip ci] " "$GH_LOG"
+}
+
+# update-readme.sh writes table/<letter>.md past the limit of the README, and none under it
+@test "check-updates: the commit step adds, changes and removes the pages of the package table" {
+  local ws="$BATS_TEST_TMPDIR/ws"
+  make_commit_repo README.md="short table" table/a.md="page a" table/b.md="new page b"
+  mkdir "$ws/table"
+  echo "old page b" >"$ws/table/b.md"
+  echo "old page c" >"$ws/table/c.md"
+  echo "notes" >"$ws/table/notes.txt"
+  git -C "$ws" add table
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m pages
+  echo other >"$BATS_TEST_TMPDIR/results/table/notes.txt"
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[] | [.path, .sha == null]] == [["README.md", false], ["table/a.md", false], ["table/b.md", false], ["table/c.md", true]]' \
+    "$GH_LOG.tree"
+  # Runs without the copy of README.md wrote no pages, so they remove none
+  rm -rf "$ws" "$BATS_TEST_TMPDIR/results"
+  make_commit_repo packages/foo.yml="current: 2.0"
+  rm "$BATS_TEST_TMPDIR/results/README.md"
+  mkdir "$ws/table"
+  echo "old page c" >"$ws/table/c.md"
+  git -C "$ws" add table
+  git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m pages
+  run_commit_step
+  [ "$status" -eq 0 ]
+  jq -e '[.tree[].path] == ["packages/foo.yml"]' "$GH_LOG.tree"
 }
 
 @test "check-updates: a commit of stats/ alone is a commit of the statistics" {
@@ -4177,6 +4360,86 @@ run_bare_issues_step() {
   [ "$status" -eq 0 ]
   run grep -c '^issue close' "$GH_LOG"
   [ "$output" = "0" ]
+}
+
+# The body of the issue holds at most HOST_BODY_MAX characters, and the run summary every package
+@test "check-updates: lists every package without a key in the run summary when its issue has no room" {
+  local i list=""
+  for i in $(seq 1 1000); do
+    list+="p$i"$'\t'"python"$'\n'
+  done
+  run_issue_step _requirements="${list%$'\n'}"
+  [ "$status" -eq 0 ]
+  grep -qxF -- '- `p1000`: python' "$BATS_TEST_TMPDIR/summary"
+  [ "$(grep -c '^- `p' "$BATS_TEST_TMPDIR/summary")" = 1000 ]
+  run_issue_step _requirements=$'p1\tpython'
+  [ ! -e "$BATS_TEST_TMPDIR/summary" ]
+}
+
+# GitHub allows 500 writes of content an hour, and no failed package goes unreported
+@test "check-updates: puts the failed packages past the writes of the run into one issue" {
+  ISSUE_WRITE_MAX=3 run_issue_step a="check_failed: boom a" b="check_failed: boom b" c="check_failed: \`boom\` @octocat" \
+    d="update_failed: boom d"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^issue create' "$GH_LOG" | sed 's/ --label.*//')" = $'issue create --title ❌ a: check failed\nissue create --title ❌ b: check failed\nissue create --title ❌ 2 failed packages of run 7' ]
+  # The run summary holds the whole text of each of them
+  grep -qF 'failure_issue_body .status/c' "$BATS_TEST_TMPDIR/body.log"
+  grep -qF 'failure_issue_body .status/d' "$BATS_TEST_TMPDIR/body.log"
+  grep -qx body "$BATS_TEST_TMPDIR/summary"
+}
+
+# The issue of a run closes once each of its packages recovered or has an issue of its own
+@test "check-updates: closes the issue of the failed packages of a run once each has recovered or its own issue" {
+  local group=$'- `c`: `boom`\n- `d`: `boom`'
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7\n6 ❌ d: check failed' \
+    run_close_step c=up_to_date d="check_failed: boom"
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 5 --comment Each package of this issue recovered or has an issue of its own in https://example.invalid/run.' "$GH_LOG"
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="check_failed: boom"
+  no_call '^issue close 5'
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="unchecked: out of time"
+  no_call '^issue close 5'
+  # Cut issues name some of their packages, so they close once no package fails without an issue
+  local cut=$'- `c`: `boom`\n- and 2 more packages, which the run summary of the step Create issues lists'
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="check_failed: boom"
+  no_call '^issue close 5'
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="unchecked: out of time"
+  no_call '^issue close 5'
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7\n6 ❌ e: check failed' run_close_step c=up_to_date e="check_failed: boom"
+  grep -q '^issue close 5' "$GH_LOG"
+  # Unread bodies stop the step and close nothing
+  GH_VIEW_FAIL=1 GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d=up_to_date
+  [ "$status" -ne 0 ]
+  no_call '^issue close 5'
+  # Closes past the writes of the run wait for the next run
+  GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' ISSUE_WRITE_MAX=1 run_close_step foo=up_to_date bar=up_to_date
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^issue close' "$GH_LOG")" = 1 ]
+}
+
+# Repositories of 3000 packages can hold more than 1000 open issues of one label
+@test "check-updates: the issue steps read every open issue of a label" {
+  local i open="" titles=""
+  for i in $(seq 1 1000); do
+    open+="$i ❌ p$i: check failed"$'\n'
+    titles+="❌ p$i: check failed"$'\n'
+  done
+  GH_OPEN="${open}1001 ❌ foo: check failed" run_close_step foo=up_to_date
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 1001 --comment comment' "$GH_LOG"
+  GH_TITLES="${titles}❌ foo: check failed" run_issue_step foo="check_failed: boom"
+  [ "$status" -eq 0 ]
+  ! grep -q '^issue create' "$GH_LOG"
+}
+
+# Anyone can open an issue in a public repository, and each issue looks up the package its title names
+@test "check-updates: reads the package from the title of each issue" {
+  GH_OPEN=$'12 ❌ g++: check failed\n13 ❌ foo: check failed: again\n14 ❌ $(touch x): check failed\n15 ❌ ../foo: check failed\n16 ❌  foo: check failed\n17 ❌ foo:check failed\n18 Foo: ❌ foo: check failed\n19 ❌ foo: check failed' \
+    run_close_step foo=up_to_date g++=up_to_date
+  [ "$status" -eq 0 ]
+  run grep '^issue close' "$GH_LOG"
+  [ "$output" = $'issue close 12 --comment comment\nissue close 19 --comment comment' ]
+  [ ! -e "$BATS_TEST_TMPDIR/ws/x" ]
 }
 
 @test "check-updates: a run without a failed job closes the issue of a failed run" {
@@ -4565,11 +4828,11 @@ run_summary_step() {
 close_files_step() {
   local mnt="$BATS_TEST_TMPDIR/mnt"
   action_run add-builder "Close files to builder" |
-    sed -e "s|for dir in /__t /github/home /github/workflow;|for dir in $mnt/t $mnt/home $mnt/workflow;|" \
-      -e "s|for dir in /github/home /github/workflow \"\$RUNNER_TEMP\";|for dir in $mnt/home $mnt/workflow $mnt/temp;|" \
+    sed -e "s|for dir in /github/home /github/workflow;|for dir in $mnt/home $mnt/workflow;|" \
+      -e "s|for dir in /__t /github/home /github/workflow \"\$RUNNER_TEMP\";|for dir in $mnt/t $mnt/home $mnt/workflow $mnt/temp;|" \
       >"$BATS_TEST_TMPDIR/step.sh"
-  grep -qF "for dir in $mnt/t $mnt/home $mnt/workflow;" "$BATS_TEST_TMPDIR/step.sh"
-  grep -qF "for dir in $mnt/home $mnt/workflow $mnt/temp;" "$BATS_TEST_TMPDIR/step.sh"
+  grep -qF "for dir in $mnt/home $mnt/workflow;" "$BATS_TEST_TMPDIR/step.sh"
+  grep -qF "for dir in $mnt/t $mnt/home $mnt/workflow $mnt/temp;" "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # PKGBUILD code of prepare runs as builder, which needs aurtomator/ alone
@@ -4609,24 +4872,26 @@ close_files_step() {
   [ "$status" -eq 0 ]
   run stat -c '%n %a' "$mnt/t" "$mnt/t/node" "$mnt/t/node/bin" "$mnt/t/node/bin/node" "$mnt/home" \
     "$mnt/workflow" "$mnt/workflow/event.json" "$outside"
-  [ "$output" = "$(printf '%s\n' "$mnt/t 755" "$mnt/t/node 755" "$mnt/t/node/bin 755" "$mnt/t/node/bin/node 644" \
+  # The step closes the tool cache as a whole and walks none of its files, as the walk took seconds
+  [ "$output" = "$(printf '%s\n' "$mnt/t 700" "$mnt/t/node 777" "$mnt/t/node/bin 775" "$mnt/t/node/bin/node 666" \
     "$mnt/home 700" "$mnt/workflow 700" "$mnt/workflow/event.json 644" "$outside 666")" ]
 }
 
-# The event of the run, the home of the steps, and the step scripts and file commands in
-# RUNNER_TEMP stay with root, which still reads and writes them
-@test "check-updates: Close files to builder takes every right of group and others from the event, home and temp" {
+# The tool cache, the event of the run, the home of the steps, and the step scripts and file commands
+# in RUNNER_TEMP stay with root, which still reads and writes them
+@test "check-updates: Close files to builder takes every right of group and others from the tool cache, event, home and temp" {
   local ws="$BATS_TEST_TMPDIR/ws" mnt="$BATS_TEST_TMPDIR/mnt"
-  mkdir -p "$ws" "$mnt/home" "$mnt/workflow" "$mnt/temp/_runner_file_commands"
+  mkdir -p "$ws" "$mnt/t/node" "$mnt/home" "$mnt/workflow" "$mnt/temp/_runner_file_commands"
   echo event >"$mnt/workflow/event.json"
   echo "set -e" >"$mnt/temp/step.sh"
-  chmod 0755 "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands"
+  chmod 0755 "$mnt/t" "$mnt/t/node" "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands"
   chmod 0644 "$mnt/workflow/event.json" "$mnt/temp/step.sh"
   close_files_step
   run env -C "$ws" DATA="$BATS_TEST_TMPDIR/data" RUNNER_TEMP="$mnt/temp" sh -e "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
-  run stat -c '%n %a' "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands" "$mnt/temp/step.sh"
-  [ "$output" = "$(printf '%s\n' "$mnt/home 700" "$mnt/workflow 700" "$mnt/temp 700" \
+  run stat -c '%n %a' "$mnt/t" "$mnt/t/node" "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands" \
+    "$mnt/temp/step.sh"
+  [ "$output" = "$(printf '%s\n' "$mnt/t 700" "$mnt/t/node 755" "$mnt/home 700" "$mnt/workflow 700" "$mnt/temp 700" \
     "$mnt/temp/_runner_file_commands 755" "$mnt/temp/step.sh 644")" ]
 }
 
@@ -4896,7 +5161,7 @@ EOF
     {"name":"pins","conclusion":"cancelled","runner_name":"GitHub Actions 2","started_at":"2026-11-13T09:55:00Z","completed_at":"2026-11-13T09:59:10Z"},
     {"name":"check-updates / check","conclusion":"cancelled","runner_name":"GitHub Actions 3","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:30:40Z"},
     {"name":"check-updates / prepare (demo)","conclusion":"cancelled","runner_name":"GitHub Actions 4","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:02:00Z"},
-    {"name":"check-updates / status","conclusion":"cancelled","runner_name":"GitHub Actions 5","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:09:10Z"}]}' run_notify_step
+    {"name":"check-updates / status","conclusion":"cancelled","runner_name":"GitHub Actions 5","started_at":"2026-11-13T10:00:00Z","completed_at":"2026-11-13T10:19:10Z"}]}' run_notify_step
   [ "$status" -eq 0 ]
   grep -qF 'failed in `pins`, `check-updates / check`, `check-updates / status`.' "$GH_LOG"
   grep -q -- '--paginate' "$GH_LOG"
@@ -5166,39 +5431,48 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   [ "$output" = '[{"persist-credentials":false,"fetch-depth":0},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
   run yq '.jobs.packages.steps[] | select(has("run")) | .run' "$VALIDATE"
   [ "$status" -eq 0 ]
-  grep -qxF './aurtomator/scripts/validate-pkg.sh --all || rc=$?' <<<"$output"
+  grep -qxE ' *\./aurtomator/scripts/validate-pkg\.sh --all \|\| rc=\$\?' <<<"$output"
+  grep -qxE ' *\./aurtomator/scripts/validate-pkg\.sh --changed "\$RUNNER_TEMP/changed" \|\| rc=\$\?' <<<"$output"
 }
 
 # File names of a pull request can hold a line break and a workflow command
 @test "validate: no line of validate-pkg.sh --all reaches the runner as a command" {
-  local ws="$BATS_TEST_TMPDIR/ws" rc
+  local ws="$BATS_TEST_TMPDIR/ws" rc all args
   mkdir -p "$ws/aurtomator/scripts"
-  printf '#!/bin/sh\necho "::notice title=forged::text"\n[ "$1" = --all ] || exit 2\nexit "$TEST_RC"\n' \
+  printf '#!/bin/sh\necho "::notice title=forged::text"\n[ "$*" = "$TEST_ARGS" ] || exit 2\nexit "$TEST_RC"\n' \
     >"$ws/aurtomator/scripts/validate-pkg.sh"
   chmod +x "$ws/aurtomator/scripts/validate-pkg.sh"
   yq '.jobs.packages.steps[] | select(.name == "Validate packages") | .run' "$VALIDATE" >"$BATS_TEST_TMPDIR/step.sh"
-  for rc in 0 1; do
-    run env -C "$ws" TEST_RC="$rc" bash -e "$BATS_TEST_TMPDIR/step.sh"
-    [ "$status" -eq "$rc" ]
-    [ "${#lines[@]}" -eq 3 ]
-    [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
-    [ "${lines[1]}" = "::notice title=forged::text" ]
-    [ "${lines[2]}" = "::${BASH_REMATCH[1]}::" ]
+  for all in true false; do
+    args=--all
+    [[ "$all" == true ]] || args="--changed $BATS_TEST_TMPDIR/changed"
+    for rc in 0 1; do
+      run env -C "$ws" ALL="$all" RUNNER_TEMP="$BATS_TEST_TMPDIR" TEST_ARGS="$args" TEST_RC="$rc" \
+        bash -e "$BATS_TEST_TMPDIR/step.sh"
+      [ "$status" -eq "$rc" ]
+      [ "${#lines[@]}" -eq 3 ]
+      [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
+      [ "${lines[1]}" = "::notice title=forged::text" ]
+      [ "${lines[2]}" = "::${BASH_REMATCH[1]}::" ]
+    done
   done
 }
 
 OLD_PIN=1234567890abcdef1234567890abcdef12345678
 
-# Runs the step of validate.yml that checks the requirements of changed packages in a repository whose
+# Runs the step Find changed packages of validate.yml and then the step $STEP, by default the one that
+# checks the requirements of changed packages, in a repository whose
 # first commit holds packages a, b and c and a workflow whose job validate calls validate.yml at
 # $OLD_PIN, followed by the text of $BASE_JOBS, and whose second adds d,
 # changes a, deletes c, or renames it to e with $RENAME, and pins $PIN, with $BASE as the base and a
-# validate-pkg.sh that logs each name
-# with the copy it reads and fails for b. Root of the job does not own the checkout of the runner, which
+# validate-pkg.sh that logs each name of --requirements
+# with the copy it reads and fails for b, and logs the files of --changed or the word all for --all.
+# Root of the job does not own the checkout of the runner, which
 # git learns from GIT_TEST_ASSUME_DIFFERENT_OWNER. sudo logs its calls to $BATS_TEST_TMPDIR/sudo.log and
 # runs the command, and chown logs to chown.log.
 run_changed_step() {
-  local repo="$BATS_TEST_TMPDIR/repo" bin="$BATS_TEST_TMPDIR/bin" name pin="${PIN-$OLD_PIN}"
+  local repo="$BATS_TEST_TMPDIR/repo" bin="$BATS_TEST_TMPDIR/bin" name pin="${PIN-$OLD_PIN}" all
+  local temp="$BATS_TEST_TMPDIR/runner-temp"
   mkdir -p "$repo/packages" "$repo/aurtomator/scripts" "$repo/.github/workflows" "$bin"
   git -C "$repo" init -q
   for name in a b c; do
@@ -5226,28 +5500,57 @@ run_changed_step() {
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m head
   printf '#!/bin/sh
-echo "$1 $(cat "packages/$1.yml" | head -n 1) cwd=$PWD" >>"%s"
-echo "::warning::from $1"
-[ "$1" != b ]
+log=%s
+case "$1" in
+  --changed) tr "\\000" "\\n" <"$2" >>"$log"; exit 0 ;;
+  --all) echo all >>"$log"; exit 0 ;;
+esac
+rc=0
+[ -z "$3" ] || : >"$3"
+while read -r name; do
+  echo "$name $(head -n 1 "packages/$name.yml") cwd=$PWD" >>"$log"
+  echo "::warning::from $name"
+  case " ${FAIL-b} " in
+    *" $name "*)
+      rc=1
+      [ -n "${NO_RESULTS:-}" ] || printf "failed\\t%%s\\n" "$name" >>"$3"
+      ;;
+  esac
+done <"$2"
+if [ -n "${RESULTS:-}" ]; then
+  printf "%%s\\n" "$RESULTS" >>"$3"
+  rc=1
+fi
+exit "$rc"
 ' "$BATS_TEST_TMPDIR/checked" >"$repo/aurtomator/scripts/validate-pkg.sh"
   chmod +x "$repo/aurtomator/scripts/validate-pkg.sh"
   printf '#!/bin/sh\necho "$*" >>"%s/sudo.log"\n[ "$1 $2 $3" != "-u builder test" ] || exit "${TEST_X_RC:-0}"\nshift 2\nexec "$@"\n' \
     "$BATS_TEST_TMPDIR" >"$bin/sudo"
   printf '#!/bin/sh\necho "$*" >>"%s/chown.log"\n' "$BATS_TEST_TMPDIR" >"$bin/chown"
   chmod +x "$bin/sudo" "$bin/chown"
-  yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .run' "$VALIDATE" \
-    >"$BATS_TEST_TMPDIR/step.sh"
-  rm -rf "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/sudo.log" "$BATS_TEST_TMPDIR/chown.log"
+  yq '.jobs.packages.steps[] | select(.name == "Find changed packages") | .run' "$VALIDATE" >"$BATS_TEST_TMPDIR/find.sh"
+  yq ".jobs.packages.steps[] | select(.name == \"${STEP:-Check the requirements of changed packages}\") | .run" \
+    "$VALIDATE" >"$BATS_TEST_TMPDIR/step.sh"
+  rm -rf "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/sudo.log" "$BATS_TEST_TMPDIR/chown.log" "$temp"
   [[ -n "${KEEP_WORK:-}" ]] || rm -rf "$BATS_TEST_TMPDIR/work"
-  run env -C "$repo" PATH="$bin:$PATH" GITHUB_WORKSPACE="$repo" WORK="$BATS_TEST_TMPDIR/work" BASE="${BASE-$FIRST}" \
-    PIN="$pin" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 TEST_X_RC="${TEST_X_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
+  mkdir "$temp"
+  run env -C "$repo" GITHUB_OUTPUT="$temp/output" RUNNER_TEMP="$temp" BASE="${BASE-$FIRST}" PIN="$pin" \
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 sh -e "$BATS_TEST_TMPDIR/find.sh"
+  [ "$status" -eq 0 ] || return 0
+  all=$(sed -n 's/^all=//p' "$temp/output")
+  moved=$(sed -n 's/^moved=//p' "$temp/output")
+  run env -C "$repo" PATH="$bin:$PATH" GITHUB_WORKSPACE="$repo" WORK="$BATS_TEST_TMPDIR/work" ALL="$all" \
+    MOVED="$moved" RUNNER_TEMP="$temp" TEST_X_RC="${TEST_X_RC:-0}" FAIL="${FAIL-b}" NO_RESULTS="${NO_RESULTS:-}" \
+    RESULTS="${RESULTS:-}" sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # The requires rules read the requirements of each new version, so validate-pkg.sh reads them online for
 # the packages that a push or a pull request adds or changes
 @test "validate: checks online the packages that the push or the pull request adds or changes" {
+  run yq -o=json -I=0 '.jobs.packages.steps[] | select(.name == "Find changed packages") | [.id, .env]' "$VALIDATE"
+  [ "$output" = '["changed",{"BASE":"${{ github.event.pull_request.base.sha || github.event.before }}","PIN":"${{ job.workflow_sha }}"}]' ]
   run yq -o=json -I=0 '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env | del(.WORK)' "$VALIDATE"
-  [ "$output" = '{"BASE":"${{ github.event.pull_request.base.sha || github.event.before }}","PIN":"${{ job.workflow_sha }}"}' ]
+  [ "$output" = '{"ALL":"${{ steps.changed.outputs.all }}","MOVED":"${{ steps.changed.outputs.moved }}"}' ]
   run_changed_step
   [ "$status" -eq 0 ]
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
@@ -5259,6 +5562,29 @@ echo "::warning::from $1"
     [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
+}
+
+# Packages that the push leaves alone passed the same validator at the base
+@test "validate: checks offline the packages that the push or the pull request adds or changes" {
+  run yq -o=json -I=0 '.jobs.packages.steps[] | select(.name == "Validate packages") | .env' "$VALIDATE"
+  [ "$output" = '{"ALL":"${{ steps.changed.outputs.all }}"}' ]
+  STEP="Validate packages" run_changed_step
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'packages/a.yml\npackages/d.yml' ]
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  STEP="Validate packages" RENAME=1 run_changed_step
+  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'packages/a.yml\npackages/d.yml\npackages/e.yml' ]
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  # A move of the pin or a missing base checks every package
+  local base
+  for base in "" 0000000000000000000000000000000000000000; do
+    STEP="Validate packages" BASE=$base run_changed_step
+    [ "$status" -eq 0 ]
+    [ "$(cat "$BATS_TEST_TMPDIR/checked")" = all ]
+    rm -rf "$BATS_TEST_TMPDIR/repo"
+  done
+  STEP="Validate packages" PIN=abcdef0123456789abcdef0123456789abcdef01 run_changed_step
+  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = all ]
 }
 
 # Root copies the YAMLs for builder, and a link would bring in the file it names
@@ -5276,13 +5602,14 @@ echo "::warning::from $1"
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd\ne' ]
 }
 
-# Packages of the base met the rules of the aurtomator it pinned, so a move of the pin checks them all
+# Packages of the base met the rules of the aurtomator it pinned, so a move of the pin checks them all,
+# the ones the push changes first
 @test "validate: checks every package online when the base pins another commit of aurtomator" {
   local pin new=abcdef0123456789abcdef0123456789abcdef01
   for pin in "$new" ""; do
-    PIN=$pin run_changed_step
-    [ "$status" -ne 0 ]
-    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
+    FAIL="" PIN=$pin run_changed_step
+    [ "$status" -eq 0 ]
+    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd\nb' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
   # The base counts only when a job of its workflows calls validate.yml at the pin
@@ -5290,15 +5617,52 @@ echo "::warning::from $1"
   for jobs in "  check:"$'\n'"    uses: owner/aurtomator/.github/workflows/check-updates.yml@$new # v1.1.0"$'\n' \
     "# uses: owner/aurtomator/.github/workflows/validate.yml@$new"$'\n' \
     "  other:"$'\n'"    uses: owner/aurtomator/.github/workflows/validate.yml@$new-x"$'\n'; do
-    PIN=$new BASE_JOBS=$jobs run_changed_step
-    [ "$status" -ne 0 ]
-    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
+    FAIL="" PIN=$new BASE_JOBS=$jobs run_changed_step
+    [ "$status" -eq 0 ]
+    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd\nb' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
   # Any job of the base that calls validate.yml at the pin, of any repository, counts
   PIN=$new BASE_JOBS="  again:"$'\n'"    uses: Owner/Fork/.github/workflows/validate.yml@$new # v1.1.0"$'\n' run_changed_step
   [ "$status" -eq 0 ]
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
+}
+
+# Packages that a pin move leaves alone met the rules of the release before it, and their next new version
+# fails its check; the packages that the push changes fail the step
+@test "validate: warns of the packages that a pin move does not change and fails for the ones it changes" {
+  local new=abcdef0123456789abcdef0123456789abcdef01 token
+  PIN=$new run_changed_step
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
+  token=${BASH_REMATCH[1]}
+  [ "${lines[-2]}" = "::$token::" ]
+  [ "${lines[-1]}" = "::warning file=packages/b.yml::The requires rules of this aurtomator cannot read the requirements of b, so the check of its next version fails; the log of this step says why" ]
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  RESULTS=$'unchecked\tb' FAIL="" PIN=$new run_changed_step
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = "::warning file=packages/b.yml::The check of requirements used its time before it reached b" ]
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  # Failures of changed packages, lines the step did not ask for and a run without its results fail
+  local case
+  for case in changed c ../b passed none; do
+    case $case in
+      changed) FAIL="a b" PIN=$new run_changed_step ;;
+      c) RESULTS=$'failed\tc' PIN=$new run_changed_step ;;
+      ../b) RESULTS=$'failed\t../b' PIN=$new run_changed_step ;;
+      passed) RESULTS=$'passed\tb' PIN=$new run_changed_step ;;
+      none) NO_RESULTS=1 PIN=$new run_changed_step ;;
+    esac
+    [ "$status" -eq 1 ] || {
+      echo "passed: $case"
+      return 1
+    }
+    rm -rf "$BATS_TEST_TMPDIR/repo"
+  done
+  # Runs without a base fail for every package
+  BASE="" run_changed_step
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"::warning file="* ]]
 }
 
 # actions/checkout trusts the checkout in a git config of its own, and root of the job packages does
@@ -5328,11 +5692,12 @@ echo "::warning::from $1"
   run_changed_step
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/checked")" = "a name: a cwd=$work"$'\n'"d name: d cwd=$work" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/sudo.log")" = "-u builder test -x $script"$'\n'"-u builder $script a"$'\n'"-u builder $script d" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/sudo.log")" = "-u builder test -x $script"$'\n'"-u builder $script --requirements names results" ]
   [ "$(cat "$BATS_TEST_TMPDIR/chown.log")" = "-R builder:builder $work" ]
   [ "$(stat -c %a "$work")" = 700 ]
+  [ "$(cat "$work/names")" = $'a\nd' ]
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
-  [ "$output" = $'./packages\n./packages/a.yml\n./packages/d.yml' ]
+  [ "$output" = $'./names\n./packages\n./packages/a.yml\n./packages/d.yml\n./results' ]
   [ "$(stat -c %a "$work/packages/a.yml")" = 644 ]
   # The output of builder sits between ::stop-commands:: and the token
   rm -rf "$BATS_TEST_TMPDIR/repo"
@@ -5361,7 +5726,7 @@ echo "::warning::from $1"
 # the releases online
 @test "validate: the packages job adds builder after the checkouts and stops it at the end" {
   run yq -o=json -I=0 '[.jobs.packages.steps[] | [.name, .uses // null, .if // null]]' "$VALIDATE"
-  [ "$output" = '[["Install dependencies",null,null],["Checkout","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Checkout aurtomator","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Add builder","./aurtomator/.github/actions/add-builder",null],["Validate packages",null,null],["Check the requirements of changed packages",null,null],["Stop builder","./aurtomator/.github/actions/stop-builder","always()"]]' ]
+  [ "$output" = '[["Install dependencies",null,null],["Checkout","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Checkout aurtomator","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Add builder","./aurtomator/.github/actions/add-builder",null],["Find changed packages",null,null],["Validate packages",null,null],["Check the requirements of changed packages",null,null],["Stop builder","./aurtomator/.github/actions/stop-builder","always()"]]' ]
   run yq '.jobs.packages.steps[] | select(.name == "Install dependencies") | .run' "$VALIDATE"
   [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq" ]]
   run yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env.WORK' "$VALIDATE"
@@ -5431,9 +5796,10 @@ run_pin_release_step() {
   run yq '.jobs.packages.container' "$VALIDATE"
   [ "$status" -eq 0 ]
   [ "$output" = '${{ needs.image.outputs.ref }}' ]
+  # validate-pkg.sh --requirements stops at its budget of 20 minutes, and the steps before it take minutes
   run yq '.jobs.packages["timeout-minutes"]' "$VALIDATE"
   [ "$status" -eq 0 ]
-  [ "$output" = "10" ]
+  [ "$output" = "30" ]
 }
 
 SETUP_DOC="$BATS_TEST_DIRNAME/../site/src/content/docs/setup.md"
@@ -5496,7 +5862,7 @@ calling_workflow() {
   run yq -o=json -I=0 '.jobs.check-updates.permissions' "$check"
   [ "$output" = '{"contents":"write","issues":"write"}' ]
   run yq -o=json -I=0 '.jobs.check-updates.secrets | keys | sort' "$check"
-  [ "$output" = '["AUR_GIT_EMAIL","AUR_GIT_NAME","AUR_SSH_KEY","GPG_SIGNING_KEY"]' ]
+  [ "$output" = '["AUR_GIT_EMAIL","AUR_GIT_NAME","AUR_SSH_KEY","GITLAB_TOKEN","GPG_SIGNING_KEY"]' ]
   run yq '.jobs.check-updates.secrets | to_entries | .[] | select(.value != "${{ secrets." + .key + " }}") | .key' "$check"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -5576,7 +5942,7 @@ EOF
   for path in "${BUILDER_PATHS[@]}"; do
     expected+=("test -w $path")
   done
-  expected+=("test -r /var/run/docker.sock" "test -w /var/run/docker.sock")
+  expected+=("test -x /__t" "test -r /var/run/docker.sock" "test -w /var/run/docker.sock")
   expected+=("test -r /__w/repo/repo" "test -r /__w/repo/repo/README.md" "test -r /data")
   for path in "${BUILDER_READ_PATHS[@]}"; do
     expected+=("test -r $path")
@@ -5601,8 +5967,15 @@ EOF
     REACH="-w:$path" run_check_builder_step
     [ "$status" -eq 1 ]
     [ "$output" = "::error::builder passes test -w $path" ]
-    [ "$(wc -l <"$CALLS/sudo")" -eq 28 ]
+    [ "$(wc -l <"$CALLS/sudo")" -eq 29 ]
   done
+}
+
+# Add builder searches no file under /__t, as builder cannot enter it
+@test "check-updates: Check builder fails when builder can enter the tool cache" {
+  REACH="-x:/__t" run_check_builder_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::builder passes test -x /__t" ]
 }
 
 # The event names the repository and the sender, and the step scripts and file commands hold

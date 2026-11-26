@@ -13,6 +13,9 @@ on:
         required: false
       AUR_GIT_EMAIL:
         required: false
+      # The check job asks GitLab.com with it as root, for the gitlab-tag packages
+      GITLAB_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -129,16 +132,30 @@ jobs:
       - name: Add builder
         uses: ./aurtomator/.github/actions/add-builder # zizmor: ignore[self-repository] add-builder runs from the aurtomator/ checkout
 
+      # GitLab.com counts the requests of a token apart from the runner. Root parses none of the answers,
+      # and builder, which parses them, never holds the token.
+      - name: Fetch GitLab tags
+        id: gitlab
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          start=$SECONDS
+          bash -c 'source ./aurtomator/scripts/lib.sh && gitlab_prefetch /data/gitlab packages/*.yml'
+          # The seconds of this step count in the budget of the checks, so the job ends within its 30 minutes
+          echo "spent=$((SECONDS - start))" >>"$GITHUB_OUTPUT"
+
       # builder works in /work, and the workspace and aurtomator/ stay root's. The job rules runs the
       # requires rules of the packages that _rules lists.
       - name: Check updates
         uses: ./aurtomator/.github/actions/run-as-builder # zizmor: ignore[self-repository] run-as-builder runs the scripts of the aurtomator/ checkout
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          AURTOMATOR_CHECK_SPENT: ${{ steps.gitlab.outputs.spent }}
         with:
           args: --rules-later
-          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER
+          keep-env: GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT
           readme: "true"
+          gitlab: /data/gitlab
 
       - name: Stop builder
         id: stop
@@ -211,6 +228,14 @@ jobs:
               take "packages/$name" "$RESULTS/packages/$name" "$results_max"
             done
           fi
+          # Past its limit, the README leaves the package table to a page for each first letter
+          if [[ -d "$WORK/table" && ! -L "$WORK/table" ]]; then
+            for f in "$WORK"/table/*.md; do
+              name=${f##*/}
+              [[ "$name" =~ ^(0-9|[a-z])\.md$ ]] || continue
+              take "table/$name" "$RESULTS/table/$name" "$results_max"
+            done
+          fi
 
       - name: Decide
         id: decide
@@ -272,6 +297,14 @@ jobs:
           work=$prepare
           if [[ -f "$RESULTS/README.md" ]] && ! cmp -s "$RESULTS/README.md" README.md; then
             work=true
+          fi
+          # Past its limit, the README links pages of the package table, which can change alone
+          if [[ -f "$RESULTS/README.md" ]]; then
+            for page in "$RESULTS"/table/*.md table/*.md; do
+              name=${page##*/}
+              [[ -f "$page" && "$name" =~ ^(0-9|[a-z])\.md$ && ! -L "table/$name" ]] || continue
+              cmp -s "$RESULTS/table/$name" "table/$name" 2>/dev/null || work=true
+            done
           fi
           # publish commits aurtomator/aurtomator.sh over a regular aurtomator.sh that differs
           release_runner=aurtomator/aurtomator.sh repo_runner=aurtomator.sh
@@ -865,20 +898,22 @@ jobs:
           BRANCH: ${{ github.ref_name }}
           RESULTS: /results
         run: |
-          # The commit takes README.md and the package YAMLs from the copies of Hand over, and
-          # stats/ from Record statistics
+          # The commit takes README.md, the package YAMLs and the pages of the package table from the
+          # copies of Hand over, and stats/ from Record statistics
           changed=()
-          for copy in "$RESULTS/README.md" "$RESULTS"/packages/*.yml \
+          declare -A removed=()
+          for copy in "$RESULTS/README.md" "$RESULTS"/packages/*.yml "$RESULTS"/table/*.md \
             "$RESULTS/stats/events.csv" "$RESULTS/stats/card.svg" "$RESULTS/stats/card-dark.svg"; do
             [[ -f "$copy" ]] || continue
             file=${copy#"$RESULTS"/}
-            if [[ "$file" == stats/* ]]; then
+            [[ "$file" != table/* || "$file" =~ ^table/(0-9|[a-z])\.md$ ]] || continue
+            if [[ "$file" == stats/* || "$file" == table/* ]]; then
               # Paths under a file would replace the file, and those under a link would follow it
-              if [[ -L stats || (-e stats && ! -d stats) ]]; then
-                echo "::warning::$file is left out of the commit, stats is a link or no directory"
+              if [[ -L "${file%%/*}" || (-e "${file%%/*}" && ! -d "${file%%/*}") ]]; then
+                echo "::warning::$file is left out of the commit, ${file%%/*} is a link or no directory"
                 continue
               fi
-              # The first run with statistics adds the files of stats/
+              # The first run with statistics or pages adds their files
               if [[ ! -e "$file" && ! -L "$file" ]]; then
                 changed+=("$file")
                 continue
@@ -887,6 +922,15 @@ jobs:
             [[ -f "$file" && ! -L "$file" ]] || continue
             cmp -s -- "$copy" "$file" || changed+=("$file")
           done
+          # Runs that wrote README.md wrote every page that it links, so the pages without a copy go
+          if [[ -f "$RESULTS/README.md" && -d table && ! -L table ]]; then
+            for file in table/*.md; do
+              if [[ "$file" =~ ^table/(0-9|[a-z])\.md$ && -f "$file" && ! -L "$file" && ! -e "$RESULTS/$file" ]]; then
+                changed+=("$file")
+                removed[$file]=1
+              fi
+            done
+          fi
           # aurtomator/aurtomator.sh replaces a regular aurtomator.sh that differs from it. The
           # step leaves a link and adds no missing file.
           release_runner=aurtomator/aurtomator.sh repo_runner=aurtomator.sh
@@ -940,6 +984,12 @@ jobs:
 
           TREE_ENTRIES="[]"
           for file in "${changed[@]}"; do
+            # The Git Data API removes a path whose entry has no sha
+            if [[ -n "${removed[$file]:-}" ]]; then
+              TREE_ENTRIES=$(echo "$TREE_ENTRIES" | jq --arg path "$file" \
+                '. + [{"path": $path, "mode": "100644", "type": "blob", "sha": null}]')
+              continue
+            fi
             from="$RESULTS/$file" mode=100644
             if [[ "$file" == "$repo_runner" ]]; then
               from=$release_runner mode=100755
@@ -1005,7 +1055,8 @@ jobs:
     if: "!cancelled() && needs.check.result == 'success'"
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
-    timeout-minutes: 10
+    # The issue writes go one a second, and 450 of them take about eight minutes
+    timeout-minutes: 20
     permissions:
       contents: read
       issues: write # opens issues for the statuses and closes resolved ones
@@ -1067,14 +1118,21 @@ jobs:
 
           has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
           [[ "$has_issues" != "false" ]] || exit 0
-          open=$(gh issue list --label "auto-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
-          held=$(gh issue list --label "update-held" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+          # gh reads pages of 100 over GraphQL up to --limit, which no count of open issues reaches
+          open=$(gh issue list --label "auto-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+          held=$(gh issue list --label "update-held" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
 
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
+          # The steps of the job count their writes to issues in one file, and closes past the writes
+          # of the run wait for the next run
+          export ISSUE_WRITES="$RUNNER_TEMP/issue-writes"
+          close_issue() {
+            lib issue_write issue close "$1" --comment "$2" || (($? == 3))
+          }
 
-          # Read once, since the loop below takes each pair of open issue and package
+          # Read once, and each issue looks up the status of the package its title names
           declare -A statuses=()
           for status_file in "$STATUS_DIR"/*; do
             [[ -f "$status_file" && "${status_file##*/}" != _* ]] || continue
@@ -1083,32 +1141,59 @@ jobs:
 
           while read -r number title; do
             [[ -n "$number" ]] || continue
-            for pkg_name in "${!statuses[@]}"; do
-              status=${statuses[$pkg_name]}
-              status_file="$STATUS_DIR/$pkg_name"
-              # Check issues close when the check passes, and update or held issues when the
-              # version is in the AUR
-              case "$title:$status" in
-                "❌ $pkg_name: check failed:check_failed:"* | "❌ $pkg_name: check failed:unchecked:"*) continue ;;
-                "❌ $pkg_name: check failed:"*) ;;
-                "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
-                  "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "* | \
-                  "❌ $pkg_name: update failed:arch_added: "*) ;;
-                "✋ $pkg_name: update held:up_to_date" | "✋ $pkg_name: update held:updated: "* | \
-                  "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "* | \
-                  "✋ $pkg_name: update held:arch_added: "*) ;;
-                *) continue ;;
-              esac
-              comment=$(lib close_comment "$status_file" "$RUN_URL")
-              gh issue close "$number" --comment "$comment"
-            done
+            pkg_name=${title#* }
+            pkg_name=${pkg_name%%: *}
+            [[ "$pkg_name" =~ ^[a-z0-9][a-z0-9.+_-]*$ && -n "${statuses[$pkg_name]+set}" ]] || continue
+            status=${statuses[$pkg_name]}
+            status_file="$STATUS_DIR/$pkg_name"
+            # Check issues close when the check passes, and update or held issues when the
+            # version is in the AUR
+            case "$title" in
+              "❌ $pkg_name: check failed")
+                [[ "$status" != check_failed:* && "$status" != unchecked:* ]] || continue
+                ;;
+              "❌ $pkg_name: update failed" | "✋ $pkg_name: update held")
+                case "$status" in
+                  up_to_date | "updated: "* | "downgrade: "* | "rebuilt: "* | "arch_added: "*) ;;
+                  *) continue ;;
+                esac
+                ;;
+              *) continue ;;
+            esac
+            comment=$(lib close_comment "$status_file" "$RUN_URL")
+            close_issue "$number" "$comment"
           done <<<"$open
           $held"
+
+          # The issue of the failed packages that a run had no writes for closes once each of them
+          # recovered or has an issue of its own; unchecked packages keep it open
+          group_re='^❌ [0-9]+ failed packages of run [0-9]+$'
+          own=$(cut -d ' ' -f 2- <<<"$open")
+          while read -r number title; do
+            [[ -n "$number" && "$title" =~ $group_re ]] || continue
+            body=$(gh issue view "$number" --json body --jq .body)
+            # shellcheck disable=SC2016 # the backticks are Markdown code of the list
+            names=$(sed -n 's/^- `\([a-z0-9][a-z0-9.+_-]*\)`: .*/\1/p' <<<"$body")
+            # Cut bodies name some of their packages, so each package of this run counts
+            if [[ "$body" == *" more packages, which the run summary of the step Create issues lists"* ]]; then
+              names=$(printf '%s\n' "${!statuses[@]}")
+            fi
+            left=""
+            while IFS= read -r pkg_name; do
+              [[ -n "$pkg_name" ]] || continue
+              case "${statuses[$pkg_name]:-unchecked:}" in
+                check_failed:* | update_failed:* | unchecked:*)
+                  grep -qxF -e "❌ $pkg_name: check failed" -e "❌ $pkg_name: update failed" <<<"$own" || left=1
+                  ;;
+              esac
+            done <<<"$names"
+            [[ -n "$left" ]] || close_issue "$number" "Each package of this issue recovered or has an issue of its own in $RUN_URL."
+          done <<<"$open"
 
           # The issues of a package whose YAML is gone close, since no check of it closes them; a
           # run without the list of packages closes none
           if [[ -f "$STATUS_DIR/_packages" ]]; then
-            arched=$(gh issue list --label "arch-missing" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            arched=$(gh issue list --label "arch-missing" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
             name_re='[a-z0-9][a-z0-9.+_-]*'
             failed_re="^❌ (${name_re}): (check|update) failed\$"
             held_re="^✋ (${name_re}): update held\$"
@@ -1119,7 +1204,7 @@ jobs:
               pkg_name=${BASH_REMATCH[1]}
               grep -qxF -e "$pkg_name" "$STATUS_DIR/_packages" && continue
               comment=$(lib retired_close_comment "$pkg_name" "$RUN_URL")
-              gh issue close "$number" --comment "$comment"
+              close_issue "$number" "$comment"
             done <<<"$open
           $held
           $arched"
@@ -1129,21 +1214,21 @@ jobs:
           if [[ "$RUN_OK" == true ]]; then
             while read -r number title; do
               [[ "$title" == "❌ Check AUR Package Updates failed" ]] || continue
-              gh issue close "$number" --comment "Run $RUN_URL succeeded."
+              close_issue "$number" "Run $RUN_URL succeeded."
             done <<<"$open"
           fi
 
           # Arch issues close when _without no longer lists their package. Only publish writes
           # _without, so runs without publish close none.
           if [[ -f "$STATUS_DIR/_without" ]]; then
-            arched=$(gh issue list --label "arch-missing" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            arched=$(gh issue list --label "arch-missing" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
             title_re='^⚠️ ([a-z0-9][a-z0-9.+_-]*): '
             while read -r number title; do
               [[ -n "$number" && "$title" =~ $title_re ]] || continue
               pkg_name=${BASH_REMATCH[1]}
               awk -F'\t' -v p="$pkg_name" '$1 "" == p "" { found = 1 } END { exit !found }' "$STATUS_DIR/_without" && continue
               comment=$(lib arch_close_comment "$pkg_name" "$RUN_URL")
-              gh issue close "$number" --comment "$comment"
+              close_issue "$number" "$comment"
             done <<<"$arched"
           fi
 
@@ -1151,10 +1236,10 @@ jobs:
           # could not read the latest release have no _upstream and close none.
           if [[ -f "$STATUS_DIR/_upstream" ]]; then
             upstream=$(cat "$STATUS_DIR/_upstream")
-            releases=$(gh issue list --label "aurtomator-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            releases=$(gh issue list --label "aurtomator-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
             while read -r number title; do
               [[ -n "$number" && "$title" != "🚀 aurtomator ${upstream#newer: } available" ]] || continue
-              gh issue close "$number" --comment "The aurtomator release status is \`$upstream\` in $RUN_URL."
+              close_issue "$number" "The aurtomator release status is \`$upstream\` in $RUN_URL."
             done <<<"$releases"
           fi
 
@@ -1180,11 +1265,12 @@ jobs:
 
           has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
           [[ "$has_issues" != "false" ]] || exit 0
-          open=$(gh issue list --label "auto-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+          open=$(gh issue list --label "auto-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
 
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
+          export ISSUE_WRITES="$RUNNER_TEMP/issue-writes"
 
           # Host issues close when fewer than HOST_ISSUE_MIN packages of the host failed to check
           hosts=$(lib failed_hosts "$STATUS_DIR")
@@ -1195,7 +1281,7 @@ jobs:
             host=${BASH_REMATCH[1]}
             grep -qxF -e "$host" <<<"$failing" && continue
             comment=$(lib host_close_comment "$host" "$RUN_URL")
-            gh issue close "$number" --comment "$comment"
+            lib issue_write issue close "$number" --comment "$comment" || (($? == 3))
           done <<<"$open"
 
       - name: Create issues
@@ -1219,7 +1305,7 @@ jobs:
               check_failed:* | update_failed:* | held:* | newer:*) kinds=true ;;
             esac
           done
-          if [[ "$kinds" == true || -s "$STATUS_DIR/_alerts" ]] || grep -qs . "$STATUS_DIR/_without"; then
+          if [[ "$kinds" == true || -s "$STATUS_DIR/_alerts" || -f "$STATUS_DIR/_requirements" ]] || grep -qs . "$STATUS_DIR/_without"; then
             has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
             if [[ "$has_issues" == "false" ]]; then
               echo "::notice::Issues are disabled in $GITHUB_REPOSITORY, so the run opens no issue"
@@ -1230,23 +1316,31 @@ jobs:
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
+          # The steps of the job count their writes to issues in one file, and failed packages past the
+          # writes of the run go to grouped
+          export ISSUE_WRITES="$RUNNER_TEMP/issue-writes"
+          grouped=()
 
           # Creates label $1 with color $2 and description $3 when it is
           # missing and lists the titles of its open issues, once per label
           declare -A titles=()
           use_label() {
             [[ -z "${titles[$1]+set}" ]] || return 0
-            gh label create "$1" --color "$2" --description "$3" 2>/dev/null || true
-            titles[$1]=$(gh issue list --label "$1" --state open --limit 1000 --json title --jq '.[].title')
+            lib issue_write label create "$1" --color "$2" --description "$3" 2>/dev/null || true
+            titles[$1]=$(gh issue list --label "$1" --state open --limit 100000 --json title --jq '.[].title')
           }
 
           # Opens an issue with label $1, title $2 and body $3, which goes on stdin since Linux refuses
-          # one argument over 128 KiB, and turns a refusal of GitHub into a warning and created=false
+          # one argument over 128 KiB; created=false after a refusal of GitHub, later past the writes
           create_issue() {
-            local out
+            local out rc=0
             created=true
-            if out=$(printf '%s' "$3" | gh issue create --title "$2" --label "$1" --body-file - 2>&1); then
+            out=$(printf '%s' "$3" | lib issue_write issue create --title "$2" --label "$1" --body-file - 2>&1) || rc=$?
+            if ((rc == 0)); then
               echo "$out"
+            elif ((rc == 3)); then
+              created=later
+              echo "No writes left in this run for the issue $2"
             else
               created=false
               echo "::warning::Could not create the issue $2: ${out//$'\n'/ }"
@@ -1282,7 +1376,7 @@ jobs:
             body=$(lib host_issue_body "$STATUS_DIR" "$host" "$RUN_URL" "${list[@]}")
             create_issue auto-update "❌ $host: ${#list[@]} packages failed to check" "$body"
             # The packages of a refused host issue get issues of their own below
-            if [[ "$created" == false ]]; then
+            if [[ "$created" != true ]]; then
               for pkg_name in "${list[@]}"; do
                 unset 'shared[$pkg_name]'
               done
@@ -1315,6 +1409,7 @@ jobs:
 
                 body=$(lib failure_issue_body "$status_file" "$RUN_URL")
                 create_issue auto-update "❌ $pkg_name: ${kind//_/ }" "$body"
+                [[ "$created" != later ]] || grouped+=("$pkg_name")
                 ;;
               "held: "*)
                 if lib only_waits "$status_file"; then
@@ -1349,4 +1444,51 @@ jobs:
           upstream=$(cat "$STATUS_DIR/_upstream" 2>/dev/null || true)
           if [[ "$upstream" == "newer: "* ]]; then
             open_issue aurtomator-update 0e8a16 "Newer aurtomator release" "🚀 aurtomator ${upstream#newer: } available" upstream_issue_body "$STATUS_DIR/_upstream"
+          fi
+
+          # Packages whose YAML names no source of their requirements share one issue, which the list of
+          # each run opens, edits or closes; runs without the list leave it as it is
+          if [[ -f "$STATUS_DIR/_requirements" ]]; then
+            title="⚠️ Packages need a python or ruby key"
+            body=$(lib requirements_issue_body "$STATUS_DIR/_requirements")
+            # The body has room for 60000 characters, and the run summary names the packages past it
+            if [[ "$body" == *" more packages, which the run summary of the step Create issues lists"* ]]; then
+              {
+                echo "Packages whose YAML names no source of their requirements:"
+                echo
+                # shellcheck disable=SC2016 # the backticks are Markdown code
+                awk -F'\t' '{ printf "- `%s`: %s\n", $1, $2 }' "$STATUS_DIR/_requirements"
+              } >>"$GITHUB_STEP_SUMMARY"
+            fi
+            numbers=$(gh issue list --label missing-key --state open --limit 100000 --json number,title \
+              --jq '.[] | "\(.number) \(.title)"' | awk -v t="$title" 'substr($0, index($0, " ") + 1) == t { print $1 }')
+            if [[ -z "$body" ]]; then
+              for number in $numbers; do
+                lib issue_write issue close "$number" --comment "No package misses the source of its requirements in $RUN_URL." ||
+                  (($? == 3))
+              done
+            elif [[ -z "$numbers" ]]; then
+              use_label missing-key fbca04 "Package YAML needs a python or ruby key"
+              create_issue missing-key "$title" "$body"
+            else
+              for number in $numbers; do
+                if [[ "$(gh issue view "$number" --json body --jq .body)" != "$body" ]]; then
+                  printf '%s' "$body" | lib issue_write issue edit "$number" --body-file - || (($? == 3))
+                fi
+              done
+            fi
+          fi
+
+          # Failed packages past the writes of the run share one issue, beyond the limit of the other
+          # writes, and the run summary of the step holds each whole error
+          if ((${#grouped[@]} > 0)); then
+            for pkg_name in "${grouped[@]}"; do
+              {
+                lib failure_issue_body "$STATUS_DIR/$pkg_name" "$RUN_URL"
+                echo
+              } >>"$GITHUB_STEP_SUMMARY"
+            done
+            body=$(lib grouped_issue_body "$STATUS_DIR" "$RUN_URL" "${grouped[@]}")
+            export ISSUE_WRITE_MAX=$((${ISSUE_WRITE_MAX:-450} + 10))
+            create_issue auto-update "❌ ${#grouped[@]} failed packages of run $GITHUB_RUN_NUMBER" "$body"
           fi

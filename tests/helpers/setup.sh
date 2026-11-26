@@ -11,6 +11,8 @@ export FIXTURES_DIR="$TESTS_DIR/fixtures"
 unset GITHUB_REPOSITORY
 # CI sets it to pull_request, and check-pins of aurtomator.sh then compares pins with HEAD^1
 unset GITHUB_EVENT_NAME
+# Tokens in the shell of a developer turn on the GraphQL reads, the REST limit and GitLab headers
+unset GITHUB_TOKEN GITLAB_TOKEN
 
 # Create temp workspace
 setup_test_env() {
@@ -172,6 +174,17 @@ python_aur() {
   printf 'pkgbase = %s\n\tpkgver = 1.0\n\tpkgrel = 1\n\tarch = any\n\tdepends = python\n\npkgname = %s\n' "$1" "$1" \
     >"$TEST_TMPDIR/aur-$1.SRCINFO"
   aur_srcinfo_remote "$1" "$TEST_TMPDIR/aur-$1.SRCINFO"
+}
+
+# Writes the AUR metadata file that mock-curl.sh serves, with a record of each argument after [ and
+# before ], one a line, as aurweb writes it
+aur_meta() {
+  local IFS=$'\n'
+  {
+    echo '['
+    [[ $# -eq 0 ]] || printf '%s\n' "$(printf '%s,\n' "$@" | sed '$ s/,$//')"
+    printf ']'
+  } | gzip >"$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz"
 }
 
 # Usage: aur_srcinfo_remote <pkgbase> <.SRCINFO>. The mock git of AUR clones then serves a repo

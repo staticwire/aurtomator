@@ -1616,6 +1616,173 @@ alerts:
   [[ "$output" == *"All 2 packages valid"* ]]
 }
 
+# Each yq is a process of its own, and validate.yml checks every package when the pins move
+@test "validate --all: starts few yq processes for a package" {
+  local real bin="$BATS_TEST_TMPDIR/bin" one
+  real=$(command -v yq)
+  mkdir -p "$bin"
+  printf '#!/bin/sh\necho x >>"%s"\nexec "%s" "$@"\n' "$BATS_TEST_TMPDIR/yq.log" "$real" >"$bin/yq"
+  chmod +x "$bin/yq"
+  create_test_package a github-release "upstream:
+  project: owner/a
+current: 1.0.0
+last_updated: '2026-01-02'"
+  PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  one=$(wc -l <"$BATS_TEST_TMPDIR/yq.log")
+  rm "$BATS_TEST_TMPDIR/yq.log"
+  sed 's/^name: a$/name: b/; s#owner/a#owner/b#' "$TEST_TMPDIR/packages/a.yml" >"$TEST_TMPDIR/packages/b.yml"
+  PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  echo "per package: $(($(wc -l <"$BATS_TEST_TMPDIR/yq.log") - one))"
+  (($(wc -l <"$BATS_TEST_TMPDIR/yq.log") - one <= 16))
+}
+
+# validate.yml checks every package when the pins move, so the packages spread over the cores
+@test "validate --all: checks as many packages at once as nproc prints" {
+  local real bin="$BATS_TEST_TMPDIR/bin" cores i
+  real=$(command -v yq)
+  mkdir -p "$bin" "$BATS_TEST_TMPDIR/running"
+  # Each yq of a tag query waits, and logs how many yq run at that moment
+  printf '#!/bin/bash
+[[ "$*" == "-r tag "* ]] || exec "%s" "$@"
+: >"%s/running/$$"
+ls "%s/running" | wc -l >>"%s/at-once"
+sleep 0.3
+rm "%s/running/$$"
+exec "%s" "$@"
+' "$real" "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" "$real" >"$bin/yq"
+  chmod +x "$bin/yq"
+  for i in 1 2 3 4 5 6; do
+    create_test_package "p$i" github-release "upstream:
+  project: owner/p$i"
+  done
+  for cores in 1 3; do
+    printf '#!/bin/sh\necho %s\n' "$cores" >"$bin/nproc"
+    chmod +x "$bin/nproc"
+    : >"$BATS_TEST_TMPDIR/at-once"
+    PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"All 6 packages valid"* ]]
+    [ "$(sort -n "$BATS_TEST_TMPDIR/at-once" | tail -n 1)" = "$cores" ]
+  done
+}
+
+# Each check runs in a subshell, and one that ends without its result fails the run
+@test "validate --all: fails when a check gives no result" {
+  local real bin="$BATS_TEST_TMPDIR/bin"
+  real=$(command -v yq)
+  mkdir -p "$bin" "$BATS_TEST_TMPDIR/tmp"
+  printf '#!/bin/bash\n[[ "$*" != "-r tag "*/b.yml ]] || rm -rf "%s"/tmp/*\nexec "%s" "$@"\n' \
+    "$BATS_TEST_TMPDIR" "$real" >"$bin/yq"
+  printf '#!/bin/sh\necho 1\n' >"$bin/nproc"
+  chmod +x "$bin/yq" "$bin/nproc"
+  create_test_package a github-release "upstream:
+  project: owner/a"
+  create_test_package b github-release "upstream:
+  project: owner/b"
+  PATH="$bin:$PATH" TMPDIR="$BATS_TEST_TMPDIR/tmp" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/b.yml: its check ended without a result"* ]]
+  [[ "$output" != *"packages valid"* ]]
+}
+
+# The lines of one package stay together, and the packages keep the order of their files
+@test "validate --all: prints the result of each package whole and in order" {
+  local i expected=""
+  for i in 01 02 03 04 05 06 07 08 09 10 11 12; do
+    if ((10#$i % 3 == 0)); then
+      create_test_package "p$i" github-release "upstream:
+  project: owner/p$i
+  tag_version_regex: '(x'
+cooldown_days: -1"
+      expected+="packages/p$i.yml: cooldown_days,packages/p$i.yml: upstream.tag_version_regex,"
+    else
+      create_test_package "p$i" github-release "upstream:
+  project: owner/p$i"
+    fi
+  done
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [ "$(grep -o 'packages/p[0-9]*\.yml: [a-z_.]*' <<<"$output" | tr '\n' ,)" = "$expected" ]
+  [[ "${lines[-1]}" == *"Validation failed: 4/12 packages have errors" ]]
+}
+
+# Merge keys bring keys that the keys of a map do not list
+@test "validate: reads the keys that a merge key brings" {
+  create_test_package a github-release "upstream:
+  <<: {tag_version_regex: '(x'}
+  project: owner/a"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/a.yml: upstream.<< is not a field of any strategy"* ]]
+  [[ "$output" == *"packages/a.yml: upstream.tag_version_regex must contain a capture group (): (x"* ]]
+  create_test_package a github-release "<<: {current: 'x y'}
+upstream:
+  project: owner/a"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/a.yml: unknown key: <<"* ]]
+  [[ "$output" == *"packages/a.yml: current must hold a digit and at most 64 characters of A-Za-z0-9 . _ +: 'x y'"* ]]
+}
+
+# validate.yml passes the files that git diff -z names for the push or the pull request
+@test "validate --changed: checks the packages that the list names" {
+  local list="$BATS_TEST_TMPDIR/changed"
+  create_test_package a github-release "upstream:
+  project: owner/a"
+  create_test_package b nonexistent-strat ""
+  create_test_package c pypi "upstream:
+  registry: c"
+  # Deleted files, files outside packages/ and files no run reads give no check
+  printf '%s\0' packages/a.yml packages/c.yml packages/gone.yml README.md packages/sub/x.yml packages/.x.yml >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"All 2 changed packages valid"* ]]
+  printf '%s\0' packages/b.yml packages/a.yml >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Validation failed: 1/2 packages have errors"* ]]
+  : >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No package changed"* ]]
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$BATS_TEST_TMPDIR/none"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$BATS_TEST_TMPDIR/none: no list of changed files"* ]]
+}
+
+# Pull requests can name a file with a line break, and git diff -z ends each name with a NUL alone
+@test "validate --changed: reads a name with a line break as one file" {
+  local list="$BATS_TEST_TMPDIR/changed" name=$'b.yml\nc.yml'
+  create_test_package b nonexistent-strat ""
+  printf 'name: x\nstrategy: github-release\nupstream:\n  project: owner/repo\n' >"$TEST_TMPDIR/packages/$name"
+  printf '%s\0' "packages/$name" >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/\$'b.yml\\nc.yml': name 'x' must equal the file name"* ]]
+  [[ "$output" != *"nonexistent-strat"* ]]
+}
+
+# The files of packages/ that no run reads fail on every run, since they cost no step per package
+@test "validate --changed: fails on every file of packages/ that no run reads" {
+  local list="$BATS_TEST_TMPDIR/changed"
+  create_test_package a github-release "upstream:
+  project: owner/a"
+  printf '%s\0' packages/a.yml >"$list"
+  ln -s "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/b.yml"
+  : >"$TEST_TMPDIR/packages/notes.txt"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/b.yml: no run reads it"* ]]
+  [[ "$output" == *"packages/notes.txt: no run reads it"* ]]
+  # A listed link is no package either
+  printf '%s\0' packages/b.yml >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/b.yml: no run reads it"* && "$output" != *"changed packages valid"* ]]
+}
+
 @test "validate: fails on nonexistent package" {
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "nonexistent"
   [ "$status" -ne 0 ]
@@ -3099,5 +3266,108 @@ $2"
   [ "$status" -eq 1 ]
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --online
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Usage: validate-pkg.sh <package-name> | --all [--online]"* ]]
+  [[ "$output" == *"Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list> | --requirements <names> [<results>]"* ]]
+  local args
+  for args in --changed "--changed $TEST_TMPDIR/a $TEST_TMPDIR/b" --requirements "--requirements a b c"; do
+    # shellcheck disable=SC2086
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" $args
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Usage: validate-pkg.sh"* ]] || {
+      echo "taken: $args"
+      return 1
+    }
+  done
+}
+
+# validate.yml reads the requirements of every package when the pins move, and the AUR metadata
+# file shows which packages have Python or Ruby in depends without a clone of each
+@test "validate --requirements: checks the packages whose AUR depends hold Python or Ruby" {
+  local names="$BATS_TEST_TMPDIR/names" meta
+  requires_package 1.1.0 "" bash python python-yaml
+  echo demo >"$names"
+  # The .SRCINFO holds python, so a full check fails
+  aur_meta '{"ID":1,"Name":"demo","PackageBaseID":7,"PackageBase":"demo","Depends":["bash","glibc>=2"]}'
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Requirements of 1 packages read: 0 with Python or Ruby in AUR depends"* ]]
+  for meta in '{"Name":"demo","PackageBase":"demo","Depends":["bash","python-yaml>=6"]}' \
+    '{"Name":"demo","PackageBase":"demo","Depends":["python"]}' \
+    '{"Name":"demo","PackageBase":"demo","Depends":["ruby"]}' \
+    '{"Name":"demo","PackageBase":"demo"}'$'\n''{"Name":"demo-ruby","PackageBase":"demo","Depends":["ruby-rack"]}' \
+    '{"Name":"other","PackageBase":"other","Depends":["bash"]}' \
+    '{"Name":"demo","PackageBase":"demo","Depends":["a]b","python"]}' \
+    '{"Name":"demo","PackageBase":"demo","Depends":["a\"],\"b","python"]}'; do
+    aur_meta "$meta"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+    [ "$status" -eq 1 ] &&
+      [[ "$output" == *"packages/demo.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]] &&
+      [[ "$output" == *"Requirements failed: 1/1 packages have errors"* ]] || {
+      echo "screened out: $meta"
+      echo "$output"
+      return 1
+    }
+  done
+  # validate.yml warns of the packages of a pin move that the push does not change, by the names in
+  # the file of results
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names" "$BATS_TEST_TMPDIR/results"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/results")" = $'failed\tdemo' ]
+  aur_meta '{"Name":"demo","PackageBase":"demo","Depends":["bash"]}'
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names" "$BATS_TEST_TMPDIR/results"
+  [ "$status" -eq 0 ]
+  [ ! -s "$BATS_TEST_TMPDIR/results" ]
+}
+
+# Without the metadata file each package gets the full check
+@test "validate --requirements: checks every package when the AUR metadata file cannot be read" {
+  local names="$BATS_TEST_TMPDIR/names" case
+  requires_package 1.1.0 "" bash python python-yaml
+  echo demo >"$names"
+  for case in missing text cut; do
+    case $case in
+      missing) rm -f "$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz" ;;
+      text) echo '<html>' >"$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz" ;;
+      cut) printf '[\n{"Name":"demo","PackageBase":"demo","Depends":["bash"]},\n' | gzip >"$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz" ;;
+    esac
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+    [ "$status" -eq 1 ] &&
+      [[ "$output" == *"https://aur.archlinux.org/packages-meta-ext-v1.json.gz could not be read, so every package gets the full check"* ]] &&
+      [[ "$output" == *"packages/demo.yml: its depends hold Python packages"* ]] || {
+      echo "taken: $case"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+# The step ends before timeout-minutes and names each package it did not check
+@test "validate --requirements: names the packages left when its budget is used" {
+  local names="$BATS_TEST_TMPDIR/names"
+  requires_package 1.1.0 "python: none" bash python python-yaml
+  create_test_package other github-release "upstream:
+  project: o/other"
+  printf '%s\n' demo other >"$names"
+  aur_meta '{"Name":"demo","PackageBase":"demo","Depends":["python"]}' '{"Name":"other","PackageBase":"other","Depends":["ruby"]}'
+  AURTOMATOR_VALIDATE_BUDGET=0 run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/demo.yml: not checked, as the check of requirements used its 0 s"* ]]
+  [[ "$output" == *"packages/other.yml: not checked, as the check of requirements used its 0 s"* ]]
+  [[ "$output" == *"Requirements failed: 0/2 packages have errors, and 2 were not checked"* ]]
+  AURTOMATOR_VALIDATE_BUDGET=0 run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names" "$BATS_TEST_TMPDIR/results"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/results")" = $'unchecked\tdemo\nunchecked\tother' ]
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Requirements of 2 packages read: 2 with Python or Ruby in AUR depends"* ]]
+  printf '%s\n' demo ../demo >"$names"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$names: '../demo' is no package name"* ]]
+  # Pushes that change no package download nothing
+  : >"$names"
+  export CURL_ARGS_LOG="$BATS_TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No package to check"* ]]
+  [ ! -e "$CURL_ARGS_LOG" ]
 }

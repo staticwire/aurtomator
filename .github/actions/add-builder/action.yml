@@ -21,7 +21,8 @@ runs:
           echo "::error::builder has the uid of the account that owns $RUNNER_TEMP"
           exit 1
         fi
-        if ! owned=$(find /__w /__e /__t \( -user builder -o -group builder \) -print -quit); then
+        # Close files to builder closes the tool cache /__t, so builder reaches no file under it
+        if ! owned=$(find /__w /__e /__t \( -user builder -o -group builder \) -print -quit -o -path /__t -prune); then
           echo "::error::find could not search /__w, /__e and /__t for the files of builder"
           exit 1
         fi
@@ -40,15 +41,15 @@ runs:
         install -d -m 0700 "$DATA"
         find . -mindepth 1 -path ./aurtomator -prune -o ! -type l -exec chmod go-rwx -- {} +
         chmod 0711 .
-        # The runner mounts its tool cache, the home of the steps and the event files read-write
-        for dir in /__t /github/home /github/workflow; do
+        # The runner mounts the home of the steps and the event files read-write
+        for dir in /github/home /github/workflow; do
           if [ -d "$dir" ]; then
             find "$dir" ! -type l -perm /022 -exec chmod go-w -- {} +
           fi
         done
-        # The event, the home of the steps, and the step scripts and file commands in RUNNER_TEMP
-        # are for root steps and the runner, which owns them
-        for dir in /github/home /github/workflow "$RUNNER_TEMP"; do
+        # The tool cache, the event, the home of the steps, and the step scripts and file commands in
+        # RUNNER_TEMP are for root steps and the runner, which owns them
+        for dir in /__t /github/home /github/workflow "$RUNNER_TEMP"; do
           if [ -n "$dir" ] && [ -d "$dir" ]; then
             chmod go-rwx -- "$dir"
           fi
@@ -75,6 +76,7 @@ runs:
           "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/aurtomator" /__w /__w/_actions /__e /__t /github/home /github/workflow; do
           check -w "$path"
         done
+        check -x /__t
         check -r /var/run/docker.sock
         check -w /var/run/docker.sock
         for path in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/README.md" /data /github/workflow/event.json /github/home \

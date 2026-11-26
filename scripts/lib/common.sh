@@ -236,7 +236,37 @@ request_begin() {
     request_failed "$1"
     return 1
   fi
+  request_pace "$host"
   printf '%s\n%s\n' "$1" "${2:-$1}" >"$AURTOMATOR_HOSTS_DIR/request"
+}
+
+# Set PACE_MS to the milliseconds between two requests to host $1: the pace that the host states,
+# none for hosts that ask for none or count elsewhere, as api.github.com does, and 200 for the rest
+host_pace() {
+  case $1 in
+    repology.org | crates.io) PACE_MS=1000 ;;
+    gitlab.com) PACE_MS=120 ;;
+    rubygems.org) PACE_MS=100 ;;
+    pypi.org | files.pythonhosted.org | api.github.com | index.crates.io) PACE_MS=0 ;;
+    *) PACE_MS=200 ;;
+  esac
+}
+
+# Wait until the pace of host $1 allows a request, and note the time of this one in the host memory
+request_pace() {
+  local file now last wait
+  host_pace "$1"
+  ((PACE_MS > 0)) || return 0
+  file="$AURTOMATOR_HOSTS_DIR/paced-$1"
+  now=${EPOCHREALTIME/[.,]/}
+  if [[ -f "$file" ]] && read -r last <"$file" && [[ "$last" =~ ^[0-9]+$ ]]; then
+    wait=$((last + PACE_MS * 1000 - now))
+    if ((wait > 0)); then
+      sleep "$((wait / 1000000)).$(printf '%06d' "$((wait % 1000000))")"
+      now=${EPOCHREALTIME/[.,]/}
+    fi
+  fi
+  printf '%s\n' "$now" >"$file"
 }
 
 # request_begin for git URL $1: the HEAD check asks the first URL that git asks
@@ -341,28 +371,202 @@ http_get() {
 # GET a URL that answers JSON. Bot checks answer HTML with HTTP 200, and yq reads YAML too, so answers
 # other than a JSON object or array, which opens with { or [, fail and name the URL they came from.
 http_get_json() {
-  local answer url lead
+  local answer url
   answer=$(http_get "$@" -w "\n%{url_effective}${HTTP_FAILURE}") || return
   url=${answer##*$'\n'}
   answer=${answer%$'\n'*}
-  lead=${answer#"${answer%%[![:space:]]*}"}
-  if [[ "${lead:0:1}" != "{" && "${lead:0:1}" != "[" ]] ||
-    [[ ! "$(yq 'tag' <<<"$answer" 2>/dev/null)" =~ ^!!(map|seq)$ ]]; then
-    printf '%s: the answer is not JSON\n' "$url" >&2
+  if ! _json_answer "$url" "$answer"; then
     request_failed "$1"
     return 1
   fi
-  printf '%s\n' "$answer"
+}
+
+# Print answer $2 when it is a JSON object or array, and fail naming URL $1 otherwise
+_json_answer() {
+  local lead
+  lead=${2#"${2%%[![:space:]]*}"}
+  if [[ "${lead:0:1}" != "{" && "${lead:0:1}" != "[" ]] ||
+    [[ ! "$(yq 'tag' <<<"$2" 2>/dev/null)" =~ ^!!(map|seq)$ ]]; then
+    printf '%s: the answer is not JSON\n' "$1" >&2
+    return 1
+  fi
+  printf '%s\n' "$2"
+}
+
+# Print the name of the file that keeps the answer to URL $1, its SHA-256
+url_key() {
+  local key
+  key=$(printf '%s' "$1" | sha256sum)
+  printf '%s\n' "${key%% *}"
+}
+
+# Print the URL of the newest 100 tags of GitLab project $2 on host $1, whose API takes the path URL-encoded
+gitlab_tags_url() {
+  printf 'https://%s/api/v4/projects/%s/repository/tags?per_page=100\n' "$1" "${2//\//%2F}"
+}
+
+# GET a GitLab API URL. In the workflow builder reads the answer that root fetched with GITLAB_TOKEN,
+# and other runs send the token to GitLab.com alone, from stdin.
+gitlab_api() {
+  local file auth=()
+  file="${AURTOMATOR_DATA_DIR}/.gitlab/$(url_key "$1")"
+  if [[ -f "$file" && ! -L "$file" ]]; then
+    if ! _json_answer "$1" "$(<"$file")"; then
+      request_failed "$1"
+      return 1
+    fi
+    return 0
+  fi
+  if [[ -n "${GITLAB_TOKEN:-}" && "$(url_host "$1")" == gitlab.com ]]; then
+    auth=(-H @-)
+  fi
+  http_get_json "$1" "${auth[@]}" <<<"PRIVATE-TOKEN: ${GITLAB_TOKEN:-}"
+}
+
+# Keep in directory $1 the answers of GitLab.com to the gitlab-tag packages of files $2..., asked with
+# GITLAB_TOKEN. The workflow runs it as root, which parses none of them, and builder never holds the token.
+gitlab_prefetch() {
+  local LC_ALL=C dir=$1 file rows strategy host project url part budget end i
+  local -a files=() urls=()
+  local -A seen=()
+  local -x AURTOMATOR_HOSTS_DIR
+  shift
+  [[ -n "${GITLAB_TOKEN:-}" ]] || return 0
+  # The time of the step counts in the budget of the checks, which ask gitlab.com for the rest
+  budget=$(env_seconds GITLAB_PREFETCH_BUDGET 300) || return 1
+  end=$((SECONDS + budget))
+  for file in "$@"; do
+    [[ ! -f "$file" || -L "$file" ]] || files+=("$file")
+  done
+  ((${#files[@]} > 0)) || return 0
+  rows=$(yq -N -r '[.strategy // "", .upstream.host // "", .upstream.project // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
+  while IFS=$'\t' read -r strategy host project; do
+    [[ "$strategy" == gitlab-tag && "${host,,}" == gitlab.com && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
+    url=$(gitlab_tags_url "$host" "$project")
+    [[ -z "${seen[$url]:-}" ]] || continue
+    seen[$url]=1
+    urls+=("$url")
+  done <<<"$rows"
+  ((${#urls[@]} > 0)) || return 0
+  mkdir -p "$dir"
+  # The memory of hosts keeps the pace of GitLab.com and stops asking it once it does not answer
+  AURTOMATOR_HOSTS_DIR=$(mktemp -d) || return 1
+  : >"$AURTOMATOR_HOSTS_DIR/silent"
+  : >"$AURTOMATOR_HOSTS_DIR/request"
+  : >"$AURTOMATOR_HOSTS_DIR/failed"
+  for ((i = 0; i < ${#urls[@]}; i++)); do
+    if ((SECONDS >= end)); then
+      printf '::warning::Fetch GitLab tags stopped after %s s, so the checks ask gitlab.com without GITLAB_TOKEN for %s of its %s projects\n' \
+        "$budget" "$((${#urls[@]} - i))" "${#urls[@]}"
+      break
+    fi
+    url=${urls[i]}
+    part=$(mktemp -p "$dir" .part.XXXXXX) || break
+    if http_get "$url" -H @- -o "$part" <<<"PRIVATE-TOKEN: $GITLAB_TOKEN"; then
+      mv -- "$part" "$dir/$(url_key "$url")"
+    else
+      rm -f -- "$part"
+    fi
+  done
+  rm -rf -- "$AURTOMATOR_HOSTS_DIR"
 }
 
 # GET a GitHub API URL with GITHUB_TOKEN when it is set. curl reads the header
 # from stdin, since ps shows every argument to every local user.
 github_api() {
-  local auth=()
+  local auth=() cached
+  if [[ -n "${AURTOMATOR_RUN_CACHE:-}" && -d "$AURTOMATOR_RUN_CACHE/github" ]]; then
+    cached=$(_github_cached "$1")
+    if [[ -f "$cached" ]]; then
+      cat -- "$cached"
+      return 0
+    fi
+  fi
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     auth=(-H @-)
   fi
   http_get "$1" "${auth[@]}" <<<"Authorization: Bearer ${GITHUB_TOKEN:-}"
+}
+
+# Print the path in the run cache of the answer that github_prefetch keeps for URL $1
+_github_cached() {
+  printf '%s/github/%s\n' "$AURTOMATOR_RUN_CACHE" "$(url_key "$1")"
+}
+
+# Keep /releases/latest, and /releases of at most 100 releases, of the github-release packages of files
+# $@ from GraphQL in the run cache for github_api; github-nightly reads notes in lists, so it keeps REST
+github_prefetch() {
+  local LC_ALL=C file rows strategy project regex repo dir header query body answer lines i n kind json
+  local -A latest=() list=() nightly=()
+  local -a files=() repos=() batch=()
+  [[ -n "${GITHUB_TOKEN:-}" && -n "${AURTOMATOR_RUN_CACHE:-}" ]] || return 0
+  for file in "$@"; do
+    [[ ! -f "$file" || -L "$file" ]] || files+=("$file")
+  done
+  ((${#files[@]} > 0)) || return 0
+  rows=$(yq -N -r '[.strategy // "", .upstream.project // "", .upstream.tag_version_regex // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
+  while IFS=$'\t' read -r strategy project regex; do
+    [[ "$project" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || continue
+    case $strategy in
+      github-release) if [[ -n "$regex" ]]; then list[$project]=1; else latest[$project]=1; fi ;;
+      github-nightly) nightly[$project]=1 ;;
+    esac
+  done <<<"$rows"
+  for repo in "${!latest[@]}" "${!list[@]}"; do
+    [[ -z "${nightly[$repo]:-}" ]] && repos+=("$repo")
+  done
+  ((${#repos[@]} > 0)) || return 0
+  mapfile -t repos < <(printf '%s\n' "${repos[@]}" | sort -u)
+  dir="$AURTOMATOR_RUN_CACHE/github"
+  mkdir -p "$dir"
+  header=$(download_temp) || return 0
+  printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN" >"$header"
+  for ((i = 0; i < ${#repos[@]}; i += 50)); do
+    # check-all.sh sets CHECK_END, the end of the time budget of its loop
+    if [[ "${CHECK_END:-}" =~ ^[0-9]+$ ]] && (($(date -u +%s) >= CHECK_END)); then
+      break
+    fi
+    batch=("${repos[@]:i:50}")
+    query="query {"
+    for ((n = 0; n < ${#batch[@]}; n++)); do
+      repo=${batch[n]}
+      query+=" r$n: repository(owner: \"${repo%%/*}\", name: \"${repo#*/}\") { latestRelease { ...R description }"
+      query+=" releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { totalCount nodes { ...R } } }"
+    done
+    query+=" } fragment R on Release { tagName name isDraft isPrerelease publishedAt createdAt }"
+    body=$(Q=$query yq -n -o json -I0 '{"query": strenv(Q)}')
+    if ! answer=$(http_get https://api.github.com/graphql -X POST -H "@$header" -H 'Content-Type: application/json' \
+      --data-binary @- <<<"$body"); then
+      log_warn "GraphQL did not answer, so the checks read the GitHub releases over REST"
+      # check-all.sh counts a failed check under the host of the failed request it finds after it
+      if host_memory; then
+        : >"$AURTOMATOR_HOSTS_DIR/failed"
+      fi
+      break
+    fi
+    # The alias rN gives the place of the repository in the batch, and a missing one has null. yq 4.54.1
+    # lets every value through a select after "as", so the expression binds no variable.
+    lines=$(yq -r -p json '.data // {} | to_entries | .[] | select(.value != null) |
+      ((select(.value.latestRelease != null) | .key + "\tlatest\t" + (.value.latestRelease | {"tag_name": .tagName,
+        "name": .name, "draft": .isDraft, "prerelease": .isPrerelease, "published_at": .publishedAt,
+        "created_at": .createdAt, "body": .description} | to_json(0))),
+      (select(.value.releases.totalCount != null and .value.releases.totalCount <= 100) | .key + "\tlist\t" +
+        ([.value.releases.nodes[] | {"tag_name": .tagName, "name": .name, "draft": .isDraft, "prerelease": .isPrerelease,
+          "published_at": .publishedAt, "created_at": .createdAt}] | to_json(0))))' <<<"$answer" 2>/dev/null) || lines=""
+    while IFS=$'\t' read -r n kind json; do
+      n=${n#r}
+      if [[ ! "$n" =~ ^[0-9]+$ ]] || ((n >= ${#batch[@]})); then
+        continue
+      fi
+      repo=${batch[n]}
+      if [[ "$kind" == latest && -n "${latest[$repo]:-}" ]]; then
+        printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases/latest")"
+      elif [[ "$kind" == list && -n "${list[$repo]:-}" ]]; then
+        printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases?per_page=100&page=1")"
+      fi
+    done <<<"$lines"
+  done
+  rm -f -- "$header"
 }
 
 # Print published_at<TAB>tag of each release in JSON $1 that passes yq filter $3
@@ -386,6 +590,36 @@ _newest_release_tag() {
   else
     sort | tail -1 | cut -f2
   fi
+}
+
+# Print the newest semantic version on stdin, one a line, by SemVer 2.0, with pre-releases only when $1
+# is true; build metadata after + takes no part in the order
+semver_newest() {
+  LC_ALL=C awk -v pre="${1:-false}" '
+    # 1 when version a ranks below version b
+    function below(a, b,   ca, cb, pa, pb, x, y, n, m, i, nx, ny) {
+      sub(/\+.*/, "", a)
+      sub(/\+.*/, "", b)
+      ca = a; pa = ""; if (i = index(a, "-")) { ca = substr(a, 1, i - 1); pa = substr(a, i + 1) }
+      cb = b; pb = ""; if (i = index(b, "-")) { cb = substr(b, 1, i - 1); pb = substr(b, i + 1) }
+      split(ca, x, "."); split(cb, y, ".")
+      for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) return x[i] + 0 < y[i] + 0
+      if (pa == pb || pa == "") return 0
+      if (pb == "") return 1
+      n = split(pa, x, "."); m = split(pb, y, ".")
+      for (i = 1; i <= n && i <= m; i++) {
+        if (x[i] == y[i]) continue
+        nx = x[i] ~ /^[0-9]+$/; ny = y[i] ~ /^[0-9]+$/
+        if (nx && ny) return x[i] + 0 < y[i] + 0
+        if (nx || ny) return nx
+        return x[i] < y[i]
+      }
+      return n < m
+    }
+    $0 == "" { next }
+    pre != "true" && /^[^+]*-/ { next }
+    best == "" || below(best, $0) { best = $0 }
+    END { if (best != "") print best }'
 }
 
 # Print the tag on stdin, one per line, that gives the newest version

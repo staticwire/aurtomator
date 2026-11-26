@@ -241,7 +241,7 @@ jobs:
           gh label create -R "$REPO" dependency-review --color d73a4a --description "Dependabot update with published vulnerabilities" 2>/dev/null || true
           # Dependabot rebases its pull requests, and each push reviews them again. Labels take
           # triage rights, so an issue of another account with this title does not count
-          titles=$(gh issue list -R "$REPO" --label dependency-review --state open --limit 1000 --json title --jq '.[].title')
+          titles=$(gh issue list -R "$REPO" --label dependency-review --state open --limit 100000 --json title --jq '.[].title')
           if grep -qxF -- "$title" <<<"$titles"; then
             echo "The issue \"$title\" is open already"
             exit 0

@@ -232,6 +232,40 @@ aur_packages() {
   done
 }
 
+# Print the package bases of file $1 that the requires rules can apply to, from the AUR metadata file:
+# python* or ruby* in Depends of a package of the base for any architecture, or no package at all
+aur_screen() {
+  local LC_ALL=C meta rc=0
+  meta=$(download_temp) || return 1
+  http_get "https://aur.archlinux.org/packages-meta-ext-v1.json.gz" -o "$meta" || rc=$?
+  if ((rc == 0)); then
+    # A ] or an escape inside a string would end the list of Depends early, so such a list counts
+    gzip -dc -- "$meta" | awk '
+      FNR == NR { if ($0 != "") want[$0] = 1; next }
+      $0 == "]" { closed = 1; next }
+      {
+        i = index($0, "\"PackageBase\":\"")
+        if (!i) next
+        base = substr($0, i + 15)
+        base = substr(base, 1, index(base, "\"") - 1)
+        if (!(base in want)) next
+        seen[base] = 1
+        i = index($0, "\"Depends\":[")
+        if (!i || base in full) next
+        deps = substr($0, i + 10)
+        j = index(deps, "]")
+        deps = j ? substr(deps, 1, j) : "\\"
+        if (index(deps, "\\") || gsub(/"/, "\"", deps) % 2 || deps ~ /"(python|ruby)/) full[base] = 1
+      }
+      END {
+        if (!closed) exit 1
+        for (base in want) if (!(base in seen) || base in full) print base
+      }' "$1" - || rc=$?
+  fi
+  rm -f -- "$meta"
+  return "$rc"
+}
+
 # Set PKG_NAME, PKG_VERSION, the pkgver, and PKG_REPO=aur for the AUR package that name or provides
 # $1 names; fail when the AUR has none
 aur_package() {

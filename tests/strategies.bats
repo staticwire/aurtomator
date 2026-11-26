@@ -537,6 +537,55 @@ EOF
 }
 
 # mesa names its releases mesa-26.2.5
+# GitLab.com plans 60 requests an hour for the traffic of one address without a token, and the
+# token is for GitLab.com alone; curl reads the header from stdin, off the command line
+@test "gitlab-tag: sends GITLAB_TOKEN to gitlab.com alone, from stdin" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: group/project"
+  GITLAB_TOKEN=glpat-test run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "3.1.0" ]
+  grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+  run ! grep -q glpat-test "$CURL_ARGS_LOG"
+  rm "$CURL_ARGS_LOG"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.gnome.org
+  project: group/project"
+  GITLAB_TOKEN=glpat-test run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  run ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+  rm "$CURL_ARGS_LOG"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: group/project"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+}
+
+# In the workflow root asks GitLab.com with GITLAB_TOKEN, and builder gets the answers in .gitlab/
+@test "gitlab-tag: reads the answer that the workflow fetched for it" {
+  local key
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: group/project"
+  key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100' | sha256sum)
+  mkdir "$TEST_TMPDIR/.gitlab"
+  echo '[{"name": "v9.0.0"}]' >"$TEST_TMPDIR/.gitlab/${key%% *}"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "9.0.0" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+  # Answers other than JSON fail as fetched ones do
+  echo '<html>' >"$TEST_TMPDIR/.gitlab/${key%% *}"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100: the answer is not JSON"* ]]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
 @test "gitlab-tag: tag_version_regex extracts from prefixed tags" {
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com
@@ -863,6 +912,53 @@ run_pin() {
       return 1
     }
   done
+}
+
+# The crates.io API allows one request a second, and the sparse index states no limit
+@test "crates: reads the sparse index under the path of the crate name" {
+  local entry name path
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  for entry in "a|1/a" "ab|2/ab" "abc|3/a/abc" "Serde_Json|se/rd/serde_json"; do
+    IFS='|' read -r name path <<<"$entry"
+    create_test_package "test-crates" "crates" "upstream:
+  registry: $name"
+    run "$TEST_TMPDIR/strategies/crates.sh" "test-crates"
+    tail -n 1 "$CURL_ARGS_LOG" | grep -q " https://index.crates.io/$path\$" || {
+      echo "$name: $(tail -n 1 "$CURL_ARGS_LOG")"
+      return 1
+    }
+  done
+  ! grep -q api/v1/crates "$CURL_ARGS_LOG"
+}
+
+# SemVer 2.0: a release ranks above its pre-releases, numbers compare as numbers and below words,
+# and build metadata takes no part
+@test "semver_newest: picks the newest version by semantic versioning" {
+  run bash -c 'source "$0/scripts/lib/common.sh"; printf "%s\n" 1.0.0-alpha 1.0.0 1.0.0-rc.1 0.9.9 | semver_newest false' "$TEST_TMPDIR"
+  [ "$output" = "1.0.0" ]
+  run bash -c 'source "$0/scripts/lib/common.sh"; printf "%s\n" 1.0.0-alpha 1.0.0-alpha.1 1.0.0-alpha.beta 1.0.0-beta 1.0.0-beta.2 1.0.0-beta.11 1.0.0-rc.1 0.9.9 | semver_newest true' "$TEST_TMPDIR"
+  [ "$output" = "1.0.0-rc.1" ]
+  run bash -c 'source "$0/scripts/lib/common.sh"; printf "%s\n" 1.0.0-beta.11 1.0.0-beta.2 1.0.0-beta | semver_newest true' "$TEST_TMPDIR"
+  [ "$output" = "1.0.0-beta.11" ]
+  run bash -c 'source "$0/scripts/lib/common.sh"; printf "%s\n" 1.0.0-alpha.beta 1.0.0-alpha.1 1.0.0-alpha | semver_newest true' "$TEST_TMPDIR"
+  [ "$output" = "1.0.0-alpha.beta" ]
+  run bash -c 'source "$0/scripts/lib/common.sh"; printf "%s\n" 1.10.0 1.9.0 1.2.10+b.1 | semver_newest false' "$TEST_TMPDIR"
+  [ "$output" = "1.10.0" ]
+  run bash -c 'source "$0/scripts/lib/common.sh"; printf "%s\n" 2.0.0-rc.1 | semver_newest false' "$TEST_TMPDIR"
+  [ -z "$output" ]
+}
+
+@test "crates: leaves out yanked versions" {
+  create_test_package "test-crates" "crates" "upstream:
+  registry: serde"
+  run "$TEST_TMPDIR/strategies/crates.sh" "test-crates"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.0.204" ]
+  create_test_package "test-crates" "crates" "upstream:
+  registry: serde
+  prerelease: true"
+  run "$TEST_TMPDIR/strategies/crates.sh" "test-crates"
+  [ "$output" = "2.0.0-alpha.1" ]
 }
 
 @test "crates: reads max_stable_version without prerelease" {
@@ -2315,7 +2411,7 @@ Failed to fetch tags from codeberg.org/gated-owner/gated-repo" ]
 # missing package
 @test "registry strategies: name the page a bot check answers in place of the version" {
   local entry strategy upstream host
-  for entry in "npm|registry|registry.npmjs.org" "pypi|registry|pypi.org" "crates|registry|crates.io" \
+  for entry in "npm|registry|registry.npmjs.org" "pypi|registry|pypi.org" "crates|registry|index.crates.io" \
     "repology|repology|repology.org" "archpkg|archpkg|archlinux.org"; do
     IFS='|' read -r strategy upstream host <<<"$entry"
     echo "$strategy"

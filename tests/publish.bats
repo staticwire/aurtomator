@@ -4662,6 +4662,18 @@ EOF
   [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 0 minutes in this run" ]
 }
 
+# Fetch GitLab tags of the workflow runs before check-all.sh, within the same budget
+@test "check-all: takes the seconds that AURTOMATOR_CHECK_SPENT names from the time budget of the loop" {
+  flaky_check flaky
+  AURTOMATOR_CHECK_BUDGET=120 AURTOMATOR_CHECK_SPENT=120 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/checks" ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 2 minutes in this run" ]
+  AURTOMATOR_CHECK_BUDGET=120 AURTOMATOR_CHECK_SPENT=60 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady' ]
+}
+
 @test "check-all: checks no package again after the time budget of the loop" {
   flaky_check flaky 1
   # Each read of the clock moves it 100 s on
@@ -4692,7 +4704,7 @@ EOF
   local name value
   flaky_check flaky
   for name in AURTOMATOR_CHECK_TIMEOUT AURTOMATOR_UPDATE_TIMEOUT AURTOMATOR_VERIFY_BUDGET \
-    AURTOMATOR_CHECK_BUDGET AURTOMATOR_PUBLISH_BUDGET AURTOMATOR_RECHECK_DELAY; do
+    AURTOMATOR_CHECK_BUDGET AURTOMATOR_CHECK_SPENT AURTOMATOR_PUBLISH_BUDGET AURTOMATOR_RECHECK_DELAY; do
     for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 010 1.5 -1 1000000 " 5"; do
       run env "$name=$value" "$TEST_TMPDIR/scripts/check-all.sh"
       [ "$status" -eq 1 ]
@@ -5386,6 +5398,94 @@ EOF
   [[ "$output" == *$'\nManual update: https://github.com/someone/aurtomator/blob/main/site/src/content/docs/setup.md#the-calling-workflows\n'* ]]
 }
 
+# === issue_write ===
+
+# GitHub allows 80 writes of content a minute and 500 an hour, and the run keeps the rest of the hour
+@test "issue_write: writes one a second, and fails with 3 past ISSUE_WRITE_MAX" {
+  local bin="$BATS_TEST_TMPDIR/bin" start end
+  mkdir -p "$bin"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s/gh.log"\n' "$BATS_TEST_TMPDIR" >"$bin/gh"
+  chmod +x "$bin/gh"
+  export ISSUE_WRITES="$BATS_TEST_TMPDIR/writes" ISSUE_WRITE_MAX=3 PATH="$bin:$PATH"
+  start=${EPOCHREALTIME/[.,]/}
+  issue_write issue close 1 --comment a
+  issue_write issue close 2 --comment b
+  issue_write issue create --title t --body-file - <<<"body"
+  end=${EPOCHREALTIME/[.,]/}
+  (((end - start) >= 2000000))
+  run issue_write issue close 4 --comment d
+  [ "$status" -eq 3 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/gh.log")" = $'issue close 1 --comment a\nissue close 2 --comment b\nissue create --title t --body-file -' ]
+  # The count holds across the steps of the job, which share the file
+  ISSUE_WRITE_MAX=4 run issue_write issue close 4 --comment d
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$BATS_TEST_TMPDIR/gh.log")" = 4 ]
+}
+
+# Errors hold text of upstream, so each goes in a code span without backticks, where @ mentions no one
+@test "grouped_issue_body: lists each package with the first line of its error" {
+  mkdir -p "$TEST_TMPDIR/st"
+  printf 'check_failed: `boom` @octocat [x](https://evil.example)\nsecond line\n' >"$TEST_TMPDIR/st/c"
+  echo "update_failed: $(printf 'x%.0s' {1..300})" >"$TEST_TMPDIR/st/d"
+  run grouped_issue_body "$TEST_TMPDIR/st" https://example.invalid/run c d
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "GitHub allows a run about 450 writes to issues an hour, so these packages failed without an issue of their own in https://example.invalid/run. The run summary of its step Create issues holds each whole error." ]
+  [ "${lines[1]}" = "- \`c\`: \`'boom' @octocat [x](https://evil.example)\`" ]
+  [ "${lines[2]}" = "- \`d\`: \`$(printf 'x%.0s' {1..200})\`" ]
+  [ "${lines[3]}" = "Auto-created by update workflow, which closes it once each of these packages recovered or has an issue of its own." ]
+}
+
+# GitHub refuses an issue body past 65536 characters
+@test "grouped_issue_body and requirements_issue_body: stay within HOST_BODY_MAX and count the packages left out" {
+  local i names=() LC_ALL=C.UTF-8
+  mkdir -p "$TEST_TMPDIR/st"
+  for i in $(seq 1 600); do
+    echo "check_failed: $(printf 'é%.0s' {1..300})" >"$TEST_TMPDIR/st/p$i"
+    names+=("p$i")
+    printf 'p%s\tpython\n' "$i" >>"$TEST_TMPDIR/req"
+  done
+  run grouped_issue_body "$TEST_TMPDIR/st" https://example.invalid/run "${names[@]}"
+  [ "$status" -eq 0 ]
+  ((${#output} <= HOST_BODY_MAX))
+  [[ "$output" =~ $'\n'"- and "([0-9]+)" more packages, which the run summary of the step Create issues lists"$'\n' ]]
+  [ "$((BASH_REMATCH[1] + $(grep -c '^- `p' <<<"$output")))" = 600 ]
+  for i in $(seq 601 1000); do
+    printf 'p%s\tpython\n' "$i" >>"$TEST_TMPDIR/req"
+  done
+  run requirements_issue_body "$TEST_TMPDIR/req"
+  [ "$status" -eq 0 ]
+  ((${#output} <= HOST_BODY_MAX))
+  [[ "$output" =~ $'\n'"- and "([0-9]+)" more packages, which the run summary of the step Create issues lists"$'\n' ]]
+  [ "$((BASH_REMATCH[1] + $(grep -c '^- `p' <<<"$output")))" = 1000 ]
+}
+
+# === requirements_issue_body ===
+
+# The body holds no run, so a run with the same list leaves the issue as it is
+@test "requirements_issue_body: lists each package with the key it needs, and nothing for an empty list" {
+  printf 'bar\truby\nfoo\tpython\nfoo\truby\nbad line\n' >"$TEST_TMPDIR/req"
+  run requirements_issue_body "$TEST_TMPDIR/req"
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+The YAML of each package below names no source of its requirements, so the requires rules cannot read them and the check of its next version fails:
+
+- `bar`: its depends hold Ruby packages, so set `ruby.gem` or `ruby: none`
+- `foo`: its depends hold Python packages, so set `python.pypi`, `python.pyproject` or `python: none`
+- `foo`: its depends hold Ruby packages, so set `ruby.gem` or `ruby: none`
+
+See https://aurtomator.dev/features/update-alerts/
+
+Auto-created by update workflow, which edits it when the list changes and closes it once no package is left.
+EOF
+  )
+  [ "$output" = "$expected" ]
+  : >"$TEST_TMPDIR/req"
+  run requirements_issue_body "$TEST_TMPDIR/req"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 # === failure_issue_body ===
 
 @test "failure_issue_body: puts the error in a code block" {
@@ -5787,6 +5887,18 @@ body_packages() {
   run clean_statuses "$TEST_TMPDIR/st"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/st/_upstream" ]
+}
+
+# builder writes _requirements, and the issue names each package and takes its text from the kind
+@test "clean_statuses: keeps the lines of _requirements that name a package and python or ruby" {
+  make_statuses _requirements=$'foo\tpython\nfoo\truby\nbar\tperl\nFoo\tpython\n_x\tpython\nbaz\tpython\textra\nqux python\n@octocat\truby\nfoo-2\truby'
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/st/_requirements")" = $'foo\tpython\nfoo\truby\nfoo-2\truby' ]
+  make_statuses _requirements=
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ -f "$TEST_TMPDIR/st/_requirements" ]
+  [ ! -s "$TEST_TMPDIR/st/_requirements" ]
 }
 
 @test "clean_statuses: keeps the lines of _without that name a package, a version and arches" {

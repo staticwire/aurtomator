@@ -55,6 +55,10 @@ clean_statuses() {
         _clean_hosts "$file"
         continue
         ;;
+      _requirements)
+        _clean_requirements "$file"
+        continue
+        ;;
       _*) continue ;;
     esac
     case "$status" in
@@ -89,6 +93,13 @@ _clean_without() {
 
 # Keep the lines of _hosts file $1 that name a package and a host, split by a tab, as
 # check-all.sh writes them
+_clean_requirements() {
+  local line kept="" LC_ALL=C re=$'^[a-z0-9][a-z0-9.+_-]*\t(python|ruby)$'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ ! "$line" =~ $re ]] || kept+="$line"$'\n'
+  done <"$1"
+  printf '%s' "$kept" >"$1"
+}
 _clean_hosts() {
   local line kept="" LC_ALL=C re=$'^[a-z0-9][a-z0-9.+_-]*\t[a-z0-9.-]+$'
   while IFS= read -r line || [[ -n "$line" ]]; do

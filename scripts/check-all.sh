@@ -45,6 +45,8 @@ VERIFY_BUDGET=$(env_seconds AURTOMATOR_VERIFY_BUDGET 1200) || exit 1
 # Time budget of the loop of a check run, in seconds: no check and no step of a check starts
 # after it, so the check job ends within its 30 minutes
 CHECK_BUDGET=$(env_seconds AURTOMATOR_CHECK_BUDGET 1200) || exit 1
+# Seconds of that budget that steps before this script spent, as Fetch GitLab tags of the workflow
+CHECK_SPENT=$(env_seconds AURTOMATOR_CHECK_SPENT 0) || exit 1
 
 # Time budget of the publish loop, in seconds: no publish starts after it,
 # so the publish job ends within its 30 minutes
@@ -350,6 +352,9 @@ AURTOMATOR_VERSION=$(aurtomator_version)
 if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
   if [[ "${CHECKED[_upstream]:-}" =~ ^(newer|current):\ [0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     printf '%s\n' "${CHECKED[_upstream]}" >"${STATUS_DIR}/_upstream"
+  fi
+  if [[ -n "${CHECKED[_requirements]+set}" ]]; then
+    printf '%s' "${CHECKED[_requirements]:+${CHECKED[_requirements]}$'\n'}" >"${STATUS_DIR}/_requirements"
   fi
 elif [[ -n "$AURTOMATOR_VERSION" ]]; then
   if UPSTREAM_STATUS=$(upstream_status); then
@@ -1102,6 +1107,83 @@ check_files=()
 for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   [[ ! -f "$pkg_file" && ! -L "$pkg_file" ]] || check_files+=("$pkg_file")
 done
+# The budget of the loop holds the GraphQL fetch, which starts no request after CHECK_END
+CHECK_END=$(($(date -u +%s) + CHECK_BUDGET - CHECK_SPENT))
+# GITHUB_TOKEN allows 1000 REST requests an hour, and GraphQL reads 50 repositories in one
+if [[ "$MODE" == check || "$MODE" == update ]]; then
+  github_prefetch "${check_files[@]}"
+fi
+
+# The REST requests of the hour that a check run with GITHUB_TOKEN leaves to publish and the issues job,
+# and the package files whose check asks REST: GitHub releases, and assets of github-tag
+readonly REST_RESERVE=400
+REST_LEFT="" REST_SINCE=10
+declare -A REST_FILES=()
+# Checks of a run for the packages of a strategy whose host caps the requests of a day: repology.org
+# counts more than 1000 a day as bulk, and a run each hour gives 40
+declare -A HOST_BUDGET=([repology]="${AURTOMATOR_REPOLOGY_BUDGET:-40}")
+declare -A HOST_OF=([repology]=repology.org) HELD_FILES=()
+declare -a repology_files=()
+if [[ "$MODE" == check ]]; then
+  scan=()
+  for pkg_file in "${check_files[@]}"; do
+    [[ ! -f "$pkg_file" || -L "$pkg_file" ]] || scan+=("$pkg_file")
+  done
+  while IFS=$'\t' read -r pkg_file strategy asset; do
+    case $strategy in
+      github-release | github-nightly | github-asset) REST_FILES[$pkg_file]=1 ;;
+      github-tag) [[ -z "$asset" ]] || REST_FILES[$pkg_file]=1 ;;
+      repology) repology_files+=("$pkg_file") ;;
+    esac
+  done < <(((${#scan[@]} == 0)) ||
+    yq -N -r '[filename, .strategy // "", .upstream.asset_regex // ""] | map(tostring) | join("\t")' "${scan[@]}" 2>/dev/null || true)
+  [[ -n "${GITHUB_TOKEN:-}" ]] || REST_FILES=()
+  # Each run takes the next packages after those of the run before, by its number
+  budget=${HOST_BUDGET[repology]}
+  if [[ ! "$budget" =~ ^[1-9][0-9]{0,4}$ ]]; then
+    log_err "AURTOMATOR_REPOLOGY_BUDGET must be a number of checks from 1: ${budget@Q}"
+    exit 1
+  fi
+  if ((${#repology_files[@]} > budget)); then
+    # Runs by hand take the hour in place of the run number, as verify does
+    run_number=$(($(date -u +%s) / 3600))
+    ! (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]) || run_number=$GITHUB_RUN_NUMBER
+    offset=$((run_number * budget % ${#repology_files[@]}))
+    for ((i = budget; i < ${#repology_files[@]}; i++)); do
+      HELD_FILES[${repology_files[(offset + i) % ${#repology_files[@]}]}]=repology
+    done
+  fi
+fi
+
+# Succeeds while the check of package file $1 may ask GitHub REST: it asks none, or GET /rate_limit,
+# which counts against no limit and runs before every tenth such check, leaves REST_RESERVE or more
+rest_left() {
+  [[ -n "${REST_FILES[$1]:-}" ]] || return 0
+  if ((REST_SINCE >= 10)); then
+    REST_SINCE=0
+    REST_LEFT=$(github_api https://api.github.com/rate_limit 2>/dev/null | yq -r '.resources.core.remaining // ""' 2>/dev/null) ||
+      REST_LEFT=""
+    # Failed reads belong to no package
+    if host_memory; then
+      : >"$AURTOMATOR_HOSTS_DIR/failed"
+    fi
+  fi
+  REST_SINCE=$((REST_SINCE + 1))
+  [[ ! "$REST_LEFT" =~ ^[0-9]+$ ]] || ((REST_LEFT >= REST_RESERVE))
+}
+
+# Gives status unchecked to package $1, whose host gives the run fewer checks than it has packages
+mark_held_unchecked() {
+  local host=${HOST_OF[$2]} budget=${HOST_BUDGET[$2]}
+  log_warn "$1: $host takes $budget checks a run, so this package gets its check in a later run"
+  echo "unchecked: $host takes $budget checks a run, so this package gets its check in a later run" >"${STATUS_DIR}/$1"
+}
+
+# Gives status unchecked to package $1, which rest_left kept from GitHub
+mark_rest_unchecked() {
+  log_warn "$1: the run keeps its last $REST_RESERVE GitHub API requests of the hour for the jobs after the check"
+  echo "unchecked: the run keeps its last $REST_RESERVE GitHub API requests of the hour for the jobs after the check" >"${STATUS_DIR}/$1"
+}
 # Packages with upstream.pin_from wait for held updates of the project that pins them, so
 # they run after the other packages, whose statuses are known then
 plain_files=()
@@ -1119,7 +1201,6 @@ check_start=0
 if [[ "$MODE" == check && ${#plain_files[@]} -gt 0 ]] && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
   check_start=$((GITHUB_RUN_NUMBER % ${#plain_files[@]}))
 fi
-CHECK_END=$(($(date -u +%s) + CHECK_BUDGET))
 
 RECHECK=()
 declare -A FAILED_HOSTS=()
@@ -1136,10 +1217,16 @@ if [[ "$MODE" == publish ]]; then
   [[ -s "${STATUS_DIR}/_hosts" ]] || rm -f "${STATUS_DIR}/_hosts"
 fi
 for pkg_file in "${plain_files[@]:check_start}" "${plain_files[@]:0:check_start}" "${companion_files[@]}"; do
-  if check_time_left; then
+  if [[ -n "${HELD_FILES[$pkg_file]:-}" ]]; then
+    ! pkg_name=$(package_name "$pkg_file") || mark_held_unchecked "$pkg_name" "${HELD_FILES[$pkg_file]}"
+  elif check_time_left && rest_left "$pkg_file"; then
     run_package "$pkg_file" 1
   elif pkg_name=$(package_name "$pkg_file"); then
-    mark_unchecked "$pkg_name"
+    if check_time_left; then
+      mark_rest_unchecked "$pkg_name"
+    else
+      mark_unchecked "$pkg_name"
+    fi
   fi
 done
 
@@ -1150,8 +1237,20 @@ if ((${#RECHECK[@]} > 0)) && check_time_left; then
   sleep "$RECHECK_DELAY"
   for pkg_file in "${RECHECK[@]}"; do
     check_time_left || break
+    # The failed check keeps its status when GitHub REST has nothing to spare
+    rest_left "$pkg_file" || continue
     run_package "$pkg_file" 2
   done
+fi
+
+# The issues job keeps one issue for the packages whose next version fails its check for a missing key;
+# a run that cannot tell writes no list, and the issue stays as it is
+if [[ -n "$RULES_LATER" ]]; then
+  if missing=$(requirements_missing "${check_files[@]}"); then
+    printf '%s' "${missing:+$missing$'\n'}" >"${STATUS_DIR}/_requirements"
+  else
+    log_warn "Could not read the AUR, so the run lists no packages that miss the source of their requirements"
+  fi
 fi
 
 # The issues step closes the issues of a name this list lacks, since a package
