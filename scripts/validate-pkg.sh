@@ -1132,21 +1132,28 @@ print_done() {
   done
 }
 
+# Set ENDED to the number of checks that wrote their exit code into CHECK_OUT
+ended_checks() {
+  local codes=("$CHECK_OUT"/*.rc)
+  ENDED=0
+  [[ ! -e "${codes[0]}" ]] || ENDED=${#codes[@]}
+}
+
 # Check the files of CHECKED, $1 at a time, and their requirements with a non-empty $2, and start no
 # check after second $3 of the script, when set; LAUNCHED counts the checks started
 check_files() {
-  local i running=0
+  local i
   CHECK_OUT=$(mktemp -d)
   trap 'rm -rf -- "$CHECK_OUT"' EXIT
   NEXT=0 LAUNCHED=0
   for i in "${!CHECKED[@]}"; do
-    if ((running >= $1)); then
-      wait -n
-      running=$((running - 1))
-    fi
+    # Ended checks leave their .rc whatever wait -n saw, and 127 means that no check runs
+    while ended_checks && ((i - ENDED >= $1)); do
+      wait -n || (($? != 127)) || break
+    done
     [[ -z "$3" ]] || ((SECONDS < $3)) || break
     check_package "$i" "$2" &
-    running=$((running + 1)) LAUNCHED=$((i + 1))
+    LAUNCHED=$((i + 1))
     print_done
   done
   wait
