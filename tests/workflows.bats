@@ -4271,6 +4271,21 @@ run_bare_issues_step() {
   [ "$output" = "0" ]
 }
 
+# Repositories of 3000 packages can hold more than 1000 open issues of one label
+@test "check-updates: the issue steps read every open issue of a label" {
+  local i open="" titles=""
+  for i in $(seq 1 1000); do
+    open+="$i ❌ p$i: check failed"$'\n'
+    titles+="❌ p$i: check failed"$'\n'
+  done
+  GH_OPEN="${open}1001 ❌ foo: check failed" run_close_step foo=up_to_date
+  [ "$status" -eq 0 ]
+  grep -qx 'issue close 1001 --comment comment' "$GH_LOG"
+  GH_TITLES="${titles}❌ foo: check failed" run_issue_step foo="check_failed: boom"
+  [ "$status" -eq 0 ]
+  ! grep -q '^issue create' "$GH_LOG"
+}
+
 # Anyone can open an issue in a public repository, and each issue looks up the package its title names
 @test "check-updates: reads the package from the title of each issue" {
   GH_OPEN=$'12 ❌ g++: check failed\n13 ❌ foo: check failed: again\n14 ❌ $(touch x): check failed\n15 ❌ ../foo: check failed\n16 ❌  foo: check failed\n17 ❌ foo:check failed\n18 Foo: ❌ foo: check failed\n19 ❌ foo: check failed' \

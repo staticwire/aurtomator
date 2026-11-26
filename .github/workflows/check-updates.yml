@@ -1096,8 +1096,9 @@ jobs:
 
           has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
           [[ "$has_issues" != "false" ]] || exit 0
-          open=$(gh issue list --label "auto-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
-          held=$(gh issue list --label "update-held" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+          # gh reads pages of 100 over GraphQL up to --limit, which no count of open issues reaches
+          open=$(gh issue list --label "auto-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+          held=$(gh issue list --label "update-held" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
 
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
@@ -1139,7 +1140,7 @@ jobs:
           # The issues of a package whose YAML is gone close, since no check of it closes them; a
           # run without the list of packages closes none
           if [[ -f "$STATUS_DIR/_packages" ]]; then
-            arched=$(gh issue list --label "arch-missing" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            arched=$(gh issue list --label "arch-missing" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
             name_re='[a-z0-9][a-z0-9.+_-]*'
             failed_re="^❌ (${name_re}): (check|update) failed\$"
             held_re="^✋ (${name_re}): update held\$"
@@ -1167,7 +1168,7 @@ jobs:
           # Arch issues close when _without no longer lists their package. Only publish writes
           # _without, so runs without publish close none.
           if [[ -f "$STATUS_DIR/_without" ]]; then
-            arched=$(gh issue list --label "arch-missing" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            arched=$(gh issue list --label "arch-missing" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
             title_re='^⚠️ ([a-z0-9][a-z0-9.+_-]*): '
             while read -r number title; do
               [[ -n "$number" && "$title" =~ $title_re ]] || continue
@@ -1182,7 +1183,7 @@ jobs:
           # could not read the latest release have no _upstream and close none.
           if [[ -f "$STATUS_DIR/_upstream" ]]; then
             upstream=$(cat "$STATUS_DIR/_upstream")
-            releases=$(gh issue list --label "aurtomator-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            releases=$(gh issue list --label "aurtomator-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
             while read -r number title; do
               [[ -n "$number" && "$title" != "🚀 aurtomator ${upstream#newer: } available" ]] || continue
               gh issue close "$number" --comment "The aurtomator release status is \`$upstream\` in $RUN_URL."
@@ -1211,7 +1212,7 @@ jobs:
 
           has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
           [[ "$has_issues" != "false" ]] || exit 0
-          open=$(gh issue list --label "auto-update" --state open --limit 1000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+          open=$(gh issue list --label "auto-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
 
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
@@ -1268,7 +1269,7 @@ jobs:
           use_label() {
             [[ -z "${titles[$1]+set}" ]] || return 0
             gh label create "$1" --color "$2" --description "$3" 2>/dev/null || true
-            titles[$1]=$(gh issue list --label "$1" --state open --limit 1000 --json title --jq '.[].title')
+            titles[$1]=$(gh issue list --label "$1" --state open --limit 100000 --json title --jq '.[].title')
           }
 
           # Opens an issue with label $1, title $2 and body $3, which goes on stdin since Linux refuses
@@ -1387,7 +1388,7 @@ jobs:
           if [[ -f "$STATUS_DIR/_requirements" ]]; then
             title="⚠️ Packages need a python or ruby key"
             body=$(lib requirements_issue_body "$STATUS_DIR/_requirements")
-            numbers=$(gh issue list --label missing-key --state open --limit 1000 --json number,title \
+            numbers=$(gh issue list --label missing-key --state open --limit 100000 --json number,title \
               --jq '.[] | "\(.number) \(.title)"' | awk -v t="$title" 'substr($0, index($0, " ") + 1) == t { print $1 }')
             if [[ -z "$body" ]]; then
               for number in $numbers; do
