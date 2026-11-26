@@ -3279,17 +3279,6 @@ $2"
   done
 }
 
-# Writes the AUR metadata file with a record of each argument after [ and before ], one a line, as
-# aurweb writes it
-aur_meta() {
-  local IFS=$'\n'
-  {
-    echo '['
-    [[ $# -eq 0 ]] || printf '%s\n' "$(printf '%s,\n' "$@" | sed '$ s/,$//')"
-    printf ']'
-  } | gzip >"$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz"
-}
-
 # validate.yml reads the requirements of every package when the pins move, and the AUR metadata
 # file shows which packages have Python or Ruby in depends without a clone of each
 @test "validate --requirements: checks the packages whose AUR depends hold Python or Ruby" {

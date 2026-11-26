@@ -199,6 +199,41 @@ requires_needed() {
   echo no
 }
 
+# Print a line of the name and python or ruby for each package file of $@ whose AUR depends hold that
+# language and whose YAML names no source of its requirements; fail when the AUR cannot be read
+requirements_missing() {
+  local list name needed file python ruby srcinfo pkgname has_python has_ruby rc=0
+  local -A files=()
+  list=$(download_temp) || return 1
+  for file in "$@"; do
+    name=$(package_name "$file" 2>/dev/null) || continue
+    files[$name]=$file
+    printf '%s\n' "$name"
+  done >"$list"
+  needed=$(aur_screen "$list") || rc=$?
+  rm -f -- "$list"
+  ((rc == 0)) || return 1
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    file=${files[$name]}
+    python=1 ruby=1
+    ! python_keyed "$file" || python=""
+    ! ruby_keyed "$file" || ruby=""
+    [[ -n "$python$ruby" ]] || continue
+    rc=0
+    srcinfo=$(aur_srcinfo "$name") || rc=$?
+    ((rc != 3)) || continue
+    ((rc == 0)) || return 1
+    has_python="" has_ruby=""
+    while IFS= read -r pkgname; do
+      [[ -z "$python" ]] || ! pkgname_has_python "$srcinfo" "$pkgname" || has_python=1
+      [[ -z "$ruby" ]] || ! pkgname_has_ruby "$srcinfo" "$pkgname" || has_ruby=1
+    done < <(srcinfo_pkgnames "$srcinfo")
+    [[ -z "$has_python" ]] || printf '%s\tpython\n' "$name"
+    [[ -z "$has_ruby" ]] || printf '%s\truby\n' "$name"
+  done < <(LC_ALL=C sort <<<"$needed")
+}
+
 # Succeed when the requires rules can read the requirements of package file $1 at its current version, as
 # the check of a new version reads them; fail with the message of that check otherwise
 requires_check() {

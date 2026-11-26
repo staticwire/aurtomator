@@ -131,6 +131,16 @@ ruby_source() {
   return 1
 }
 
+# Succeed when package file $1 names the source of its gem in a key that ruby_source takes: ruby: none,
+# strategy rubygems or ruby.gem
+ruby_keyed() {
+  if [[ "$(pkg_get "$1" '.ruby | tag')" == "!!str" && "$(pkg_get "$1" .ruby)" == none ]] ||
+    [[ "$(pkg_get "$1" .strategy)" == rubygems ]]; then
+    return 0
+  fi
+  [[ "$(pkg_get "$1" '.ruby | tag')" == "!!map" && -n "$(pkg_get "$1" '.ruby.gem // ""')" ]]
+}
+
 # Succeed when depends of pkgname $2 of .SRCINFO $1 hold ruby or ruby-*
 pkgname_has_ruby() {
   srcinfo_depends "$1" "$2" depends | awk '$0 == "ruby" || index($0, "ruby-") == 1 { found = 1 } END { exit !found }'

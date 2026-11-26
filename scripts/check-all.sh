@@ -351,6 +351,9 @@ if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
   if [[ "${CHECKED[_upstream]:-}" =~ ^(newer|current):\ [0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     printf '%s\n' "${CHECKED[_upstream]}" >"${STATUS_DIR}/_upstream"
   fi
+  if [[ -n "${CHECKED[_requirements]+set}" ]]; then
+    printf '%s' "${CHECKED[_requirements]:+${CHECKED[_requirements]}$'\n'}" >"${STATUS_DIR}/_requirements"
+  fi
 elif [[ -n "$AURTOMATOR_VERSION" ]]; then
   if UPSTREAM_STATUS=$(upstream_status); then
     printf '%s\n' "$UPSTREAM_STATUS" >"${STATUS_DIR}/_upstream"
@@ -1152,6 +1155,16 @@ if ((${#RECHECK[@]} > 0)) && check_time_left; then
     check_time_left || break
     run_package "$pkg_file" 2
   done
+fi
+
+# The issues job keeps one issue for the packages whose next version fails its check for a missing key;
+# a run that cannot tell writes no list, and the issue stays as it is
+if [[ -n "$RULES_LATER" ]]; then
+  if missing=$(requirements_missing "${check_files[@]}"); then
+    printf '%s' "${missing:+$missing$'\n'}" >"${STATUS_DIR}/_requirements"
+  else
+    log_warn "Could not read the AUR, so the run lists no packages that miss the source of their requirements"
+  fi
 fi
 
 # The issues step closes the issues of a name this list lacks, since a package

@@ -5386,6 +5386,33 @@ EOF
   [[ "$output" == *$'\nManual update: https://github.com/someone/aurtomator/blob/main/site/src/content/docs/setup.md#the-calling-workflows\n'* ]]
 }
 
+# === requirements_issue_body ===
+
+# The body holds no run, so a run with the same list leaves the issue as it is
+@test "requirements_issue_body: lists each package with the key it needs, and nothing for an empty list" {
+  printf 'bar\truby\nfoo\tpython\nfoo\truby\nbad line\n' >"$TEST_TMPDIR/req"
+  run requirements_issue_body "$TEST_TMPDIR/req"
+  [ "$status" -eq 0 ]
+  expected=$(
+    cat <<'EOF'
+The YAML of each package below names no source of its requirements, so the requires rules cannot read them and the check of its next version fails:
+
+- `bar`: its depends hold Ruby packages, so set `ruby.gem` or `ruby: none`
+- `foo`: its depends hold Python packages, so set `python.pypi`, `python.pyproject` or `python: none`
+- `foo`: its depends hold Ruby packages, so set `ruby.gem` or `ruby: none`
+
+See https://aurtomator.dev/features/update-alerts/
+
+Auto-created by update workflow, which edits it when the list changes and closes it once no package is left.
+EOF
+  )
+  [ "$output" = "$expected" ]
+  : >"$TEST_TMPDIR/req"
+  run requirements_issue_body "$TEST_TMPDIR/req"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 # === failure_issue_body ===
 
 @test "failure_issue_body: puts the error in a code block" {
@@ -5787,6 +5814,18 @@ body_packages() {
   run clean_statuses "$TEST_TMPDIR/st"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/st/_upstream" ]
+}
+
+# builder writes _requirements, and the issue names each package and takes its text from the kind
+@test "clean_statuses: keeps the lines of _requirements that name a package and python or ruby" {
+  make_statuses _requirements=$'foo\tpython\nfoo\truby\nbar\tperl\nFoo\tpython\n_x\tpython\nbaz\tpython\textra\nqux python\n@octocat\truby\nfoo-2\truby'
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/st/_requirements")" = $'foo\tpython\nfoo\truby\nfoo-2\truby' ]
+  make_statuses _requirements=
+  run clean_statuses "$TEST_TMPDIR/st"
+  [ -f "$TEST_TMPDIR/st/_requirements" ]
+  [ ! -s "$TEST_TMPDIR/st/_requirements" ]
 }
 
 @test "clean_statuses: keeps the lines of _without that name a package, a version and arches" {

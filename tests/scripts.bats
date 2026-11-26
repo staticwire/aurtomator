@@ -4208,6 +4208,74 @@ $1"
   [ "$output" = "--rules-later goes with a check run alone" ]
 }
 
+# The issues job keeps one issue for the packages whose next version fails its check for a missing key
+@test "check-all: --rules-later lists in _requirements the packages whose YAML names no source of their requirements" {
+  local yaml
+  aur_meta '{"Name":"kube-diagrams","PackageBase":"kube-diagrams","Depends":["bash","python"]}'
+  python_package "" bash python python-yaml
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$(cat "$TEST_TMPDIR/.status/_requirements")" = $'kube-diagrams\tpython' ]
+  python_package "" bash python ruby-rack
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$(cat "$TEST_TMPDIR/.status/_requirements")" = $'kube-diagrams\tpython\nkube-diagrams\truby' ]
+  # The keys that python_source and ruby_source take
+  for yaml in $'python: none\nruby: none' $'python:\n  pypi: KubeDiagrams\nruby:\n  gem: rack' \
+    $'python:\n  pyproject: pyproject.toml\nruby: none'; do
+    rm -rf "$TEST_TMPDIR/aur-remote" "$TEST_TMPDIR/aur-work-kube-diagrams"
+    python_package "$yaml" bash python ruby-rack
+    run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+    [ -e "$TEST_TMPDIR/.status/_requirements" ] && [ ! -s "$TEST_TMPDIR/.status/_requirements" ] || {
+      echo "listed: $yaml"
+      return 1
+    }
+  done
+  # Depends of the AUR metadata file without Python or Ruby need no clone of the AUR
+  python_package "" bash python
+  aur_meta '{"Name":"kube-diagrams","PackageBase":"kube-diagrams","Depends":["bash"]}'
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ ! -s "$TEST_TMPDIR/.status/_requirements" ]
+  # Without the metadata file the run cannot tell, so it writes no list and the issue stays
+  rm "$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ ! -e "$TEST_TMPDIR/.status/_requirements" ]
+  [[ "$output" == *"Could not read the AUR, so the run lists no packages that miss the source of their requirements"* ]]
+  # Runs without --rules-later read no metadata file
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ ! -e "$TEST_TMPDIR/.status/_requirements" ]
+  ! grep -q packages-meta "$CURL_ARGS_LOG"
+}
+
+# The issues job reads the statuses of publish when it ran
+@test "check-all: --prepare and --publish carry the _requirements of the check run" {
+  local mode
+  create_test_package foo github-release "upstream:
+  project: owner/foo
+current: '1.0.0'"
+  for mode in prepare publish; do
+    rm -rf "$TEST_TMPDIR/.status" "$TEST_TMPDIR/out"
+    mkdir -p "$TEST_TMPDIR/.status"
+    echo up_to_date >"$TEST_TMPDIR/.status/foo"
+    printf 'foo\tpython\n' >"$TEST_TMPDIR/.status/_requirements"
+    run "$TEST_TMPDIR/scripts/check-all.sh" "--$mode" "$TEST_TMPDIR/out"
+    [ "$(cat "$TEST_TMPDIR/.status/_requirements")" = $'foo\tpython' ] || {
+      echo "lost by --$mode"
+      return 1
+    }
+    rm -rf "$TEST_TMPDIR/.status" "$TEST_TMPDIR/out"
+    mkdir -p "$TEST_TMPDIR/.status"
+    echo up_to_date >"$TEST_TMPDIR/.status/foo"
+    : >"$TEST_TMPDIR/.status/_requirements"
+    run "$TEST_TMPDIR/scripts/check-all.sh" "--$mode" "$TEST_TMPDIR/out"
+    [ -e "$TEST_TMPDIR/.status/_requirements" ] && [ ! -s "$TEST_TMPDIR/.status/_requirements" ]
+    rm -rf "$TEST_TMPDIR/.status" "$TEST_TMPDIR/out"
+    mkdir -p "$TEST_TMPDIR/.status"
+    echo up_to_date >"$TEST_TMPDIR/.status/foo"
+    run "$TEST_TMPDIR/scripts/check-all.sh" "--$mode" "$TEST_TMPDIR/out"
+    [ ! -e "$TEST_TMPDIR/.status/_requirements" ]
+  done
+}
+
 @test "check-all: --rules-later fails the check of a package whose AUR .SRCINFO it cannot read" {
   python_package $'python:\n  pypi: KubeDiagrams' bash python python-yaml
   # The AUR serves an empty repository for a package it lacks, and git fails to clone this one

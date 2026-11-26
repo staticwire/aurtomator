@@ -174,6 +174,17 @@ python_aur() {
   aur_srcinfo_remote "$1" "$TEST_TMPDIR/aur-$1.SRCINFO"
 }
 
+# Writes the AUR metadata file that mock-curl.sh serves, with a record of each argument after [ and
+# before ], one a line, as aurweb writes it
+aur_meta() {
+  local IFS=$'\n'
+  {
+    echo '['
+    [[ $# -eq 0 ]] || printf '%s\n' "$(printf '%s,\n' "$@" | sed '$ s/,$//')"
+    printf ']'
+  } | gzip >"$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz"
+}
+
 # Usage: aur_srcinfo_remote <pkgbase> <.SRCINFO>. The mock git of AUR clones then serves a repo
 # with that .SRCINFO and a stub PKGBUILD for <pkgbase>; MOCK_DIR keeps its git.
 aur_srcinfo_remote() {

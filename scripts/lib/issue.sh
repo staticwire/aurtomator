@@ -239,6 +239,22 @@ host_close_comment() {
 
 # Print the body of the issue of package $1, published at version $2 without
 # the arches $3, for run URL $4
+# Print the body of the issue for the packages of requirements file $1, lines of a name and python or
+# ruby, or nothing when it names none; the body holds no run, so an equal list gives an equal body
+requirements_issue_body() {
+  local line items="" LC_ALL=C re=$'^([a-z0-9][a-z0-9.+_-]*)\t(python|ruby)$'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ $re ]] || continue
+    # shellcheck disable=SC2016 # Markdown code, not expansions
+    case ${BASH_REMATCH[2]} in
+      python) items+="- \`${BASH_REMATCH[1]}\`: its depends hold Python packages, so set \`python.pypi\`, \`python.pyproject\` or \`python: none\`"$'\n' ;;
+      ruby) items+="- \`${BASH_REMATCH[1]}\`: its depends hold Ruby packages, so set \`ruby.gem\` or \`ruby: none\`"$'\n' ;;
+    esac
+  done <"$1"
+  [[ -n "$items" ]] || return 0
+  printf 'The YAML of each package below names no source of its requirements, so the requires rules cannot read them and the check of its next version fails:\n\n%s\nSee https://aurtomator.dev/features/update-alerts/\n\nAuto-created by update workflow, which edits it when the list changes and closes it once no package is left.\n' "$items"
+}
+
 arch_issue_body() {
   # The backticks are Markdown code around the package, version and arches
   # shellcheck disable=SC2016

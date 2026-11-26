@@ -1219,7 +1219,7 @@ jobs:
               check_failed:* | update_failed:* | held:* | newer:*) kinds=true ;;
             esac
           done
-          if [[ "$kinds" == true || -s "$STATUS_DIR/_alerts" ]] || grep -qs . "$STATUS_DIR/_without"; then
+          if [[ "$kinds" == true || -s "$STATUS_DIR/_alerts" || -f "$STATUS_DIR/_requirements" ]] || grep -qs . "$STATUS_DIR/_without"; then
             has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
             if [[ "$has_issues" == "false" ]]; then
               echo "::notice::Issues are disabled in $GITHUB_REPOSITORY, so the run opens no issue"
@@ -1349,4 +1349,27 @@ jobs:
           upstream=$(cat "$STATUS_DIR/_upstream" 2>/dev/null || true)
           if [[ "$upstream" == "newer: "* ]]; then
             open_issue aurtomator-update 0e8a16 "Newer aurtomator release" "🚀 aurtomator ${upstream#newer: } available" upstream_issue_body "$STATUS_DIR/_upstream"
+          fi
+
+          # Packages whose YAML names no source of their requirements share one issue, which the list of
+          # each run opens, edits or closes; runs without the list leave it as it is
+          if [[ -f "$STATUS_DIR/_requirements" ]]; then
+            title="⚠️ Packages need a python or ruby key"
+            body=$(lib requirements_issue_body "$STATUS_DIR/_requirements")
+            numbers=$(gh issue list --label missing-key --state open --limit 1000 --json number,title \
+              --jq '.[] | "\(.number) \(.title)"' | awk -v t="$title" 'substr($0, index($0, " ") + 1) == t { print $1 }')
+            if [[ -z "$body" ]]; then
+              for number in $numbers; do
+                gh issue close "$number" --comment "No package misses the source of its requirements in $RUN_URL."
+              done
+            elif [[ -z "$numbers" ]]; then
+              use_label missing-key fbca04 "Package YAML needs a python or ruby key"
+              create_issue missing-key "$title" "$body"
+            else
+              for number in $numbers; do
+                if [[ "$(gh issue view "$number" --json body --jq .body)" != "$body" ]]; then
+                  printf '%s' "$body" | gh issue edit "$number" --body-file -
+                fi
+              done
+            fi
           fi

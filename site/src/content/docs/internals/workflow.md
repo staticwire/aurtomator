@@ -111,6 +111,7 @@ While `packages/` holds no package, the script writes nothing, so repositories f
 | `.status/_rules` | package | packages with a new version whose AUR `.SRCINFO` has Python or Ruby in `depends`, which `--rules-later` lists and the step `Decide` keeps for the jobs of `rules` |
 | `.status/_deferred` | package | packages with a new version past the 256 jobs of `prepare`, which the step `Decide` leaves for a later run |
 | `.status/_packages` | package | one line for each package YAML of the run; the issues step closes the issues of names this list lacks |
+| `.status/_requirements` | package, `python` or `ruby` | packages whose AUR `depends` hold that language and whose YAML names no source of its requirements, which `--rules-later` lists from the AUR metadata file and the `.SRCINFO` of each such package, and `--prepare` and `--publish` copy; the issues step keeps one issue `⚠️ Packages need a python or ruby key` with label `missing-key` for them, edits it when the list changes and closes it when the list is empty, and a run that cannot read the AUR writes no file and leaves the issue as it is |
 | `.status/_upstream` | `newer: 0.7.0` or `current: 0.6.0` | latest aurtomator release against `VERSION` |
 
 Fields of the shared files are split by tabs.

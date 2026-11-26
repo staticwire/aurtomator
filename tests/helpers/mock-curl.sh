@@ -153,7 +153,7 @@ case "$url" in
       http_error 404
     fi
     ;;
-  # AUR metadata file of every package, as aur_meta of validate-pkg.bats writes it
+  # AUR metadata file of every package, as aur_meta of setup.sh writes it
   *aur.archlinux.org/packages-meta-ext-v1.json.gz)
     if [[ -f "$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz" ]]; then
       cat "$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz"

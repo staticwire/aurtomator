@@ -3130,6 +3130,10 @@ if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_FAIL_HOST:-}" && "$*" == *" p
   printf 'GraphQL: body is too long (maximum is 65536 characters)\n' >&2
   exit 1
 fi
+if [[ "$1 $2" == "issue view" ]]; then
+  printf '%s\n' "${GH_BODY:-}"
+  exit 0
+fi
 [[ "$1 $2" == "issue list" ]] || exit 0
 [[ -z "${GH_FAIL:-}" ]] || exit 1
 limit=30 jq_expr="" emoji=""
@@ -3143,7 +3147,8 @@ while (($#)); do
         update-held) emoji="✋" ;;
         update-notice) emoji="🔔" ;;
         aurtomator-update) emoji="🚀" ;;
-        arch-missing) emoji="⚠️" ;;
+        arch-missing) emoji="⚠️ [a-z0-9]" ;;
+        missing-key) emoji="⚠️ Packages" ;;
       esac
       shift
       ;;
@@ -3153,6 +3158,8 @@ done
 titles=$(grep "^$emoji" <<<"${GH_TITLES:-}" | head -n "$limit") || true
 case "$jq_expr" in
   ".[].title") [[ -z "$titles" ]] || printf '%s\n' "$titles" ;;
+  # Issue numbers start at 41
+  '.[] | "\(.number) \(.title)"') [[ -z "$titles" ]] || awk '{ print NR + 40 " " $0 }' <<<"$titles" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -3168,7 +3175,38 @@ EOF
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GH_CREATE_FAIL_HOST="${GH_CREATE_FAIL_HOST:-}" GITHUB_REPOSITORY=owner/fork \
-    GH_BODY_LOG="$GH_BODY_LOG" BIG_BODY="${BIG_BODY:-}" RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
+    GH_BODY_LOG="$GH_BODY_LOG" BIG_BODY="${BIG_BODY:-}" GH_BODY="${GH_BODY:-}" RUN_URL=https://example.invalid/run \
+    sh -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+# The list of every check run opens, edits or closes one issue
+@test "check-updates: keeps one issue for the packages whose YAML names no source of their requirements" {
+  local title="⚠️ Packages need a python or ruby key" body
+  run_issue_step _requirements=$'foo\tpython'
+  [ "$status" -eq 0 ]
+  grep -qxF "issue create --title $title --label missing-key --body-file -" "$GH_LOG"
+  # An open issue with the same list stays as it is
+  printf 'foo\tpython\n' >"$BATS_TEST_TMPDIR/req"
+  body=$(bash -c 'source "$1" && requirements_issue_body "$2"' _ "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" "$BATS_TEST_TMPDIR/req")
+  GH_BODY=$body GH_TITLES="$title" run_issue_step _requirements=$'foo\tpython'
+  [ "$status" -eq 0 ]
+  ! grep -q -e '^issue create' -e '^issue edit' -e '^issue close' "$GH_LOG"
+  # Another list edits it
+  GH_BODY=$body GH_TITLES="$title" run_issue_step _requirements=$'foo\tpython\nbar\truby'
+  [ "$status" -eq 0 ]
+  grep -qxF "issue edit 41 --body-file -" "$GH_LOG"
+  ! grep -q -e '^issue create' -e '^issue close' "$GH_LOG"
+  # An empty list closes it, and a run without the list leaves it
+  GH_BODY=$body GH_TITLES="$title" run_issue_step _requirements=
+  [ "$status" -eq 0 ]
+  grep -qxF "issue close 41 --comment No package misses the source of its requirements in https://example.invalid/run." "$GH_LOG"
+  GH_BODY=$body GH_TITLES="$title" run_issue_step foo=up_to_date
+  [ "$status" -eq 0 ]
+  ! grep -q -e 'missing-key' -e '^issue close' "$GH_LOG"
+  # Repositories with Issues turned off get the notice of every issue step
+  GH_HAS_ISSUES=false run_issue_step _requirements=$'foo\tpython'
+  [ "$status" -eq 0 ]
+  [ "$output" = "::notice::Issues are disabled in owner/fork, so the run opens no issue" ]
 }
 
 @test "check-updates: an open issue of another package holds back no issue" {

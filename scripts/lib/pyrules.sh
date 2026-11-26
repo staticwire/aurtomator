@@ -4,6 +4,17 @@
 #
 # Sourced by lib.sh.
 
+# Succeed when package file $1 names the source of its Python requirements in a key that python_source
+# takes: python: none, strategy pypi, python.pypi or python.pyproject
+python_keyed() {
+  local tag
+  tag=$(pkg_get "$1" '.python | tag')
+  if [[ "$tag" == "!!str" && "$(pkg_get "$1" .python)" == none ]] || [[ "$(pkg_get "$1" .strategy)" == pypi ]]; then
+    return 0
+  fi
+  [[ "$tag" == "!!map" ]] && [[ -n "$(pkg_get "$1" '.python.pypi // ""')$(pkg_get "$1" '.python.pyproject // ""')" ]]
+}
+
 # Succeed when depends of pkgname $2 of .SRCINFO $1 hold python or python-*
 pkgname_has_python() {
   srcinfo_depends "$1" "$2" depends | awk '$0 == "python" || index($0, "python-") == 1 { found = 1 } END { exit !found }'
