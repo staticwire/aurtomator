@@ -548,13 +548,13 @@ EOF
   [ "$status" -eq 0 ]
   [ "$output" = "3.1.0" ]
   grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
-  ! grep -q glpat-test "$CURL_ARGS_LOG"
+  run ! grep -q glpat-test "$CURL_ARGS_LOG"
   rm "$CURL_ARGS_LOG"
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.gnome.org
   project: group/project"
   GITLAB_TOKEN=glpat-test run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
-  ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+  run ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
   rm "$CURL_ARGS_LOG"
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com

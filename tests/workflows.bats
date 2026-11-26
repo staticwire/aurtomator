@@ -3145,6 +3145,7 @@ run_stats_step() {
 # $GH_TITLES and logs to $GH_LOG, and the issue functions log to $BODY_LOG
 run_issue_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
+  rm -rf "$ws/.status"
   mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
   printf 'set -euo pipefail\nsource %q\n' "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" >"$ws/aurtomator/scripts/lib.sh"
   cat >>"$ws/aurtomator/scripts/lib.sh" <<'EOF'
@@ -3158,7 +3159,6 @@ host_issue_body() {
 }
 arch_issue_body() { echo "arch_issue_body $*" >>"$BODY_LOG" && echo body; }
 EOF
-  rm -f "$ws/.status/_hosts"
   for pair in "$@"; do
     # Each failed check adds its line to _hosts
     if [[ "${pair%%=*}" == _hosts ]]; then
@@ -3250,19 +3250,23 @@ EOF
   body=$(bash -c 'source "$1" && requirements_issue_body "$2"' _ "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" "$BATS_TEST_TMPDIR/req")
   GH_BODY=$body GH_TITLES="$title" run_issue_step _requirements=$'foo\tpython'
   [ "$status" -eq 0 ]
-  ! grep -q -e '^issue create' -e '^issue edit' -e '^issue close' "$GH_LOG"
+  no_call '^issue create'
+  no_call '^issue edit'
+  no_call '^issue close'
   # Another list edits it
   GH_BODY=$body GH_TITLES="$title" run_issue_step _requirements=$'foo\tpython\nbar\truby'
   [ "$status" -eq 0 ]
   grep -qxF "issue edit 41 --body-file -" "$GH_LOG"
-  ! grep -q -e '^issue create' -e '^issue close' "$GH_LOG"
+  no_call '^issue create'
+  no_call '^issue close'
   # An empty list closes it, and a run without the list leaves it
   GH_BODY=$body GH_TITLES="$title" run_issue_step _requirements=
   [ "$status" -eq 0 ]
   grep -qxF "issue close 41 --comment No package misses the source of its requirements in https://example.invalid/run." "$GH_LOG"
   GH_BODY=$body GH_TITLES="$title" run_issue_step foo=up_to_date
   [ "$status" -eq 0 ]
-  ! grep -q -e 'missing-key' -e '^issue close' "$GH_LOG"
+  no_call missing-key
+  no_call '^issue close'
   # Repositories with Issues turned off get the notice of every issue step
   GH_HAS_ISSUES=false run_issue_step _requirements=$'foo\tpython'
   [ "$status" -eq 0 ]
@@ -3584,13 +3588,13 @@ host_failures() {
 # issues of $GH_OPEN and logs to $GH_LOG, and the issue functions log to $BODY_LOG
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
+  rm -rf "$ws/.status"
   mkdir -p "$ws/.status" "$ws/aurtomator/scripts" "$bin"
   printf 'set -euo pipefail\nsource %q\n' "$BATS_TEST_DIRNAME/../scripts/lib/issue.sh" >"$ws/aurtomator/scripts/lib.sh"
   cat >>"$ws/aurtomator/scripts/lib.sh" <<'EOF'
 close_comment() { echo "close_comment $*" >>"$BODY_LOG" && echo comment; }
 arch_close_comment() { echo "arch_close_comment $*" >>"$BODY_LOG" && echo comment; }
 EOF
-  rm -f "$ws/.status/_hosts"
   for pair in "$@"; do
     # Each failed check adds its line to _hosts
     if [[ "${pair%%=*}" == _hosts ]]; then
@@ -4344,9 +4348,9 @@ run_bare_issues_step() {
   [ "$status" -eq 0 ]
   grep -qx 'issue close 5 --comment Each package of this issue recovered or has an issue of its own in https://example.invalid/run.' "$GH_LOG"
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="check_failed: boom"
-  ! grep -q '^issue close 5' "$GH_LOG"
+  no_call '^issue close 5'
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="unchecked: out of time"
-  ! grep -q '^issue close 5' "$GH_LOG"
+  no_call '^issue close 5'
   # Closes past the writes of the run wait for the next run
   GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' ISSUE_WRITE_MAX=1 run_close_step foo=up_to_date bar=up_to_date
   [ "$status" -eq 0 ]

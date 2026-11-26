@@ -4292,8 +4292,8 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 3.0.0" ]
   [ "$(cat "$TEST_TMPDIR/.status/b")" = "new_version: 5.0.0" ]
   [ "$(grep -c api.github.com/graphql "$CURL_ARGS_LOG")" = 1 ]
-  ! grep -q -e repos/owner/a/releases -e repos/owner/b/releases "$CURL_ARGS_LOG"
-  ! grep -q test-token "$CURL_ARGS_LOG"
+  run ! grep -q -e repos/owner/a/releases -e repos/owner/b/releases "$CURL_ARGS_LOG"
+  run ! grep -q test-token "$CURL_ARGS_LOG"
   grep -qF 'r0: repository(owner: \"owner\", name: \"a\")' "$MOCK_FILES_DIR/graphql.log"
   grep -qF 'r1: repository(owner: \"owner\", name: \"b\")' "$MOCK_FILES_DIR/graphql.log"
   # Without a token the run asks REST alone
@@ -4370,7 +4370,7 @@ current: '1.0.0'"
   [[ "$(cat "$TEST_TMPDIR/.status/t")" != unchecked:* ]]
   [[ "$(cat "$TEST_TMPDIR/.status/s")" != unchecked:* ]]
   [[ "$output" == *"a: the run keeps its last 400 GitHub API requests of the hour for the jobs after the check"* ]]
-  ! grep -q repos/owner/a/releases "$CURL_ARGS_LOG"
+  run ! grep -q repos/owner/a/releases "$CURL_ARGS_LOG"
   # github-tag reads tags with git, and its asset over REST
   create_test_package t github-tag "upstream:
   project: owner/t
@@ -4384,7 +4384,7 @@ current: '1.0.0'"
   rm "$CURL_ARGS_LOG"
   MOCK_REST_LEFT=0 run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
-  ! grep -q rate_limit "$CURL_ARGS_LOG"
+  run ! grep -q rate_limit "$CURL_ARGS_LOG"
   MOCK_REST_LEFT=fail GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
 }
@@ -5374,13 +5374,13 @@ $1"
   grep -qxF '15 packages: ✅ 13, ❌ 1, 📦 1' "$TEST_TMPDIR/README.md"
   grep -qF '>alpha</a>' "$TEST_TMPDIR/README.md"
   grep -qF '>beta</a>' "$TEST_TMPDIR/README.md"
-  ! grep -qF '>avocado</a>' "$TEST_TMPDIR/README.md"
+  run ! grep -qF '>avocado</a>' "$TEST_TMPDIR/README.md"
   grep -qxF 'Every package: [0-9](table/0-9.md) [a](table/a.md) [b](table/b.md) [z](table/z.md)' "$TEST_TMPDIR/README.md"
   [ "$(tail -n 1 "$TEST_TMPDIR/README.md")" = end ]
   # Each page holds the rows of its letter
   grep -qF '>alpha</a>' "$TEST_TMPDIR/table/a.md"
   grep -qF '>avocado</a>' "$TEST_TMPDIR/table/a.md"
-  ! grep -qF '>beta</a>' "$TEST_TMPDIR/table/a.md"
+  run ! grep -qF '>beta</a>' "$TEST_TMPDIR/table/a.md"
   grep -qF '>0ad</a>' "$TEST_TMPDIR/table/0-9.md"
   grep -qxF '[Back to the README](../README.md)' "$TEST_TMPDIR/table/z.md"
   [ ! -e "$TEST_TMPDIR/table/q.md" ]
