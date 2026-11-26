@@ -264,8 +264,8 @@ _python_imports_read() {
     printf 'notice\timports: bsdtar cannot extract %s, not read\n' "$name"
     return 0
   fi
-  # Links of the archive could point at any file of the runner
-  find "$work/tree" -type l -delete
+  # Links of the archive could point at any file of the runner, and readers block on a FIFO
+  find "$work/tree" ! -type f ! -type d -delete
   top="$work/tree"
   if [[ "$kind" != wheel ]]; then
     top="$work/tree/${name%.tar.gz}"

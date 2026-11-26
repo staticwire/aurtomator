@@ -386,8 +386,8 @@ _ruby_imports_read() {
     printf 'notice\timports: bsdtar cannot extract the files of %s, not read\n' "$name"
     return 0
   fi
-  # Links of the archive could point at any file of the runner
-  find "$work/tree" -type l -delete
+  # Links of the archive could point at any file of the runner, and readers block on a FIFO
+  find "$work/tree" ! -type f ! -type d -delete
   # The gem builds these extensions at install, named by create_makefile or else by their directory
   RB_EXT=()
   for path in "${exts[@]}"; do

@@ -3886,6 +3886,25 @@ EOF
   [ "$output" = $'notice\timports: pacman has no files database, not read' ]
 }
 
+# Readers block on a FIFO until a writer opens it; the python3 here lists what py_imports.py would meet
+@test "pyrules.sh: python_imports drops members of the archive that are no regular file or directory" {
+  imports_env
+  local s="$TEST_TMPDIR/sdist-demo-1.0/demo-1.0"
+  mkdir -p "$s/demo"
+  printf 'import tqdm\n' >"$s/demo/__init__.py"
+  mkfifo "$s/demo/pipe.py" "$s/demo/pipe"
+  pypi_fake_sdist demo 1.0 $'Metadata-Version: 2.2\nName: demo\nVersion: 1.0\n'
+  unmet_srcinfo "$TEST_TMPDIR/demo.SRCINFO" python-demo python
+  printf '#!/usr/bin/env bash\n[[ "$4" == --stdlib ]] || find "$4" ! -type f ! -type d >>"%s/special"\nexec /usr/bin/python3 "$@"\n' \
+    "$TEST_TMPDIR" >"$MOCK_DIR/python3"
+  chmod +x "$MOCK_DIR/python3"
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\timport tqdm: python-tqdm not in depends' ]
+  [ -e "$TEST_TMPDIR/special" ]
+  [ ! -s "$TEST_TMPDIR/special" ]
+}
+
 @test "lib.sh: fired_alerts fires requires: imports as a notice" {
   imports_env
   demo_wheel
@@ -4713,6 +4732,23 @@ ruby:
   skip:
     - ffi-win32-extensions"
   run --separate-stderr bash -c 'source "$0/scripts/lib.sh"; ruby_imports "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" \
+    "$TEST_TMPDIR/d.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'notice\trequire missing: no package owns it' ]
+}
+
+# Readers block on a FIFO until a writer opens it
+@test "rbrules.sh: ruby_imports drops members of the gem that are no regular file or directory" {
+  gems_env 1.3.2
+  local g="$TEST_TMPDIR/ext"
+  mkdir -p "$g/lib" "$g/ext/demo_ext"
+  printf '%s\n' 'require "demo_ext.so"' 'require "missing"' >"$g/lib/demo.rb"
+  mkfifo "$g/ext/demo_ext/extconf.rb"
+  gem_build demo 1.0 "$g" $'name: demo\nextensions:\n- ext/demo_ext/extconf.rb\nrequire_paths:\n- lib\n'
+  unmet_srcinfo "$TEST_TMPDIR/d.SRCINFO" ruby-demo ruby
+  create_test_package "demo" "rubygems" "upstream:
+  registry: demo"
+  run --separate-stderr timeout 20 bash -c 'source "$0/scripts/lib.sh"; ruby_imports "$@"' "$TEST_TMPDIR" "$TEST_TMPDIR/packages/demo.yml" \
     "$TEST_TMPDIR/d.SRCINFO" demo 1.0
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\trequire missing: no package owns it' ]
