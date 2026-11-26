@@ -4278,6 +4278,20 @@ run_bare_issues_step() {
   [ "$output" = "0" ]
 }
 
+# The body of the issue holds at most HOST_BODY_MAX characters, and the run summary every package
+@test "check-updates: lists every package without a key in the run summary when its issue has no room" {
+  local i list=""
+  for i in $(seq 1 1000); do
+    list+="p$i"$'\t'"python"$'\n'
+  done
+  run_issue_step _requirements="${list%$'\n'}"
+  [ "$status" -eq 0 ]
+  grep -qxF -- '- `p1000`: python' "$BATS_TEST_TMPDIR/summary"
+  [ "$(grep -c '^- `p' "$BATS_TEST_TMPDIR/summary")" = 1000 ]
+  run_issue_step _requirements=$'p1\tpython'
+  [ ! -e "$BATS_TEST_TMPDIR/summary" ]
+}
+
 # GitHub allows 500 writes of content an hour, and no failed package goes unreported
 @test "check-updates: puts the failed packages past the writes of the run into one issue" {
   ISSUE_WRITE_MAX=3 run_issue_step a="check_failed: boom a" b="check_failed: boom b" c="check_failed: \`boom\` @octocat" \

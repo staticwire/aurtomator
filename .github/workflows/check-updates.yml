@@ -1424,6 +1424,15 @@ jobs:
           if [[ -f "$STATUS_DIR/_requirements" ]]; then
             title="⚠️ Packages need a python or ruby key"
             body=$(lib requirements_issue_body "$STATUS_DIR/_requirements")
+            # The body has room for 60000 characters, and the run summary names the packages past it
+            if [[ "$body" == *" more packages, which the run summary of the step Create issues lists"* ]]; then
+              {
+                echo "Packages whose YAML names no source of their requirements:"
+                echo
+                # shellcheck disable=SC2016 # the backticks are Markdown code
+                awk -F'\t' '{ printf "- `%s`: %s\n", $1, $2 }' "$STATUS_DIR/_requirements"
+              } >>"$GITHUB_STEP_SUMMARY"
+            fi
             numbers=$(gh issue list --label missing-key --state open --limit 100000 --json number,title \
               --jq '.[] | "\(.number) \(.title)"' | awk -v t="$title" 'substr($0, index($0, " ") + 1) == t { print $1 }')
             if [[ -z "$body" ]]; then

@@ -258,34 +258,58 @@ issue_write() {
 # Print the body of the issue for failed packages $3 on, whose statuses are in directory $1, that the run $2
 # had no writes left for; errors hold text of upstream, so each goes in a code span without backticks
 grouped_issue_body() {
-  local dir=$1 run=$2 name error
+  local dir=$1 run=$2 name error entry head foot items="" kept=0 LC_ALL=C.UTF-8
   shift 2
-  printf 'GitHub allows a run about 450 writes to issues an hour, so these packages failed without an issue of their own in %s. The run summary of its step Create issues holds each whole error.\n\n' "$run"
+  head="GitHub allows a run about 450 writes to issues an hour, so these packages failed without an issue of their own in $run. The run summary of its step Create issues holds each whole error."$'\n\n'
+  foot=$'\nAuto-created by update workflow, which closes it once each of these packages recovered or has an issue of its own.\n'
   for name in "$@"; do
     error=""
     IFS= read -r error <"$dir/$name" || true
     error=${error#*: }
     error=${error//\`/\'}
     # shellcheck disable=SC2016 # Markdown code, not expansions
-    printf -- '- `%s`: `%s`\n' "$name" "${error:0:200}"
+    printf -v entry -- '- `%s`: `%s`\n' "$name" "${error:0:200}"
+    _issue_item_fits "$head$items$foot" "$entry" || break
+    items+=$entry
+    kept=$((kept + 1))
   done
-  printf '\nAuto-created by update workflow, which closes it once each of these packages recovered or has an issue of its own.\n'
+  printf '%s%s%s' "$head" "$items$(_issue_items_left $(($# - kept)))" "$foot"
+}
+
+# Succeed when item $2 fits in a body of HOST_BODY_MAX characters beside text $1 and the line of
+# _issue_items_left; GitHub refuses a body past 65536 characters
+_issue_item_fits() {
+  local LC_ALL=C.UTF-8
+  ((${#1} + ${#2} + 100 <= HOST_BODY_MAX))
+}
+
+# Print the line of the $1 packages that a body has no room for, and nothing for none
+_issue_items_left() {
+  (($1 == 0)) || printf -- '- and %s more packages, which the run summary of the step Create issues lists\n' "$1"
 }
 
 # Print the body of the issue for the packages of requirements file $1, lines of a name and python or
 # ruby, or nothing when it names none; the body holds no run, so an equal list gives an equal body
 requirements_issue_body() {
-  local line items="" LC_ALL=C re=$'^([a-z0-9][a-z0-9.+_-]*)\t(python|ruby)$'
+  local line entry head foot items="" kept=0 left=0 LC_ALL=C.UTF-8 re=$'^([a-z0-9][a-z0-9.+_-]*)\t(python|ruby)$'
+  head=$'The YAML of each package below names no source of its requirements, so the requires rules cannot read them and the check of its next version fails:\n\n'
+  foot=$'\nSee https://aurtomator.dev/features/update-alerts/\n\nAuto-created by update workflow, which edits it when the list changes and closes it once no package is left.\n'
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ $re ]] || continue
     # shellcheck disable=SC2016 # Markdown code, not expansions
     case ${BASH_REMATCH[2]} in
-      python) items+="- \`${BASH_REMATCH[1]}\`: its depends hold Python packages, so set \`python.pypi\`, \`python.pyproject\` or \`python: none\`"$'\n' ;;
-      ruby) items+="- \`${BASH_REMATCH[1]}\`: its depends hold Ruby packages, so set \`ruby.gem\` or \`ruby: none\`"$'\n' ;;
+      python) entry="- \`${BASH_REMATCH[1]}\`: its depends hold Python packages, so set \`python.pypi\`, \`python.pyproject\` or \`python: none\`"$'\n' ;;
+      ruby) entry="- \`${BASH_REMATCH[1]}\`: its depends hold Ruby packages, so set \`ruby.gem\` or \`ruby: none\`"$'\n' ;;
     esac
+    if ((left == 0)) && _issue_item_fits "$head$items$foot" "$entry"; then
+      items+=$entry
+      kept=$((kept + 1))
+    else
+      left=$((left + 1))
+    fi
   done <"$1"
-  [[ -n "$items" ]] || return 0
-  printf 'The YAML of each package below names no source of its requirements, so the requires rules cannot read them and the check of its next version fails:\n\n%s\nSee https://aurtomator.dev/features/update-alerts/\n\nAuto-created by update workflow, which edits it when the list changes and closes it once no package is left.\n' "$items"
+  ((kept > 0)) || return 0
+  printf '%s%s%s' "$head" "$items$(_issue_items_left "$left")" "$foot"
 }
 
 arch_issue_body() {

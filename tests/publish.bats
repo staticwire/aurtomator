@@ -5423,6 +5423,30 @@ EOF
   [ "${lines[3]}" = "Auto-created by update workflow, which closes it once each of these packages recovered or has an issue of its own." ]
 }
 
+# GitHub refuses an issue body past 65536 characters
+@test "grouped_issue_body and requirements_issue_body: stay within HOST_BODY_MAX and count the packages left out" {
+  local i names=() LC_ALL=C.UTF-8
+  mkdir -p "$TEST_TMPDIR/st"
+  for i in $(seq 1 600); do
+    echo "check_failed: $(printf 'é%.0s' {1..300})" >"$TEST_TMPDIR/st/p$i"
+    names+=("p$i")
+    printf 'p%s\tpython\n' "$i" >>"$TEST_TMPDIR/req"
+  done
+  run grouped_issue_body "$TEST_TMPDIR/st" https://example.invalid/run "${names[@]}"
+  [ "$status" -eq 0 ]
+  ((${#output} <= HOST_BODY_MAX))
+  [[ "$output" =~ $'\n'"- and "([0-9]+)" more packages, which the run summary of the step Create issues lists"$'\n' ]]
+  [ "$((BASH_REMATCH[1] + $(grep -c '^- `p' <<<"$output")))" = 600 ]
+  for i in $(seq 601 1000); do
+    printf 'p%s\tpython\n' "$i" >>"$TEST_TMPDIR/req"
+  done
+  run requirements_issue_body "$TEST_TMPDIR/req"
+  [ "$status" -eq 0 ]
+  ((${#output} <= HOST_BODY_MAX))
+  [[ "$output" =~ $'\n'"- and "([0-9]+)" more packages, which the run summary of the step Create issues lists"$'\n' ]]
+  [ "$((BASH_REMATCH[1] + $(grep -c '^- `p' <<<"$output")))" = 1000 ]
+}
+
 # === requirements_issue_body ===
 
 # The body holds no run, so a run with the same list leaves the issue as it is
