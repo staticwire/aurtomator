@@ -242,7 +242,7 @@ In your repository, open Settings > Secrets and variables > Actions > New reposi
 | `AUR_GIT_EMAIL` | your email, as `jane@example.com` |
 | `AUR_SSH_KEY` | whole private key, `~/.ssh/aur_ed25519` |
 | `GPG_SIGNING_KEY` | with GPG signing: the output of `gpg --export-secret-subkeys --armor '<subkey-id>!'` |
-| `GITLAB_TOKEN` | optional, for `gitlab-tag` packages on gitlab.com: a GitLab personal access token with the scope `read_api` |
+| `GITLAB_TOKEN` | optional, for `gitlab-tag` packages on gitlab.com: a GitLab personal access token with the scope `read_api` and an expiry date, of a GitLab account that holds no private project, since the check job holds it beside code that parses the answers of upstreams |
 
 That GPG output works in CI only for keys without a passphrase. For keys with one, `./aurtomator.sh setup gpg secrets` prints a copy without it, see [Passphrase stripping](/gpg-signing/#passphrase-stripping-3-pinentry-dialogs).
 

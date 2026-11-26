@@ -32,7 +32,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 | Hostile PKGBUILD code | Anyone with push access to the AUR repository of a package | Runs only as `builder` in jobs without secrets, and `verify` and `publish` never source it |
 | Crafted package YAML | Pull requests to a user repository | `validate-pkg.sh` with allow lists of keys and values |
 | Tampered downloads | Network attackers | `verify` downloads every source again over HTTPS and refuses checksums that do not match |
-| Theft of secrets | Code that runs in a job | Secrets that push or sign only in `publish`, which runs no PKGBUILD code; the optional `GITLAB_TOKEN`, which reads GitLab, in `check`, which runs no PKGBUILD code either; workflow commands stopped in the output of `builder` |
+| Theft of secrets | Code that runs in a job | Secrets that push or sign only in `publish`, which runs no PKGBUILD code; the optional `GITLAB_TOKEN`, which reads GitLab, in `check`, which runs no PKGBUILD code either, and reaches only `gitlab-tag` among the strategies, while every process of `builder` there can read it in the environment of `check-all.sh`; workflow commands stopped in the output of `builder` |
 | Changed dependencies | Actions and the base image | Actions pinned by commit SHA, the base image pinned by digest, and Dependabot pull requests that bring each version a week after its release. Security updates of Dependabot skip that week, and the jobs upgrade the packages of the image from the Arch mirrors, see [Permissions and container](/internals/workflow/#permissions-and-container). The Scorecard action pulls its image by tag, see [Scorecard](/develop/ci/#scorecard) |
 
 ## Trust boundaries

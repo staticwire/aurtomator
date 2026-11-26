@@ -948,6 +948,27 @@ EOF
 
 # === check-update.sh ===
 
+# The token outlives the run, and only gitlab-tag sends it; other strategies parse upstream answers
+@test "check-update: gives GITLAB_TOKEN to gitlab-tag alone" {
+  local strategy
+  for strategy in gitlab-tag github-release; do
+    # The strategies of the test tree link to those of the checkout
+    rm -f "$TEST_TMPDIR/strategies/$strategy.sh"
+    printf '#!/usr/bin/env bash\nif [ -n "${GITLAB_TOKEN:-}" ]; then echo 9.0.0; else echo 2.0.0; fi\n' \
+      >"$TEST_TMPDIR/strategies/$strategy.sh"
+    chmod +x "$TEST_TMPDIR/strategies/$strategy.sh"
+  done
+  create_test_package lab gitlab-tag "upstream:
+  host: gitlab.com
+  project: group/project
+current: '1.0.0'"
+  create_test_package hub github-release "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  [ "$(GITLAB_TOKEN=glpat-test "$TEST_TMPDIR/scripts/check-update.sh" lab 2>/dev/null)" = 9.0.0 ]
+  [ "$(GITLAB_TOKEN=glpat-test "$TEST_TMPDIR/scripts/check-update.sh" hub 2>/dev/null)" = 2.0.0 ]
+}
+
 @test "check-update: detects new version" {
   create_test_package "mypkg" "github-release" "upstream:
   type: github
