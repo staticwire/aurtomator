@@ -1616,6 +1616,46 @@ alerts:
   [[ "$output" == *"All 2 packages valid"* ]]
 }
 
+# Each yq is a process of its own, and validate.yml checks every package when the pins move
+@test "validate --all: starts few yq processes for a package" {
+  local real bin="$BATS_TEST_TMPDIR/bin" one
+  real=$(command -v yq)
+  mkdir -p "$bin"
+  printf '#!/bin/sh\necho x >>"%s"\nexec "%s" "$@"\n' "$BATS_TEST_TMPDIR/yq.log" "$real" >"$bin/yq"
+  chmod +x "$bin/yq"
+  create_test_package a github-release "upstream:
+  project: owner/a
+current: 1.0.0
+last_updated: '2026-01-02'"
+  PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  one=$(wc -l <"$BATS_TEST_TMPDIR/yq.log")
+  rm "$BATS_TEST_TMPDIR/yq.log"
+  sed 's/^name: a$/name: b/; s#owner/a#owner/b#' "$TEST_TMPDIR/packages/a.yml" >"$TEST_TMPDIR/packages/b.yml"
+  PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  echo "per package: $(($(wc -l <"$BATS_TEST_TMPDIR/yq.log") - one))"
+  (($(wc -l <"$BATS_TEST_TMPDIR/yq.log") - one <= 16))
+}
+
+# Merge keys bring keys that the keys of a map do not list
+@test "validate: reads the keys that a merge key brings" {
+  create_test_package a github-release "upstream:
+  <<: {tag_version_regex: '(x'}
+  project: owner/a"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/a.yml: upstream.<< is not a field of any strategy"* ]]
+  [[ "$output" == *"packages/a.yml: upstream.tag_version_regex must contain a capture group (): (x"* ]]
+  create_test_package a github-release "<<: {current: 'x y'}
+upstream:
+  project: owner/a"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/a.yml: unknown key: <<"* ]]
+  [[ "$output" == *"packages/a.yml: current must hold a digit and at most 64 characters of A-Za-z0-9 . _ +: 'x y'"* ]]
+}
+
 # validate.yml passes the files that git diff -z names for the push or the pull request
 @test "validate --changed: checks the packages that the list names" {
   local list="$BATS_TEST_TMPDIR/changed"

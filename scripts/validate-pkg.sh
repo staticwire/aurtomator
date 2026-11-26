@@ -60,6 +60,27 @@ in_words() {
   return 1
 }
 
+# The keys of package file KEYS_FILE, and those of its upstream map after upstream., which
+# validate_pkg reads
+KEYS_FILE=""
+declare -A FILE_KEYS=()
+
+# pkg_get of lib.sh, which prints for a key that KEYS_FILE lacks what yq prints, with no yq
+pkg_get() {
+  local re='^(explode\(\.\) \| )?\.((upstream\.)?[a-z_]+)( \| tag| // "")?$'
+  if [[ "$1" == "$KEYS_FILE" && "$2" =~ $re ]]; then
+    if [[ ! -v "FILE_KEYS[${BASH_REMATCH[2]}]" ]]; then
+      case "${BASH_REMATCH[4]}" in
+        " | tag") echo '!!null' ;;
+        ' // ""') echo ;;
+        *) echo null ;;
+      esac
+      return 0
+    fi
+  fi
+  yq -r "$2" "$1"
+}
+
 # Succeeds when field $2 of package file $1 is missing or a boolean that pkg_bool reads
 flag_ok() {
   pkg_bool "$1" "$2" >/dev/null 2>&1
@@ -348,6 +369,8 @@ validate_pkg() {
   # The messages name the file in the data directory, as the user sees it
   local shown
   shown=$(shown_file "$file")
+  KEYS_FILE=""
+  FILE_KEYS=()
 
   # --- YAML syntax ---
   if ! yq '.' "$file" >/dev/null 2>&1; then
@@ -437,9 +460,10 @@ validate_pkg() {
 
   # --- Keys that no script reads ---
 
-  local keys key unknown=() list strategy_keys where
+  local keys key unknown=() list strategy_keys where text=""
   mapfile -t keys < <(pkg_get "$file" 'keys | .[]')
   for key in "${keys[@]}"; do
+    FILE_KEYS["$key"]=1
     in_words "$key" "$PACKAGE_KEYS" || unknown+=("$key")
   done
   if ((${#unknown[@]} > 0)); then
@@ -454,6 +478,12 @@ validate_pkg() {
     log_err "$shown: upstream must be a map"
     return 1
   fi
+  for key in "${keys[@]}"; do
+    FILE_KEYS["upstream.$key"]=1
+  done
+  # Anchors, aliases, merge keys and tags can bring keys that keys does not list
+  IFS= read -r -d '' text <"$file" || true
+  [[ "$text" == *[\*\&\!]* || "$text" == *"<<"* ]] || KEYS_FILE=$file
   if ((${#keys[@]} > 0)) && ! strategy_keys=$(upstream_keys "$strategy"); then
     log_err "$shown: validate-pkg.sh lists no upstream keys for the strategy $strategy"
     ((errors++))
