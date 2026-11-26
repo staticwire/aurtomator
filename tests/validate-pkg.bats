@@ -3266,9 +3266,9 @@ $2"
   [ "$status" -eq 1 ]
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --online
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list> | --requirements <names>"* ]]
+  [[ "$output" == *"Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list> | --requirements <names> [<results>]"* ]]
   local args
-  for args in --changed "--changed $TEST_TMPDIR/a $TEST_TMPDIR/b" --requirements "--requirements a b"; do
+  for args in --changed "--changed $TEST_TMPDIR/a $TEST_TMPDIR/b" --requirements "--requirements a b c"; do
     # shellcheck disable=SC2086
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" $args
     [ "$status" -eq 1 ]
@@ -3318,6 +3318,15 @@ aur_meta() {
       return 1
     }
   done
+  # validate.yml warns of the packages of a pin move that the push does not change, by the names in
+  # the file of results
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names" "$BATS_TEST_TMPDIR/results"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/results")" = $'failed\tdemo' ]
+  aur_meta '{"Name":"demo","PackageBase":"demo","Depends":["bash"]}'
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names" "$BATS_TEST_TMPDIR/results"
+  [ "$status" -eq 0 ]
+  [ ! -s "$BATS_TEST_TMPDIR/results" ]
 }
 
 # Without the metadata file each package gets the full check
@@ -3355,6 +3364,9 @@ aur_meta() {
   [[ "$output" == *"packages/demo.yml: not checked, as the check of requirements used its 0 s"* ]]
   [[ "$output" == *"packages/other.yml: not checked, as the check of requirements used its 0 s"* ]]
   [[ "$output" == *"Requirements failed: 0/2 packages have errors, and 2 were not checked"* ]]
+  AURTOMATOR_VALIDATE_BUDGET=0 run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names" "$BATS_TEST_TMPDIR/results"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/results")" = $'unchecked\tdemo\nunchecked\tother' ]
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Requirements of 2 packages read: 2 with Python or Ruby in AUR depends"* ]]

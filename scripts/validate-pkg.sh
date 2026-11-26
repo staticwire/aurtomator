@@ -1119,11 +1119,15 @@ check_package() {
   mv -- "$CHECK_OUT/$1.rc.part" "$CHECK_OUT/$1.rc"
 }
 
-# Print the text of each check that ended, from number NEXT on and in order, and count failed
+# Print the text of each check that ended, from number NEXT on and in order, and count failed ones in
+# failed and FAILED_FILES
 print_done() {
   while ((NEXT < ${#CHECKED[@]})) && [[ -f "$CHECK_OUT/$NEXT.rc" ]]; do
     cat -- "$CHECK_OUT/$NEXT" >&2
-    [[ $(<"$CHECK_OUT/$NEXT.rc") == 0 ]] || failed=$((failed + 1))
+    if [[ $(<"$CHECK_OUT/$NEXT.rc") != 0 ]]; then
+      failed=$((failed + 1))
+      FAILED_FILES+=("${CHECKED[NEXT]}")
+    fi
     NEXT=$((NEXT + 1))
   done
 }
@@ -1156,9 +1160,10 @@ check_files() {
 
 # === MAIN ===
 
-USAGE="Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list> | --requirements <names>"
-if [[ "${1:-}" == --online || ("${1:-}" == --all && $# -gt 1 && "${2:-}" != --online) || $# -gt 2 ||
-  (("${1:-}" == --changed || "${1:-}" == --requirements) && $# -ne 2) ]]; then
+USAGE="Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list> | --requirements <names> [<results>]"
+if [[ "${1:-}" == --online || ("${1:-}" == --all && $# -gt 1 && "${2:-}" != --online) ||
+  ("${1:-}" == --changed && $# -ne 2) || ("${1:-}" == --requirements && ($# -lt 2 || $# -gt 3)) ||
+  ("${1:-}" != --requirements && $# -gt 2) ]]; then
   echo "$USAGE" >&2
   exit 1
 fi
@@ -1201,10 +1206,24 @@ if [[ "${1:-}" == --requirements ]]; then
     CHECKED+=("$file")
   done
   failed=0
+  FAILED_FILES=()
   check_files 8 1 "$budget"
   for name in "${CHECKED[@]:LAUNCHED}"; do
     log_err "$(shown_file "$name"): not checked, as the check of requirements used its $budget s"
   done
+  # validate.yml reads the names of the file of results
+  if [[ -n "${3:-}" ]]; then
+    {
+      for file in "${FAILED_FILES[@]}"; do
+        file=${file##*/}
+        printf 'failed\t%s\n' "${file%.yml}"
+      done
+      for file in "${CHECKED[@]:LAUNCHED}"; do
+        file=${file##*/}
+        printf 'unchecked\t%s\n' "${file%.yml}"
+      done
+    } >"$3"
+  fi
   if ((failed > 0 || LAUNCHED < ${#CHECKED[@]})); then
     log_err "Requirements failed: $failed/${#names[@]} packages have errors, and $((${#CHECKED[@]} - LAUNCHED)) were not checked"
     exit 1

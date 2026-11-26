@@ -5244,11 +5244,21 @@ case "$1" in
   --all) echo all >>"$log"; exit 0 ;;
 esac
 rc=0
+[ -z "$3" ] || : >"$3"
 while read -r name; do
   echo "$name $(head -n 1 "packages/$name.yml") cwd=$PWD" >>"$log"
   echo "::warning::from $name"
-  [ "$name" != b ] || rc=1
+  case " ${FAIL-b} " in
+    *" $name "*)
+      rc=1
+      [ -n "${NO_RESULTS:-}" ] || printf "failed\\t%%s\\n" "$name" >>"$3"
+      ;;
+  esac
 done <"$2"
+if [ -n "${RESULTS:-}" ]; then
+  printf "%%s\\n" "$RESULTS" >>"$3"
+  rc=1
+fi
 exit "$rc"
 ' "$BATS_TEST_TMPDIR/checked" >"$repo/aurtomator/scripts/validate-pkg.sh"
   chmod +x "$repo/aurtomator/scripts/validate-pkg.sh"
@@ -5266,8 +5276,10 @@ exit "$rc"
     GIT_TEST_ASSUME_DIFFERENT_OWNER=1 sh -e "$BATS_TEST_TMPDIR/find.sh"
   [ "$status" -eq 0 ] || return 0
   all=$(sed -n 's/^all=//p' "$temp/output")
+  moved=$(sed -n 's/^moved=//p' "$temp/output")
   run env -C "$repo" PATH="$bin:$PATH" GITHUB_WORKSPACE="$repo" WORK="$BATS_TEST_TMPDIR/work" ALL="$all" \
-    RUNNER_TEMP="$temp" TEST_X_RC="${TEST_X_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
+    MOVED="$moved" RUNNER_TEMP="$temp" TEST_X_RC="${TEST_X_RC:-0}" FAIL="${FAIL-b}" NO_RESULTS="${NO_RESULTS:-}" \
+    RESULTS="${RESULTS:-}" sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # The requires rules read the requirements of each new version, so validate-pkg.sh reads them online for
@@ -5276,7 +5288,7 @@ exit "$rc"
   run yq -o=json -I=0 '.jobs.packages.steps[] | select(.name == "Find changed packages") | [.id, .env]' "$VALIDATE"
   [ "$output" = '["changed",{"BASE":"${{ github.event.pull_request.base.sha || github.event.before }}","PIN":"${{ job.workflow_sha }}"}]' ]
   run yq -o=json -I=0 '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env | del(.WORK)' "$VALIDATE"
-  [ "$output" = '{"ALL":"${{ steps.changed.outputs.all }}"}' ]
+  [ "$output" = '{"ALL":"${{ steps.changed.outputs.all }}","MOVED":"${{ steps.changed.outputs.moved }}"}' ]
   run_changed_step
   [ "$status" -eq 0 ]
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
@@ -5333,8 +5345,8 @@ exit "$rc"
 @test "validate: checks every package online when the base pins another commit of aurtomator" {
   local pin new=abcdef0123456789abcdef0123456789abcdef01
   for pin in "$new" ""; do
-    PIN=$pin run_changed_step
-    [ "$status" -ne 0 ]
+    FAIL="" PIN=$pin run_changed_step
+    [ "$status" -eq 0 ]
     [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd\nb' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
@@ -5343,8 +5355,8 @@ exit "$rc"
   for jobs in "  check:"$'\n'"    uses: owner/aurtomator/.github/workflows/check-updates.yml@$new # v1.1.0"$'\n' \
     "# uses: owner/aurtomator/.github/workflows/validate.yml@$new"$'\n' \
     "  other:"$'\n'"    uses: owner/aurtomator/.github/workflows/validate.yml@$new-x"$'\n'; do
-    PIN=$new BASE_JOBS=$jobs run_changed_step
-    [ "$status" -ne 0 ]
+    FAIL="" PIN=$new BASE_JOBS=$jobs run_changed_step
+    [ "$status" -eq 0 ]
     [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd\nb' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
@@ -5352,6 +5364,43 @@ exit "$rc"
   PIN=$new BASE_JOBS="  again:"$'\n'"    uses: Owner/Fork/.github/workflows/validate.yml@$new # v1.1.0"$'\n' run_changed_step
   [ "$status" -eq 0 ]
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
+}
+
+# Packages that a pin move leaves alone met the rules of the release before it, and their next new version
+# fails its check; the packages that the push changes fail the step
+@test "validate: warns of the packages that a pin move does not change and fails for the ones it changes" {
+  local new=abcdef0123456789abcdef0123456789abcdef01 token
+  PIN=$new run_changed_step
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
+  token=${BASH_REMATCH[1]}
+  [ "${lines[-2]}" = "::$token::" ]
+  [ "${lines[-1]}" = "::warning file=packages/b.yml::The requires rules of this aurtomator cannot read the requirements of b, so the check of its next version fails; the log of this step says why" ]
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  RESULTS=$'unchecked\tb' FAIL="" PIN=$new run_changed_step
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = "::warning file=packages/b.yml::The check of requirements used its time before it reached b" ]
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  # Failures of changed packages, lines the step did not ask for and a run without its results fail
+  local case
+  for case in changed c ../b passed none; do
+    case $case in
+      changed) FAIL="a b" PIN=$new run_changed_step ;;
+      c) RESULTS=$'failed\tc' PIN=$new run_changed_step ;;
+      ../b) RESULTS=$'failed\t../b' PIN=$new run_changed_step ;;
+      passed) RESULTS=$'passed\tb' PIN=$new run_changed_step ;;
+      none) NO_RESULTS=1 PIN=$new run_changed_step ;;
+    esac
+    [ "$status" -eq 1 ] || {
+      echo "passed: $case"
+      return 1
+    }
+    rm -rf "$BATS_TEST_TMPDIR/repo"
+  done
+  # Runs without a base fail for every package
+  BASE="" run_changed_step
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"::warning file="* ]]
 }
 
 # actions/checkout trusts the checkout in a git config of its own, and root of the job packages does
@@ -5381,12 +5430,12 @@ exit "$rc"
   run_changed_step
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/checked")" = "a name: a cwd=$work"$'\n'"d name: d cwd=$work" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/sudo.log")" = "-u builder test -x $script"$'\n'"-u builder $script --requirements names" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/sudo.log")" = "-u builder test -x $script"$'\n'"-u builder $script --requirements names results" ]
   [ "$(cat "$BATS_TEST_TMPDIR/chown.log")" = "-R builder:builder $work" ]
   [ "$(stat -c %a "$work")" = 700 ]
   [ "$(cat "$work/names")" = $'a\nd' ]
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
-  [ "$output" = $'./names\n./packages\n./packages/a.yml\n./packages/d.yml' ]
+  [ "$output" = $'./names\n./packages\n./packages/a.yml\n./packages/d.yml\n./results' ]
   [ "$(stat -c %a "$work/packages/a.yml")" = 644 ]
   # The output of builder sits between ::stop-commands:: and the token
   rm -rf "$BATS_TEST_TMPDIR/repo"
