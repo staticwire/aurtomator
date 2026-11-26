@@ -4271,6 +4271,16 @@ run_bare_issues_step() {
   [ "$output" = "0" ]
 }
 
+# Anyone can open an issue in a public repository, and each issue looks up the package its title names
+@test "check-updates: reads the package from the title of each issue" {
+  GH_OPEN=$'12 ❌ g++: check failed\n13 ❌ foo: check failed: again\n14 ❌ $(touch x): check failed\n15 ❌ ../foo: check failed\n16 ❌  foo: check failed\n17 ❌ foo:check failed\n18 Foo: ❌ foo: check failed\n19 ❌ foo: check failed' \
+    run_close_step foo=up_to_date g++=up_to_date
+  [ "$status" -eq 0 ]
+  run grep '^issue close' "$GH_LOG"
+  [ "$output" = $'issue close 12 --comment comment\nissue close 19 --comment comment' ]
+  [ ! -e "$BATS_TEST_TMPDIR/ws/x" ]
+}
+
 @test "check-updates: a run without a failed job closes the issue of a failed run" {
   GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ Check AUR Package Updates failed' \
     run_close_step foo="check_failed: API down"

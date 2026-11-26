@@ -1103,7 +1103,7 @@ jobs:
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
 
-          # Read once, since the loop below takes each pair of open issue and package
+          # Read once, and each issue looks up the status of the package its title names
           declare -A statuses=()
           for status_file in "$STATUS_DIR"/*; do
             [[ -f "$status_file" && "${status_file##*/}" != _* ]] || continue
@@ -1112,25 +1112,27 @@ jobs:
 
           while read -r number title; do
             [[ -n "$number" ]] || continue
-            for pkg_name in "${!statuses[@]}"; do
-              status=${statuses[$pkg_name]}
-              status_file="$STATUS_DIR/$pkg_name"
-              # Check issues close when the check passes, and update or held issues when the
-              # version is in the AUR
-              case "$title:$status" in
-                "❌ $pkg_name: check failed:check_failed:"* | "❌ $pkg_name: check failed:unchecked:"*) continue ;;
-                "❌ $pkg_name: check failed:"*) ;;
-                "❌ $pkg_name: update failed:up_to_date" | "❌ $pkg_name: update failed:updated: "* | \
-                  "❌ $pkg_name: update failed:downgrade: "* | "❌ $pkg_name: update failed:rebuilt: "* | \
-                  "❌ $pkg_name: update failed:arch_added: "*) ;;
-                "✋ $pkg_name: update held:up_to_date" | "✋ $pkg_name: update held:updated: "* | \
-                  "✋ $pkg_name: update held:downgrade: "* | "✋ $pkg_name: update held:rebuilt: "* | \
-                  "✋ $pkg_name: update held:arch_added: "*) ;;
-                *) continue ;;
-              esac
-              comment=$(lib close_comment "$status_file" "$RUN_URL")
-              gh issue close "$number" --comment "$comment"
-            done
+            pkg_name=${title#* }
+            pkg_name=${pkg_name%%: *}
+            [[ "$pkg_name" =~ ^[a-z0-9][a-z0-9.+_-]*$ && -n "${statuses[$pkg_name]+set}" ]] || continue
+            status=${statuses[$pkg_name]}
+            status_file="$STATUS_DIR/$pkg_name"
+            # Check issues close when the check passes, and update or held issues when the
+            # version is in the AUR
+            case "$title" in
+              "❌ $pkg_name: check failed")
+                [[ "$status" != check_failed:* && "$status" != unchecked:* ]] || continue
+                ;;
+              "❌ $pkg_name: update failed" | "✋ $pkg_name: update held")
+                case "$status" in
+                  up_to_date | "updated: "* | "downgrade: "* | "rebuilt: "* | "arch_added: "*) ;;
+                  *) continue ;;
+                esac
+                ;;
+              *) continue ;;
+            esac
+            comment=$(lib close_comment "$status_file" "$RUN_URL")
+            gh issue close "$number" --comment "$comment"
           done <<<"$open
           $held"
 
