@@ -3266,9 +3266,9 @@ $2"
   [ "$status" -eq 1 ]
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --online
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list>"* ]]
+  [[ "$output" == *"Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list> | --requirements <names>"* ]]
   local args
-  for args in --changed "--changed $TEST_TMPDIR/a $TEST_TMPDIR/b"; do
+  for args in --changed "--changed $TEST_TMPDIR/a $TEST_TMPDIR/b" --requirements "--requirements a b"; do
     # shellcheck disable=SC2086
     run "$TEST_TMPDIR/scripts/validate-pkg.sh" $args
     [ "$status" -eq 1 ]
@@ -3277,4 +3277,96 @@ $2"
       return 1
     }
   done
+}
+
+# Writes the AUR metadata file with a record of each argument after [ and before ], one a line, as
+# aurweb writes it
+aur_meta() {
+  local IFS=$'\n'
+  {
+    echo '['
+    [[ $# -eq 0 ]] || printf '%s\n' "$(printf '%s,\n' "$@" | sed '$ s/,$//')"
+    printf ']'
+  } | gzip >"$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz"
+}
+
+# validate.yml reads the requirements of every package when the pins move, and the AUR metadata
+# file shows which packages have Python or Ruby in depends without a clone of each
+@test "validate --requirements: checks the packages whose AUR depends hold Python or Ruby" {
+  local names="$BATS_TEST_TMPDIR/names" meta
+  requires_package 1.1.0 "" bash python python-yaml
+  echo demo >"$names"
+  # The .SRCINFO holds python, so a full check fails
+  aur_meta '{"ID":1,"Name":"demo","PackageBaseID":7,"PackageBase":"demo","Depends":["bash","glibc>=2"]}'
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Requirements of 1 packages read: 0 with Python or Ruby in AUR depends"* ]]
+  for meta in '{"Name":"demo","PackageBase":"demo","Depends":["bash","python-yaml>=6"]}' \
+    '{"Name":"demo","PackageBase":"demo","Depends":["python"]}' \
+    '{"Name":"demo","PackageBase":"demo","Depends":["ruby"]}' \
+    '{"Name":"demo","PackageBase":"demo"}'$'\n''{"Name":"demo-ruby","PackageBase":"demo","Depends":["ruby-rack"]}' \
+    '{"Name":"other","PackageBase":"other","Depends":["bash"]}' \
+    '{"Name":"demo","PackageBase":"demo","Depends":["a]b","python"]}' \
+    '{"Name":"demo","PackageBase":"demo","Depends":["a\"],\"b","python"]}'; do
+    aur_meta "$meta"
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+    [ "$status" -eq 1 ] &&
+      [[ "$output" == *"packages/demo.yml: its depends hold Python packages, so set python.pypi, python.pyproject or python: none"* ]] &&
+      [[ "$output" == *"Requirements failed: 1/1 packages have errors"* ]] || {
+      echo "screened out: $meta"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+# Without the metadata file each package gets the full check
+@test "validate --requirements: checks every package when the AUR metadata file cannot be read" {
+  local names="$BATS_TEST_TMPDIR/names" case
+  requires_package 1.1.0 "" bash python python-yaml
+  echo demo >"$names"
+  for case in missing text cut; do
+    case $case in
+      missing) rm -f "$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz" ;;
+      text) echo '<html>' >"$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz" ;;
+      cut) printf '[\n{"Name":"demo","PackageBase":"demo","Depends":["bash"]},\n' | gzip >"$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz" ;;
+    esac
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+    [ "$status" -eq 1 ] &&
+      [[ "$output" == *"https://aur.archlinux.org/packages-meta-ext-v1.json.gz could not be read, so every package gets the full check"* ]] &&
+      [[ "$output" == *"packages/demo.yml: its depends hold Python packages"* ]] || {
+      echo "taken: $case"
+      echo "$output"
+      return 1
+    }
+  done
+}
+
+# The step ends before timeout-minutes and names each package it did not check
+@test "validate --requirements: names the packages left when its budget is used" {
+  local names="$BATS_TEST_TMPDIR/names"
+  requires_package 1.1.0 "python: none" bash python python-yaml
+  create_test_package other github-release "upstream:
+  project: o/other"
+  printf '%s\n' demo other >"$names"
+  aur_meta '{"Name":"demo","PackageBase":"demo","Depends":["python"]}' '{"Name":"other","PackageBase":"other","Depends":["ruby"]}'
+  AURTOMATOR_VALIDATE_BUDGET=0 run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/demo.yml: not checked, as the check of requirements used its 0 s"* ]]
+  [[ "$output" == *"packages/other.yml: not checked, as the check of requirements used its 0 s"* ]]
+  [[ "$output" == *"Requirements failed: 0/2 packages have errors, and 2 were not checked"* ]]
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Requirements of 2 packages read: 2 with Python or Ruby in AUR depends"* ]]
+  printf '%s\n' demo ../demo >"$names"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$names: '../demo' is no package name"* ]]
+  # Pushes that change no package download nothing
+  : >"$names"
+  export CURL_ARGS_LOG="$BATS_TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No package to check"* ]]
+  [ ! -e "$CURL_ARGS_LOG" ]
 }

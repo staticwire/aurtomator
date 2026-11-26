@@ -5200,7 +5200,7 @@ OLD_PIN=1234567890abcdef1234567890abcdef12345678
 # first commit holds packages a, b and c and a workflow whose job validate calls validate.yml at
 # $OLD_PIN, followed by the text of $BASE_JOBS, and whose second adds d,
 # changes a, deletes c, or renames it to e with $RENAME, and pins $PIN, with $BASE as the base and a
-# validate-pkg.sh that logs each name
+# validate-pkg.sh that logs each name of --requirements
 # with the copy it reads and fails for b, and logs the files of --changed or the word all for --all.
 # Root of the job does not own the checkout of the runner, which
 # git learns from GIT_TEST_ASSUME_DIFFERENT_OWNER. sudo logs its calls to $BATS_TEST_TMPDIR/sudo.log and
@@ -5235,15 +5235,19 @@ run_changed_step() {
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m head
   printf '#!/bin/sh
+log=%s
 case "$1" in
-  --changed) tr "\\000" "\\n" <"$2" >>"%s"; exit 0 ;;
-  --all) echo all >>"%s"; exit 0 ;;
+  --changed) tr "\\000" "\\n" <"$2" >>"$log"; exit 0 ;;
+  --all) echo all >>"$log"; exit 0 ;;
 esac
-echo "$1 $(cat "packages/$1.yml" | head -n 1) cwd=$PWD" >>"%s"
-echo "::warning::from $1"
-[ "$1" != b ]
-' "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/checked" \
-    >"$repo/aurtomator/scripts/validate-pkg.sh"
+rc=0
+while read -r name; do
+  echo "$name $(head -n 1 "packages/$name.yml") cwd=$PWD" >>"$log"
+  echo "::warning::from $name"
+  [ "$name" != b ] || rc=1
+done <"$2"
+exit "$rc"
+' "$BATS_TEST_TMPDIR/checked" >"$repo/aurtomator/scripts/validate-pkg.sh"
   chmod +x "$repo/aurtomator/scripts/validate-pkg.sh"
   printf '#!/bin/sh\necho "$*" >>"%s/sudo.log"\n[ "$1 $2 $3" != "-u builder test" ] || exit "${TEST_X_RC:-0}"\nshift 2\nexec "$@"\n' \
     "$BATS_TEST_TMPDIR" >"$bin/sudo"
@@ -5321,13 +5325,14 @@ echo "::warning::from $1"
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd\ne' ]
 }
 
-# Packages of the base met the rules of the aurtomator it pinned, so a move of the pin checks them all
+# Packages of the base met the rules of the aurtomator it pinned, so a move of the pin checks them all,
+# the ones the push changes first
 @test "validate: checks every package online when the base pins another commit of aurtomator" {
   local pin new=abcdef0123456789abcdef0123456789abcdef01
   for pin in "$new" ""; do
     PIN=$pin run_changed_step
     [ "$status" -ne 0 ]
-    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
+    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd\nb' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
   # The base counts only when a job of its workflows calls validate.yml at the pin
@@ -5337,7 +5342,7 @@ echo "::warning::from $1"
     "  other:"$'\n'"    uses: owner/aurtomator/.github/workflows/validate.yml@$new-x"$'\n'; do
     PIN=$new BASE_JOBS=$jobs run_changed_step
     [ "$status" -ne 0 ]
-    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
+    [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd\nb' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
   # Any job of the base that calls validate.yml at the pin, of any repository, counts
@@ -5373,11 +5378,12 @@ echo "::warning::from $1"
   run_changed_step
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/checked")" = "a name: a cwd=$work"$'\n'"d name: d cwd=$work" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/sudo.log")" = "-u builder test -x $script"$'\n'"-u builder $script a"$'\n'"-u builder $script d" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/sudo.log")" = "-u builder test -x $script"$'\n'"-u builder $script --requirements names" ]
   [ "$(cat "$BATS_TEST_TMPDIR/chown.log")" = "-R builder:builder $work" ]
   [ "$(stat -c %a "$work")" = 700 ]
+  [ "$(cat "$work/names")" = $'a\nd' ]
   run bash -c 'cd "$1" && find . -mindepth 1 | LC_ALL=C sort' _ "$work"
-  [ "$output" = $'./packages\n./packages/a.yml\n./packages/d.yml' ]
+  [ "$output" = $'./names\n./packages\n./packages/a.yml\n./packages/d.yml' ]
   [ "$(stat -c %a "$work/packages/a.yml")" = 644 ]
   # The output of builder sits between ::stop-commands:: and the token
   rm -rf "$BATS_TEST_TMPDIR/repo"
@@ -5476,9 +5482,10 @@ run_pin_release_step() {
   run yq '.jobs.packages.container' "$VALIDATE"
   [ "$status" -eq 0 ]
   [ "$output" = '${{ needs.image.outputs.ref }}' ]
+  # validate-pkg.sh --requirements stops at its budget of 20 minutes, and the steps before it take minutes
   run yq '.jobs.packages["timeout-minutes"]' "$VALIDATE"
   [ "$status" -eq 0 ]
-  [ "$output" = "10" ]
+  [ "$output" = "30" ]
 }
 
 SETUP_DOC="$BATS_TEST_DIRNAME/../site/src/content/docs/setup.md"

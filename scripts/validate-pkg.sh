@@ -1128,13 +1128,89 @@ print_done() {
   done
 }
 
+# Check the files of CHECKED, $1 at a time, and their requirements with a non-empty $2, and start no
+# check after second $3 of the script, when set; LAUNCHED counts the checks started
+check_files() {
+  local i running=0
+  CHECK_OUT=$(mktemp -d)
+  trap 'rm -rf -- "$CHECK_OUT"' EXIT
+  NEXT=0 LAUNCHED=0
+  for i in "${!CHECKED[@]}"; do
+    if ((running >= $1)); then
+      wait -n
+      running=$((running - 1))
+    fi
+    [[ -z "$3" ]] || ((SECONDS < $3)) || break
+    check_package "$i" "$2" &
+    running=$((running + 1)) LAUNCHED=$((i + 1))
+    print_done
+  done
+  wait
+  print_done
+  # Subshells that end early, as set -u ends them, write no result
+  if ((NEXT < LAUNCHED)); then
+    log_err "$(shown_file "${CHECKED[NEXT]}"): its check ended without a result"
+    exit 1
+  fi
+}
+
 # === MAIN ===
 
-USAGE="Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list>"
+USAGE="Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list> | --requirements <names>"
 if [[ "${1:-}" == --online || ("${1:-}" == --all && $# -gt 1 && "${2:-}" != --online) || $# -gt 2 ||
-  ("${1:-}" == --changed && $# -ne 2) ]]; then
+  (("${1:-}" == --changed || "${1:-}" == --requirements) && $# -ne 2) ]]; then
   echo "$USAGE" >&2
   exit 1
+fi
+
+# The online check of validate.yml: the packages that file $2 names, one a line, in order
+if [[ "${1:-}" == --requirements ]]; then
+  budget=${AURTOMATOR_VALIDATE_BUDGET:-1200}
+  [[ "$budget" =~ ^[0-9]+$ ]] || {
+    log_err "AURTOMATOR_VALIDATE_BUDGET must be a number of seconds: ${budget@Q}"
+    exit 1
+  }
+  names=()
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]; then
+      log_err "$2: ${name@Q} is no package name"
+      exit 1
+    fi
+    names+=("$name")
+  done <"$2"
+  if ((${#names[@]} == 0)); then
+    log_ok "No package to check"
+    exit 0
+  fi
+  declare -A screened=()
+  if needed=$(aur_screen "$2"); then
+    for name in "${names[@]}"; do
+      screened[$name]=1
+    done
+    while IFS= read -r name; do
+      [[ -z "$name" ]] || unset "screened[$name]"
+    done <<<"$needed"
+  else
+    log_warn "https://aur.archlinux.org/packages-meta-ext-v1.json.gz could not be read, so every package gets the full check"
+  fi
+  CHECKED=()
+  for name in "${names[@]}"; do
+    [[ -z "${screened[$name]:-}" ]] || continue
+    file=$(pkg_file "$name") || exit 1
+    CHECKED+=("$file")
+  done
+  failed=0
+  check_files 8 1 "$budget"
+  for name in "${CHECKED[@]:LAUNCHED}"; do
+    log_err "$(shown_file "$name"): not checked, as the check of requirements used its $budget s"
+  done
+  if ((failed > 0 || LAUNCHED < ${#CHECKED[@]})); then
+    log_err "Requirements failed: $failed/${#names[@]} packages have errors, and $((${#CHECKED[@]} - LAUNCHED)) were not checked"
+    exit 1
+  fi
+  log_ok "Requirements of ${#names[@]} packages read: ${#CHECKED[@]} with Python or Ruby in AUR depends"
+  exit 0
 fi
 
 if [[ "${1:-}" == --all || "${1:-}" == --changed ]]; then
@@ -1174,27 +1250,7 @@ if [[ "${1:-}" == --all || "${1:-}" == --changed ]]; then
   if [[ "$1" == --all && "${2:-}" == --online ]]; then
     online=1
   fi
-  CHECK_OUT=$(mktemp -d)
-  trap 'rm -rf -- "$CHECK_OUT"' EXIT
-  cores=$(nproc)
-  running=0
-  NEXT=0
-  for i in "${!CHECKED[@]}"; do
-    if ((running >= cores)); then
-      wait -n
-      running=$((running - 1))
-    fi
-    check_package "$i" "$online" &
-    running=$((running + 1))
-    print_done
-  done
-  wait
-  print_done
-  # Subshells that end early, as set -u ends them, write no result
-  if ((NEXT < total)); then
-    log_err "$(shown_file "${CHECKED[NEXT]}"): its check ended without a result"
-    exit 1
-  fi
+  check_files "$(nproc)" "$online" ""
   if [[ "$total" -eq 0 && "$strays" -eq 0 ]]; then
     if [[ "$1" == --changed ]]; then
       log_ok "No package changed"
