@@ -3937,6 +3937,7 @@ alerts:
   # A publish before writes _alerts into the statuses that the next one reads
   rm -f "$TEST_TMPDIR/.status/_alerts"
   mkdir -p "$TEST_TMPDIR/out/rules"
+  rm -f "$TEST_TMPDIR/out/rules/zensical-bin"
   [[ "${2:-}" == unprepared ]] || mkdir -p "$TEST_TMPDIR/out/prepared/zensical-bin"
   if [[ "$1" == error* ]]; then
     printf '%s' "$1" >"$TEST_TMPDIR/out/rules/zensical-bin"
@@ -3970,19 +3971,31 @@ alerts:
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: zensical 0.1.3: PyPI holds no metadata that lists the requirements without running code" ]
+  # Each case starts from the statuses of the check run, since publish keeps a check_failed of them
   rules_package ""
   rm "$TEST_TMPDIR/out/rules/zensical-bin"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
-  echo "notice"$'\t'"elsewhere" >"$TEST_TMPDIR/elsewhere"
+  rules_package ""
+  rm "$TEST_TMPDIR/out/rules/zensical-bin"
+  printf 'version\t0.1.3\nnotice\telsewhere\n' >"$TEST_TMPDIR/elsewhere"
   ln -s "$TEST_TMPDIR/elsewhere" "$TEST_TMPDIR/out/rules/zensical-bin"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
-  rm "$TEST_TMPDIR/out/rules/zensical-bin"
-  truncate -s $((64 * 1024 + 1)) "$TEST_TMPDIR/out/rules/zensical-bin"
+  rules_package ""
+  {
+    printf 'version\t0.1.3\n'
+    printf 'notice\tadds pathspec\n%.0s' {1..4096}
+  } >"$TEST_TMPDIR/out/rules/zensical-bin"
+  [ "$(stat -c %s "$TEST_TMPDIR/out/rules/zensical-bin")" -gt $((64 * 1024)) ]
+  run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
+  rules_package ""
+  printf 'version\t0.1.3\nnotice\tadds\0pathspec\n' >"$TEST_TMPDIR/out/rules/zensical-bin"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
   # An attempt of the run before a check run that found another version
+  rules_package ""
   printf 'version\t0.1.2\nnotice\tadds pathspec\n' >"$TEST_TMPDIR/out/rules/zensical-bin"
   run "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
   [ "$(cat "$TEST_TMPDIR/.status/zensical-bin")" = "check_failed: the rules job handed over no result" ]
