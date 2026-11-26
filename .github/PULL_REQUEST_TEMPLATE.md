@@ -18,9 +18,9 @@ Fixes #<!-- issue number --> <!-- or "N/A" if this PR does not track an issue --
 ## Checklist
 
 - [ ] Commit messages follow Conventional Commits format
-- [ ] `shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh` passes locally
-- [ ] `shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh` produces no diff
-- [ ] `actionlint` passes locally
+- [ ] `shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh tests/helpers/cov-shims/*` and `shellcheck aurtomator.sh` pass locally
+- [ ] `shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh tests/helpers/cov-shims/*` and `shfmt -d -i 2 -ci aurtomator.sh` produce no diff
+- [ ] `actionlint`, `zizmor --persona pedantic .` and the shellcheck of the run steps of `.github/actions/` from `CONTRIBUTING.md` pass locally
 - [ ] `bats tests/ --recursive` passes
 - [ ] New scripts or strategies have BATS tests
 - [ ] New strategies are documented in `README.md` and `site/src/content/docs/strategies.md`
