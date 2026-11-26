@@ -522,6 +522,10 @@ github_prefetch() {
   header=$(download_temp) || return 0
   printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN" >"$header"
   for ((i = 0; i < ${#repos[@]}; i += 50)); do
+    # check-all.sh sets CHECK_END, the end of the time budget of its loop
+    if [[ "${CHECK_END:-}" =~ ^[0-9]+$ ]] && (($(date -u +%s) >= CHECK_END)); then
+      break
+    fi
     batch=("${repos[@]:i:50}")
     query="query {"
     for ((n = 0; n < ${#batch[@]}; n++)); do

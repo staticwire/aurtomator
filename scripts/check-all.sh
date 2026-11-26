@@ -1107,6 +1107,8 @@ check_files=()
 for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   [[ ! -f "$pkg_file" && ! -L "$pkg_file" ]] || check_files+=("$pkg_file")
 done
+# The budget of the loop holds the GraphQL fetch, which starts no request after CHECK_END
+CHECK_END=$(($(date -u +%s) + CHECK_BUDGET - CHECK_SPENT))
 # GITHUB_TOKEN allows 1000 REST requests an hour, and GraphQL reads 50 repositories in one
 if [[ "$MODE" == check || "$MODE" == update ]]; then
   github_prefetch "${check_files[@]}"
@@ -1199,7 +1201,6 @@ check_start=0
 if [[ "$MODE" == check && ${#plain_files[@]} -gt 0 ]] && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
   check_start=$((GITHUB_RUN_NUMBER % ${#plain_files[@]}))
 fi
-CHECK_END=$(($(date -u +%s) + CHECK_BUDGET - CHECK_SPENT))
 
 RECHECK=()
 declare -A FAILED_HOSTS=()

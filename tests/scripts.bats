@@ -4332,6 +4332,16 @@ current: '1.0.0'"
   ! grep -qF 'name: \"a\"' "$MOCK_FILES_DIR/graphql.log"
 }
 
+# The GraphQL fetch counts in the time budget of the loop, so the check job ends within its 30 minutes
+@test "check-all: starts no GraphQL request after the time budget of the loop" {
+  graphql_packages
+  touch "$CURL_ARGS_LOG"
+  AURTOMATOR_CHECK_BUDGET=0 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "unchecked: the check ran out of its 0 minutes in this run" ]
+  run ! grep -q api.github.com/graphql "$CURL_ARGS_LOG"
+}
+
 # The issues count a failed check under the host of its own failed request, which check-all.sh reads
 # from the memory of hosts after the check
 @test "github_prefetch: leaves no failed request to the first check" {
