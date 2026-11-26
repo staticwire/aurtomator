@@ -392,7 +392,7 @@ pypi_metadata() {
     return 4
   fi
   IFS=$'\t' read -r name url sha <<<"$pick"
-  tmp=$(mktemp) || return 1
+  tmp=$(download_temp) || return 1
   http_get "$url" -o "$tmp" || rc=1
   if ((rc == 0)) && [[ "$(sha256sum "$tmp")" != "$sha "* ]]; then
     log_err "$name does not match its sha256"

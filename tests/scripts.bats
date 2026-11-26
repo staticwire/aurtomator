@@ -2850,6 +2850,31 @@ run_split() {
   [ "$output" = $'Metadata-Version: 2.2\nName: demo\nVersion: 1.0\nRequires-Dist: click\nDynamic: Summary' ]
 }
 
+# Checks that their timeout kills leave their files behind, and check-all.sh removes the run cache at its end
+@test "lib.sh: http_get, pypi_metadata and remote_tags download into the run cache" {
+  export AURTOMATOR_RUN_CACHE="$TEST_TMPDIR/run-cache" CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  mkdir -p "$AURTOMATOR_RUN_CACHE"
+  pypi_fake_sdist demo 1.0 $'Metadata-Version: 2.2\nName: demo\nVersion: 1.0\nRequires-Dist: click\n'
+  run_requires 'pypi_metadata demo 1.0'
+  [ "$status" -eq 0 ]
+  grep -o -- ' -o [^ ]*' "$CURL_ARGS_LOG" | cut -d' ' -f3 >"$TEST_TMPDIR/paths"
+  [ "$(wc -l <"$TEST_TMPDIR/paths")" -ge 2 ]
+  run grep -cv -- "^$AURTOMATOR_RUN_CACHE/" "$TEST_TMPDIR/paths"
+  [ "$output" = 0 ]
+  printf '#!/usr/bin/env bash\nreadlink "/proc/$$/fd/1" >>"%s"\nprintf "abc\\trefs/tags/v1.0.0\\n"\n' "$TEST_TMPDIR/refs-path" \
+    >"$MOCK_DIR/git"
+  chmod +x "$MOCK_DIR/git"
+  run_requires 'remote_tags https://git.example/repo.git'
+  [ "$status" -eq 0 ]
+  [ "$output" = v1.0.0 ]
+  [[ "$(<"$TEST_TMPDIR/refs-path")" == "$AURTOMATOR_RUN_CACHE/"* ]]
+  # Outside a run the files go to TMPDIR
+  : >"$TEST_TMPDIR/refs-path"
+  run env -u AURTOMATOR_RUN_CACHE bash -c 'source "$0/scripts/lib.sh"; remote_tags https://git.example/repo.git' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$(dirname "$(<"$TEST_TMPDIR/refs-path")")" = "${TMPDIR:-/tmp}" ]
+}
+
 @test "requires.sh: pypi_metadata fails with 4 for an sdist whose requirements are dynamic or unknown" {
   local text
   for text in $'Metadata-Version: 2.2\nName: demo\nDynamic: requires-dist\n' $'Metadata-Version: 2.1\nName: demo\nRequires-Dist: click\n' \

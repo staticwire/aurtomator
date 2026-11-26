@@ -271,6 +271,16 @@ remember_host() {
   fi
 }
 
+# Print the path of a new file for a download: in the run cache, which check-all.sh removes at its end
+# also after a check its timeout killed, and in TMPDIR outside a run
+download_temp() {
+  if [[ -n "${AURTOMATOR_RUN_CACHE:-}" && -d "$AURTOMATOR_RUN_CACHE" ]]; then
+    mktemp -p "$AURTOMATOR_RUN_CACHE" download.XXXXXX
+  else
+    mktemp
+  fi
+}
+
 # Args: $1=URL, the rest: curl options, which come after these and win. curl waits the
 # Retry-After of a server before a retry, so no retry starts 75 s after the first try.
 _curl_get() {
@@ -282,8 +292,8 @@ _curl_get() {
     fi
   done
   # Retries truncate a file of -o, and on stdout they follow the piece of the try that failed
-  body=$(mktemp) || return 1
-  out=$(mktemp) || {
+  body=$(download_temp) || return 1
+  out=$(download_temp) || {
     rm -f -- "$body"
     return 1
   }
@@ -544,7 +554,7 @@ cooldown_until() {
 # have no time limit, so a stall ends the listing as it ends a fetch in verify.
 remote_tags() {
   local rc=0 refs
-  refs=$(mktemp) || return 1
+  refs=$(download_temp) || return 1
   if ! git_request_begin "$1"; then
     rm -f -- "$refs"
     return 1
