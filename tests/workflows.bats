@@ -2636,7 +2636,8 @@ run_add_builder_step() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   [ "$(cat "$CALLS/useradd")" = "-m -u 2000 builder" ]
-  [ "$(cat "$CALLS/find")" = "/__w /__e /__t ( -user builder -o -group builder ) -print -quit" ]
+  # Close files to builder closes the tool cache, so the search reads /__t and nothing under it
+  [ "$(cat "$CALLS/find")" = "/__w /__e /__t ( -user builder -o -group builder ) -print -quit -o -path /__t -prune" ]
 }
 
 @test "check-updates: Add builder fails when the uid of builder is taken" {
@@ -4565,11 +4566,11 @@ run_summary_step() {
 close_files_step() {
   local mnt="$BATS_TEST_TMPDIR/mnt"
   action_run add-builder "Close files to builder" |
-    sed -e "s|for dir in /__t /github/home /github/workflow;|for dir in $mnt/t $mnt/home $mnt/workflow;|" \
-      -e "s|for dir in /github/home /github/workflow \"\$RUNNER_TEMP\";|for dir in $mnt/home $mnt/workflow $mnt/temp;|" \
+    sed -e "s|for dir in /github/home /github/workflow;|for dir in $mnt/home $mnt/workflow;|" \
+      -e "s|for dir in /__t /github/home /github/workflow \"\$RUNNER_TEMP\";|for dir in $mnt/t $mnt/home $mnt/workflow $mnt/temp;|" \
       >"$BATS_TEST_TMPDIR/step.sh"
-  grep -qF "for dir in $mnt/t $mnt/home $mnt/workflow;" "$BATS_TEST_TMPDIR/step.sh"
-  grep -qF "for dir in $mnt/home $mnt/workflow $mnt/temp;" "$BATS_TEST_TMPDIR/step.sh"
+  grep -qF "for dir in $mnt/home $mnt/workflow;" "$BATS_TEST_TMPDIR/step.sh"
+  grep -qF "for dir in $mnt/t $mnt/home $mnt/workflow $mnt/temp;" "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # PKGBUILD code of prepare runs as builder, which needs aurtomator/ alone
@@ -4609,24 +4610,26 @@ close_files_step() {
   [ "$status" -eq 0 ]
   run stat -c '%n %a' "$mnt/t" "$mnt/t/node" "$mnt/t/node/bin" "$mnt/t/node/bin/node" "$mnt/home" \
     "$mnt/workflow" "$mnt/workflow/event.json" "$outside"
-  [ "$output" = "$(printf '%s\n' "$mnt/t 755" "$mnt/t/node 755" "$mnt/t/node/bin 755" "$mnt/t/node/bin/node 644" \
+  # The step closes the tool cache as a whole and walks none of its files, as the walk took seconds
+  [ "$output" = "$(printf '%s\n' "$mnt/t 700" "$mnt/t/node 777" "$mnt/t/node/bin 775" "$mnt/t/node/bin/node 666" \
     "$mnt/home 700" "$mnt/workflow 700" "$mnt/workflow/event.json 644" "$outside 666")" ]
 }
 
-# The event of the run, the home of the steps, and the step scripts and file commands in
-# RUNNER_TEMP stay with root, which still reads and writes them
-@test "check-updates: Close files to builder takes every right of group and others from the event, home and temp" {
+# The tool cache, the event of the run, the home of the steps, and the step scripts and file commands
+# in RUNNER_TEMP stay with root, which still reads and writes them
+@test "check-updates: Close files to builder takes every right of group and others from the tool cache, event, home and temp" {
   local ws="$BATS_TEST_TMPDIR/ws" mnt="$BATS_TEST_TMPDIR/mnt"
-  mkdir -p "$ws" "$mnt/home" "$mnt/workflow" "$mnt/temp/_runner_file_commands"
+  mkdir -p "$ws" "$mnt/t/node" "$mnt/home" "$mnt/workflow" "$mnt/temp/_runner_file_commands"
   echo event >"$mnt/workflow/event.json"
   echo "set -e" >"$mnt/temp/step.sh"
-  chmod 0755 "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands"
+  chmod 0755 "$mnt/t" "$mnt/t/node" "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands"
   chmod 0644 "$mnt/workflow/event.json" "$mnt/temp/step.sh"
   close_files_step
   run env -C "$ws" DATA="$BATS_TEST_TMPDIR/data" RUNNER_TEMP="$mnt/temp" sh -e "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
-  run stat -c '%n %a' "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands" "$mnt/temp/step.sh"
-  [ "$output" = "$(printf '%s\n' "$mnt/home 700" "$mnt/workflow 700" "$mnt/temp 700" \
+  run stat -c '%n %a' "$mnt/t" "$mnt/t/node" "$mnt/home" "$mnt/workflow" "$mnt/temp" "$mnt/temp/_runner_file_commands" \
+    "$mnt/temp/step.sh"
+  [ "$output" = "$(printf '%s\n' "$mnt/t 700" "$mnt/t/node 755" "$mnt/home 700" "$mnt/workflow 700" "$mnt/temp 700" \
     "$mnt/temp/_runner_file_commands 755" "$mnt/temp/step.sh 644")" ]
 }
 
@@ -5628,7 +5631,7 @@ EOF
   for path in "${BUILDER_PATHS[@]}"; do
     expected+=("test -w $path")
   done
-  expected+=("test -r /var/run/docker.sock" "test -w /var/run/docker.sock")
+  expected+=("test -x /__t" "test -r /var/run/docker.sock" "test -w /var/run/docker.sock")
   expected+=("test -r /__w/repo/repo" "test -r /__w/repo/repo/README.md" "test -r /data")
   for path in "${BUILDER_READ_PATHS[@]}"; do
     expected+=("test -r $path")
@@ -5653,8 +5656,15 @@ EOF
     REACH="-w:$path" run_check_builder_step
     [ "$status" -eq 1 ]
     [ "$output" = "::error::builder passes test -w $path" ]
-    [ "$(wc -l <"$CALLS/sudo")" -eq 28 ]
+    [ "$(wc -l <"$CALLS/sudo")" -eq 29 ]
   done
+}
+
+# Add builder searches no file under /__t, as builder cannot enter it
+@test "check-updates: Check builder fails when builder can enter the tool cache" {
+  REACH="-x:/__t" run_check_builder_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::builder passes test -x /__t" ]
 }
 
 # The event names the repository and the sender, and the step scripts and file commands hold
