@@ -95,10 +95,19 @@ key_strategies() {
   esac
 }
 
+# Prints packages/ and the name of package file $1, quoted outside the pattern of package names, since
+# a pull request can name a file with a line break and a workflow command
+shown_file() {
+  local LC_ALL=C name="${1##*/}"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9.+_-]*\.yml$ ]] || name=${name@Q}
+  printf 'packages/%s\n' "$name"
+}
+
 # Check the python key of package file $1 of strategy $2: none, or a map of the source keys pypi,
 # release and pyproject, map, from PyPI names to package names, and skip, paths that imports leaves out
 validate_python() {
-  local file="$1" shown="packages/${1##*/}" errors=0 key value unknown path pypi pyproject
+  local file="$1" shown errors=0 key value unknown path pypi pyproject
+  shown=$(shown_file "$file")
   case $(pkg_get "$file" '.python | tag') in
     "!!null") return 0 ;;
     "!!map") ;;
@@ -179,7 +188,8 @@ validate_python() {
 # Check the ruby key of package file $1 of strategy $2: none, or a map of gem, the source of the
 # requirements, map, skip and relax, true when the PKGBUILD turns ~> into >=
 validate_ruby() {
-  local file="$1" shown="packages/${1##*/}" errors=0 key value unknown
+  local file="$1" shown errors=0 key value unknown
+  shown=$(shown_file "$file")
   case $(pkg_get "$file" '.ruby | tag') in
     "!!null") return 0 ;;
     "!!map") ;;
@@ -245,7 +255,8 @@ validate_ruby() {
 # Check entry $2 of the alerts of package file $1, with pkgver_format $3 if any, strategy $4
 # and pkgver_dash set when $5 is true; the errors go to stderr
 validate_alert() {
-  local file="$1" i="$2" format="$3" rule="packages/${1##*/}: alerts[$2]" errors=0 unknown tag value requires
+  local file="$1" i="$2" format="$3" rule errors=0 unknown tag value requires
+  rule="$(shown_file "$file"): alerts[$2]"
   if [[ $(pkg_get "$file" ".alerts[$i] | tag") != "!!map" ]]; then
     log_err "$rule must be a map with note and one of when, from, match, requires"
     return 1
@@ -333,7 +344,8 @@ validate_pkg() {
   local file="$1"
   local errors=0
   # The messages name the file in the data directory, as the user sees it
-  local shown="packages/${file##*/}"
+  local shown
+  shown=$(shown_file "$file")
 
   # --- YAML syntax ---
   if ! yq '.' "$file" >/dev/null 2>&1; then
@@ -396,7 +408,7 @@ validate_pkg() {
     log_err "$shown: name ${name@Q} must start with a-z or 0-9 and hold only a-z, 0-9 and . _ + -"
     ((errors++))
   elif [[ "$name" != "$stem" ]]; then
-    log_err "$shown: name '$name' must equal the file name '$stem'"
+    log_err "$shown: name ${name@Q} must equal the file name ${stem@Q}"
     ((errors++))
   fi
 
@@ -1062,7 +1074,7 @@ validate_pkg() {
 # new version reads: the AUR .SRCINFO, the python or ruby key and the release of the current version
 requirements_ok() {
   requires_check "$1" && return 0
-  log_err "packages/${1##*/}: the requires rules cannot read its requirements, see https://aurtomator.dev/features/update-alerts/"
+  log_err "$(shown_file "$1"): the requires rules cannot read its requirements, see https://aurtomator.dev/features/update-alerts/"
   return 1
 }
 

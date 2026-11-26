@@ -79,8 +79,16 @@ jobs:
       - name: Add builder
         uses: ./aurtomator/.github/actions/add-builder # zizmor: ignore[self-repository] add-builder runs from the aurtomator/ checkout
 
+      # Pull requests can name a file with a line break and a workflow command, which the runner
+      # ignores until it reads the token
       - name: Validate packages
-        run: ./aurtomator/scripts/validate-pkg.sh --all
+        run: |
+          token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+          echo "::stop-commands::$token"
+          rc=0
+          ./aurtomator/scripts/validate-pkg.sh --all || rc=$?
+          echo "::$token::"
+          exit "$rc"
 
       # The requires rules read the requirements of each new version, so validate-pkg.sh reads them online
       # for the packages that the push or the pull request adds or changes, and for all when the base is

@@ -5166,7 +5166,25 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   [ "$output" = '[{"persist-credentials":false,"fetch-depth":0},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
   run yq '.jobs.packages.steps[] | select(has("run")) | .run' "$VALIDATE"
   [ "$status" -eq 0 ]
-  grep -qxF './aurtomator/scripts/validate-pkg.sh --all' <<<"$output"
+  grep -qxF './aurtomator/scripts/validate-pkg.sh --all || rc=$?' <<<"$output"
+}
+
+# File names of a pull request can hold a line break and a workflow command
+@test "validate: no line of validate-pkg.sh --all reaches the runner as a command" {
+  local ws="$BATS_TEST_TMPDIR/ws" rc
+  mkdir -p "$ws/aurtomator/scripts"
+  printf '#!/bin/sh\necho "::notice title=forged::text"\n[ "$1" = --all ] || exit 2\nexit "$TEST_RC"\n' \
+    >"$ws/aurtomator/scripts/validate-pkg.sh"
+  chmod +x "$ws/aurtomator/scripts/validate-pkg.sh"
+  yq '.jobs.packages.steps[] | select(.name == "Validate packages") | .run' "$VALIDATE" >"$BATS_TEST_TMPDIR/step.sh"
+  for rc in 0 1; do
+    run env -C "$ws" TEST_RC="$rc" bash -e "$BATS_TEST_TMPDIR/step.sh"
+    [ "$status" -eq "$rc" ]
+    [ "${#lines[@]}" -eq 3 ]
+    [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
+    [ "${lines[1]}" = "::notice title=forged::text" ]
+    [ "${lines[2]}" = "::${BASH_REMATCH[1]}::" ]
+  done
 }
 
 OLD_PIN=1234567890abcdef1234567890abcdef12345678
