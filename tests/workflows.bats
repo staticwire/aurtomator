@@ -5166,39 +5166,48 @@ VALIDATE="$GITHUB_DIR/workflows/validate.yml"
   [ "$output" = '[{"persist-credentials":false,"fetch-depth":0},{"repository":"${{ job.workflow_repository }}","ref":"${{ job.workflow_sha }}","path":"aurtomator","persist-credentials":false}]' ]
   run yq '.jobs.packages.steps[] | select(has("run")) | .run' "$VALIDATE"
   [ "$status" -eq 0 ]
-  grep -qxF './aurtomator/scripts/validate-pkg.sh --all || rc=$?' <<<"$output"
+  grep -qxE ' *\./aurtomator/scripts/validate-pkg\.sh --all \|\| rc=\$\?' <<<"$output"
+  grep -qxE ' *\./aurtomator/scripts/validate-pkg\.sh --changed "\$RUNNER_TEMP/changed" \|\| rc=\$\?' <<<"$output"
 }
 
 # File names of a pull request can hold a line break and a workflow command
 @test "validate: no line of validate-pkg.sh --all reaches the runner as a command" {
-  local ws="$BATS_TEST_TMPDIR/ws" rc
+  local ws="$BATS_TEST_TMPDIR/ws" rc all args
   mkdir -p "$ws/aurtomator/scripts"
-  printf '#!/bin/sh\necho "::notice title=forged::text"\n[ "$1" = --all ] || exit 2\nexit "$TEST_RC"\n' \
+  printf '#!/bin/sh\necho "::notice title=forged::text"\n[ "$*" = "$TEST_ARGS" ] || exit 2\nexit "$TEST_RC"\n' \
     >"$ws/aurtomator/scripts/validate-pkg.sh"
   chmod +x "$ws/aurtomator/scripts/validate-pkg.sh"
   yq '.jobs.packages.steps[] | select(.name == "Validate packages") | .run' "$VALIDATE" >"$BATS_TEST_TMPDIR/step.sh"
-  for rc in 0 1; do
-    run env -C "$ws" TEST_RC="$rc" bash -e "$BATS_TEST_TMPDIR/step.sh"
-    [ "$status" -eq "$rc" ]
-    [ "${#lines[@]}" -eq 3 ]
-    [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
-    [ "${lines[1]}" = "::notice title=forged::text" ]
-    [ "${lines[2]}" = "::${BASH_REMATCH[1]}::" ]
+  for all in true false; do
+    args=--all
+    [[ "$all" == true ]] || args="--changed $BATS_TEST_TMPDIR/changed"
+    for rc in 0 1; do
+      run env -C "$ws" ALL="$all" RUNNER_TEMP="$BATS_TEST_TMPDIR" TEST_ARGS="$args" TEST_RC="$rc" \
+        bash -e "$BATS_TEST_TMPDIR/step.sh"
+      [ "$status" -eq "$rc" ]
+      [ "${#lines[@]}" -eq 3 ]
+      [[ "${lines[0]}" =~ ^::stop-commands::([0-9a-f]{32})$ ]]
+      [ "${lines[1]}" = "::notice title=forged::text" ]
+      [ "${lines[2]}" = "::${BASH_REMATCH[1]}::" ]
+    done
   done
 }
 
 OLD_PIN=1234567890abcdef1234567890abcdef12345678
 
-# Runs the step of validate.yml that checks the requirements of changed packages in a repository whose
+# Runs the step Find changed packages of validate.yml and then the step $STEP, by default the one that
+# checks the requirements of changed packages, in a repository whose
 # first commit holds packages a, b and c and a workflow whose job validate calls validate.yml at
 # $OLD_PIN, followed by the text of $BASE_JOBS, and whose second adds d,
 # changes a, deletes c, or renames it to e with $RENAME, and pins $PIN, with $BASE as the base and a
 # validate-pkg.sh that logs each name
-# with the copy it reads and fails for b. Root of the job does not own the checkout of the runner, which
+# with the copy it reads and fails for b, and logs the files of --changed or the word all for --all.
+# Root of the job does not own the checkout of the runner, which
 # git learns from GIT_TEST_ASSUME_DIFFERENT_OWNER. sudo logs its calls to $BATS_TEST_TMPDIR/sudo.log and
 # runs the command, and chown logs to chown.log.
 run_changed_step() {
-  local repo="$BATS_TEST_TMPDIR/repo" bin="$BATS_TEST_TMPDIR/bin" name pin="${PIN-$OLD_PIN}"
+  local repo="$BATS_TEST_TMPDIR/repo" bin="$BATS_TEST_TMPDIR/bin" name pin="${PIN-$OLD_PIN}" all
+  local temp="$BATS_TEST_TMPDIR/runner-temp"
   mkdir -p "$repo/packages" "$repo/aurtomator/scripts" "$repo/.github/workflows" "$bin"
   git -C "$repo" init -q
   for name in a b c; do
@@ -5226,28 +5235,41 @@ run_changed_step() {
   git -C "$repo" add -A
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m head
   printf '#!/bin/sh
+case "$1" in
+  --changed) tr "\\000" "\\n" <"$2" >>"%s"; exit 0 ;;
+  --all) echo all >>"%s"; exit 0 ;;
+esac
 echo "$1 $(cat "packages/$1.yml" | head -n 1) cwd=$PWD" >>"%s"
 echo "::warning::from $1"
 [ "$1" != b ]
-' "$BATS_TEST_TMPDIR/checked" >"$repo/aurtomator/scripts/validate-pkg.sh"
+' "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/checked" \
+    >"$repo/aurtomator/scripts/validate-pkg.sh"
   chmod +x "$repo/aurtomator/scripts/validate-pkg.sh"
   printf '#!/bin/sh\necho "$*" >>"%s/sudo.log"\n[ "$1 $2 $3" != "-u builder test" ] || exit "${TEST_X_RC:-0}"\nshift 2\nexec "$@"\n' \
     "$BATS_TEST_TMPDIR" >"$bin/sudo"
   printf '#!/bin/sh\necho "$*" >>"%s/chown.log"\n' "$BATS_TEST_TMPDIR" >"$bin/chown"
   chmod +x "$bin/sudo" "$bin/chown"
-  yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .run' "$VALIDATE" \
-    >"$BATS_TEST_TMPDIR/step.sh"
-  rm -rf "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/sudo.log" "$BATS_TEST_TMPDIR/chown.log"
+  yq '.jobs.packages.steps[] | select(.name == "Find changed packages") | .run' "$VALIDATE" >"$BATS_TEST_TMPDIR/find.sh"
+  yq ".jobs.packages.steps[] | select(.name == \"${STEP:-Check the requirements of changed packages}\") | .run" \
+    "$VALIDATE" >"$BATS_TEST_TMPDIR/step.sh"
+  rm -rf "$BATS_TEST_TMPDIR/checked" "$BATS_TEST_TMPDIR/sudo.log" "$BATS_TEST_TMPDIR/chown.log" "$temp"
   [[ -n "${KEEP_WORK:-}" ]] || rm -rf "$BATS_TEST_TMPDIR/work"
-  run env -C "$repo" PATH="$bin:$PATH" GITHUB_WORKSPACE="$repo" WORK="$BATS_TEST_TMPDIR/work" BASE="${BASE-$FIRST}" \
-    PIN="$pin" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 TEST_X_RC="${TEST_X_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
+  mkdir "$temp"
+  run env -C "$repo" GITHUB_OUTPUT="$temp/output" RUNNER_TEMP="$temp" BASE="${BASE-$FIRST}" PIN="$pin" \
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 sh -e "$BATS_TEST_TMPDIR/find.sh"
+  [ "$status" -eq 0 ] || return 0
+  all=$(sed -n 's/^all=//p' "$temp/output")
+  run env -C "$repo" PATH="$bin:$PATH" GITHUB_WORKSPACE="$repo" WORK="$BATS_TEST_TMPDIR/work" ALL="$all" \
+    RUNNER_TEMP="$temp" TEST_X_RC="${TEST_X_RC:-0}" sh -e "$BATS_TEST_TMPDIR/step.sh"
 }
 
 # The requires rules read the requirements of each new version, so validate-pkg.sh reads them online for
 # the packages that a push or a pull request adds or changes
 @test "validate: checks online the packages that the push or the pull request adds or changes" {
+  run yq -o=json -I=0 '.jobs.packages.steps[] | select(.name == "Find changed packages") | [.id, .env]' "$VALIDATE"
+  [ "$output" = '["changed",{"BASE":"${{ github.event.pull_request.base.sha || github.event.before }}","PIN":"${{ job.workflow_sha }}"}]' ]
   run yq -o=json -I=0 '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env | del(.WORK)' "$VALIDATE"
-  [ "$output" = '{"BASE":"${{ github.event.pull_request.base.sha || github.event.before }}","PIN":"${{ job.workflow_sha }}"}' ]
+  [ "$output" = '{"ALL":"${{ steps.changed.outputs.all }}"}' ]
   run_changed_step
   [ "$status" -eq 0 ]
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nd' ]
@@ -5259,6 +5281,29 @@ echo "::warning::from $1"
     [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/checked")" = $'a\nb\nd' ]
     rm -rf "$BATS_TEST_TMPDIR/repo"
   done
+}
+
+# Packages that the push leaves alone passed the same validator at the base
+@test "validate: checks offline the packages that the push or the pull request adds or changes" {
+  run yq -o=json -I=0 '.jobs.packages.steps[] | select(.name == "Validate packages") | .env' "$VALIDATE"
+  [ "$output" = '{"ALL":"${{ steps.changed.outputs.all }}"}' ]
+  STEP="Validate packages" run_changed_step
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'packages/a.yml\npackages/d.yml' ]
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  STEP="Validate packages" RENAME=1 run_changed_step
+  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = $'packages/a.yml\npackages/d.yml\npackages/e.yml' ]
+  rm -rf "$BATS_TEST_TMPDIR/repo"
+  # A move of the pin or a missing base checks every package
+  local base
+  for base in "" 0000000000000000000000000000000000000000; do
+    STEP="Validate packages" BASE=$base run_changed_step
+    [ "$status" -eq 0 ]
+    [ "$(cat "$BATS_TEST_TMPDIR/checked")" = all ]
+    rm -rf "$BATS_TEST_TMPDIR/repo"
+  done
+  STEP="Validate packages" PIN=abcdef0123456789abcdef0123456789abcdef01 run_changed_step
+  [ "$(cat "$BATS_TEST_TMPDIR/checked")" = all ]
 }
 
 # Root copies the YAMLs for builder, and a link would bring in the file it names
@@ -5361,7 +5406,7 @@ echo "::warning::from $1"
 # the releases online
 @test "validate: the packages job adds builder after the checkouts and stops it at the end" {
   run yq -o=json -I=0 '[.jobs.packages.steps[] | [.name, .uses // null, .if // null]]' "$VALIDATE"
-  [ "$output" = '[["Install dependencies",null,null],["Checkout","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Checkout aurtomator","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Add builder","./aurtomator/.github/actions/add-builder",null],["Validate packages",null,null],["Check the requirements of changed packages",null,null],["Stop builder","./aurtomator/.github/actions/stop-builder","always()"]]' ]
+  [ "$output" = '[["Install dependencies",null,null],["Checkout","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Checkout aurtomator","actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",null],["Add builder","./aurtomator/.github/actions/add-builder",null],["Find changed packages",null,null],["Validate packages",null,null],["Check the requirements of changed packages",null,null],["Stop builder","./aurtomator/.github/actions/stop-builder","always()"]]' ]
   run yq '.jobs.packages.steps[] | select(.name == "Install dependencies") | .run' "$VALIDATE"
   [[ "$output" == *$'\n'"pacman -Su --noconfirm --needed sudo git go-yq" ]]
   run yq '.jobs.packages.steps[] | select(.name == "Check the requirements of changed packages") | .env.WORK' "$VALIDATE"

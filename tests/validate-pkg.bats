@@ -1616,6 +1616,63 @@ alerts:
   [[ "$output" == *"All 2 packages valid"* ]]
 }
 
+# validate.yml passes the files that git diff -z names for the push or the pull request
+@test "validate --changed: checks the packages that the list names" {
+  local list="$BATS_TEST_TMPDIR/changed"
+  create_test_package a github-release "upstream:
+  project: owner/a"
+  create_test_package b nonexistent-strat ""
+  create_test_package c pypi "upstream:
+  registry: c"
+  # Deleted files, files outside packages/ and files no run reads give no check
+  printf '%s\0' packages/a.yml packages/c.yml packages/gone.yml README.md packages/sub/x.yml packages/.x.yml >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"All 2 changed packages valid"* ]]
+  printf '%s\0' packages/b.yml packages/a.yml >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Validation failed: 1/2 packages have errors"* ]]
+  : >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No package changed"* ]]
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$BATS_TEST_TMPDIR/none"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$BATS_TEST_TMPDIR/none: no list of changed files"* ]]
+}
+
+# Pull requests can name a file with a line break, and git diff -z ends each name with a NUL alone
+@test "validate --changed: reads a name with a line break as one file" {
+  local list="$BATS_TEST_TMPDIR/changed" name=$'b.yml\nc.yml'
+  create_test_package b nonexistent-strat ""
+  printf 'name: x\nstrategy: github-release\nupstream:\n  project: owner/repo\n' >"$TEST_TMPDIR/packages/$name"
+  printf '%s\0' "packages/$name" >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/\$'b.yml\\nc.yml': name 'x' must equal the file name"* ]]
+  [[ "$output" != *"nonexistent-strat"* ]]
+}
+
+# The files of packages/ that no run reads fail on every run, since they cost no step per package
+@test "validate --changed: fails on every file of packages/ that no run reads" {
+  local list="$BATS_TEST_TMPDIR/changed"
+  create_test_package a github-release "upstream:
+  project: owner/a"
+  printf '%s\0' packages/a.yml >"$list"
+  ln -s "$TEST_TMPDIR/packages/a.yml" "$TEST_TMPDIR/packages/b.yml"
+  : >"$TEST_TMPDIR/packages/notes.txt"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/b.yml: no run reads it"* ]]
+  [[ "$output" == *"packages/notes.txt: no run reads it"* ]]
+  # A listed link is no package either
+  printf '%s\0' packages/b.yml >"$list"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --changed "$list"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"packages/b.yml: no run reads it"* && "$output" != *"changed packages valid"* ]]
+}
+
 @test "validate: fails on nonexistent package" {
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" "nonexistent"
   [ "$status" -ne 0 ]
@@ -3099,5 +3156,15 @@ $2"
   [ "$status" -eq 1 ]
   run "$TEST_TMPDIR/scripts/validate-pkg.sh" --online
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Usage: validate-pkg.sh <package-name> | --all [--online]"* ]]
+  [[ "$output" == *"Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list>"* ]]
+  local args
+  for args in --changed "--changed $TEST_TMPDIR/a $TEST_TMPDIR/b"; do
+    # shellcheck disable=SC2086
+    run "$TEST_TMPDIR/scripts/validate-pkg.sh" $args
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Usage: validate-pkg.sh"* ]] || {
+      echo "taken: $args"
+      return 1
+    }
+  done
 }

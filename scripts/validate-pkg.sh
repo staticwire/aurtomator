@@ -5,8 +5,10 @@
 #
 # Usage: ./scripts/validate-pkg.sh <package-name>
 #        ./scripts/validate-pkg.sh --all [--online]
+#        ./scripts/validate-pkg.sh --changed <list>
 #
 # --all checks the syntax of every package alone, and with --online the requirements too.
+# --changed checks the syntax of the packages that <list> names, as git diff -z prints them.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -1080,13 +1082,29 @@ requirements_ok() {
 
 # === MAIN ===
 
-USAGE="Usage: validate-pkg.sh <package-name> | --all [--online]"
-if [[ "${1:-}" == --online || ("${1:-}" == --all && $# -gt 1 && "${2:-}" != --online) || $# -gt 2 ]]; then
+USAGE="Usage: validate-pkg.sh <package-name> | --all [--online] | --changed <list>"
+if [[ "${1:-}" == --online || ("${1:-}" == --all && $# -gt 1 && "${2:-}" != --online) || $# -gt 2 ||
+  ("${1:-}" == --changed && $# -ne 2) ]]; then
   echo "$USAGE" >&2
   exit 1
 fi
 
-if [[ "${1:-}" == "--all" ]]; then
+if [[ "${1:-}" == --all || "${1:-}" == --changed ]]; then
+  pkg_files=("${AURTOMATOR_DATA_DIR}"/packages/*.yml)
+  what=packages
+  if [[ "$1" == --changed ]]; then
+    if [[ ! -f "$2" ]]; then
+      log_err "$2: no list of changed files"
+      exit 1
+    fi
+    pkg_files=()
+    what="changed packages"
+    # The list holds paths of the data directory, each ended by a NUL, as git diff -z prints them
+    while IFS= read -r -d '' path; do
+      [[ "$path" == packages/*.yml && "$path" != packages/*/* && "$path" != packages/.* ]] || continue
+      pkg_files+=("${AURTOMATOR_DATA_DIR}/$path")
+    done <"$2"
+  fi
   total=0
   failed=0
   strays=0
@@ -1098,7 +1116,7 @@ if [[ "${1:-}" == "--all" ]]; then
     log_err "packages/$entry: no run reads it, as the runs read the regular files packages/<name>.yml alone"
     ((strays++)) || true
   done < <(find "${AURTOMATOR_DATA_DIR}/packages" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
-  for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
+  for pkg_file in "${pkg_files[@]}"; do
     [[ -f "$pkg_file" && ! -L "$pkg_file" ]] || continue
     ((total++)) || true
     if ! validate_pkg "$pkg_file" || { [[ "${2:-}" == --online ]] && ! requirements_ok "$pkg_file"; }; then
@@ -1106,7 +1124,11 @@ if [[ "${1:-}" == "--all" ]]; then
     fi
   done
   if [[ "$total" -eq 0 && "$strays" -eq 0 ]]; then
-    log_warn "No packages found in packages/"
+    if [[ "$1" == --changed ]]; then
+      log_ok "No package changed"
+    else
+      log_warn "No packages found in packages/"
+    fi
     exit 0
   fi
   if [[ "$failed" -gt 0 ]]; then
@@ -1114,7 +1136,7 @@ if [[ "${1:-}" == "--all" ]]; then
     exit 1
   fi
   ((strays == 0)) || exit 1
-  log_ok "All $total packages valid"
+  log_ok "All $total $what valid"
   exit 0
 fi
 
