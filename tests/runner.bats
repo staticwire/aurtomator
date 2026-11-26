@@ -635,29 +635,44 @@ shape() {
   [ "$output" = "name: pinned" ]
 
   pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v0.14.1
-  run "$REPO/aurtomator.sh" check-pins
+  GITHUB_TOKEN=secret run "$REPO/aurtomator.sh" check-pins
   [ "$status" -eq 1 ]
   [ "$output" = "GitHub shows the release v0.14.1 of staticwire/aurtomator as mutable, and aurtomator publishes every release after v0.14.0 as immutable" ]
 }
 
-@test "runner: asks the GitHub API with GITHUB_TOKEN when it is set, and names its failures" {
+# Runners share the addresses that the GitHub API limits to 60 requests an hour without a token, and the
+# image job of each workflow checks the release with the token of the run
+@test "runner: asks the GitHub API with GITHUB_TOKEN when it is set, and check-pins only then" {
   CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" run "$REPO/aurtomator.sh" check-pins
   [ "$status" -eq 0 ]
-  [ "$(<"$TEST_TMPDIR/curl-args")" = "-qgsSL --proto =https --max-time 30 -w \n%{http_code} -H Accept: application/vnd.github+json https://api.github.com/repos/staticwire/aurtomator/releases/tags/v1.0.0" ]
-  rm "$TEST_TMPDIR/curl-args"
+  [ ! -e "$TEST_TMPDIR/curl-args" ]
   CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" GITHUB_TOKEN=secret run "$REPO/aurtomator.sh" check-pins
   [ "$status" -eq 0 ]
   [ "$(<"$TEST_TMPDIR/curl-args")" = "-qgsSL --proto =https --max-time 30 -w \n%{http_code} -H Accept: application/vnd.github+json -H @- https://api.github.com/repos/staticwire/aurtomator/releases/tags/v1.0.0" ]
+  rm "$TEST_TMPDIR/curl-args"
+  CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 0 ]
+  [ "$(<"$TEST_TMPDIR/curl-args")" = "-qgsSL --proto =https --max-time 30 -w \n%{http_code} -H Accept: application/vnd.github+json https://api.github.com/repos/staticwire/aurtomator/releases/tags/v1.0.0" ]
+}
 
-  # GitHub answers 403 past the rate limit
+@test "runner: names the failures of the GitHub API, and GITHUB_TOKEN past the limit without it" {
+  # GitHub answers 403 or 429 past the rate limit
   cat >"$MOCK_DIR/curl" <<'EOF'
 #!/usr/bin/env bash
 [[ -z "${CURL_FAIL:-}" ]] || exit 6
-printf '{"message": "API rate limit exceeded"}\n403'
+printf '{"message": "API rate limit exceeded"}\n%s' "${CODE:-403}"
 EOF
-  run "$REPO/aurtomator.sh" check-pins
+  GITHUB_TOKEN=secret run "$REPO/aurtomator.sh" check-pins
   [ "$status" -eq 1 ]
   [ "$output" = "The GitHub API answered HTTP 403 for the release v1.0.0 of staticwire/aurtomator: API rate limit exceeded" ]
+  local code
+  for code in 403 429; do
+    CODE=$code run "$REPO/aurtomator.sh" pin v1.1.0
+    [ "$status" -eq 1 ]
+    [ "$output" = "The GitHub API answered HTTP $code for the release v1.1.0 of staticwire/aurtomator: API rate limit exceeded; set GITHUB_TOKEN to a GitHub token for a higher limit" ]
+  done
+  CODE=500 run "$REPO/aurtomator.sh" pin v1.1.0
+  [ "$output" = "The GitHub API answered HTTP 500 for the release v1.1.0 of staticwire/aurtomator: API rate limit exceeded" ]
   CURL_FAIL=1 run "$REPO/aurtomator.sh" pin v1.1.0
   [ "$status" -eq 1 ]
   [ "$output" = "Could not ask the GitHub API for the release v1.1.0 of staticwire/aurtomator" ]

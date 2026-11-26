@@ -31,7 +31,7 @@ The jobs run on `ubuntu-latest` in the image of `ci-image/archlinux.Dockerfile` 
 
 ## The jobs
 
-`image` checks that `job.workflow_sha` is a commit SHA, since an empty one would check out `main` of aurtomator, and reads the pinned image from `ci-image/archlinux.Dockerfile`.
+`image` checks that `job.workflow_sha` is a commit SHA, since an empty one would check out `main` of aurtomator. In repositories other than aurtomator it also checks that the commit is the commit of a release tag and that the GitHub API, asked with the token of the run, shows that release as published and immutable. Then it reads the pinned image from `ci-image/archlinux.Dockerfile`.
 
 `check` runs the strategies as `builder` with the read-only workflow token and decides the run. It names the packages with a new version, at most 256, the most jobs one matrix starts; the rest wait for a later run. It sets `work` when some package has a new version, when the README or `aurtomator.sh` changed, or when the day's statistics card differs from `stats/card.svg`. It runs no requires rule and parses no release archive, only the metadata file of a wheel for `upstream.pin_from`. Among the packages with a new version it lists in `_rules` those whose AUR `.SRCINFO` has Python or Ruby in `depends`, see [Update alerts](/features/update-alerts/).
 
