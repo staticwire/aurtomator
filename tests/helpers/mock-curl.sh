@@ -153,6 +153,11 @@ case "$url" in
       http_error 404
     fi
     ;;
+  # GitHub REST limit: MOCK_REST_LEFT requests left, 5000 by default, and fail fails the request
+  *api.github.com/rate_limit)
+    [[ "${MOCK_REST_LEFT:-}" != fail ]] || http_error 500
+    printf '{"resources": {"core": {"limit": 5000, "remaining": %s}}}\n' "${MOCK_REST_LEFT:-5000}"
+    ;;
   # GitHub GraphQL: the body of each request goes on a line of graphql.log, and graphql.json is the answer
   *api.github.com/graphql)
     { cat && echo; } >>"$MOCK_FILES_DIR/graphql.log"

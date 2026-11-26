@@ -1109,6 +1109,48 @@ done
 if [[ "$MODE" == check || "$MODE" == update ]]; then
   github_prefetch "${check_files[@]}"
 fi
+
+# The REST requests of the hour that a check run with GITHUB_TOKEN leaves to publish and the issues job,
+# and the package files whose check asks REST: GitHub releases, and assets of github-tag
+readonly REST_RESERVE=400
+REST_LEFT="" REST_SINCE=10
+declare -A REST_FILES=()
+if [[ "$MODE" == check && -n "${GITHUB_TOKEN:-}" ]]; then
+  rest_scan=()
+  for pkg_file in "${check_files[@]}"; do
+    [[ ! -f "$pkg_file" || -L "$pkg_file" ]] || rest_scan+=("$pkg_file")
+  done
+  while IFS=$'\t' read -r pkg_file strategy asset; do
+    case $strategy in
+      github-release | github-nightly | github-asset) REST_FILES[$pkg_file]=1 ;;
+      github-tag) [[ -z "$asset" ]] || REST_FILES[$pkg_file]=1 ;;
+    esac
+  done < <(((${#rest_scan[@]} == 0)) ||
+    yq -N -r '[filename, .strategy // "", .upstream.asset_regex // ""] | map(tostring) | join("\t")' "${rest_scan[@]}" 2>/dev/null || true)
+fi
+
+# Succeeds while the check of package file $1 may ask GitHub REST: it asks none, or GET /rate_limit,
+# which counts against no limit and runs before every tenth such check, leaves REST_RESERVE or more
+rest_left() {
+  [[ -n "${REST_FILES[$1]:-}" ]] || return 0
+  if ((REST_SINCE >= 10)); then
+    REST_SINCE=0
+    REST_LEFT=$(github_api https://api.github.com/rate_limit 2>/dev/null | yq -r '.resources.core.remaining // ""' 2>/dev/null) ||
+      REST_LEFT=""
+    # Failed reads belong to no package
+    if host_memory; then
+      : >"$AURTOMATOR_HOSTS_DIR/failed"
+    fi
+  fi
+  REST_SINCE=$((REST_SINCE + 1))
+  [[ ! "$REST_LEFT" =~ ^[0-9]+$ ]] || ((REST_LEFT >= REST_RESERVE))
+}
+
+# Gives status unchecked to package $1, which rest_left kept from GitHub
+mark_rest_unchecked() {
+  log_warn "$1: the run keeps its last $REST_RESERVE GitHub API requests of the hour for the jobs after the check"
+  echo "unchecked: the run keeps its last $REST_RESERVE GitHub API requests of the hour for the jobs after the check" >"${STATUS_DIR}/$1"
+}
 # Packages with upstream.pin_from wait for held updates of the project that pins them, so
 # they run after the other packages, whose statuses are known then
 plain_files=()
@@ -1143,10 +1185,14 @@ if [[ "$MODE" == publish ]]; then
   [[ -s "${STATUS_DIR}/_hosts" ]] || rm -f "${STATUS_DIR}/_hosts"
 fi
 for pkg_file in "${plain_files[@]:check_start}" "${plain_files[@]:0:check_start}" "${companion_files[@]}"; do
-  if check_time_left; then
+  if check_time_left && rest_left "$pkg_file"; then
     run_package "$pkg_file" 1
   elif pkg_name=$(package_name "$pkg_file"); then
-    mark_unchecked "$pkg_name"
+    if check_time_left; then
+      mark_rest_unchecked "$pkg_name"
+    else
+      mark_unchecked "$pkg_name"
+    fi
   fi
 done
 
@@ -1157,6 +1203,8 @@ if ((${#RECHECK[@]} > 0)) && check_time_left; then
   sleep "$RECHECK_DELAY"
   for pkg_file in "${RECHECK[@]}"; do
     check_time_left || break
+    # The failed check keeps its status when GitHub REST has nothing to spare
+    rest_left "$pkg_file" || continue
     run_package "$pkg_file" 2
   done
 fi

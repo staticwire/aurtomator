@@ -101,7 +101,7 @@ While `packages/` holds no package, the script writes nothing, so repositories f
 | `.status/<name>` | `arch_back: 28+23 aarch64` | arches out are back, not pushed yet |
 | `.status/<name>` | `arch_added: 28+23 aarch64` | arches put back at the AUR version, pushed |
 | `.status/<name>` | `check_failed: <error>` | check failed |
-| `.status/<name>` | `unchecked: <reason>` | not checked in this run, since the check ran out of its minutes or the package waits for the second check of the package of its project; its issues stay as they are |
+| `.status/<name>` | `unchecked: <reason>` | not checked in this run, since the check ran out of its minutes, the check would ask GitHub REST and the run keeps its last 400 requests of the hour for the jobs after the check, or the package waits for the second check of the package of its project; its issues stay as they are |
 | `.status/<name>` | `update_failed: <error>` | update failed |
 | `.status/_alerts` | package, `hold`, `notice` or `wait`, note | one line for each alert that fired, and `wait` for packages with `upstream.pin_from` that wait for the package of their project, with the note `Waits for the held update of <name>` or `Waits for the update of <name>`; `--publish` copies the lines of the check run |
 | `.status/_assets` | package, asset value | one line for each value found |

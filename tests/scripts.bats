@@ -4329,6 +4329,58 @@ current: '1.0.0'"
   [ "$output" = $'0\n0' ]
 }
 
+# GITHUB_TOKEN allows 1000 REST requests an hour for the repository, and publish and the issues job
+# need some after the check job
+@test "check-all: leaves the GitHub packages unchecked when 400 REST requests are left" {
+  local reason="unchecked: the run keeps its last 400 GitHub API requests of the hour for the jobs after the check"
+  create_test_package a github-release "upstream:
+  project: owner/a
+current: '1.0.0'"
+  create_test_package t github-tag "upstream:
+  project: owner/t
+current: '1.0.0'"
+  create_test_package s pypi "upstream:
+  registry: s
+current: '1.0.0'"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  MOCK_REST_LEFT=399 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "$reason" ]
+  [[ "$(cat "$TEST_TMPDIR/.status/t")" != unchecked:* ]]
+  [[ "$(cat "$TEST_TMPDIR/.status/s")" != unchecked:* ]]
+  [[ "$output" == *"a: the run keeps its last 400 GitHub API requests of the hour for the jobs after the check"* ]]
+  ! grep -q repos/owner/a/releases "$CURL_ARGS_LOG"
+  # github-tag reads tags with git, and its asset over REST
+  create_test_package t github-tag "upstream:
+  project: owner/t
+  asset_regex: 't-.*'
+current: '1.0.0'"
+  MOCK_REST_LEFT=399 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/t")" = "$reason" ]
+  MOCK_REST_LEFT=400 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
+  # The limit of local runs without a token is theirs to watch, and an unread limit stops nothing
+  rm "$CURL_ARGS_LOG"
+  MOCK_REST_LEFT=0 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
+  ! grep -q rate_limit "$CURL_ARGS_LOG"
+  MOCK_REST_LEFT=fail GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
+}
+
+# GET /rate_limit counts against no limit, and each check takes a few requests at most
+@test "check-all: reads the GitHub REST limit before every tenth GitHub package" {
+  local i
+  for i in $(seq 10 30); do
+    create_test_package "p$i" github-release "upstream:
+  project: owner/p$i"
+  done
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c api.github.com/rate_limit "$CURL_ARGS_LOG")" = 3 ]
+}
+
 # One request holds 50 repositories
 @test "check-all: asks GraphQL for 50 repositories a request" {
   local i
