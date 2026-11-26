@@ -27,7 +27,7 @@ pkgver_dash: ''
 
 The check takes the one tag that gives the version, as `github-tag` reads tags, and the release of that tag. Exactly one asset name must match `asset_regex`, and its capture group is the value. The regex above names the OCaml 5 build, because v2.4.6 also has an `ocaml4.14.2` asset and `ocaml[0-9.]+` would match both. Versions with no tag or two tags, two matching assets, and values with characters outside those below fail the check.
 
-Upstream can push a tag before it publishes the release: liquidsoap uploads the assets to a draft, which the API shows only to users who can push, and published `v2.5.0-rc1` 40 minutes after its tag. Releases without matching assets wait 24 hours from their `published_at`, and tags without releases 24 hours from their commit date, with status `pending`. After that the check fails and names the release assets. Commit dates more than 24 hours after the run fail the check at once.
+Upstream can push a tag before it publishes the release: liquidsoap uploads the assets to a draft, which the API shows only to users who can push, and published `v2.5.0-rc1` 40 minutes after its tag. Releases without matching assets wait 24 hours from their `published_at`, and tags without releases 24 hours from the tagger date of an annotated tag or the commit date of a lightweight one, with status `pending`. After that the check fails and names the release assets. Tag and commit dates more than 24 hours after the run fail the check at once.
 
 For packages at `current`, values other than `current_asset` are rebuilds of that version. YAML files without `current_asset` get it in their first run, with no push when the AUR already has the value.
 

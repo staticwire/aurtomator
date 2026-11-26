@@ -8017,7 +8017,19 @@ pkgver_dash: ''"
   MOCK_TAG_TYPE=tag MOCK_TAG_AGE=1 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
   [ "$status" -eq 3 ]
   grep -q "repos/asset-owner/asset-repo/git/tags/$(printf 'c%.0s' {1..40})\$" "$CURL_ARGS_LOG"
-  grep -q "repos/asset-owner/asset-repo/git/commits/$(printf 'd%.0s' {1..40})\$" "$CURL_ARGS_LOG"
+}
+
+# Annotated tags carry the time they were made, which can come long after their commit
+@test "check-asset: dates an annotated tag without a release by its tagger" {
+  liquidsoap_package
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  MOCK_TAG_TYPE=tag MOCK_TAG_AGE=48 MOCK_TAGGER_AGE=1 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 3 ]
+  run grep -c '/git/commits/' "$CURL_ARGS_LOG"
+  [ "$output" = 0 ]
+  MOCK_TAG_TYPE=tag MOCK_TAG_AGE=1 MOCK_TAGGER_AGE=30 run "$TEST_TMPDIR/scripts/check-asset.sh" liq 2.5.0rc2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tag v2.5.0-rc2 has no release"* ]]
 }
 
 # bash expands a tilde at the start of an assignment
