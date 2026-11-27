@@ -3393,10 +3393,10 @@ $2"
 @test "validate --requirements: refuses a budget from the environment that is no number of seconds" {
   local names="$BATS_TEST_TMPDIR/names" value
   printf 'demo\n' >"$names"
-  for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 1.5 -1; do
+  for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 1.5 -1 010 09; do
     AURTOMATOR_VALIDATE_BUDGET=$value run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"AURTOMATOR_VALIDATE_BUDGET must be a number of seconds: "* ]] || {
+    [[ "$output" == *"AURTOMATOR_VALIDATE_BUDGET must be a whole number of seconds from 0 to 999999: "* ]] || {
       echo "taken: $value"
       return 1
     }

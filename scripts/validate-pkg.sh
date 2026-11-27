@@ -1177,11 +1177,7 @@ fi
 
 # The online check of validate.yml: the packages that file $2 names, one a line, in order
 if [[ "${1:-}" == --requirements ]]; then
-  budget=${AURTOMATOR_VALIDATE_BUDGET:-1200}
-  [[ "$budget" =~ ^[0-9]+$ ]] || {
-    log_err "AURTOMATOR_VALIDATE_BUDGET must be a number of seconds: ${budget@Q}"
-    exit 1
-  }
+  budget=$(env_seconds AURTOMATOR_VALIDATE_BUDGET 1200) || exit 1
   names=()
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
