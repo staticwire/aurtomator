@@ -4592,7 +4592,10 @@ current: '1.0.0'"
 current: '1.0.0'"
   MOCK_REST_LEFT=399 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$(cat "$TEST_TMPDIR/.status/t")" = "$reason" ]
-  MOCK_REST_LEFT=400 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  # A check asks at most 15 requests, and the reserve stays after them
+  MOCK_REST_LEFT=414 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "$reason" ]
+  MOCK_REST_LEFT=415 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
   # The limit of local runs without a token is theirs to watch, and an unread limit stops nothing
   rm "$CURL_ARGS_LOG"
@@ -4629,6 +4632,22 @@ current: '1.0.0'"
   GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(grep -c api.github.com/rate_limit "$CURL_ARGS_LOG")" = 3 ]
+}
+
+# Between two reads each check counts as the 15 requests it can ask at most
+@test "check-all: keeps the REST reserve between two reads of the limit" {
+  local i
+  for i in $(seq 10 30); do
+    create_test_package "p$i" github-release "upstream:
+  project: owner/p$i"
+  done
+  # 430 left: two checks after each read, at 415 and at 400
+  MOCK_REST_LEFT=430 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  run grep -lx 'unchecked: the run keeps its last 400 GitHub API requests of the hour for the jobs after the check' \
+    "$TEST_TMPDIR"/.status/p*
+  [ "${#lines[@]}" -eq 16 ]
+  [[ "$output" != *"/p10"* && "$output" != *"/p11"* && "$output" != *"/p20"* && "$output" != *"/p21"* && "$output" != *"/p30"* ]]
 }
 
 # Prints the milliseconds that three requests to URL $1 take to begin in a check run

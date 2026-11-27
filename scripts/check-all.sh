@@ -1157,6 +1157,8 @@ fi
 # The REST requests of the hour that a check run with GITHUB_TOKEN leaves to publish and the issues job,
 # and the package files whose check asks REST: GitHub releases outside the answers of GraphQL, and assets
 readonly REST_RESERVE=400
+# The most REST requests of one check: 11 of github-release with tag_version_regex, 4 of check-asset.sh
+readonly REST_PER_CHECK=15
 REST_LEFT="" REST_SINCE=10
 declare -A REST_FILES=()
 # Checks of a run for the packages of a strategy whose host caps the requests of a day: repology.org
@@ -1204,8 +1206,8 @@ if [[ "$MODE" == check ]]; then
   fi
 fi
 
-# Succeeds while the check of package file $1 may ask GitHub REST: it asks none, or GET /rate_limit,
-# which counts against no limit and runs before every tenth such check, leaves REST_RESERVE or more
+# Succeeds while the check of package file $1 asks no GitHub REST, or leaves REST_RESERVE after its REST_PER_CHECK
+# requests; GET /rate_limit, free, runs before every tenth such check, and the checks between count down
 rest_left() {
   [[ -n "${REST_FILES[$1]:-}" ]] || return 0
   if ((REST_SINCE >= 10)); then
@@ -1218,7 +1220,9 @@ rest_left() {
     fi
   fi
   REST_SINCE=$((REST_SINCE + 1))
-  [[ ! "$REST_LEFT" =~ ^[0-9]+$ ]] || ((REST_LEFT >= REST_RESERVE))
+  [[ "$REST_LEFT" =~ ^[0-9]+$ ]] || return 0
+  ((REST_LEFT - REST_PER_CHECK >= REST_RESERVE)) || return 1
+  REST_LEFT=$((REST_LEFT - REST_PER_CHECK))
 }
 
 # Gives status unchecked to package $1, whose host gives the run fewer checks than it has packages
