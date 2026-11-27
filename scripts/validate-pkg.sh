@@ -1145,6 +1145,10 @@ check_files() {
   local i
   CHECK_OUT=$(mktemp -d)
   trap 'rm -rf -- "$CHECK_OUT"' EXIT
+  if [[ -n "$2" ]]; then
+    export AURTOMATOR_PACE_DIR="$CHECK_OUT/pace"
+    mkdir -- "$AURTOMATOR_PACE_DIR"
+  fi
   NEXT=0 LAUNCHED=0
   for i in "${!CHECKED[@]}"; do
     # Ended checks leave their .rc whatever wait -n saw, and 127 means that no check runs

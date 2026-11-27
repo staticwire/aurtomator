@@ -3389,6 +3389,23 @@ $2"
   [ ! -e "$CURL_ARGS_LOG" ]
 }
 
+# Online checks run eight at a time, and one directory keeps the pace of each host for all of them
+@test "validate --requirements: gives its parallel checks one pace of the hosts" {
+  local names="$BATS_TEST_TMPDIR/names" bin="$BATS_TEST_TMPDIR/rec" cmd
+  requires_package 1.1.0 "" bash python python-yaml
+  echo demo >"$names"
+  aur_meta '{"Name":"demo","PackageBase":"demo","Depends":["python"]}'
+  mkdir -p "$bin"
+  for cmd in curl git; do
+    printf '#!/usr/bin/env bash\necho "%s ${AURTOMATOR_PACE_DIR:-none}" >>"%s/pace-dirs"\nPATH=${PATH#"%s:"}\nexec %s "$@"\n' \
+      "$cmd" "$BATS_TEST_TMPDIR" "$bin" "$cmd" >"$bin/$cmd"
+    chmod +x "$bin/$cmd"
+  done
+  PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 1 ]
+  grep -q '^git /' "$BATS_TEST_TMPDIR/pace-dirs"
+}
+
 # bash runs $(...) in an array subscript of (( )), so the budget matches a digit pattern first
 @test "validate --requirements: refuses a budget from the environment that is no number of seconds" {
   local names="$BATS_TEST_TMPDIR/names" value

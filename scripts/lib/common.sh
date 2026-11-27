@@ -228,7 +228,12 @@ request_begin() {
     printf '%s: the host is no plain name of ASCII letters, digits, dots and dashes\n' "$1" >&2
     return 1
   fi
-  if ! host_memory || ! host=$(url_host "$1"); then
+  if ! host=$(url_host "$1"); then
+    return 0
+  fi
+  # Parallel checks of validate-pkg.sh share the pace of each host, and keep no other memory
+  if ! host_memory; then
+    [[ -z "${AURTOMATOR_PACE_DIR:-}" || ! -d "$AURTOMATOR_PACE_DIR" ]] || request_pace "$host" "$AURTOMATOR_PACE_DIR"
     return 0
   fi
   if grep -qxF -e "$host" "$AURTOMATOR_HOSTS_DIR/silent"; then
@@ -236,7 +241,7 @@ request_begin() {
     request_failed "$1"
     return 1
   fi
-  request_pace "$host"
+  request_pace "$host" "$AURTOMATOR_HOSTS_DIR"
   printf '%s\n%s\n' "$1" "${2:-$1}" >"$AURTOMATOR_HOSTS_DIR/request"
 }
 
@@ -252,12 +257,15 @@ host_pace() {
   esac
 }
 
-# Wait until the pace of host $1 allows a request, and note the time of this one in the host memory
+# Wait until the pace of host $1 allows a request, and note the time of this one in directory $2; the
+# lock, which a killed process gives up, makes processes that share the directory wait for each other
 request_pace() {
-  local file now last wait
+  local file now last wait lock
   host_pace "$1"
   ((PACE_MS > 0)) || return 0
-  file="$AURTOMATOR_HOSTS_DIR/paced-$1"
+  file="$2/paced-$1"
+  exec {lock}>>"$file.lock"
+  flock "$lock"
   now=${EPOCHREALTIME/[.,]/}
   if [[ -f "$file" ]] && read -r last <"$file" && [[ "$last" =~ ^[0-9]+$ ]]; then
     wait=$((last + PACE_MS * 1000 - now))
@@ -267,6 +275,7 @@ request_pace() {
     fi
   fi
   printf '%s\n' "$now" >"$file"
+  exec {lock}>&-
 }
 
 # request_begin for git URL $1: the HEAD check asks the first URL that git asks

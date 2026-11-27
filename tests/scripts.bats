@@ -4678,6 +4678,23 @@ paced_ms() {
   ((ms >= 2000 && ms < 3500))
 }
 
+# The parallel checks of validate-pkg.sh share the pace of each host and keep no other memory
+@test "request_begin: keeps the pace of a host across parallel checks with AURTOMATOR_PACE_DIR" {
+  run bash -c 'source "$0/scripts/lib.sh"
+    export AURTOMATOR_PACE_DIR=$(mktemp -d)
+    start=${EPOCHREALTIME/[.,]/}
+    for p in 1 2; do
+      (for i in 1 2 3; do request_begin "https://rubygems.org/api/$p/$i"; done) &
+    done
+    wait
+    echo $(((${EPOCHREALTIME/[.,]/} - start) / 1000))
+    ls "$AURTOMATOR_PACE_DIR"' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  echo "six requests: ${lines[0]} ms"
+  [ "${lines[0]}" -ge 500 ]
+  [[ "${lines[*]:1}" != *request* && "${lines[*]:1}" != *silent* ]]
+}
+
 # Repology counts more than 1000 requests a day as bulk, and the next run starts where this one stopped
 @test "check-all: gives the packages of repology.org the checks of its budget, the next ones in the next run" {
   local reason="unchecked: repology.org takes 2 checks a run, so this package gets its check in a later run" n
