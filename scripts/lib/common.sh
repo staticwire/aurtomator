@@ -613,6 +613,9 @@ github_prefetch() {
         "created_at": .createdAt, "body": .description} | to_json(0))),
       (select(.value.releases.totalCount != null and .value.releases.totalCount <= 100) | .key + "\tlist\t" +
         ([.value.releases.nodes[] | {"tag_name": .tagName, "name": .name, "draft": .isDraft, "prerelease": .isPrerelease,
+          "published_at": .publishedAt, "created_at": .createdAt}] | to_json(0))),
+      (select(.value.releases.totalCount != null and .value.releases.totalCount <= 100) | .key + "\tfirst\t" +
+        ([.value.releases.nodes[0:1][] | {"tag_name": .tagName, "name": .name, "draft": .isDraft, "prerelease": .isPrerelease,
           "published_at": .publishedAt, "created_at": .createdAt}] | to_json(0))))' <<<"$answer" 2>/dev/null) || lines=""
     while IFS=$'\t' read -r n kind json; do
       n=${n#r}
@@ -624,6 +627,10 @@ github_prefetch() {
         printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases/latest")"
       elif [[ "$kind" == list && -n "${list[$repo]:-}" ]]; then
         printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases?per_page=100&page=1")"
+        # The list holds every release, and a check outside the REST budget reads more pages of it only here
+        printf '[]\n' >"$(_github_cached "https://api.github.com/repos/$repo/releases?per_page=100&page=2")"
+      elif [[ "$kind" == first && -n "${list[$repo]:-}" ]]; then
+        printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases?per_page=1")"
       fi
     done <<<"$lines"
   done

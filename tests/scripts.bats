@@ -4621,6 +4621,31 @@ current: '1.0.0'"
   run ! grep -q -e repos/owner/a/releases -e repos/owner/b/releases "$CURL_ARGS_LOG"
 }
 
+# Packages whose releases GraphQL answered take no REST check, so the cache answers each page they read
+@test "check-all: a check of releases that GraphQL answered asks no REST" {
+  local node='{"name":"x","isDraft":false,"isPrerelease":false,"publishedAt":"2026-01-02T00:00:00Z","createdAt":"2026-01-01T00:00:00Z"' nodes="" i
+  create_test_package c github-release "upstream:
+  project: owner/c
+  tag_version_regex: '^v([0-9.]+)\$'
+current: '1.0.0'"
+  create_test_package d github-release "upstream:
+  project: owner/d
+  tag_version_regex: '^release-(.+)\$'
+current: '1.0.0'"
+  # 100 releases fill the first page, so the list reads a second one
+  for i in $(seq 1 100); do
+    nodes+="${nodes:+,}$node,\"tagName\":\"v1.$i.0\"}"
+  done
+  printf '%s\n' "{\"data\":{\"r0\":{\"latestRelease\":null,\"releases\":{\"totalCount\":100,\"nodes\":[$nodes]}},\"r1\":{\"latestRelease\":null,\"releases\":{\"totalCount\":1,\"nodes\":[$node,\"tagName\":\"v2.0.0\"}]}}}}" \
+    >"$MOCK_FILES_DIR/graphql.json"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/c")" = "new_version: 1.100.0" ]
+  # No release matches, so the check asks whether the list is empty
+  [[ "$(cat "$TEST_TMPDIR/.status/d")" == "check_failed: "*"No release of owner/d outside pre-releases"* ]]
+  run ! grep -q -e repos/owner/c/releases -e repos/owner/d/releases "$CURL_ARGS_LOG"
+}
+
 # GET /rate_limit counts against no limit, and each check takes a few requests at most
 @test "check-all: reads the GitHub REST limit before every tenth GitHub package" {
   local i
