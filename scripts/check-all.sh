@@ -796,7 +796,7 @@ run_package() {
             echo "held: $(checked_version "$pkg_name")" >"${STATUS_DIR}/${pkg_name}"
             return
           fi
-          # The check run left it for a later run, past the 256 jobs of a run, or verify past its budget
+          # The check run left it for a later run, past the 100 jobs of a run, or verify past its budget
           if grep -qxF -e "$pkg_name" <<<"${CHECKED[_deferred]:-}" || unverified "$pkg_name"; then
             printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
           else

@@ -1637,21 +1637,21 @@ run_decide_step() {
   [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
 }
 
-# GitHub starts at most 256 jobs from one matrix
-@test "check-updates: Decide prepares 256 packages and leaves the rest for the next run" {
+# verify and publish take about 10 s a package of their 20 minutes
+@test "check-updates: Decide prepares 100 packages and leaves the rest for the next run" {
   local pairs=() i expected=""
-  for i in $(seq -w 1 258); do
+  for i in $(seq -w 1 102); do
     pairs+=("p$i=new_version: 2.0.0")
   done
-  for i in $(seq -w 1 256); do
+  for i in $(seq -w 1 100); do
     expected+="\"p$i\","
   done
   run run_decide_step "${pairs[@]}"
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "prepare=true" ]
   [ "${lines[3]}" = "to-prepare=[${expected%,}]" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/data/statuses/_deferred")" = $'p257\np258' ]
-  grep -qxF '::warning::2 outdated packages wait for the next run, which prepares at most 256' "$BATS_TEST_TMPDIR/decide.out"
+  [ "$(cat "$BATS_TEST_TMPDIR/data/statuses/_deferred")" = $'p101\np102' ]
+  grep -qxF '::warning::2 outdated packages wait for the next run, which prepares at most 100' "$BATS_TEST_TMPDIR/decide.out"
 }
 
 @test "check-updates: Decide removes the _without and the _deferred of builder" {

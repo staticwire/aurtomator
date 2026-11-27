@@ -259,7 +259,8 @@ jobs:
           DATA: /data
           RESULTS: /results
         run: |
-          # Matrices run at most 256 jobs, so prepare takes the first 256 outdated packages
+          # verify and publish take about 10 s a package of their 20 minutes, so prepare takes the first
+          # 100 outdated packages, below the 256 jobs that a matrix runs
           name_re='^[a-z0-9][a-z0-9.+_-]*$'
           # Only --publish writes _without and only this step writes _deferred and the _rules that
           # publish reads, so the step takes _rules of builder as a list of names and deletes the rest
@@ -283,7 +284,7 @@ jobs:
             esac
             # builder writes the statuses, so a name takes a prepare job only with its YAML
             [[ -f "packages/$name.yml" ]] || continue
-            if ((${#to_prepare[@]} < 256)); then
+            if ((${#to_prepare[@]} < 100)); then
               to_prepare+=("$name")
               [[ -z "${rules_listed[$name]:-}" ]] || to_rules+=("$name")
             else
@@ -308,7 +309,7 @@ jobs:
           fi
           if ((${#deferred[@]} > 0)); then
             printf '%s\n' "${deferred[@]}" >"$DATA/statuses/_deferred"
-            echo "::warning::${#deferred[@]} outdated packages wait for the next run, which prepares at most 256"
+            echo "::warning::${#deferred[@]} outdated packages wait for the next run, which prepares at most 100"
           fi
           work=$prepare
           if [[ -f "$RESULTS/README.md" ]] && ! cmp -s "$RESULTS/README.md" README.md; then
