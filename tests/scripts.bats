@@ -8684,6 +8684,23 @@ pkgver_dash: ''"
   [[ "$output" == *"No tag of asset-owner/asset-repo gives version 9.9.9"* ]]
 }
 
+@test "check-asset: finds the tag of the version among tags that the regex leaves out" {
+  local version
+  mock_tags
+  create_test_package "mixed" "github-tag" "upstream:
+  project: asset-owner/mixed-repo
+  tag_version_regex: '^v(.+)\$'
+  asset_regex: '^mixed-(.+)\\.tar\\.gz\$'
+  asset_var: _mixed"
+  for version in 1.0.0 1.1.0; do
+    rm -f "$BATS_TEST_TMPDIR/curl-args"
+    CURL_ARGS_LOG="$BATS_TEST_TMPDIR/curl-args" run "$TEST_TMPDIR/scripts/check-asset.sh" mixed "$version"
+    run grep -c '/releases/tags/' "$BATS_TEST_TMPDIR/curl-args"
+    [ "$output" = 1 ]
+    grep -q "/releases/tags/v$version" "$BATS_TEST_TMPDIR/curl-args"
+  done
+}
+
 @test "check-asset: fails when two tags give the version" {
   mock_tags
   create_test_package "twin" "github-tag" "upstream:
