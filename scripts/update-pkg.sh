@@ -185,6 +185,11 @@ if [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgver)" == "$NEW_VERSION" ]] &&
 fi
 
 _edit_parts_ok "$(_pkgbuild_parts "${aur_dir}/PKGBUILD" "$ASSET_VAR")" "AUR PKGBUILD" || exit 1
+# pkgrel goes into a sed replacement
+if ! (LC_ALL=C && [[ "$pkgrel" =~ ^[0-9]+([.][0-9]+)?$ ]]); then
+  log_err "The AUR PKGBUILD has pkgrel=${pkgrel@Q}, which makepkg does not take"
+  exit 1
+fi
 if [[ -n "$ASSET_VAR" ]]; then
   sed -i "s/^${ASSET_VAR}=.*/${ASSET_VAR}=${ASSET}/" "${aur_dir}/PKGBUILD"
 fi

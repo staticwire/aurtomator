@@ -550,6 +550,23 @@ current: 28+22"
   [ "$(cat "$ARCH_OUT_DIR/base")" = "$AUR_BASE" ]
 }
 
+# The AUR pkgrel goes into a sed replacement, where /e runs a line as a command
+@test "update-pkg --prepare: refuses an AUR pkgrel that makepkg does not take" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin" rel='1/;s/.*/true/e;#'
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  awk -v rel="$rel" '/^pkgrel=/ { print "pkgrel=\047" rel "\047"; next } { print }' "$work/PKGBUILD" >"$work/PKGBUILD.new"
+  awk -v rel="$rel" '/^\tpkgrel = / { print "\tpkgrel = " rel; next } { print }' "$work/.SRCINFO" >"$work/.SRCINFO.new"
+  mv "$work/PKGBUILD.new" "$work/PKGBUILD"
+  mv "$work/.SRCINFO.new" "$work/.SRCINFO"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "pkgrel"
+  git -C "$work" push -q "$AUR_REMOTE" master
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --arch-out "" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR PKGBUILD has pkgrel='1/;s/.*/true/e;#', which makepkg does not take"* ]]
+  [ ! -e "$ARCH_OUT_DIR" ]
+}
+
 @test "update-pkg --prepare: puts the arches back in the order of their commit" {
   setup_arch_prepare x86_64 riscv64
   archive_missing powerpc64le 28+24
