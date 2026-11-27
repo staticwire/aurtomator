@@ -725,6 +725,26 @@ current: '1.0.0'"
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
 }
 
+# git add would pass the checked files through the attributes, and ident collapses $Id: ...$
+@test "update-pkg: commits the checked bytes whatever the attributes of the git config say" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 SKIP SKIP
+  sed -i 's/^\tpkgdesc = demo$/&, $Id: kept $/' "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+  printf '%s\n' '.SRCINFO ident' >"$TEST_TMPDIR/attributes"
+  printf '[core]\n\tattributesFile = %s\n' "$TEST_TMPDIR/attributes" >>"$GIT_CONFIG_GLOBAL"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0
+  [ "$status" -eq 0 ]
+  cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:.SRCINFO) "$TEST_TMPDIR/new.SRCINFO"
+}
+
 @test "update-pkg --dry-run: shows the PKGBUILD diff and pushes nothing" {
   create_test_package "demo" "github-nightly" "upstream:
   project: owner/repo

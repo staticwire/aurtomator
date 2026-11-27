@@ -38,7 +38,7 @@ check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir> | --
 9. Regenerate `.SRCINFO` with `makepkg --printsrcinfo`.
 10. Check `PKGBUILD` and `.SRCINFO` against the clone, as steps 4 and 5 of publish do. Refused files stop the update.
 11. With `--dry-run`, print the PKGBUILD diff and stop.
-12. Commit as `<new-version> release from <strategy>`, or `<new-version>-<pkgrel> release from <strategy>` for rebuilds, authored by `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, by default `aurtomator` and `aurtomator@users.noreply.github.com`. With `GPG_KEY_ID`, sign the commit, and push nothing when signing fails.
+12. Put the checked `PKGBUILD` and `.SRCINFO` into the index byte for byte, as step 6 of publish does, and commit them as `<new-version> release from <strategy>`, or `<new-version>-<pkgrel> release from <strategy>` for rebuilds, authored by `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, by default `aurtomator` and `aurtomator@users.noreply.github.com`. With `GPG_KEY_ID`, sign the commit, and push nothing when signing fails.
 13. Push, with up to 3 attempts 5 seconds apart.
 14. Write `current`, `current_asset` and `last_updated` to the package YAML.
 
