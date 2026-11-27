@@ -7,7 +7,7 @@ title: Local testing
 ```bash
 sudo pacman -S --needed git curl go-yq pacman-contrib namcap
 # For tests and linting:
-sudo pacman -S --needed bats jq openssh shellcheck shfmt actionlint zizmor
+sudo pacman -S --needed bats jq openssh shellcheck shfmt actionlint zizmor python ruby
 ```
 
 The commands of the next four sections and of [Draft a package](/add-a-package/#draft-a-package) run in your repository through `aurtomator.sh`, at the commit the calling workflows pin, so local runs use the strategies and checks of CI, see [The aurtomator.sh script](/setup/#the-aurtomatorsh-script).
