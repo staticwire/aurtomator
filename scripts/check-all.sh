@@ -1132,7 +1132,7 @@ if [[ "$MODE" == check || "$MODE" == update ]]; then
 fi
 
 # The REST requests of the hour that a check run with GITHUB_TOKEN leaves to publish and the issues job,
-# and the package files whose check asks REST: GitHub releases, and assets of github-tag
+# and the package files whose check asks REST: GitHub releases outside the answers of GraphQL, and assets
 readonly REST_RESERVE=400
 REST_LEFT="" REST_SINCE=10
 declare -A REST_FILES=()
@@ -1146,13 +1146,23 @@ if [[ "$MODE" == check ]]; then
   for pkg_file in "${check_files[@]}"; do
     [[ ! -f "$pkg_file" || -L "$pkg_file" ]] || scan+=("$pkg_file")
   done
-  while IFS=$'\t' read -r pkg_file strategy asset; do
+  # Each field starts with x, since read joins the tabs around an empty one
+  while IFS=$'\t' read -r pkg_file strategy asset project regex; do
+    pkg_file=${pkg_file#x} strategy=${strategy#x} asset=${asset#x} project=${project#x} regex=${regex#x}
     case $strategy in
-      github-release | github-nightly | github-asset) REST_FILES[$pkg_file]=1 ;;
+      github-release)
+        url="https://api.github.com/repos/$project/releases/latest"
+        [[ -z "$regex" ]] || url="https://api.github.com/repos/$project/releases?per_page=100&page=1"
+        if [[ -n "$asset" || -z "${AURTOMATOR_RUN_CACHE:-}" || ! -f "$(_github_cached "$url")" ]]; then
+          REST_FILES[$pkg_file]=1
+        fi
+        ;;
+      github-nightly | github-asset) REST_FILES[$pkg_file]=1 ;;
       github-tag) [[ -z "$asset" ]] || REST_FILES[$pkg_file]=1 ;;
       repology) repology_files+=("$pkg_file") ;;
     esac
-  done < <(package_rows '[filename, .strategy // "", .upstream.asset_regex // ""] | map(tostring) | join("\t")' "${scan[@]}")
+  done < <(package_rows '[filename, .strategy // "", .upstream.asset_regex // "", .upstream.project // "", .upstream.tag_version_regex // ""] |
+    map("x" + tostring) | join("\t")' "${scan[@]}")
   [[ -n "${GITHUB_TOKEN:-}" ]] || REST_FILES=()
   # Each run takes the next packages after those of the run before, by its number
   budget=${HOST_BUDGET[repology]}

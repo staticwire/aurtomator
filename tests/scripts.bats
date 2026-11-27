@@ -4515,6 +4515,21 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
 }
 
+# The answers of GraphQL in the run cache take no REST request, and the assets of a release take some
+@test "check-all: checks the packages whose releases GraphQL answered when 400 REST requests are left" {
+  graphql_packages
+  create_test_package c github-release "upstream:
+  project: owner/a
+  asset_regex: 'c-.*'
+current: '1.0.0'"
+  MOCK_REST_LEFT=399 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 3.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/b")" = "new_version: 5.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/c")" = "unchecked: the run keeps its last 400 GitHub API requests of the hour for the jobs after the check" ]
+  run ! grep -q -e repos/owner/a/releases -e repos/owner/b/releases "$CURL_ARGS_LOG"
+}
+
 # GET /rate_limit counts against no limit, and each check takes a few requests at most
 @test "check-all: reads the GitHub REST limit before every tenth GitHub package" {
   local i
