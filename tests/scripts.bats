@@ -4347,6 +4347,40 @@ current: '1.0.0'"
   run ! grep -q api.github.com/graphql "$CURL_ARGS_LOG"
 }
 
+# yq reads all files in one call, which stops at the first file it cannot read
+@test "check-all: a YAML that yq cannot read keeps the fetches and budgets of the other packages" {
+  local n
+  graphql_packages
+  printf 'strategy: [\n' >"$TEST_TMPDIR/packages/0bad.yml"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 3.0.0" ]
+  [ "$(grep -c api.github.com/graphql "$CURL_ARGS_LOG")" = 1 ]
+  [[ "$output" == *"yq cannot read 'packages/0bad.yml', so the reads before the checks leave it out"* ]]
+  rm "$TEST_TMPDIR"/packages/[ab].yml
+  for n in 1 2; do
+    create_test_package "r$n" repology "upstream:
+  repology: r$n
+current: '1.0.0'"
+  done
+  AURTOMATOR_REPOLOGY_BUDGET=1 GITHUB_RUN_NUMBER=0 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/r2")" = "unchecked: repology.org takes 1 checks a run, so this package gets its check in a later run" ]
+}
+
+@test "gitlab_prefetch: a YAML that yq cannot read keeps the fetches of the other packages" {
+  local key
+  printf 'strategy: [\n' >"$TEST_TMPDIR/packages/0bad.yml"
+  create_test_package a gitlab-tag "upstream:
+  host: gitlab.com
+  project: group/a"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN_GITLAB_COM=glpat-com gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"yq cannot read 'packages/0bad.yml', so the reads before the checks leave it out"* ]]
+  key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fa/repository/tags?per_page=100' | sha256sum)
+  [ -f "$TEST_TMPDIR/answers/${key%% *}" ]
+}
+
 # The issues count a failed check under the host of its own failed request, which check-all.sh reads
 # from the memory of hosts after the check
 @test "github_prefetch: leaves no failed request to the first check" {

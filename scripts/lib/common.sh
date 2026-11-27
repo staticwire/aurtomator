@@ -444,6 +444,26 @@ gitlab_api() {
   http_get_json "$1" "${auth[@]}" <<<"Authorization: Bearer ${token}"
 }
 
+# Print the rows of yq expression $1 for package files $2...; yq reads them in one call, which stops at a
+# file it cannot read, and then file by file, so only that file is left out, with a warning
+package_rows() {
+  local expr=$1 rows file
+  shift
+  (($# > 0)) || return 0
+  if rows=$(yq -N -r "$expr" "$@" 2>/dev/null); then
+    [[ -z "$rows" ]] || printf '%s\n' "$rows"
+    return 0
+  fi
+  for file in "$@"; do
+    if rows=$(yq -N -r "$expr" "$file" 2>/dev/null); then
+      [[ -z "$rows" ]] || printf '%s\n' "$rows"
+    else
+      file="packages/${file##*/}"
+      log_warn "yq cannot read ${file@Q}, so the reads before the checks leave it out"
+    fi
+  done
+}
+
 # Keep in directory $1 the answers of GITLAB_HOSTS to the gitlab-tag packages of files $2..., each asked with
 # the token of its host. Root runs it in the workflow and parses none, and builder never holds a token.
 gitlab_prefetch() {
@@ -465,7 +485,7 @@ gitlab_prefetch() {
     [[ ! -f "$file" || -L "$file" ]] || files+=("$file")
   done
   ((${#files[@]} > 0)) || return 0
-  rows=$(yq -N -r '[.strategy // "", .upstream.host // "", .upstream.project // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
+  rows=$(package_rows '[.strategy // "", .upstream.host // "", .upstream.project // ""] | map(tostring) | join("\t")' "${files[@]}")
   while IFS=$'\t' read -r strategy host project; do
     [[ "$strategy" == gitlab-tag && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
     [[ "/$project/" != */./* && "/$project/" != */../* ]] || continue
@@ -536,7 +556,7 @@ github_prefetch() {
     [[ ! -f "$file" || -L "$file" ]] || files+=("$file")
   done
   ((${#files[@]} > 0)) || return 0
-  rows=$(yq -N -r '[.strategy // "", .upstream.project // "", .upstream.tag_version_regex // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
+  rows=$(package_rows '[.strategy // "", .upstream.project // "", .upstream.tag_version_regex // ""] | map(tostring) | join("\t")' "${files[@]}")
   while IFS=$'\t' read -r strategy project regex; do
     [[ "$project" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || continue
     case $strategy in

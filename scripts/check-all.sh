@@ -1152,8 +1152,7 @@ if [[ "$MODE" == check ]]; then
       github-tag) [[ -z "$asset" ]] || REST_FILES[$pkg_file]=1 ;;
       repology) repology_files+=("$pkg_file") ;;
     esac
-  done < <(((${#scan[@]} == 0)) ||
-    yq -N -r '[filename, .strategy // "", .upstream.asset_regex // ""] | map(tostring) | join("\t")' "${scan[@]}" 2>/dev/null || true)
+  done < <(package_rows '[filename, .strategy // "", .upstream.asset_regex // ""] | map(tostring) | join("\t")' "${scan[@]}")
   [[ -n "${GITHUB_TOKEN:-}" ]] || REST_FILES=()
   # Each run takes the next packages after those of the run before, by its number
   budget=${HOST_BUDGET[repology]}
