@@ -61,7 +61,7 @@ The two jobs call the reusable workflows of the same commit with `uses: ./.githu
 
 ## CodeQL
 
-`codeql.yml` analyzes the workflows of the repository with the `security-extended` queries of CodeQL on pull requests to `main`, on pushes to `main` and on Mondays at 03:41 UTC, and pushes to a pull request cancel its older runs. Default setup of code scanning skips the pull requests of Dependabot, and those move the pins of actions in the workflows, so the repository runs this workflow in its place. Default setup stays off, since GitHub refuses the results of other CodeQL uploads while it is on.
+`codeql.yml` analyzes the workflows of the repository with the `security-extended` queries of CodeQL on pull requests to `main`, on pushes to `main` and on Mondays at 03:41 UTC, and pushes to a pull request cancel its older runs. Default setup of code scanning skips the pull requests of Dependabot, and those move the pins of actions in the workflows, so the repository runs this workflow in its place. Default setup stays off, since GitHub refuses the results of other CodeQL uploads while it is on. Dependabot moves the `init` and `analyze` steps of `github/codeql-action` in one pull request, since CodeQL refuses an `analyze` step of another version than its `init` step.
 
 On Dependabot pull requests its job holds `security-events: write`, unlike the jobs that skip them. That token changes code scanning alerts and analyses and nothing else, CodeQL reads the workflows of the pull request and runs none of them, and the only new code that gets the token is a new version of `actions/checkout` or `github/codeql-action` in `codeql.yml` itself.
 

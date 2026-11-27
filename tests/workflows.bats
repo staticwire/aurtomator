@@ -209,6 +209,16 @@ secret_lines() {
   [ "$output" = '[["github-actions",{"default-days":7}],["docker",{"default-days":7}],["uv",{"default-days":7}],["bundler",{"default-days":7}],["npm",{"default-days":7}]]' ]
 }
 
+# CodeQL refuses an analyze step of another version than its init step, so one pull request moves both
+@test "dependabot: moves every step of github/codeql-action in one pull request" {
+  run yq -o=json -I=0 '.updates[] | select(.["package-ecosystem"] == "github-actions") | .groups' "$GITHUB_DIR/dependabot.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"codeql-action":{"patterns":["github/codeql-action*"]}}' ]
+  run grep -o -E 'uses: github/codeql-action/[a-z-]+@[0-9a-f]{40} # v[0-9.]+' "$GITHUB_DIR/workflows/codeql.yml"
+  [ "${#lines[@]}" -ge 2 ]
+  [ "$(printf '%s\n' "${lines[@]}" | sed 's/.*@//' | sort -u | wc -l)" -eq 1 ]
+}
+
 # The token a checkout leaves in .git/config would reach builder, which owns the workspace
 @test "workflows: no checkout keeps its credentials" {
   local workflow count=0

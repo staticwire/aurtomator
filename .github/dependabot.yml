@@ -8,6 +8,10 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+    # CodeQL refuses an analyze step of another version than its init step
+    groups:
+      codeql-action:
+        patterns: ["github/codeql-action*"]
   - package-ecosystem: "docker"
     directory: "/ci-image"
     schedule:
