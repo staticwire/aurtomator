@@ -524,7 +524,7 @@ Gems list each release once per platform, so nokogiri 1.19.7 appears eleven time
 
 ### repology
 
-**Upstream:** the Repology API, `https://repology.org/api/v1/project/{name}`, a fallback when no other strategy fits. Repology allows one request per second and blocks clients that send more, so the strategy waits one second before its request and sends a User-Agent with a link to the aurtomator repository. Blocked requests fail with `repology.org answered 403, as it does to clients that send more than one request per second`.
+**Upstream:** the Repology API, `https://repology.org/api/v1/project/{name}`, a fallback when no other strategy fits. Repology allows one request per second and blocks clients that send more, so check runs keep a second between two of its requests, single checks wait one second before theirs, and the strategy sends a User-Agent with a link to the aurtomator repository. Blocked requests fail with `repology.org answered 403, as it does to clients that send more than one request per second`.
 
 | Field | Required | Description |
 |---|---|---|

@@ -14,9 +14,9 @@ source "${SCRIPT_DIR}/../scripts/lib/common.sh"
 pkg_file=$(pkg_file "$NAME")
 repology_name=$(pkg_get "$pkg_file" '.upstream.repology // .name')
 
-# Repology blocks clients that send more than one request per second, and asks bulk clients
-# for a User-Agent with a link to their repository: https://repology.org/api
-sleep 1
+# Repology blocks clients that send more than one request per second, a pace that the memory of hosts
+# keeps in a check run, and asks bulk clients for a User-Agent with a link: https://repology.org/api
+host_memory || sleep 1
 err_file=$(mktemp)
 trap 'rm -f -- "$err_file"' EXIT
 # Repology returns an array of package entries from various repos, and

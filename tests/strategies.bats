@@ -1081,6 +1081,23 @@ run_gem() {
   [[ "$(cat "$TEST_TMPDIR/curl.args")" == *"-A aurtomator/1.0 (+https://github.com/staticwire/aurtomator) -w"* ]]
 }
 
+# The memory of hosts of a check run keeps one second between two requests to repology.org
+@test "repology: leaves the wait to the pace of the check run" {
+  local hosts="$TEST_TMPDIR/hosts"
+  create_test_package "test-repology" "repology" "upstream:
+  repology: testpkg"
+  printf '#!/bin/sh\necho "$*" >>"%s/sleep.log"\n' "$TEST_TMPDIR" >"$TEST_TMPDIR/mock-bin/sleep"
+  chmod +x "$TEST_TMPDIR/mock-bin/sleep"
+  mkdir "$hosts"
+  : >"$hosts/silent"
+  : >"$hosts/request"
+  : >"$hosts/failed"
+  AURTOMATOR_HOSTS_DIR="$hosts" run "$TEST_TMPDIR/strategies/repology.sh" "test-repology"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/sleep.log" ]
+  [ -s "$hosts/paced-repology.org" ]
+}
+
 @test "repology: names the block of repology.org on a 403" {
   create_test_package "test-repology" "repology" "upstream:
   repology: blocked-project"
