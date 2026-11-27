@@ -143,14 +143,19 @@ secret_lines() {
     secret_lines "$workflow"
   done >"$BATS_TEST_TMPDIR/actual"
   printf '%s\n' \
-    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_GITLAB_COM' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_GITLAB_GNOME_ORG' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_INVENT_KDE_ORG' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_SALSA_DEBIAN_ORG' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG' \
     'check-updates.yml publish/Setup workspace AUR_GIT_NAME' \
     'check-updates.yml publish/Setup workspace AUR_GIT_EMAIL' \
     'check-updates.yml publish/Setup AUR SSH AUR_SSH_KEY' \
     'check-updates.yml publish/Setup GPG GPG_SIGNING_KEY' \
     'check-updates.yml publish/Publish updates AUR_GIT_NAME' \
     'check-updates.yml publish/Publish updates AUR_GIT_EMAIL' \
-    'check-updates.yml 7' \
+    'check-updates.yml 12' \
     'ci.yml merge-image/Merge image update CI_IMAGE_AUTO_MERGE' \
     'ci.yml 1' \
     'codeql.yml 0' \
@@ -176,7 +181,7 @@ secret_lines() {
     printf '%s %s\n' "${workflow##*/}" "$(yq -o=json -I=0 '.on' "$workflow")"
   done >"$BATS_TEST_TMPDIR/actual"
   printf '%s\n' \
-    'check-updates.yml {"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN":{"required":false}}}}' \
+    'check-updates.yml {"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN_GITLAB_COM":{"required":false},"GITLAB_TOKEN_GITLAB_GNOME_ORG":{"required":false},"GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG":{"required":false},"GITLAB_TOKEN_INVENT_KDE_ORG":{"required":false},"GITLAB_TOKEN_SALSA_DEBIAN_ORG":{"required":false},"GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG":{"required":false}}}}' \
     'ci.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"workflow_dispatch":null}' \
     'codeql.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"schedule":[{"cron":"41 3 * * 1"}]}' \
     'docs.yml {"push":{"branches":["main"],"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"pull_request":{"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"workflow_dispatch":null}' \
@@ -1338,10 +1343,10 @@ action_run() {
   [ "$output" = "::error::Start the run from a branch: it commits its results to the branch it runs on" ]
 }
 
-@test "check-updates: runs only when called, with the five secrets optional" {
+@test "check-updates: runs only when called, with every secret optional" {
   run yq -o=json -I=0 '.on' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN":{"required":false}}}}' ]
+  [ "$output" = '{"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN_GITLAB_COM":{"required":false},"GITLAB_TOKEN_GITLAB_GNOME_ORG":{"required":false},"GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG":{"required":false},"GITLAB_TOKEN_INVENT_KDE_ORG":{"required":false},"GITLAB_TOKEN_SALSA_DEBIAN_ORG":{"required":false},"GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG":{"required":false}}}}' ]
   run yq '.concurrency' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [ "$output" = "null" ]
@@ -2190,11 +2195,21 @@ builder_steps() {
   [ "${#lines[@]}" -eq 5 ]
 }
 
-# builder parses the answers of upstreams in check, so the token stays with root, which parses none
-@test "check-updates: root fetches the GitLab tags with GITLAB_TOKEN before builder checks" {
-  local step='.jobs.check.steps[] | select(.name == "Fetch GitLab tags")' ws="$BATS_TEST_TMPDIR/ws"
-  run yq -o=json -I=0 "$step | [.id, .env]" "$CHECK_UPDATES"
-  [ "$output" = '["gitlab",{"GITLAB_TOKEN":"${{ secrets.GITLAB_TOKEN }}"}]' ]
+# builder parses the answers of upstreams in check, so the tokens stay with root, which parses none.
+# The step and the secrets of the workflow name the variable of each host of GITLAB_HOSTS.
+@test "check-updates: root fetches the GitLab tags with the GitLab tokens before builder checks" {
+  local step='.jobs.check.steps[] | select(.name == "Fetch GitLab tags")' ws="$BATS_TEST_TMPDIR/ws" vars
+  vars=$(bash -c 'source "$0" && for host in "${GITLAB_HOSTS[@]}"; do gitlab_token_var "$host"; done' \
+    "$BATS_TEST_DIRNAME/../scripts/lib/common.sh")
+  [ "$vars" = $'GITLAB_TOKEN_GITLAB_COM\nGITLAB_TOKEN_GITLAB_GNOME_ORG\nGITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG\nGITLAB_TOKEN_INVENT_KDE_ORG\nGITLAB_TOKEN_SALSA_DEBIAN_ORG\nGITLAB_TOKEN_GITLAB_ARCHLINUX_ORG' ]
+  run yq -r "$step | .env | to_entries | .[] | select(.value == \"\${{ secrets.\" + .key + \" }}\") | .key" "$CHECK_UPDATES"
+  [ "$output" = "$vars" ]
+  run yq "$step | .env | length" "$CHECK_UPDATES"
+  [ "$output" = 6 ]
+  run yq -r '.on.workflow_call.secrets | keys | .[] | select(test("^GITLAB_"))' "$CHECK_UPDATES"
+  [ "$output" = "$vars" ]
+  run yq "$step | .id" "$CHECK_UPDATES"
+  [ "$output" = gitlab ]
   [ "$(step_index check "Add builder")" -lt "$(step_index check "Fetch GitLab tags")" ]
   [ "$(step_index check "Fetch GitLab tags")" -lt "$(step_index check "Check updates")" ]
   run yq '.jobs.check.steps[] | select(.name == "Check updates") | .with.gitlab' "$CHECK_UPDATES"
@@ -2435,7 +2450,7 @@ make_builder_inputs() {
   [ -z "$(ls -A "$work")" ]
 }
 
-# Root fetched the answers of GitLab.com with GITLAB_TOKEN, and each is named by the SHA-256 of its URL
+# Root fetched the answers of GitLab with the GitLab tokens, and each is named by the SHA-256 of its URL
 @test "run-as-builder: gives builder the GitLab answers named by 64 hex digits alone" {
   local work="$BATS_TEST_TMPDIR/work" gl="$BATS_TEST_TMPDIR/data/gitlab" key big
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
@@ -5868,7 +5883,7 @@ calling_workflow() {
   run yq -o=json -I=0 '.jobs.check-updates.permissions' "$check"
   [ "$output" = '{"contents":"write","issues":"write"}' ]
   run yq -o=json -I=0 '.jobs.check-updates.secrets | keys | sort' "$check"
-  [ "$output" = '["AUR_GIT_EMAIL","AUR_GIT_NAME","AUR_SSH_KEY","GITLAB_TOKEN","GPG_SIGNING_KEY"]' ]
+  [ "$output" = '["AUR_GIT_EMAIL","AUR_GIT_NAME","AUR_SSH_KEY","GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG","GITLAB_TOKEN_GITLAB_COM","GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG","GITLAB_TOKEN_GITLAB_GNOME_ORG","GITLAB_TOKEN_INVENT_KDE_ORG","GITLAB_TOKEN_SALSA_DEBIAN_ORG","GPG_SIGNING_KEY"]' ]
   run yq '.jobs.check-updates.secrets | to_entries | .[] | select(.value != "${{ secrets." + .key + " }}") | .key' "$check"
   [ "$status" -eq 0 ]
   [ -z "$output" ]

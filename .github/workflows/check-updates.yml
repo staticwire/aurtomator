@@ -13,8 +13,19 @@ on:
         required: false
       AUR_GIT_EMAIL:
         required: false
-      # The check job asks GitLab.com with it as root, for the gitlab-tag packages
-      GITLAB_TOKEN:
+      # The check job asks each GitLab host of GITLAB_HOSTS in scripts/lib/common.sh with its own token
+      # as root, for the gitlab-tag packages there
+      GITLAB_TOKEN_GITLAB_COM:
+        required: false
+      GITLAB_TOKEN_GITLAB_GNOME_ORG:
+        required: false
+      GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG:
+        required: false
+      GITLAB_TOKEN_INVENT_KDE_ORG:
+        required: false
+      GITLAB_TOKEN_SALSA_DEBIAN_ORG:
+        required: false
+      GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG:
         required: false
 
 permissions:
@@ -132,12 +143,17 @@ jobs:
       - name: Add builder
         uses: ./aurtomator/.github/actions/add-builder # zizmor: ignore[self-repository] add-builder runs from the aurtomator/ checkout
 
-      # GitLab.com counts the requests of a token apart from the runner. Root parses none of the answers,
-      # and builder, which parses them, never holds the token.
+      # GitLab counts the requests of a token apart from the runner. Root parses none of the answers,
+      # and builder, which parses them, never holds a token.
       - name: Fetch GitLab tags
         id: gitlab
         env:
-          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GITLAB_TOKEN_GITLAB_COM: ${{ secrets.GITLAB_TOKEN_GITLAB_COM }}
+          GITLAB_TOKEN_GITLAB_GNOME_ORG: ${{ secrets.GITLAB_TOKEN_GITLAB_GNOME_ORG }}
+          GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG: ${{ secrets.GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG }}
+          GITLAB_TOKEN_INVENT_KDE_ORG: ${{ secrets.GITLAB_TOKEN_INVENT_KDE_ORG }}
+          GITLAB_TOKEN_SALSA_DEBIAN_ORG: ${{ secrets.GITLAB_TOKEN_SALSA_DEBIAN_ORG }}
+          GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG: ${{ secrets.GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG }}
         run: |
           start=$SECONDS
           bash -c 'source ./aurtomator/scripts/lib.sh && gitlab_prefetch /data/gitlab packages/*.yml'

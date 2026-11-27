@@ -537,30 +537,41 @@ EOF
 }
 
 # mesa names its releases mesa-26.2.5
-# GitLab.com plans 60 requests an hour for the traffic of one address without a token, and the
-# token is for GitLab.com alone; curl reads the header from stdin, off the command line, and
-# carries Authorization to no other host of a redirect
-@test "gitlab-tag: sends GITLAB_TOKEN to gitlab.com alone, from stdin" {
-  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+# GitLab instances limit the traffic of one address without a token, and each token is for its own
+# host alone; curl reads the header from stdin, off the command line, and carries Authorization to
+# no other host of a redirect
+@test "gitlab-tag: sends each GitLab host its own token alone, from stdin" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" GITLAB_TOKEN_GITLAB_COM=glpat-com GITLAB_TOKEN_INVENT_KDE_ORG=glpat-kde
   mv "$MOCK_DIR/curl" "$MOCK_DIR/curl-answer"
-  printf '%s\n' '#!/usr/bin/env bash' "cat >>'$TEST_TMPDIR/curl.stdin'" 'exec "${0%/*}/curl-answer" "$@"' >"$MOCK_DIR/curl"
+  printf '%s\n' '#!/usr/bin/env bash' "cat >'$TEST_TMPDIR/curl.stdin'" 'exec "${0%/*}/curl-answer" "$@"' >"$MOCK_DIR/curl"
   chmod +x "$MOCK_DIR/curl"
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com
   project: group/project"
-  GITLAB_TOKEN=glpat-test run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
   [ "$status" -eq 0 ]
   [ "$output" = "3.1.0" ]
   grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
-  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = "Authorization: Bearer glpat-test" ]
-  run ! grep -q glpat-test "$CURL_ARGS_LOG"
+  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = "Authorization: Bearer glpat-com" ]
+  run ! grep -q glpat- "$CURL_ARGS_LOG"
   rm "$CURL_ARGS_LOG"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: invent.kde.org
+  project: group/project"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "3.1.0" ]
+  grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = "Authorization: Bearer glpat-kde" ]
+  rm "$CURL_ARGS_LOG"
+  # Hosts without a token of their own get none of the others
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.gnome.org
   project: group/project"
-  GITLAB_TOKEN=glpat-test run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
   run ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
   rm "$CURL_ARGS_LOG"
+  unset GITLAB_TOKEN_GITLAB_COM GITLAB_TOKEN_INVENT_KDE_ORG
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com
   project: group/project"
@@ -569,7 +580,7 @@ EOF
   ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
 }
 
-# In the workflow root asks GitLab.com with GITLAB_TOKEN, and builder gets the answers in the
+# In the workflow root asks GitLab with the GitLab tokens, and builder gets the answers in the
 # directory that AURTOMATOR_GITLAB_ANSWERS names
 @test "gitlab-tag: reads the answer that the workflow fetched for it" {
   local key

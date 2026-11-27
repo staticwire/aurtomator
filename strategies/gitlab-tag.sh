@@ -17,7 +17,7 @@ project=$(pkg_get "$pkg_file" .upstream.project)
 tag_version_regex=$(pkg_get "$pkg_file" '.upstream.tag_version_regex // ""')
 tag_version_replace=$(pkg_get "$pkg_file" '.upstream.tag_version_replace // ""')
 
-# GitLab.com counts the requests of a token apart from those of the address of the runner
+# GitLab counts the requests of a token apart from those of the address of the runner
 tags=$(gitlab_api "$(gitlab_tags_url "$host" "$project")" | yq -r '.[].name') || {
   echo "Failed to fetch tags from ${host}/${project}" >&2
   exit 1

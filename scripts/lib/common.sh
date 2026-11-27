@@ -405,10 +405,27 @@ gitlab_tags_url() {
   printf 'https://%s/api/v4/projects/%s/repository/tags?per_page=100\n' "$1" "${2//\//%2F}"
 }
 
-# GET a GitLab API URL. In the workflow builder reads the answer that root fetched with GITLAB_TOKEN
-# from the directory AURTOMATOR_GITLAB_ANSWERS, and other runs send the token to GitLab.com alone, from stdin.
+# GitLab hosts that get a token, each from a variable of its own, so no host gets the token of another
+GITLAB_HOSTS=(gitlab.com gitlab.gnome.org gitlab.freedesktop.org invent.kde.org salsa.debian.org gitlab.archlinux.org)
+
+# Print the variable of the token for GitLab host $1, GITLAB_TOKEN_ and the host in capitals with _ for
+# the dots, and fail for a host outside GITLAB_HOSTS
+gitlab_token_var() {
+  local host=${1,,} known
+  for known in "${GITLAB_HOSTS[@]}"; do
+    if [[ "$host" == "$known" ]]; then
+      host=${host^^}
+      printf 'GITLAB_TOKEN_%s\n' "${host//./_}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# GET a GitLab API URL. In the workflow builder reads the answer that root fetched with the token of its
+# host from the directory AURTOMATOR_GITLAB_ANSWERS, and other runs send the token of the host, from stdin.
 gitlab_api() {
-  local file auth=()
+  local file var token="" auth=()
   if [[ -n "${AURTOMATOR_GITLAB_ANSWERS:-}" ]]; then
     file="${AURTOMATOR_GITLAB_ANSWERS}/$(url_key "$1")"
     if [[ -f "$file" && ! -L "$file" ]]; then
@@ -420,22 +437,28 @@ gitlab_api() {
     fi
   fi
   # On a redirect to another host curl drops the Authorization header alone, so the token goes there
-  if [[ -n "${GITLAB_TOKEN:-}" && "$(url_host "$1")" == gitlab.com ]]; then
+  if var=$(gitlab_token_var "$(url_host "$1")") && [[ -n "${!var:-}" ]]; then
+    token=${!var}
     auth=(-H @-)
   fi
-  http_get_json "$1" "${auth[@]}" <<<"Authorization: Bearer ${GITLAB_TOKEN:-}"
+  http_get_json "$1" "${auth[@]}" <<<"Authorization: Bearer ${token}"
 }
 
-# Keep in directory $1 the answers of GitLab.com to the gitlab-tag packages of files $2..., asked with
-# GITLAB_TOKEN. The workflow runs it as root, which parses none of them, and builder never holds the token.
+# Keep in directory $1 the answers of GITLAB_HOSTS to the gitlab-tag packages of files $2..., each asked with
+# the token of its host. Root runs it in the workflow and parses none, and builder never holds a token.
 gitlab_prefetch() {
-  local LC_ALL=C dir=$1 file rows strategy host project url part budget end i
-  local -a files=() urls=()
+  local LC_ALL=C dir=$1 file rows strategy host project url var part budget end i
+  local -a files=() urls=() vars=()
   local -A seen=()
   local -x AURTOMATOR_HOSTS_DIR
   shift
-  [[ -n "${GITLAB_TOKEN:-}" ]] || return 0
-  # The time of the step counts in the budget of the checks, which ask gitlab.com for the rest
+  for host in "${GITLAB_HOSTS[@]}"; do
+    var=$(gitlab_token_var "$host")
+    [[ -z "${!var:-}" ]] || break
+    var=""
+  done
+  [[ -n "$var" ]] || return 0
+  # The time of the step counts in the budget of the checks, which ask GitLab for the rest
   budget=$(env_seconds GITLAB_PREFETCH_BUDGET 300) || return 1
   end=$((SECONDS + budget))
   for file in "$@"; do
@@ -444,29 +467,34 @@ gitlab_prefetch() {
   ((${#files[@]} > 0)) || return 0
   rows=$(yq -N -r '[.strategy // "", .upstream.host // "", .upstream.project // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
   while IFS=$'\t' read -r strategy host project; do
-    [[ "$strategy" == gitlab-tag && "${host,,}" == gitlab.com && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
+    [[ "$strategy" == gitlab-tag && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
     [[ "/$project/" != */./* && "/$project/" != */../* ]] || continue
+    if ! var=$(gitlab_token_var "$host") || [[ -z "${!var:-}" ]]; then
+      continue
+    fi
     url=$(gitlab_tags_url "$host" "$project")
     [[ -z "${seen[$url]:-}" ]] || continue
     seen[$url]=1
     urls+=("$url")
+    vars+=("$var")
   done <<<"$rows"
   ((${#urls[@]} > 0)) || return 0
   mkdir -p "$dir"
-  # The memory of hosts keeps the pace of GitLab.com and stops asking it once it does not answer
+  # The memory of hosts keeps the pace of each host and stops asking a host once it does not answer
   AURTOMATOR_HOSTS_DIR=$(mktemp -d) || return 1
   : >"$AURTOMATOR_HOSTS_DIR/silent"
   : >"$AURTOMATOR_HOSTS_DIR/request"
   : >"$AURTOMATOR_HOSTS_DIR/failed"
   for ((i = 0; i < ${#urls[@]}; i++)); do
     if ((SECONDS >= end)); then
-      printf '::warning::Fetch GitLab tags stopped after %s s, so the checks ask gitlab.com without GITLAB_TOKEN for %s of its %s projects\n' \
+      printf '::warning::Fetch GitLab tags stopped after %s s, so the checks ask GitLab without a token for %s of %s projects\n' \
         "$budget" "$((${#urls[@]} - i))" "${#urls[@]}"
       break
     fi
     url=${urls[i]}
+    var=${vars[i]}
     part=$(mktemp -p "$dir" .part.XXXXXX) || break
-    if http_get "$url" -H @- -o "$part" <<<"Authorization: Bearer $GITLAB_TOKEN"; then
+    if http_get "$url" -H @- -o "$part" <<<"Authorization: Bearer ${!var}"; then
       mv -- "$part" "$dir/$(url_key "$url")"
     else
       rm -f -- "$part"

@@ -40,7 +40,7 @@ inputs:
     required: false
     default: ""
   gitlab:
-    description: Directory of the answers of GitLab.com that root fetched with GITLAB_TOKEN, which builder gets as .gitlab/
+    description: Directory of the answers of GitLab that root fetched with the GITLAB_TOKEN_* secrets, which builder gets as .gitlab/
     required: false
     default: ""
 

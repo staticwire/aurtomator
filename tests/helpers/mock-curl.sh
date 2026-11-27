@@ -622,7 +622,7 @@ case "$url" in
     echo '{"tag_name": "v2.0.0"}'
     ;;
   # GitLab Tags API
-  *gitlab.com/api/v4/projects/*/repository/tags"?per_page=100")
+  *gitlab.com/api/v4/projects/*/repository/tags"?per_page=100" | *invent.kde.org/api/v4/projects/*/repository/tags"?per_page=100")
     echo '[{"name": "v3.1.0"}, {"name": "v3.0.0"}, {"name": "v2.0.0"}]'
     ;;
   # Gitea Tags API

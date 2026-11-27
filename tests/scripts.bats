@@ -949,12 +949,13 @@ EOF
 # === check-update.sh ===
 
 # The token outlives the run, and only gitlab-tag sends it; other strategies parse upstream answers
-@test "check-update: gives GITLAB_TOKEN to gitlab-tag alone" {
-  local strategy
+@test "check-update: gives the GitLab tokens to gitlab-tag alone" {
+  local strategy var
   for strategy in gitlab-tag github-release; do
     # The strategies of the test tree link to those of the checkout
     rm -f "$TEST_TMPDIR/strategies/$strategy.sh"
-    printf '#!/usr/bin/env bash\nif [ -n "${GITLAB_TOKEN:-}" ]; then echo 9.0.0; else echo 2.0.0; fi\n' \
+    # 2.0.0 and one more major for each token in the environment
+    printf '#!/usr/bin/env bash\necho "$((2 + $(env | grep -c "^GITLAB_TOKEN_"))).0.0"\n' \
       >"$TEST_TMPDIR/strategies/$strategy.sh"
     chmod +x "$TEST_TMPDIR/strategies/$strategy.sh"
   done
@@ -965,8 +966,12 @@ current: '1.0.0'"
   create_test_package hub github-release "upstream:
   project: owner/repo
 current: '1.0.0'"
-  [ "$(GITLAB_TOKEN=glpat-test "$TEST_TMPDIR/scripts/check-update.sh" lab 2>/dev/null)" = 9.0.0 ]
-  [ "$(GITLAB_TOKEN=glpat-test "$TEST_TMPDIR/scripts/check-update.sh" hub 2>/dev/null)" = 2.0.0 ]
+  for var in GITLAB_TOKEN_GITLAB_COM GITLAB_TOKEN_GITLAB_GNOME_ORG GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG \
+    GITLAB_TOKEN_INVENT_KDE_ORG GITLAB_TOKEN_SALSA_DEBIAN_ORG GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG; do
+    export "$var=glpat-test"
+  done
+  [ "$("$TEST_TMPDIR/scripts/check-update.sh" lab 2>/dev/null)" = 8.0.0 ]
+  [ "$("$TEST_TMPDIR/scripts/check-update.sh" hub 2>/dev/null)" = 2.0.0 ]
 }
 
 @test "check-update: detects new version" {
@@ -4360,9 +4365,10 @@ current: '1.0.0'"
   [ "$output" = $'0\n0' ]
 }
 
-# The workflow runs it as root, which parses no answer, so builder parses them without the token
-@test "gitlab_prefetch: keeps the answers of GitLab.com to the gitlab-tag packages, asked with GITLAB_TOKEN" {
-  local key
+# The workflow runs it as root, which parses no answer, so builder parses them without the tokens.
+# Each host of the table gets the token of its own variable, and other hosts get none.
+@test "gitlab_prefetch: asks each GitLab host of the table with its own token" {
+  local key_a key_k
   create_test_package a gitlab-tag "upstream:
   host: gitlab.com
   project: group/a"
@@ -4377,26 +4383,40 @@ current: '1.0.0'"
   create_test_package e gitlab-tag "upstream:
   host: gitlab.com
   project: group/.."
+  create_test_package f gitlab-tag "upstream:
+  host: invent-kde.org
+  project: group/f"
+  create_test_package g gitlab-tag "upstream:
+  host: gitlab.example.org
+  project: group/g"
+  create_test_package k gitlab-tag "upstream:
+  host: invent.kde.org
+  project: group/k"
   printf '%s\n' 'name: l' 'strategy: gitlab-tag' 'upstream:' '  host: gitlab.com' '  project: group/l' >"$TEST_TMPDIR/l.yml"
   ln -s "$TEST_TMPDIR/l.yml" "$TEST_TMPDIR/packages/l.yml"
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
   mv "$MOCK_DIR/curl" "$MOCK_DIR/curl-answer"
   printf '%s\n' '#!/usr/bin/env bash' "cat >>'$TEST_TMPDIR/curl.stdin'" 'exec "${0%/*}/curl-answer" "$@"' >"$MOCK_DIR/curl"
   chmod +x "$MOCK_DIR/curl"
-  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  run bash -c 'source "$0/scripts/lib.sh" &&
+    GITLAB_TOKEN_GITLAB_COM=glpat-com GITLAB_TOKEN_INVENT_KDE_ORG=glpat-kde GITLAB_TOKEN_GITLAB_EXAMPLE_ORG=glpat-example \
+      gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
   [[ "$output" == *"missing-group%2Fd/repository/tags?per_page=100: The requested URL returned error: 404"* ]]
-  key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fa/repository/tags?per_page=100' | sha256sum)
-  [ "$(ls -A "$TEST_TMPDIR/answers")" = "${key%% *}" ]
-  [ "$(cat "$TEST_TMPDIR/answers/${key%% *}")" = '[{"name": "v3.1.0"}, {"name": "v3.0.0"}, {"name": "v2.0.0"}]' ]
-  # curl reads the header from stdin, and asks gitlab.com alone, for no project with a part . or ..
-  [ "$(grep -c -- ' -H @- ' "$CURL_ARGS_LOG")" = 2 ]
-  [ "$(wc -l <"$CURL_ARGS_LOG")" = 2 ]
-  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = $'Authorization: Bearer glpat-test\nAuthorization: Bearer glpat-test' ]
-  run ! grep -q glpat-test "$CURL_ARGS_LOG"
-  # Without the token it asks nothing
+  key_a=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fa/repository/tags?per_page=100' | sha256sum)
+  key_k=$(printf '%s' 'https://invent.kde.org/api/v4/projects/group%2Fk/repository/tags?per_page=100' | sha256sum)
+  [ "$(ls -A "$TEST_TMPDIR/answers" | sort)" = "$(printf '%s\n' "${key_a%% *}" "${key_k%% *}" | sort)" ]
+  [ "$(cat "$TEST_TMPDIR/answers/${key_a%% *}")" = '[{"name": "v3.1.0"}, {"name": "v3.0.0"}, {"name": "v2.0.0"}]' ]
+  # curl reads each header from stdin, for no project with a part . or ..
+  [ "$(grep -c -- ' -H @- ' "$CURL_ARGS_LOG")" = 3 ]
+  [ "$(wc -l <"$CURL_ARGS_LOG")" = 3 ]
+  [ "$(grep -c 'https://gitlab.com/' "$CURL_ARGS_LOG")" = 2 ]
+  [ "$(grep -c 'https://invent.kde.org/' "$CURL_ARGS_LOG")" = 1 ]
+  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = $'Authorization: Bearer glpat-com\nAuthorization: Bearer glpat-com\nAuthorization: Bearer glpat-kde' ]
+  run ! grep -q glpat- "$CURL_ARGS_LOG"
+  # Without a token of the table it asks nothing
   rm "$CURL_ARGS_LOG"
-  run bash -c 'source "$0/scripts/lib.sh" && gitlab_prefetch "$0/none" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN_GITLAB_EXAMPLE_ORG=glpat-example gitlab_prefetch "$0/none" "$0"/packages/*.yml' "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/none" ]
   [ ! -e "$CURL_ARGS_LOG" ]
@@ -4411,12 +4431,12 @@ current: '1.0.0'"
   host: gitlab.com
   project: group/b"
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
-  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test GITLAB_PREFETCH_BUDGET=0 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN_GITLAB_COM=glpat-test GITLAB_PREFETCH_BUDGET=0 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
-  [ "$output" = "::warning::Fetch GitLab tags stopped after 0 s, so the checks ask gitlab.com without GITLAB_TOKEN for 2 of its 2 projects" ]
+  [ "$output" = "::warning::Fetch GitLab tags stopped after 0 s, so the checks ask GitLab without a token for 2 of 2 projects" ]
   [ ! -e "$CURL_ARGS_LOG" ]
   [ -z "$(ls -A "$TEST_TMPDIR/answers")" ]
-  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test GITLAB_PREFETCH_BUDGET=1.5 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN_GITLAB_COM=glpat-test GITLAB_PREFETCH_BUDGET=1.5 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"GITLAB_PREFETCH_BUDGET must be a whole number of seconds from 0 to 999999: '1.5'"* ]]
   [ ! -e "$CURL_ARGS_LOG" ]
