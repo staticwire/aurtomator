@@ -96,7 +96,7 @@ Your repository holds one YAML per package, which names its upstream source, and
 | `git-latest`     | `git clone --bare`     | `-git` packages from any HTTPS git host                 |
 | `pypi`           | PyPI JSON API          | Python packages                                         |
 | `npm`            | npm registry           | Node.js packages                                        |
-| `crates`         | crates.io API          | Rust crates                                             |
+| `crates`         | crates.io sparse index | Rust crates                                             |
 | `rubygems`       | rubygems.org API       | Ruby gems                                               |
 | `repology`       | Repology API           | Fallback across distribution repositories               |
 | `archpkg`        | Arch package search    | Official Arch packages                                  |
