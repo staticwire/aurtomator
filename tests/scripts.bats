@@ -5574,6 +5574,9 @@ $1"
   grep -qF '>0ad</a>' "$TEST_TMPDIR/table/0-9.md"
   grep -qxF '[Back to the README](../README.md)' "$TEST_TMPDIR/table/z.md"
   [ ! -e "$TEST_TMPDIR/table/q.md" ]
+  # The README is written three times here, and each text replaces the one before
+  run find "$TEST_TMPDIR" -maxdepth 1 -name 'README.md.*'
+  [ -z "$output" ]
   # Under the limit the README holds every row again, and the pages go
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]

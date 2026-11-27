@@ -214,6 +214,7 @@ fi
 
 # Write README.md with text $1 between the package markers
 write_readme() {
+  [[ -z "$new_readme" ]] || rm -f -- "$new_readme"
   new_readme=$(mktemp "${README}.XXXXXX")
   {
     sed -n "0,/^${PKG_START}\$/p" "$README"
@@ -264,7 +265,6 @@ if (($(wc -c <"$new_readme") > readme_max * 1024)); then
     # Runs where most packages fail list most rows here, so the rows stop where the limit would pass
     write_readme "$block"$'\n\n'"$links"
     room=$((readme_max * 1024 - $(wc -c <"$new_readme") - ${#table_header} - 200))
-    rm -f -- "$new_readme"
     rows="" kept=0
     for row in "${attention[@]}"; do
       (($(LC_ALL=C && printf '%s' "$rows$row" | wc -c) <= room)) || break
