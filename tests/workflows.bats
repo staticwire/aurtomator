@@ -2302,11 +2302,11 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT,AURTOMATOR_GITLAB_ANSWERS -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT,AURTOMATOR_GITLAB_ANSWERS,AURTOMATOR_README_BUDGET -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder timeout --kill-after=10 180 $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
     "rules${tab}Run the requires rules${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --rules rules cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
-    "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL,AURTOMATOR_README_BUDGET -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder timeout --kill-after=10 180 $code/update-readme.sh cwd=$work"
   )
   for entry in "${expected[@]}"; do
     IFS=$'\t' read -r job name want readme <<<"$entry"
@@ -2342,9 +2342,16 @@ sudo_commands() {
     [[ "${lines[i]}" != "::warning::README.md stays as it is"* ]] || warned=$i
   done
   ((resumed >= 0 && warned > resumed))
+  # The step refuses a directory of builder that an earlier step left
+  rm -rf "$BATS_TEST_TMPDIR/work"
   SUDO_OUT=ok README_RC=1 run_builder_step check "Check updates"
   [ "$status" -eq 1 ]
-  [[ "$output" != *"::warning::"* ]]
+  [[ "$output" != *"::warning::"* && "$output" != *"exists already"* ]]
+  # timeout ends with 124 past the share of the README, which check-all.sh left out of its loop
+  rm -rf "$BATS_TEST_TMPDIR/work"
+  SUDO_OUT=ok README_RC=124 run_builder_step publish "Publish updates"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::update-readme.sh ran out of its 180 s in this run"* ]]
 }
 
 @test "run-as-builder: gives builder its own directory and runs no git" {

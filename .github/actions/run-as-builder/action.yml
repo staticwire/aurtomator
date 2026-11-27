@@ -167,6 +167,11 @@ runs:
           export AURTOMATOR_GITLAB_ANSWERS="$WORK/.gitlab"
           keep+=,AURTOMATOR_GITLAB_ANSWERS
         fi
+        # update-readme.sh takes these seconds of the budget of check-all.sh, whose loop leaves them out
+        if [[ "$README_TOO" == true ]]; then
+          export AURTOMATOR_README_BUDGET=180
+          keep+=,AURTOMATOR_README_BUDGET
+        fi
         # The runner ignores workflow commands until it reads the token, which builder never sees.
         # cat ends when no process of builder holds the pipe, so the token comes last.
         token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
@@ -176,12 +181,15 @@ runs:
         readme_rc=0
         if [[ "$rc" -eq 0 && "$README_TOO" == true ]]; then
           # update-readme.sh reads GITHUB_REPOSITORY alone, so it gets no token of keep-env
-          (cd "$WORK" && sudo --preserve-env=GITHUB_REPOSITORY -u builder "$code/scripts/update-readme.sh") 2>&1 | cat || readme_rc=$?
+          (cd "$WORK" && sudo --preserve-env=GITHUB_REPOSITORY -u builder timeout --kill-after=10 "$AURTOMATOR_README_BUDGET" \
+            "$code/scripts/update-readme.sh") 2>&1 | cat || readme_rc=$?
         fi
         echo "::$token::"
         # update-readme.sh ends with 3 when it leaves README.md as it is, and the run goes on
         if [[ "$readme_rc" -eq 3 ]]; then
           echo "::warning::README.md stays as it is, the log of this step names the reason"
+        elif [[ "$readme_rc" -eq 124 || "$readme_rc" -eq 137 ]]; then
+          echo "::warning::update-readme.sh ran out of its $AURTOMATOR_README_BUDGET s in this run"
         elif [[ "$readme_rc" -ne 0 ]]; then
           rc=$readme_rc
         fi

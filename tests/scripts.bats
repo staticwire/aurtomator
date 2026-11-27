@@ -3096,7 +3096,8 @@ python_files_db() {
   [ "$output" = "$TEST_TMPDIR/run-cache/aur/ydiskarc.SRCINFO"$'\n'"$TEST_TMPDIR/run-cache/aur/ydiskarc.SRCINFO" ]
   cmp "$TEST_TMPDIR/run-cache/aur/ydiskarc.SRCINFO" "$FIXTURES_DIR/aur/ydiskarc.SRCINFO"
   [ "$(wc -l <"$TEST_TMPDIR/clones")" -eq 1 ]
-  [[ "$(<"$TEST_TMPDIR/clones")" == "clone --depth 1 --no-checkout -q https://aur.archlinux.org/ydiskarc.git "* ]]
+  # The list of the packages that miss a key clones the AUR repository of each, so stalled clones end
+  [[ "$(<"$TEST_TMPDIR/clones")" == "clone --depth 1 --no-checkout -q -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 https://aur.archlinux.org/ydiskarc.git "* ]]
   run_archdb 'aur_srcinfo ydiskarc'
   [ "$(wc -l <"$TEST_TMPDIR/clones")" -eq 1 ]
 }
@@ -4270,6 +4271,28 @@ $1"
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ ! -e "$TEST_TMPDIR/.status/_requirements" ]
   ! grep -q packages-meta "$CURL_ARGS_LOG"
+}
+
+# The list runs after the loop in the same 30 minutes of the job, so it takes the share of the budget
+# that the loop leaves it, and a run without time for it leaves the issue as it is
+@test "check-all: lists the packages that miss a key within the time the loop leaves it" {
+  local start
+  aur_meta '{"Name":"kube-diagrams","PackageBase":"kube-diagrams","Depends":["bash","python"]}'
+  python_package "" bash python python-yaml
+  AURTOMATOR_CHECK_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/.status/_requirements" ]
+  [[ "$output" == *"The run has no time left to list the packages that miss the source of their requirements"* ]]
+  start=$SECONDS
+  MOCK_META_SLEEP=10 AURTOMATOR_CHECK_BUDGET=2 AURTOMATOR_REQUIREMENTS_BUDGET=2 run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  ((SECONDS - start < 8))
+  [ ! -e "$TEST_TMPDIR/.status/_requirements" ]
+  [[ "$output" == *"The run has no time left to list the packages that miss the source of their requirements"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "unchecked: the check ran out of its 0 minutes in this run" ]
+  AURTOMATOR_CHECK_BUDGET=60 AURTOMATOR_REQUIREMENTS_BUDGET=60 run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "unchecked: the check ran out of its 1 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_requirements")" = $'kube-diagrams\tpython' ]
 }
 
 # Writes the GraphQL answer for github-release packages a, at current 1.0.0 with no regex, and b, at

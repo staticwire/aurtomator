@@ -52,6 +52,11 @@ CHECK_SPENT=$(env_seconds AURTOMATOR_CHECK_SPENT 0) || exit 1
 # so the publish job ends within its 30 minutes
 PUBLISH_BUDGET=$(env_seconds AURTOMATOR_PUBLISH_BUDGET 1200) || exit 1
 
+# Seconds of the budgets of check and publish that update-readme.sh takes after this script, and that
+# the list of the packages that miss a key takes after the loop of --rules-later
+README_BUDGET=$(env_seconds AURTOMATOR_README_BUDGET 0) || exit 1
+REQUIREMENTS_BUDGET=$(env_seconds AURTOMATOR_REQUIREMENTS_BUDGET 120) || exit 1
+
 # Pause, in seconds, before a package whose check failed is checked again
 RECHECK_DELAY=$(env_seconds AURTOMATOR_RECHECK_DELAY 60) || exit 1
 
@@ -800,7 +805,7 @@ run_package() {
           return
         fi
         # Later runs find the version again, as for a package the check run deferred
-        if ((SECONDS >= PUBLISH_BUDGET)); then
+        if ((SECONDS >= PUBLISH_BUDGET - README_BUDGET)); then
           log_warn "$pkg_name: publish ran out of its $((PUBLISH_BUDGET / 60)) minutes in this run"
           printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
           return
@@ -1022,6 +1027,7 @@ run_package() {
     check)
       # The rules job of CI takes the packages of _rules
       if [[ -n "$RULES_LATER" ]]; then
+        step_time_left "$pkg_name" || return 0
         err_file=$(mktemp)
         check_rc=0
         needed=$(bounded_rules_needed "$pkg_file" 2>"$err_file") || check_rc=$?
@@ -1124,8 +1130,11 @@ check_files=()
 for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   [[ ! -f "$pkg_file" && ! -L "$pkg_file" ]] || check_files+=("$pkg_file")
 done
-# The budget of the loop holds the GraphQL fetch, which starts no request after CHECK_END
-CHECK_END=$(($(date -u +%s) + CHECK_BUDGET - CHECK_SPENT))
+# The budget of the loop holds the GraphQL fetch, which starts no request after CHECK_END. The work after
+# the loop ends by TAIL_END, and the README takes the rest of the budget.
+TAIL_END=$(($(date -u +%s) + CHECK_BUDGET - CHECK_SPENT - README_BUDGET))
+CHECK_END=$TAIL_END
+[[ -z "$RULES_LATER" ]] || CHECK_END=$((TAIL_END - REQUIREMENTS_BUDGET))
 # GITHUB_TOKEN allows 1000 REST requests an hour, and GraphQL reads 50 repositories in one
 if [[ "$MODE" == check || "$MODE" == update ]]; then
   github_prefetch "${check_files[@]}"
@@ -1272,11 +1281,19 @@ fi
 # The issues job keeps one issue for the packages whose next version fails its check for a missing key;
 # a run that cannot tell writes no list, and the issue stays as it is
 if [[ -n "$RULES_LATER" ]]; then
-  if missing=$(requirements_missing "${check_files[@]}"); then
-    printf '%s' "${missing:+$missing$'\n'}" >"${STATUS_DIR}/_requirements"
-  else
-    log_warn "Could not read the AUR, so the run lists no packages that miss the source of their requirements"
+  tail_left=$((TAIL_END - $(date -u +%s)))
+  list_rc=124
+  if ((tail_left > 0)); then
+    list_rc=0
+    # shellcheck disable=SC2016
+    missing=$(bounded "$tail_left" bash -c 'source "$1/scripts/lib.sh" && requirements_missing "${@:2}"' _ \
+      "$AURTOMATOR_DIR" "${check_files[@]}") || list_rc=$?
   fi
+  case $list_rc in
+    0) printf '%s' "${missing:+$missing$'\n'}" >"${STATUS_DIR}/_requirements" ;;
+    124 | 137) log_warn "The run has no time left to list the packages that miss the source of their requirements" ;;
+    *) log_warn "Could not read the AUR, so the run lists no packages that miss the source of their requirements" ;;
+  esac
 fi
 
 # The issues step closes the issues of a name this list lacks, since a package
@@ -1303,13 +1320,19 @@ hosts=$(
 # fails name no package, and an arch_out that is no map counts as none, as in the check.
 if [[ "$MODE" == "publish" ]]; then
   : >"${STATUS_DIR}/_without"
+  scan=()
   for pkg_file in "${check_files[@]}"; do
-    [[ ! -L "$pkg_file" ]] || continue
-    pkg_name=$(package_name "$pkg_file" 2>/dev/null) || continue
-    arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")' 2>/dev/null) || continue
-    [[ -z "$arches_out" ]] || printf '%s\t%s\t%s\n' "$pkg_name" \
-      "$(pkg_get "$pkg_file" '.current // ""')" "$arches_out" >>"${STATUS_DIR}/_without"
+    [[ ! -f "$pkg_file" || -L "$pkg_file" ]] || scan+=("$pkg_file")
   done
+  # One yq call reads every package, and each field starts with x, since read joins the tabs around an empty one
+  while IFS=$'\t' read -r pkg_file pkg_name current arches_out; do
+    pkg_file=${pkg_file#x} pkg_name=${pkg_name#x} current=${current#x} arches_out=${arches_out#x}
+    stem=${pkg_file##*/}
+    [[ -n "$arches_out" && "$pkg_name" == "${stem%.yml}" ]] || continue
+    (LC_ALL=C && [[ "$pkg_name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]) || continue
+    printf '%s\t%s\t%s\n' "$pkg_name" "$current" "$arches_out" >>"${STATUS_DIR}/_without"
+  done < <(package_rows '[filename, .name // "", .current // "",
+    (if (.arch_out | tag) == "!!map" then .arch_out | keys | join(" ") else "" end)] | map("x" + tostring) | join("\t")' "${scan[@]}")
 fi
 
 errors=0

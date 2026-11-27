@@ -4316,6 +4316,11 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
   [[ "$output" == *"pkg: publish ran out of its 0 minutes in this run"* ]]
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+  # update-readme.sh runs after it in the same job
+  run env AURTOMATOR_PUBLISH_BUDGET=600 AURTOMATOR_README_BUDGET=600 "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
 }
 
 @test "check-all --publish: keeps the update failure the prepare run recorded" {
@@ -4674,6 +4679,23 @@ EOF
   [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady' ]
 }
 
+# update-readme.sh runs after check-all.sh in the same 30 minutes of the job
+@test "check-all: leaves the share of the README out of the time budget of the loop" {
+  flaky_check flaky
+  # Each read of the clock moves it 100 s on
+  printf '%s\n' '#!/bin/sh' 'if [ "$*" = "-u +%s" ]; then' 'n=$(($(cat "$CLOCK" 2>/dev/null || echo 0) + 100))' \
+    'echo "$n" >"$CLOCK"' 'echo "$n"' 'else exec /usr/bin/date "$@"; fi' >"$MOCK_DIR/date"
+  chmod +x "$MOCK_DIR/date"
+  CLOCK="$TEST_TMPDIR/clock" AURTOMATOR_CHECK_BUDGET=250 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady' ]
+  rm "$TEST_TMPDIR/checks" "$TEST_TMPDIR/clock"
+  CLOCK="$TEST_TMPDIR/clock" AURTOMATOR_CHECK_BUDGET=250 AURTOMATOR_README_BUDGET=100 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = flaky ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 4 minutes in this run" ]
+}
+
 @test "check-all: checks no package again after the time budget of the loop" {
   flaky_check flaky 1
   # Each read of the clock moves it 100 s on
@@ -4741,7 +4763,8 @@ current: '1.0.0'"
   local name value
   flaky_check flaky
   for name in AURTOMATOR_CHECK_TIMEOUT AURTOMATOR_UPDATE_TIMEOUT AURTOMATOR_VERIFY_BUDGET \
-    AURTOMATOR_CHECK_BUDGET AURTOMATOR_CHECK_SPENT AURTOMATOR_PUBLISH_BUDGET AURTOMATOR_RECHECK_DELAY; do
+    AURTOMATOR_CHECK_BUDGET AURTOMATOR_CHECK_SPENT AURTOMATOR_PUBLISH_BUDGET AURTOMATOR_RECHECK_DELAY \
+    AURTOMATOR_README_BUDGET AURTOMATOR_REQUIREMENTS_BUDGET; do
     for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 010 1.5 -1 1000000 " 5"; do
       run env "$name=$value" "$TEST_TMPDIR/scripts/check-all.sh"
       [ "$status" -eq 1 ]
@@ -4884,6 +4907,23 @@ arch_out:
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/steps" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
+}
+
+# The check of the arches comes after the alerts and before the requires rules, and it spends the budget
+@test "check-all: starts no step of the requires rules after the time budget of the loop" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'
+arch_out:
+  aarch64: '0123456789012345678901234567890123456789'"
+  check_until_budget 2.0.0
+  printf '#!/usr/bin/env bash\necho 2.0.0\n' >"$TEST_TMPDIR/scripts/check-update.sh"
+  rm -f "$TEST_TMPDIR/scripts/check-arch.sh"
+  printf '#!/usr/bin/env bash\necho 1200 >"%s/clock"\n' "$TEST_TMPDIR" >"$TEST_TMPDIR/scripts/check-arch.sh"
+  chmod +x "$TEST_TMPDIR/scripts/check-arch.sh"
+  AURTOMATOR_REQUIREMENTS_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
 }
 

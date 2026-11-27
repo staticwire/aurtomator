@@ -173,6 +173,8 @@ case "$url" in
     ;;
   # AUR metadata file of every package, as aur_meta of setup.sh writes it
   *aur.archlinux.org/packages-meta-ext-v1.json.gz)
+    # MOCK_META_SLEEP makes the AUR answer after that many seconds
+    [[ -z "${MOCK_META_SLEEP:-}" ]] || sleep "$MOCK_META_SLEEP"
     if [[ -f "$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz" ]]; then
       cat "$MOCK_FILES_DIR/packages-meta-ext-v1.json.gz"
     else
