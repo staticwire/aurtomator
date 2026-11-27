@@ -30,8 +30,10 @@ aur_srcinfo() {
   if [[ ! -f "$srcinfo" ]]; then
     mkdir -p "$AURTOMATOR_RUN_CACHE/aur" || return 1
     rm -rf "$dir"
-    # git warns of every empty repository, which the AUR serves for a new package
-    if ! aur_clone "https://aur.archlinux.org/$1.git" "$dir" --depth 1 --no-checkout -q >"$dir.log" 2>&1; then
+    # git warns of every empty repository, which the AUR serves for a new package. Stalled transfers end
+    # after 60 s, since the list of the packages that miss a key clones the AUR repository of each.
+    if ! aur_clone "https://aur.archlinux.org/$1.git" "$dir" --depth 1 --no-checkout -q \
+      -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 >"$dir.log" 2>&1; then
       cat "$dir.log" >&2
       return 1
     fi
@@ -241,7 +243,7 @@ aur_screen() {
   if ((rc == 0)); then
     # A ] or an escape inside a string would end the list of Depends early, so such a list counts
     gzip -dc -- "$meta" | awk '
-      FNR == NR { if ($0 != "") want[$0] = 1; next }
+      FILENAME == ARGV[1] { if ($0 != "") want[$0] = 1; next }
       $0 == "]" { closed = 1; next }
       {
         i = index($0, "\"PackageBase\":\"")

@@ -61,12 +61,17 @@ tags=$(github_tags "$project") || {
   exit 1
 }
 mapfile -t all_tags <<<"$tags"
-found=()
+taken=()
 for tag in "${all_tags[@]}"; do
-  version=$(tag_versions "$regex" "$replace" <<<"$tag")
-  if [[ "$(to_pkgver "$version" "$dash" "$format")" == "$PKGVER" ]]; then
-    found+=("$tag")
-  fi
+  [[ -n "$regex" && ! "$tag" =~ $regex ]] || taken+=("$tag")
+done
+# tag_versions prints one line for each tag that the regex takes, so one call reads them all
+pkgvers=$(printf '%s\n' "${taken[@]}" | tag_versions "$regex" "$replace" |
+  while IFS= read -r version; do to_pkgver "$version" "$dash" "$format"; done)
+mapfile -t all_pkgvers <<<"$pkgvers"
+found=()
+for i in "${!taken[@]}"; do
+  [[ "${all_pkgvers[i]:-}" != "$PKGVER" ]] || found+=("${taken[i]}")
 done
 if ((${#found[@]} == 0)); then
   log_err "No tag of ${project} gives version ${PKGVER}"

@@ -537,25 +537,41 @@ EOF
 }
 
 # mesa names its releases mesa-26.2.5
-# GitLab.com plans 60 requests an hour for the traffic of one address without a token, and the
-# token is for GitLab.com alone; curl reads the header from stdin, off the command line
-@test "gitlab-tag: sends GITLAB_TOKEN to gitlab.com alone, from stdin" {
-  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+# GitLab instances limit the traffic of one address without a token, and each token is for its own
+# host alone; curl reads the header from stdin, off the command line, and carries Authorization to
+# no other host of a redirect
+@test "gitlab-tag: sends each GitLab host its own token alone, from stdin" {
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" GITLAB_TOKEN_GITLAB_COM=glpat-com GITLAB_TOKEN_INVENT_KDE_ORG=glpat-kde
+  mv "$MOCK_DIR/curl" "$MOCK_DIR/curl-answer"
+  printf '%s\n' '#!/usr/bin/env bash' "cat >'$TEST_TMPDIR/curl.stdin'" 'exec "${0%/*}/curl-answer" "$@"' >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com
   project: group/project"
-  GITLAB_TOKEN=glpat-test run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
   [ "$status" -eq 0 ]
   [ "$output" = "3.1.0" ]
   grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
-  run ! grep -q glpat-test "$CURL_ARGS_LOG"
+  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = "Authorization: Bearer glpat-com" ]
+  run ! grep -q glpat- "$CURL_ARGS_LOG"
   rm "$CURL_ARGS_LOG"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: invent.kde.org
+  project: group/project"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "3.1.0" ]
+  grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = "Authorization: Bearer glpat-kde" ]
+  rm "$CURL_ARGS_LOG"
+  # Hosts without a token of their own get none of the others
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.gnome.org
   project: group/project"
-  GITLAB_TOKEN=glpat-test run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
   run ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
   rm "$CURL_ARGS_LOG"
+  unset GITLAB_TOKEN_GITLAB_COM GITLAB_TOKEN_INVENT_KDE_ORG
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com
   project: group/project"
@@ -564,8 +580,31 @@ EOF
   ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
 }
 
-# In the workflow root asks GitLab.com with GITLAB_TOKEN, and builder gets the answers in .gitlab/
+# In the workflow root asks GitLab with the GitLab tokens, and builder gets the answers in the
+# directory that AURTOMATOR_GITLAB_ANSWERS names
 @test "gitlab-tag: reads the answer that the workflow fetched for it" {
+  local key
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" AURTOMATOR_GITLAB_ANSWERS="$TEST_TMPDIR/answers"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: group/project"
+  key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100' | sha256sum)
+  mkdir "$TEST_TMPDIR/answers"
+  echo '[{"name": "v9.0.0"}]' >"$TEST_TMPDIR/answers/${key%% *}"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "9.0.0" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+  # Answers other than JSON fail as fetched ones do
+  echo '<html>' >"$TEST_TMPDIR/answers/${key%% *}"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100: the answer is not JSON"* ]]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+# Commits can add .gitlab/ to a repository of packages, and local runs ask GitLab all the same
+@test "gitlab-tag: reads no answer from .gitlab/ of the repository" {
   local key
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
@@ -576,14 +615,8 @@ EOF
   echo '[{"name": "v9.0.0"}]' >"$TEST_TMPDIR/.gitlab/${key%% *}"
   run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
   [ "$status" -eq 0 ]
-  [ "$output" = "9.0.0" ]
-  [ ! -e "$CURL_ARGS_LOG" ]
-  # Answers other than JSON fail as fetched ones do
-  echo '<html>' >"$TEST_TMPDIR/.gitlab/${key%% *}"
-  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100: the answer is not JSON"* ]]
-  [ ! -e "$CURL_ARGS_LOG" ]
+  [ "$output" = "3.1.0" ]
+  [ "$(wc -l <"$CURL_ARGS_LOG")" = 1 ]
 }
 
 @test "gitlab-tag: tag_version_regex extracts from prefixed tags" {
@@ -1046,6 +1079,23 @@ run_gem() {
   [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/sleep.log")" = "before 1" ]
   [[ "$(cat "$TEST_TMPDIR/curl.args")" == *"-A aurtomator/1.0 (+https://github.com/staticwire/aurtomator) -w"* ]]
+}
+
+# The memory of hosts of a check run keeps one second between two requests to repology.org
+@test "repology: leaves the wait to the pace of the check run" {
+  local hosts="$TEST_TMPDIR/hosts"
+  create_test_package "test-repology" "repology" "upstream:
+  repology: testpkg"
+  printf '#!/bin/sh\necho "$*" >>"%s/sleep.log"\n' "$TEST_TMPDIR" >"$TEST_TMPDIR/mock-bin/sleep"
+  chmod +x "$TEST_TMPDIR/mock-bin/sleep"
+  mkdir "$hosts"
+  : >"$hosts/silent"
+  : >"$hosts/request"
+  : >"$hosts/failed"
+  AURTOMATOR_HOSTS_DIR="$hosts" run "$TEST_TMPDIR/strategies/repology.sh" "test-repology"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/sleep.log" ]
+  [ -s "$hosts/paced-repology.org" ]
 }
 
 @test "repology: names the block of repology.org on a 403" {

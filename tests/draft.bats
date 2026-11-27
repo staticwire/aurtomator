@@ -517,10 +517,10 @@ stub_git_latest() {
 }
 
 @test "draft: keeps the file for an edit when the check fails" {
-  aur_package demo 1.0.0 'source = https://invent.kde.org/group/demo/-/archive/v1.0.0/demo-v1.0.0.tar.gz'
+  aur_package demo 1.0.0 'source = https://gitlab.example.org/group/demo/-/archive/v1.0.0/demo-v1.0.0.tar.gz'
   run "$TEST_TMPDIR/scripts/draft.sh" demo
   [ "$status" -eq 1 ]
-  expect_yaml demo 'name: demo' 'strategy: gitlab-tag' 'upstream:' '  host: invent.kde.org' '  project: group/demo' 'current: 1.0.0'
+  expect_yaml demo 'name: demo' 'strategy: gitlab-tag' 'upstream:' '  host: gitlab.example.org' '  project: group/demo' 'current: 1.0.0'
   [[ "$output" == *"demo: valid"* ]]
   [[ "$output" == *"Fix packages/demo.yml, or delete it"* ]]
 }

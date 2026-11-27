@@ -39,8 +39,8 @@ fi
 
 log_info "Checking $PKG_NAME (strategy: $strategy, current: ${current:-none})"
 
-# The token outlives the run, and the other strategies parse answers of upstreams that it is no business of
-[[ "$strategy" == gitlab-tag ]] || unset GITLAB_TOKEN
+# The tokens outlive the run, and the other strategies parse answers of upstreams that they are no business of
+[[ "$strategy" == gitlab-tag ]] || unset "${!GITLAB_TOKEN_@}"
 latest=$("$strategy_script" "$PKG_NAME") || {
   log_err "Strategy failed for $PKG_NAME"
   exit 1

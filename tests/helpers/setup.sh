@@ -12,7 +12,7 @@ unset GITHUB_REPOSITORY
 # CI sets it to pull_request, and check-pins of aurtomator.sh then compares pins with HEAD^1
 unset GITHUB_EVENT_NAME
 # Tokens in the shell of a developer turn on the GraphQL reads, the REST limit and GitLab headers
-unset GITHUB_TOKEN GITLAB_TOKEN
+unset GITHUB_TOKEN "${!GITLAB_TOKEN_@}"
 
 # Create temp workspace
 setup_test_env() {

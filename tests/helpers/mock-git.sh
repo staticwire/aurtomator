@@ -52,6 +52,10 @@ case "${*: -1}" in
   https://github.com/asset-owner/asset-repo.git)
     tags=(v2.4.5 v2.4.6 v2.5.0-rc1 v2.5.0-rc2 rolling-release-v2.5.x)
     ;;
+  # Tags that a tag_version_regex of v tags leaves out, between those it takes
+  https://github.com/asset-owner/mixed-repo.git)
+    tags=(build-7 v1.0.0 nightly v1.1.0 zz-last)
+    ;;
   # Two tags of one version
   https://github.com/asset-owner/twin-repo.git)
     tags=(v1.0.0 1.0.0)

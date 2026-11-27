@@ -202,14 +202,26 @@ requires_needed() {
 # Print a line of the name and python or ruby for each package file of $@ whose AUR depends hold that
 # language and whose YAML names no source of its requirements; fail when the AUR cannot be read
 requirements_missing() {
-  local list name needed file python ruby srcinfo pkgname has_python has_ruby rc=0
+  local list name needed file stem python ruby srcinfo pkgname has_python has_ruby rc=0
+  local -a regular=()
   local -A files=()
   list=$(download_temp) || return 1
   for file in "$@"; do
-    name=$(package_name "$file" 2>/dev/null) || continue
+    [[ ! -f "$file" || -L "$file" ]] || regular+=("$file")
+  done
+  # One yq call reads the names of all packages; a name that differs from its file names none
+  while IFS=$'\t' read -r file name; do
+    stem=${file##*/}
+    [[ "$name" == "${stem%.yml}" ]] || continue
+    (LC_ALL=C && [[ "$name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]) || continue
     files[$name]=$file
     printf '%s\n' "$name"
-  done >"$list"
+  done < <(package_rows '[filename, .name // ""] | map(tostring) | join("\t")' "${regular[@]}") >"$list"
+  # Without names the AUR has nothing to screen
+  if [[ ! -s "$list" ]]; then
+    rm -f -- "$list"
+    return 0
+  fi
   needed=$(aur_screen "$list") || rc=$?
   rm -f -- "$list"
   ((rc == 0)) || return 1

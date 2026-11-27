@@ -4,7 +4,7 @@ title: Issues
 
 Job `issues` of the workflow opens and closes issues in your repository after every run in which `check` succeeded. Run pages list it as `check-updates / status`. It reads the final status of each package: that of `publish` when `publish` handed over its statuses, and that of `check` otherwise, as after a `publish` job that failed before it reached the packages.
 
-Before it touches issues, the job writes the run summary, which the run page shows under `check-updates / status summary`: counts of all packages and of those up to date, the other packages in a table with their README labels, and errors of failed packages.
+Before it touches issues, the job writes the run summary, which the run page shows under `check-updates / status summary`: counts of all packages and of those up to date, the other packages in a table with their README labels, and the errors of failed packages for as many as 1,000,000 bytes hold, since GitHub shows no summary of a step past 1 MiB. The log of the step Write the run summary holds each whole error.
 
 | Title | Label | Opens on | Closes on |
 |---|---|---|---|
@@ -15,7 +15,10 @@ Before it touches issues, the job writes the run summary, which the run page sho
 | `🔔 <package>: <version> notice` | `update-notice` | pushes with alert notes | maintainer, after the edit |
 | `⚠️ <package>: <version> without <arches>` | `arch-missing` | pushes without some arches, see [Versions without some arches](/features/missing-arches/) | every arch is back |
 | `🚀 aurtomator <release> available` | `aurtomator-update` | newer release, see [Updates of aurtomator](/features/aurtomator-updates/) | pin reaches the latest release, or newer releases get their own issue |
+| `⚠️ Packages need a python or ruby key` | `missing-key` | packages whose YAML names no source of their requirements, see [Update alerts](/features/update-alerts/) | every YAML has its key |
 | `❌ Check AUR Package Updates failed` | `auto-update` | failed jobs, see [Failed runs](#failed-runs) | next run without failed jobs |
+
+The issue of missing keys names every such package, and each check run edits it to its own list. Runs that could not read the AUR or ran out of time leave it as it is.
 
 Packages with `upstream.pin_from` that only wait for the package of their project get no `update held` issue, and the issue of a held update of that package names them, see [pypi](/strategies/#pypi). Packages get no second issue of the same kind while one is open, and issues closed while their package still fails come back in the next run. Each body links the run. Errors hold text from upstream, so they stand in a code block, where links, images and mentions do not render, and keep their last 3900 bytes after a line `[first <n> bytes cut]`. Closing comments name the run and show the new status.
 
@@ -25,7 +28,7 @@ Failed checks count for the host of the request they failed on, in lower case, a
 
 Issues close before new ones open, so packages whose check passes and whose update fails get the check issue closed and an update issue opened in one run. Failed steps close nothing, and failed `publish` jobs close host issues alone, since those rest on the checks. In repositories with Issues turned off, the job prints a notice and opens nothing.
 
-GitHub allows 500 writes of content an hour, so the job writes one a second and at most 450 times a run. Closes past that wait for the next run, and the failed packages past that share one issue, `❌ <count> failed packages of run <number>`, with the first line of each error for as many as 60000 characters hold and the count of the rest, while the run summary holds each whole error. That issue closes once each of its packages recovered or has an issue of its own.
+GitHub allows 500 writes of content an hour, and the job token has 1,000 GraphQL points an hour per repository, about 3 for each write. So the job writes one a second, counts a close with a comment as two writes, writes at most 450 times a run, and stops while fewer than 100 points would be left, which it reads from `GET /rate_limit` before every tenth write. Closes past these limits wait for the next run, as do writes that GitHub refuses for its rate limits, and the failed packages past them share one issue, `❌ <count> failed packages of run <number>`, with the first line of each error for as many as 60000 characters hold and the count of the rest, while the log of the step Write the run summary holds each whole error. That issue closes once each of its packages recovered, has an issue of its own or has no YAML. Unchecked packages keep it open when it names them.
 
 ## Failed runs
 

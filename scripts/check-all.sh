@@ -28,6 +28,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 require_cmd vercmp
 
+# The GitLab tokens stay in this shell for check-update.sh alone, since makepkg runs PKGBUILD code
+for token_var in "${!GITLAB_TOKEN_@}"; do
+  export -n "${token_var?}"
+done
+
 MODE=check
 WORK_DIR=""
 DRY_RUN=""
@@ -51,6 +56,11 @@ CHECK_SPENT=$(env_seconds AURTOMATOR_CHECK_SPENT 0) || exit 1
 # Time budget of the publish loop, in seconds: no publish starts after it,
 # so the publish job ends within its 30 minutes
 PUBLISH_BUDGET=$(env_seconds AURTOMATOR_PUBLISH_BUDGET 1200) || exit 1
+
+# Seconds of the budgets of check and publish that update-readme.sh takes after this script, and that
+# the list of the packages that miss a key takes after the loop of --rules-later
+README_BUDGET=$(env_seconds AURTOMATOR_README_BUDGET 0) || exit 1
+REQUIREMENTS_BUDGET=$(env_seconds AURTOMATOR_REQUIREMENTS_BUDGET 120) || exit 1
 
 # Pause, in seconds, before a package whose check failed is checked again
 RECHECK_DELAY=$(env_seconds AURTOMATOR_RECHECK_DELAY 60) || exit 1
@@ -82,6 +92,15 @@ bounded_alerts() {
 bounded_rules_needed() {
   # shellcheck disable=SC2016
   bounded "$CHECK_TIMEOUT" bash -c 'source "$1/scripts/lib.sh" && requires_needed "$2"' _ "$AURTOMATOR_DIR" "$1"
+}
+
+# Runs check-update.sh for package $1 under the check timeout, with the GitLab tokens, in a subshell
+bounded_check() {
+  local var
+  for var in "${!GITLAB_TOKEN_@}"; do
+    export "${var?}"
+  done
+  bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-update.sh" "$1"
 }
 
 # Errors keep their last bytes, since a server writes the stderr of git. With the line that
@@ -227,11 +246,28 @@ if [[ "$MODE" =~ ^(prepare|verify|publish|rules)$ ]] && [[ ! -L "$STATUS_DIR" ]]
   done
 fi
 
+# Print the start of a loop over $1 packages in run $2: a step of 0.618 of $1 that shares no factor
+# with it, so the packages that a budget leaves out of one run are near the start of the next
+loop_start() {
+  local count=$1 stride a b rest
+  stride=$((count * 618 / 1000))
+  ((stride > 0)) || stride=1
+  while :; do
+    a=$count b=$stride
+    while ((b > 0)); do
+      rest=$((a % b)) a=$b b=$rest
+    done
+    ((a != 1)) || break
+    stride=$((stride + 1))
+  done
+  echo "$(($2 % count * stride % count))"
+}
+
 # Failed verifies, exit code 3 of a moved AUR repo included, take the update
 # out with update_failed. Only package names from packages/ reach a path.
 if [[ "$MODE" == "verify" ]]; then
   # Slow sources early in the list would take the budget of the same packages in every run, so each
-  # run of the workflow starts the loop one package later, and runs by hand one package each hour
+  # run of the workflow starts the loop at another package, and runs by hand at another one each hour
   verify_files=()
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     if [[ -f "$pkg_file" ]]; then
@@ -240,9 +276,9 @@ if [[ "$MODE" == "verify" ]]; then
   done
   verify_start=0
   if ((${#verify_files[@]} > 0)) && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
-    verify_start=$((GITHUB_RUN_NUMBER % ${#verify_files[@]}))
+    verify_start=$(loop_start "${#verify_files[@]}" "$GITHUB_RUN_NUMBER")
   elif ((${#verify_files[@]} > 0)); then
-    verify_start=$(($(date -u +%s) / 3600 % ${#verify_files[@]}))
+    verify_start=$(loop_start "${#verify_files[@]}" "$(($(date -u +%s) / 3600))")
   fi
   # Packages on this list keep the status of the check run in publish, so only this loop writes it
   rm -f "${WORK_DIR}/status/_unverified"
@@ -774,7 +810,7 @@ run_package() {
             echo "held: $(checked_version "$pkg_name")" >"${STATUS_DIR}/${pkg_name}"
             return
           fi
-          # The check run left it for a later run, past the 256 jobs of a run, or verify past its budget
+          # The check run left it for a later run, past the 100 jobs of a run, or verify past its budget
           if grep -qxF -e "$pkg_name" <<<"${CHECKED[_deferred]:-}" || unverified "$pkg_name"; then
             printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
           else
@@ -783,7 +819,7 @@ run_package() {
           return
         fi
         # Later runs find the version again, as for a package the check run deferred
-        if ((SECONDS >= PUBLISH_BUDGET)); then
+        if ((SECONDS >= PUBLISH_BUDGET - README_BUDGET)); then
           log_warn "$pkg_name: publish ran out of its $((PUBLISH_BUDGET / 60)) minutes in this run"
           printf '%s\n' "$found" >"${STATUS_DIR}/${pkg_name}"
           return
@@ -831,7 +867,7 @@ run_package() {
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
     check_cmd=(checked_version "$pkg_name")
   else
-    check_cmd=(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-update.sh" "$pkg_name")
+    check_cmd=(bounded_check "$pkg_name")
   fi
 
   err_file=$(mktemp)
@@ -844,7 +880,7 @@ run_package() {
     log_err "Failed to check $pkg_name: $(status_text "$check_err")"
     status_text "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     note_failed_host "$pkg_name" "$in_flight"
-    if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded ]] && second_pass "$check_rc" "$in_flight"; then
+    if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded_check ]] && second_pass "$check_rc" "$in_flight"; then
       RECHECK+=("$pkg_file")
     fi
     return
@@ -1005,6 +1041,7 @@ run_package() {
     check)
       # The rules job of CI takes the packages of _rules
       if [[ -n "$RULES_LATER" ]]; then
+        step_time_left "$pkg_name" || return 0
         err_file=$(mktemp)
         check_rc=0
         needed=$(bounded_rules_needed "$pkg_file" 2>"$err_file") || check_rc=$?
@@ -1107,16 +1144,21 @@ check_files=()
 for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
   [[ ! -f "$pkg_file" && ! -L "$pkg_file" ]] || check_files+=("$pkg_file")
 done
-# The budget of the loop holds the GraphQL fetch, which starts no request after CHECK_END
-CHECK_END=$(($(date -u +%s) + CHECK_BUDGET - CHECK_SPENT))
+# The budget of the loop holds the GraphQL fetch, which starts no request after CHECK_END. The work after
+# the loop ends by TAIL_END, and the README takes the rest of the budget.
+TAIL_END=$(($(date -u +%s) + CHECK_BUDGET - CHECK_SPENT - README_BUDGET))
+CHECK_END=$TAIL_END
+[[ -z "$RULES_LATER" ]] || CHECK_END=$((TAIL_END - REQUIREMENTS_BUDGET))
 # GITHUB_TOKEN allows 1000 REST requests an hour, and GraphQL reads 50 repositories in one
 if [[ "$MODE" == check || "$MODE" == update ]]; then
   github_prefetch "${check_files[@]}"
 fi
 
 # The REST requests of the hour that a check run with GITHUB_TOKEN leaves to publish and the issues job,
-# and the package files whose check asks REST: GitHub releases, and assets of github-tag
+# and the package files whose check asks REST: GitHub releases outside the answers of GraphQL, and assets
 readonly REST_RESERVE=400
+# The most REST requests of one check: 11 of github-release with tag_version_regex, 4 of check-asset.sh
+readonly REST_PER_CHECK=15
 REST_LEFT="" REST_SINCE=10
 declare -A REST_FILES=()
 # Checks of a run for the packages of a strategy whose host caps the requests of a day: repology.org
@@ -1129,14 +1171,23 @@ if [[ "$MODE" == check ]]; then
   for pkg_file in "${check_files[@]}"; do
     [[ ! -f "$pkg_file" || -L "$pkg_file" ]] || scan+=("$pkg_file")
   done
-  while IFS=$'\t' read -r pkg_file strategy asset; do
+  # Each field starts with x, since read joins the tabs around an empty one
+  while IFS=$'\t' read -r pkg_file strategy asset project regex; do
+    pkg_file=${pkg_file#x} strategy=${strategy#x} asset=${asset#x} project=${project#x} regex=${regex#x}
     case $strategy in
-      github-release | github-nightly | github-asset) REST_FILES[$pkg_file]=1 ;;
+      github-release)
+        url="https://api.github.com/repos/$project/releases/latest"
+        [[ -z "$regex" ]] || url="https://api.github.com/repos/$project/releases?per_page=100&page=1"
+        if [[ -n "$asset" || -z "${AURTOMATOR_RUN_CACHE:-}" || ! -f "$(_github_cached "$url")" ]]; then
+          REST_FILES[$pkg_file]=1
+        fi
+        ;;
+      github-nightly | github-asset) REST_FILES[$pkg_file]=1 ;;
       github-tag) [[ -z "$asset" ]] || REST_FILES[$pkg_file]=1 ;;
       repology) repology_files+=("$pkg_file") ;;
     esac
-  done < <(((${#scan[@]} == 0)) ||
-    yq -N -r '[filename, .strategy // "", .upstream.asset_regex // ""] | map(tostring) | join("\t")' "${scan[@]}" 2>/dev/null || true)
+  done < <(package_rows '[filename, .strategy // "", .upstream.asset_regex // "", .upstream.project // "", .upstream.tag_version_regex // ""] |
+    map("x" + tostring) | join("\t")' "${scan[@]}")
   [[ -n "${GITHUB_TOKEN:-}" ]] || REST_FILES=()
   # Each run takes the next packages after those of the run before, by its number
   budget=${HOST_BUDGET[repology]}
@@ -1155,8 +1206,8 @@ if [[ "$MODE" == check ]]; then
   fi
 fi
 
-# Succeeds while the check of package file $1 may ask GitHub REST: it asks none, or GET /rate_limit,
-# which counts against no limit and runs before every tenth such check, leaves REST_RESERVE or more
+# Succeeds while the check of package file $1 asks no GitHub REST, or leaves REST_RESERVE after its REST_PER_CHECK
+# requests; GET /rate_limit, free, runs before every tenth such check, and the checks between count down
 rest_left() {
   [[ -n "${REST_FILES[$1]:-}" ]] || return 0
   if ((REST_SINCE >= 10)); then
@@ -1169,7 +1220,9 @@ rest_left() {
     fi
   fi
   REST_SINCE=$((REST_SINCE + 1))
-  [[ ! "$REST_LEFT" =~ ^[0-9]+$ ]] || ((REST_LEFT >= REST_RESERVE))
+  [[ "$REST_LEFT" =~ ^[0-9]+$ ]] || return 0
+  ((REST_LEFT - REST_PER_CHECK >= REST_RESERVE)) || return 1
+  REST_LEFT=$((REST_LEFT - REST_PER_CHECK))
 }
 
 # Gives status unchecked to package $1, whose host gives the run fewer checks than it has packages
@@ -1196,10 +1249,10 @@ for pkg_file in "${check_files[@]}"; do
   fi
 done
 # Slow hosts early in the list would take the budget of the same packages in
-# every run, so each run of the workflow starts the loop one package later
+# every run, so each run of the workflow starts the loop at another package
 check_start=0
 if [[ "$MODE" == check && ${#plain_files[@]} -gt 0 ]] && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
-  check_start=$((GITHUB_RUN_NUMBER % ${#plain_files[@]}))
+  check_start=$(loop_start "${#plain_files[@]}" "$GITHUB_RUN_NUMBER")
 fi
 
 RECHECK=()
@@ -1246,11 +1299,19 @@ fi
 # The issues job keeps one issue for the packages whose next version fails its check for a missing key;
 # a run that cannot tell writes no list, and the issue stays as it is
 if [[ -n "$RULES_LATER" ]]; then
-  if missing=$(requirements_missing "${check_files[@]}"); then
-    printf '%s' "${missing:+$missing$'\n'}" >"${STATUS_DIR}/_requirements"
-  else
-    log_warn "Could not read the AUR, so the run lists no packages that miss the source of their requirements"
+  tail_left=$((TAIL_END - $(date -u +%s)))
+  list_rc=124
+  if ((tail_left > 0)); then
+    list_rc=0
+    # shellcheck disable=SC2016
+    missing=$(bounded "$tail_left" bash -c 'source "$1/scripts/lib.sh" && requirements_missing "${@:2}"' _ \
+      "$AURTOMATOR_DIR" "${check_files[@]}") || list_rc=$?
   fi
+  case $list_rc in
+    0) printf '%s' "${missing:+$missing$'\n'}" >"${STATUS_DIR}/_requirements" ;;
+    124 | 137) log_warn "The run has no time left to list the packages that miss the source of their requirements" ;;
+    *) log_warn "Could not read the AUR, so the run lists no packages that miss the source of their requirements" ;;
+  esac
 fi
 
 # The issues step closes the issues of a name this list lacks, since a package
@@ -1277,13 +1338,19 @@ hosts=$(
 # fails name no package, and an arch_out that is no map counts as none, as in the check.
 if [[ "$MODE" == "publish" ]]; then
   : >"${STATUS_DIR}/_without"
+  scan=()
   for pkg_file in "${check_files[@]}"; do
-    [[ ! -L "$pkg_file" ]] || continue
-    pkg_name=$(package_name "$pkg_file" 2>/dev/null) || continue
-    arches_out=$(pkg_get "$pkg_file" '.arch_out // {} | keys | join(" ")' 2>/dev/null) || continue
-    [[ -z "$arches_out" ]] || printf '%s\t%s\t%s\n' "$pkg_name" \
-      "$(pkg_get "$pkg_file" '.current // ""')" "$arches_out" >>"${STATUS_DIR}/_without"
+    [[ ! -f "$pkg_file" || -L "$pkg_file" ]] || scan+=("$pkg_file")
   done
+  # One yq call reads every package, and each field starts with x, since read joins the tabs around an empty one
+  while IFS=$'\t' read -r pkg_file pkg_name current arches_out; do
+    pkg_file=${pkg_file#x} pkg_name=${pkg_name#x} current=${current#x} arches_out=${arches_out#x}
+    stem=${pkg_file##*/}
+    [[ -n "$arches_out" && "$pkg_name" == "${stem%.yml}" ]] || continue
+    (LC_ALL=C && [[ "$pkg_name" =~ ^[a-z0-9][a-z0-9.+_-]*$ ]]) || continue
+    printf '%s\t%s\t%s\n' "$pkg_name" "$current" "$arches_out" >>"${STATUS_DIR}/_without"
+  done < <(package_rows '[filename, .name // "", .current // "",
+    (if (.arch_out | tag) == "!!map" then .arch_out | keys | join(" ") else "" end)] | map("x" + tostring) | join("\t")' "${scan[@]}")
 fi
 
 errors=0

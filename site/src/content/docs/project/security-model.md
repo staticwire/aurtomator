@@ -32,7 +32,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 | Hostile PKGBUILD code | Anyone with push access to the AUR repository of a package | Runs only as `builder` in jobs without secrets, and `verify` and `publish` never source it |
 | Crafted package YAML | Pull requests to a user repository | `validate-pkg.sh` with allow lists of keys and values |
 | Tampered downloads | Network attackers | `verify` downloads every source again over HTTPS and refuses checksums that do not match |
-| Theft of secrets | Code that runs in a job | Secrets that push or sign only in `publish`, which runs no PKGBUILD code; the optional `GITLAB_TOKEN`, which reads GitLab, only in the root step of `check` that asks gitlab.com for tags and reads none of the answers, while `builder`, which parses them, never gets it; workflow commands stopped in the output of `builder` |
+| Theft of secrets | Code that runs in a job | Secrets that push or sign only in `publish`, which runs no PKGBUILD code; the optional `GITLAB_TOKEN_*` secrets, which read GitLab, only in the root step of `check` that asks each GitLab instance for tags with its own token alone and reads none of the answers, while `builder`, which parses them, never gets one; workflow commands stopped in the output of `builder` and in the errors of failed packages that `issues` prints |
 | Changed dependencies | Actions and the base image | Actions pinned by commit SHA, the base image pinned by digest, and Dependabot pull requests that bring each version a week after its release. Security updates of Dependabot skip that week, and the jobs upgrade the packages of the image from the Arch mirrors, see [Permissions and container](/internals/workflow/#permissions-and-container). The Scorecard action pulls its image by tag, see [Scorecard](/develop/ci/#scorecard) |
 
 ## Trust boundaries
@@ -65,7 +65,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 | CWE-319, cleartext transmission | Strategies and `verify` download over HTTPS only |
 | CWE-400, resource consumption | Limits on the size and time of answers and downloads, and timeouts on every job |
 | CWE-345, data authenticity | The second download of `verify`, releases pinned by commit SHA, and signed release archives |
-| CWE-532, secrets in logs | Secrets that push or sign only in `publish`, `GITLAB_TOKEN` only in one root step of `check`, every secret masked by GitHub, and workflow commands stopped in the output of `builder` |
+| CWE-532, secrets in logs | Secrets that push or sign only in `publish`, the `GITLAB_TOKEN_*` secrets only in one root step of `check`, every secret masked by GitHub, and workflow commands stopped in the output of `builder` and in the errors of failed packages that `issues` prints |
 
 ## Verify a release
 
@@ -97,4 +97,11 @@ Releases after v0.14.0 are immutable. The workflow attaches the archive and its 
 ```sh
 gh release verify vX.Y.Z -R staticwire/aurtomator
 gh release verify-asset vX.Y.Z aurtomator-X.Y.Z.tar.gz -R staticwire/aurtomator
+```
+
+Job `sign` builds the archive with `git archive --format=tar.gz` at the release commit. Its gzip bytes depend on the git and the zlib of the machine that compresses it, so the same command on your machine gives another `.tar.gz`. The tar inside is the same, and in a clone of aurtomator both commands below print one digest:
+
+```sh
+gunzip -c aurtomator-X.Y.Z.tar.gz | sha256sum
+git archive --format=tar --prefix=aurtomator-X.Y.Z/ vX.Y.Z | sha256sum
 ```

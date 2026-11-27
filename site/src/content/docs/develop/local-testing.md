@@ -7,7 +7,7 @@ title: Local testing
 ```bash
 sudo pacman -S --needed git curl go-yq pacman-contrib namcap
 # For tests and linting:
-sudo pacman -S --needed bats jq openssh shellcheck shfmt actionlint zizmor
+sudo pacman -S --needed bats jq openssh shellcheck shfmt actionlint zizmor python ruby
 ```
 
 The commands of the next four sections and of [Draft a package](/add-a-package/#draft-a-package) run in your repository through `aurtomator.sh`, at the commit the calling workflows pin, so local runs use the strategies and checks of CI, see [The aurtomator.sh script](/setup/#the-aurtomatorsh-script).
@@ -77,7 +77,7 @@ bats tests/scripts.bats
 bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 ```
 
-`tests/helpers/setup.sh` gives every test a temporary directory with links to the scripts and strategies, with `tests/helpers/mock-curl.sh` as the first `curl` in `PATH` and `tests/helpers/mock-aur-git.sh` as `git` after it. That `git` answers clones of `https://aur.archlinux.org/` URLs with an empty repository in the test directory, as the AUR answers for a package it lacks, and runs the real `git` for every other command. Tests that need `git`, `ssh` or `gh` to answer otherwise write their own mocks into `$MOCK_DIR`, the first directory in `PATH`. `setup.sh` also exports `GIT_ALLOW_PROTOCOL=file`, so `git` refuses every remote but a local path. Only the listing of tags and the fetch of a git source set the variable themselves, and the tests answer both with mocks. The suite sends no request to the network and never touches a real AUR repository.
+`tests/helpers/setup.sh` gives every test a temporary directory with links to the scripts and strategies, with `tests/helpers/mock-curl.sh` as the first `curl` in `PATH` and `tests/helpers/mock-aur-git.sh` as `git` after it. That `git` answers clones of `https://aur.archlinux.org/` URLs with an empty repository in the test directory, as the AUR answers for a package it lacks, and runs the real `git` for every other command. Tests that need `git`, `ssh` or `gh` to answer otherwise write their own mocks into `$MOCK_DIR`, the first directory in `PATH`. `setup.sh` also exports `GIT_ALLOW_PROTOCOL=file`, so `git` refuses every remote but a local path. Only the listing of tags, the fetch of a git source and the bare clone of `git-latest` set the variable themselves, and the tests answer all three with mocks. The suite sends no request to the network and never touches a real AUR repository.
 
 ## Linting locally
 

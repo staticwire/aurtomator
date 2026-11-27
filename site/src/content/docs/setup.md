@@ -88,7 +88,12 @@ jobs:
       GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
       AUR_GIT_NAME: ${{ secrets.AUR_GIT_NAME }}
       AUR_GIT_EMAIL: ${{ secrets.AUR_GIT_EMAIL }}
-      GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+      GITLAB_TOKEN_GITLAB_COM: ${{ secrets.GITLAB_TOKEN_GITLAB_COM }}
+      GITLAB_TOKEN_GITLAB_GNOME_ORG: ${{ secrets.GITLAB_TOKEN_GITLAB_GNOME_ORG }}
+      GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG: ${{ secrets.GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG }}
+      GITLAB_TOKEN_INVENT_KDE_ORG: ${{ secrets.GITLAB_TOKEN_INVENT_KDE_ORG }}
+      GITLAB_TOKEN_SALSA_DEBIAN_ORG: ${{ secrets.GITLAB_TOKEN_SALSA_DEBIAN_ORG }}
+      GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG: ${{ secrets.GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG }}
 
   notify:
     needs: check-updates
@@ -242,7 +247,14 @@ In your repository, open Settings > Secrets and variables > Actions > New reposi
 | `AUR_GIT_EMAIL` | your email, as `jane@example.com` |
 | `AUR_SSH_KEY` | whole private key, `~/.ssh/aur_ed25519` |
 | `GPG_SIGNING_KEY` | with GPG signing: the output of `gpg --export-secret-subkeys --armor '<subkey-id>!'` |
-| `GITLAB_TOKEN` | optional, for `gitlab-tag` packages on gitlab.com: a GitLab personal access token with the scope `read_api` and an expiry date. The check job sends it to gitlab.com as root, in a step that reads none of the answers |
+| `GITLAB_TOKEN_GITLAB_COM` | optional, for `gitlab-tag` packages on gitlab.com |
+| `GITLAB_TOKEN_GITLAB_GNOME_ORG` | optional, for `gitlab-tag` packages on gitlab.gnome.org |
+| `GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG` | optional, for `gitlab-tag` packages on gitlab.freedesktop.org |
+| `GITLAB_TOKEN_INVENT_KDE_ORG` | optional, for `gitlab-tag` packages on invent.kde.org |
+| `GITLAB_TOKEN_SALSA_DEBIAN_ORG` | optional, for `gitlab-tag` packages on salsa.debian.org |
+| `GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG` | optional, for `gitlab-tag` packages on gitlab.archlinux.org |
+
+Each `GITLAB_TOKEN_*` secret is a personal access token of its GitLab instance, with the scope `read_api` and an expiry date. These instances limit the requests without a token by address, and runners share addresses. The check job sends each token as root to its own instance alone, in a step that reads none of the answers. Packages on other GitLab instances are checked without a token.
 
 That GPG output works in CI only for keys without a passphrase. For keys with one, `./aurtomator.sh setup gpg secrets` prints a copy without it, see [Passphrase stripping](/gpg-signing/#passphrase-stripping-3-pinentry-dialogs).
 

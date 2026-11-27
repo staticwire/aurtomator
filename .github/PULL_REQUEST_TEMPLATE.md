@@ -20,6 +20,7 @@ Fixes #<!-- issue number --> <!-- or "N/A" if this PR does not track an issue --
 - [ ] Commit messages follow Conventional Commits format
 - [ ] `shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh tests/helpers/cov-shims/*` and `shellcheck aurtomator.sh` pass locally
 - [ ] `shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh tests/helpers/cov-shims/*` and `shfmt -d -i 2 -ci aurtomator.sh` produce no diff
+- [ ] `python3 -m py_compile scripts/lib/*.py` and `ruby -wc scripts/lib/*.rb` pass locally
 - [ ] `actionlint`, `zizmor --persona pedantic .` and the shellcheck of the run steps of `.github/actions/` from `CONTRIBUTING.md` pass locally
 - [ ] `bats tests/ --recursive` passes
 - [ ] New scripts or strategies have BATS tests

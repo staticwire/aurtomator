@@ -165,13 +165,14 @@ case "$1" in
         echo "$GH_LATEST"
         ;;
       "api user --jq "*) jq -r "${*: -1}" <<<'{"login": "testuser"}' ;;
+      "api repos/"*"/issues?labels=auto-update&state=open&per_page=100 --paginate --jq "*)
+        [[ -z "${GH_RUN_ISSUE:-}" ]] || echo "$GH_RUN_ISSUE"
+        ;;
     esac
     exit 0
     ;;
-  issue)
-    [[ -z "${GH_RUN_ISSUE:-}" ]] || echo "$GH_RUN_ISSUE"
-    exit 0
-    ;;
+  # gh issue list --label searches, and a search stops at 1000 issues
+  issue) exit 2 ;;
   secret)
     if [[ "$2" == "set" ]]; then
       cat > /dev/null 2>&1 || true  # drain stdin (piped secrets)
@@ -1618,7 +1619,7 @@ EOF
   [[ "$output" != *"Run issue"* ]]
   grep -qx 'api repos/test/repo --jq .has_issues' "$TEST_TMPDIR/gh.args"
   grep -qxF 'api repos/test/repo/actions/workflows --jq .workflows[] | "\(.path) \(.state)"' "$TEST_TMPDIR/gh.args"
-  grep -qxF 'issue list -R test/repo --label auto-update --state open --limit 1000 --json number,title --jq .[] | select(.title == "❌ Check AUR Package Updates failed") | .number' "$TEST_TMPDIR/gh.args"
+  grep -qxF 'api repos/test/repo/issues?labels=auto-update&state=open&per_page=100 --paginate --jq .[] | select(.pull_request == null and .title == "❌ Check AUR Package Updates failed") | .number' "$TEST_TMPDIR/gh.args"
 }
 
 @test "setup verify: Issues turned off is an issue" {

@@ -108,10 +108,17 @@ _clean_hosts() {
   printf '%s' "$kept" >"$1"
 }
 
-# Print the Markdown summary of a run from status directory $1. Errors
+# Succeed when text $1 and $2 with the line of the errors left out fit in RUN_SUMMARY_MAX bytes;
+# GitHub shows no summary of a step past 1 MiB
+_summary_fits() {
+  local LC_ALL=C
+  ((${#1} + ${#2} + 100 <= ${RUN_SUMMARY_MAX:-1000000}))
+}
+
+# Print the Markdown summary of a run from status directory $1, with the errors that fit. Errors
 # hold text from upstream, so they go into a code block, as in their issue.
 run_summary() {
-  local file name status kind total=0 current=0 rows="" errors="" unchecked="" noun=packages
+  local file name status kind total=0 current=0 rows="" blocks=() unchecked="" noun=packages head tail="" kept="" block left=0
   for file in "$1"/*; do
     [[ -f "$file" ]] || continue
     name="${file##*/}"
@@ -130,7 +137,7 @@ run_summary() {
     case "$status" in
       check_failed:* | update_failed:*)
         kind="${status%%:*}"
-        errors+=$(printf "\n\`%s\`: %s\n\n%s" "$name" "${kind//_/ }" "$(_code_block "${status#*: }")")$'\n'
+        blocks+=("$(printf "\n\`%s\`: %s\n\n%s" "$name" "${kind//_/ }" "$(_code_block "${status#*: }")")"$'\n')
         ;;
     esac
   done
@@ -140,7 +147,42 @@ run_summary() {
     printf '%s %s, all up to date.\n' "$total" "$noun"
     return 0
   fi
-  printf '%s %s, %s up to date.\n' "$total" "$noun" "$current"
-  [[ -z "$rows" ]] || printf '\n| Package | Status |\n|---|---|\n%s%s' "$rows" "$errors"
-  [[ -z "$unchecked" ]] || printf '\nNot checked in this run: %s.\n' "$unchecked"
+  head="$total $noun, $current up to date."$'\n'
+  [[ -z "$rows" ]] || head+=$'\n| Package | Status |\n|---|---|\n'"$rows"
+  [[ -z "$unchecked" ]] || tail=$'\n'"Not checked in this run: $unchecked."$'\n'
+  for block in "${blocks[@]}"; do
+    if _summary_fits "$head$kept$block" "$tail"; then
+      kept+=$block
+    else
+      ((++left))
+    fi
+  done
+  printf '%s%s' "$head" "$kept"
+  if ((left == 1)); then
+    printf '\nThe log of the step Write the run summary holds the error of 1 more package.\n'
+  elif ((left > 1)); then
+    printf '\nThe log of the step Write the run summary holds the errors of %s more packages.\n' "$left"
+  fi
+  printf '%s' "$tail"
+}
+
+# Print each whole error of the failed packages of status directory $1 to the log of the step; errors
+# hold text from upstream, so workflow commands stop until a token that no upstream knows
+log_errors() {
+  local file status kind token=""
+  for file in "$1"/*; do
+    [[ -f "$file" && "${file##*/}" != _* ]] || continue
+    status=$(<"$file")
+    case "$status" in
+      check_failed:* | update_failed:*)
+        if [[ -z "$token" ]]; then
+          token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+          echo "::stop-commands::$token"
+        fi
+        kind="${status%%:*}"
+        printf '%s: %s\n%s\n\n' "${file##*/}" "${kind//_/ }" "${status#*: }"
+        ;;
+    esac
+  done
+  [[ -z "$token" ]] || echo "::$token::"
 }

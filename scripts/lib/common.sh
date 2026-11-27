@@ -228,7 +228,12 @@ request_begin() {
     printf '%s: the host is no plain name of ASCII letters, digits, dots and dashes\n' "$1" >&2
     return 1
   fi
-  if ! host_memory || ! host=$(url_host "$1"); then
+  if ! host=$(url_host "$1"); then
+    return 0
+  fi
+  # Parallel checks of validate-pkg.sh share the pace of each host, and keep no other memory
+  if ! host_memory; then
+    [[ -z "${AURTOMATOR_PACE_DIR:-}" || ! -d "$AURTOMATOR_PACE_DIR" ]] || request_pace "$host" "$AURTOMATOR_PACE_DIR"
     return 0
   fi
   if grep -qxF -e "$host" "$AURTOMATOR_HOSTS_DIR/silent"; then
@@ -236,7 +241,7 @@ request_begin() {
     request_failed "$1"
     return 1
   fi
-  request_pace "$host"
+  request_pace "$host" "$AURTOMATOR_HOSTS_DIR"
   printf '%s\n%s\n' "$1" "${2:-$1}" >"$AURTOMATOR_HOSTS_DIR/request"
 }
 
@@ -252,12 +257,15 @@ host_pace() {
   esac
 }
 
-# Wait until the pace of host $1 allows a request, and note the time of this one in the host memory
+# Wait until the pace of host $1 allows a request, and note the time of this one in directory $2; the
+# lock, which a killed process gives up, makes processes that share the directory wait for each other
 request_pace() {
-  local file now last wait
+  local file now last wait lock
   host_pace "$1"
   ((PACE_MS > 0)) || return 0
-  file="$AURTOMATOR_HOSTS_DIR/paced-$1"
+  file="$2/paced-$1"
+  exec {lock}>>"$file.lock"
+  flock "$lock"
   now=${EPOCHREALTIME/[.,]/}
   if [[ -f "$file" ]] && read -r last <"$file" && [[ "$last" =~ ^[0-9]+$ ]]; then
     wait=$((last + PACE_MS * 1000 - now))
@@ -267,6 +275,7 @@ request_pace() {
     fi
   fi
   printf '%s\n' "$now" >"$file"
+  exec {lock}>&-
 }
 
 # request_begin for git URL $1: the HEAD check asks the first URL that git asks
@@ -405,64 +414,116 @@ gitlab_tags_url() {
   printf 'https://%s/api/v4/projects/%s/repository/tags?per_page=100\n' "$1" "${2//\//%2F}"
 }
 
-# GET a GitLab API URL. In the workflow builder reads the answer that root fetched with GITLAB_TOKEN,
-# and other runs send the token to GitLab.com alone, from stdin.
-gitlab_api() {
-  local file auth=()
-  file="${AURTOMATOR_DATA_DIR}/.gitlab/$(url_key "$1")"
-  if [[ -f "$file" && ! -L "$file" ]]; then
-    if ! _json_answer "$1" "$(<"$file")"; then
-      request_failed "$1"
-      return 1
+# GitLab hosts that get a token, each from a variable of its own, so no host gets the token of another
+GITLAB_HOSTS=(gitlab.com gitlab.gnome.org gitlab.freedesktop.org invent.kde.org salsa.debian.org gitlab.archlinux.org)
+
+# Print the variable of the token for GitLab host $1, GITLAB_TOKEN_ and the host in capitals with _ for
+# the dots, and fail for a host outside GITLAB_HOSTS
+gitlab_token_var() {
+  local host=${1,,} known
+  for known in "${GITLAB_HOSTS[@]}"; do
+    if [[ "$host" == "$known" ]]; then
+      host=${host^^}
+      printf 'GITLAB_TOKEN_%s\n' "${host//./_}"
+      return 0
     fi
-    return 0
-  fi
-  if [[ -n "${GITLAB_TOKEN:-}" && "$(url_host "$1")" == gitlab.com ]]; then
-    auth=(-H @-)
-  fi
-  http_get_json "$1" "${auth[@]}" <<<"PRIVATE-TOKEN: ${GITLAB_TOKEN:-}"
+  done
+  return 1
 }
 
-# Keep in directory $1 the answers of GitLab.com to the gitlab-tag packages of files $2..., asked with
-# GITLAB_TOKEN. The workflow runs it as root, which parses none of them, and builder never holds the token.
+# GET a GitLab API URL. In the workflow builder reads the answer that root fetched with the token of its
+# host from the directory AURTOMATOR_GITLAB_ANSWERS, and other runs send the token of the host, from stdin.
+gitlab_api() {
+  local file var token="" auth=()
+  if [[ -n "${AURTOMATOR_GITLAB_ANSWERS:-}" ]]; then
+    file="${AURTOMATOR_GITLAB_ANSWERS}/$(url_key "$1")"
+    if [[ -f "$file" && ! -L "$file" ]]; then
+      if ! _json_answer "$1" "$(<"$file")"; then
+        request_failed "$1"
+        return 1
+      fi
+      return 0
+    fi
+  fi
+  # On a redirect to another host curl drops the Authorization header alone, so the token goes there
+  if var=$(gitlab_token_var "$(url_host "$1")") && [[ -n "${!var:-}" ]]; then
+    token=${!var}
+    auth=(-H @-)
+  fi
+  http_get_json "$1" "${auth[@]}" <<<"Authorization: Bearer ${token}"
+}
+
+# Print the rows of yq expression $1 for package files $2...; yq reads them in one call, which stops at a
+# file it cannot read, and then file by file, so only that file is left out, with a warning
+package_rows() {
+  local expr=$1 rows file
+  shift
+  (($# > 0)) || return 0
+  if rows=$(yq -N -r "$expr" "$@" 2>/dev/null); then
+    [[ -z "$rows" ]] || printf '%s\n' "$rows"
+    return 0
+  fi
+  for file in "$@"; do
+    if rows=$(yq -N -r "$expr" "$file" 2>/dev/null); then
+      [[ -z "$rows" ]] || printf '%s\n' "$rows"
+    else
+      file="packages/${file##*/}"
+      log_warn "yq cannot read ${file@Q}, so the reads before the checks leave it out"
+    fi
+  done
+}
+
+# Keep in directory $1 the answers of GITLAB_HOSTS to the gitlab-tag packages of files $2..., each asked with
+# the token of its host. Root runs it in the workflow and parses none, and builder never holds a token.
 gitlab_prefetch() {
-  local LC_ALL=C dir=$1 file rows strategy host project url part budget end i
-  local -a files=() urls=()
+  local LC_ALL=C dir=$1 file rows strategy host project url var part budget end i
+  local -a files=() urls=() vars=()
   local -A seen=()
   local -x AURTOMATOR_HOSTS_DIR
   shift
-  [[ -n "${GITLAB_TOKEN:-}" ]] || return 0
-  # The time of the step counts in the budget of the checks, which ask gitlab.com for the rest
+  for host in "${GITLAB_HOSTS[@]}"; do
+    var=$(gitlab_token_var "$host")
+    [[ -z "${!var:-}" ]] || break
+    var=""
+  done
+  [[ -n "$var" ]] || return 0
+  # The time of the step counts in the budget of the checks, which ask GitLab for the rest
   budget=$(env_seconds GITLAB_PREFETCH_BUDGET 300) || return 1
   end=$((SECONDS + budget))
   for file in "$@"; do
     [[ ! -f "$file" || -L "$file" ]] || files+=("$file")
   done
   ((${#files[@]} > 0)) || return 0
-  rows=$(yq -N -r '[.strategy // "", .upstream.host // "", .upstream.project // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
+  rows=$(package_rows '[.strategy // "", .upstream.host // "", .upstream.project // ""] | map(tostring) | join("\t")' "${files[@]}")
   while IFS=$'\t' read -r strategy host project; do
-    [[ "$strategy" == gitlab-tag && "${host,,}" == gitlab.com && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
+    [[ "$strategy" == gitlab-tag && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
+    [[ "/$project/" != */./* && "/$project/" != */../* ]] || continue
+    if ! var=$(gitlab_token_var "$host") || [[ -z "${!var:-}" ]]; then
+      continue
+    fi
     url=$(gitlab_tags_url "$host" "$project")
     [[ -z "${seen[$url]:-}" ]] || continue
     seen[$url]=1
     urls+=("$url")
+    vars+=("$var")
   done <<<"$rows"
   ((${#urls[@]} > 0)) || return 0
   mkdir -p "$dir"
-  # The memory of hosts keeps the pace of GitLab.com and stops asking it once it does not answer
+  # The memory of hosts keeps the pace of each host and stops asking a host once it does not answer
   AURTOMATOR_HOSTS_DIR=$(mktemp -d) || return 1
   : >"$AURTOMATOR_HOSTS_DIR/silent"
   : >"$AURTOMATOR_HOSTS_DIR/request"
   : >"$AURTOMATOR_HOSTS_DIR/failed"
   for ((i = 0; i < ${#urls[@]}; i++)); do
     if ((SECONDS >= end)); then
-      printf '::warning::Fetch GitLab tags stopped after %s s, so the checks ask gitlab.com without GITLAB_TOKEN for %s of its %s projects\n' \
+      printf '::warning::Fetch GitLab tags stopped after %s s, so the checks ask GitLab without a token for %s of %s projects\n' \
         "$budget" "$((${#urls[@]} - i))" "${#urls[@]}"
       break
     fi
     url=${urls[i]}
+    var=${vars[i]}
     part=$(mktemp -p "$dir" .part.XXXXXX) || break
-    if http_get "$url" -H @- -o "$part" <<<"PRIVATE-TOKEN: $GITLAB_TOKEN"; then
+    if http_get "$url" -H @- -o "$part" <<<"Authorization: Bearer ${!var}"; then
       mv -- "$part" "$dir/$(url_key "$url")"
     else
       rm -f -- "$part"
@@ -504,7 +565,7 @@ github_prefetch() {
     [[ ! -f "$file" || -L "$file" ]] || files+=("$file")
   done
   ((${#files[@]} > 0)) || return 0
-  rows=$(yq -N -r '[.strategy // "", .upstream.project // "", .upstream.tag_version_regex // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
+  rows=$(package_rows '[.strategy // "", .upstream.project // "", .upstream.tag_version_regex // ""] | map(tostring) | join("\t")' "${files[@]}")
   while IFS=$'\t' read -r strategy project regex; do
     [[ "$project" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || continue
     case $strategy in
@@ -552,6 +613,9 @@ github_prefetch() {
         "created_at": .createdAt, "body": .description} | to_json(0))),
       (select(.value.releases.totalCount != null and .value.releases.totalCount <= 100) | .key + "\tlist\t" +
         ([.value.releases.nodes[] | {"tag_name": .tagName, "name": .name, "draft": .isDraft, "prerelease": .isPrerelease,
+          "published_at": .publishedAt, "created_at": .createdAt}] | to_json(0))),
+      (select(.value.releases.totalCount != null and .value.releases.totalCount <= 100) | .key + "\tfirst\t" +
+        ([.value.releases.nodes[0:1][] | {"tag_name": .tagName, "name": .name, "draft": .isDraft, "prerelease": .isPrerelease,
           "published_at": .publishedAt, "created_at": .createdAt}] | to_json(0))))' <<<"$answer" 2>/dev/null) || lines=""
     while IFS=$'\t' read -r n kind json; do
       n=${n#r}
@@ -563,6 +627,10 @@ github_prefetch() {
         printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases/latest")"
       elif [[ "$kind" == list && -n "${list[$repo]:-}" ]]; then
         printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases?per_page=100&page=1")"
+        # The list holds every release, and a check outside the REST budget reads more pages of it only here
+        printf '[]\n' >"$(_github_cached "https://api.github.com/repos/$repo/releases?per_page=100&page=2")"
+      elif [[ "$kind" == first && -n "${list[$repo]:-}" ]]; then
+        printf '%s\n' "$json" >"$(_github_cached "https://api.github.com/repos/$repo/releases?per_page=1")"
       fi
     done <<<"$lines"
   done

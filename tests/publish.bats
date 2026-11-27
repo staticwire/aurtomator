@@ -550,6 +550,23 @@ current: 28+22"
   [ "$(cat "$ARCH_OUT_DIR/base")" = "$AUR_BASE" ]
 }
 
+# The AUR pkgrel goes into a sed replacement, where /e runs a line as a command
+@test "update-pkg --prepare: refuses an AUR pkgrel that makepkg does not take" {
+  local work="$TEST_TMPDIR/aur-work-jdk-temurin-ea-bin" rel='1/;s/.*/true/e;#'
+  setup_arch_prepare x86_64 powerpc64le riscv64
+  awk -v rel="$rel" '/^pkgrel=/ { print "pkgrel=\047" rel "\047"; next } { print }' "$work/PKGBUILD" >"$work/PKGBUILD.new"
+  awk -v rel="$rel" '/^\tpkgrel = / { print "\tpkgrel = " rel; next } { print }' "$work/.SRCINFO" >"$work/.SRCINFO.new"
+  mv "$work/PKGBUILD.new" "$work/PKGBUILD"
+  mv "$work/.SRCINFO.new" "$work/.SRCINFO"
+  git -C "$work" -c user.name=aur -c user.email=aur@example.invalid -c commit.gpgsign=false commit -qam "pkgrel"
+  git -C "$work" push -q "$AUR_REMOTE" master
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" jdk-temurin-ea-bin 28+23 --arch-out "" --prepare "$TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"The AUR PKGBUILD has pkgrel='1/;s/.*/true/e;#', which makepkg does not take"* ]]
+  [ ! -e "$ARCH_OUT_DIR" ]
+}
+
 @test "update-pkg --prepare: puts the arches back in the order of their commit" {
   setup_arch_prepare x86_64 riscv64
   archive_missing powerpc64le 28+24
@@ -706,6 +723,26 @@ current: '1.0.0'"
   git -C "$AUR_REMOTE" show HEAD:PKGBUILD | grep -qx 'pkgver=1.1.0'
   [ "$(git -C "$AUR_REMOTE" show HEAD:.SRCINFO)" = "$(cat "$TEST_TMPDIR/new.SRCINFO")" ]
   [ "$(pkg_get "$TEST_TMPDIR/packages/demo.yml" .current)" = "1.1.0" ]
+}
+
+# git add would pass the checked files through the attributes, and ident collapses $Id: ...$
+@test "update-pkg: commits the checked bytes whatever the attributes of the git config say" {
+  create_test_package "demo" "github-nightly" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  write_pkgbuild "$OLD" 1.0.0 1 "sha256sums=('SKIP' 'SKIP')"
+  write_srcinfo "$TEST_TMPDIR/old.SRCINFO" 1.0.0 1 SKIP SKIP
+  write_srcinfo "$TEST_TMPDIR/new.SRCINFO" 1.1.0 1 SKIP SKIP
+  sed -i 's/^\tpkgdesc = demo$/&, $Id: kept $/' "$TEST_TMPDIR/old.SRCINFO" "$TEST_TMPDIR/new.SRCINFO"
+  make_aur_remote demo "$OLD" "$TEST_TMPDIR/old.SRCINFO"
+  mock_pkg_tools "$TEST_TMPDIR/new.SRCINFO"
+  mock_source_tools
+  printf '%s\n' '.SRCINFO ident' >"$TEST_TMPDIR/attributes"
+  printf '[core]\n\tattributesFile = %s\n' "$TEST_TMPDIR/attributes" >>"$GIT_CONFIG_GLOBAL"
+
+  run "$TEST_TMPDIR/scripts/update-pkg.sh" demo 1.1.0
+  [ "$status" -eq 0 ]
+  cmp <(git -C "$AUR_REMOTE" cat-file blob HEAD:.SRCINFO) "$TEST_TMPDIR/new.SRCINFO"
 }
 
 @test "update-pkg --dry-run: shows the PKGBUILD diff and pushes nothing" {
@@ -4316,6 +4353,11 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
   [[ "$output" == *"pkg: publish ran out of its 0 minutes in this run"* ]]
   [ "$(failed_statuses "$TEST_TMPDIR/.status")" = "0" ]
+  # update-readme.sh runs after it in the same job
+  run env AURTOMATOR_PUBLISH_BUDGET=600 AURTOMATOR_README_BUDGET=600 "$TEST_TMPDIR/scripts/check-all.sh" --publish "$TEST_TMPDIR/out"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/publish-pkg.sh.args" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "new_version: 2.0.0" ]
 }
 
 @test "check-all --publish: keeps the update failure the prepare run recorded" {
@@ -4674,6 +4716,23 @@ EOF
   [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady' ]
 }
 
+# update-readme.sh runs after check-all.sh in the same 30 minutes of the job
+@test "check-all: leaves the share of the README out of the time budget of the loop" {
+  flaky_check flaky
+  # Each read of the clock moves it 100 s on
+  printf '%s\n' '#!/bin/sh' 'if [ "$*" = "-u +%s" ]; then' 'n=$(($(cat "$CLOCK" 2>/dev/null || echo 0) + 100))' \
+    'echo "$n" >"$CLOCK"' 'echo "$n"' 'else exec /usr/bin/date "$@"; fi' >"$MOCK_DIR/date"
+  chmod +x "$MOCK_DIR/date"
+  CLOCK="$TEST_TMPDIR/clock" AURTOMATOR_CHECK_BUDGET=250 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = $'flaky\nsteady' ]
+  rm "$TEST_TMPDIR/checks" "$TEST_TMPDIR/clock"
+  CLOCK="$TEST_TMPDIR/clock" AURTOMATOR_CHECK_BUDGET=250 AURTOMATOR_README_BUDGET=100 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/checks")" = flaky ]
+  [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 4 minutes in this run" ]
+}
+
 @test "check-all: checks no package again after the time budget of the loop" {
   flaky_check flaky 1
   # Each read of the clock moves it 100 s on
@@ -4687,7 +4746,44 @@ EOF
   [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 2 minutes in this run" ]
 }
 
-@test "check-all: starts the check loop one package later in each run" {
+# Budgets that reach some of the packages leave the rest unchecked, and each run starts far from
+# the start of the run before
+@test "check-all: leaves no package unchecked in more than two runs in a row" {
+  local i run missed=() unchecked=0
+  for i in 0 1 2 3 4 5 6 7 8 9; do
+    create_test_package "p$i" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+    missed[i]=0
+  done
+  rm -f "$TEST_TMPDIR/scripts/check-update.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TMPDIR/scripts/check-update.sh"
+  chmod +x "$TEST_TMPDIR/scripts/check-update.sh"
+  # Each read of the clock moves it 100 s on, so a budget of 650 s takes 6 checks
+  printf '%s\n' '#!/bin/sh' 'if [ "$*" = "-u +%s" ]; then' 'n=$(($(cat "$CLOCK" 2>/dev/null || echo 0) + 100))' \
+    'echo "$n" >"$CLOCK"' 'echo "$n"' 'else exec /usr/bin/date "$@"; fi' >"$MOCK_DIR/date"
+  chmod +x "$MOCK_DIR/date"
+  for run in $(seq 0 19); do
+    echo 0 >"$TEST_TMPDIR/clock"
+    CLOCK="$TEST_TMPDIR/clock" AURTOMATOR_CHECK_BUDGET=650 GITHUB_RUN_NUMBER=$run run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ]
+    for i in 0 1 2 3 4 5 6 7 8 9; do
+      if [[ "$(cat "$TEST_TMPDIR/.status/p$i")" == unchecked:* ]]; then
+        missed[i]=$((missed[i] + 1))
+        unchecked=$((unchecked + 1))
+      else
+        missed[i]=0
+      fi
+      ((missed[i] <= 2)) || {
+        echo "p$i unchecked in ${missed[i]} runs in a row up to run $run"
+        return 1
+      }
+    done
+  done
+  [ "$unchecked" -eq 80 ]
+}
+
+@test "check-all: starts the check loop at another package in each run" {
   flaky_check flaky
   GITHUB_RUN_NUMBER=7 run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
@@ -4704,7 +4800,8 @@ EOF
   local name value
   flaky_check flaky
   for name in AURTOMATOR_CHECK_TIMEOUT AURTOMATOR_UPDATE_TIMEOUT AURTOMATOR_VERIFY_BUDGET \
-    AURTOMATOR_CHECK_BUDGET AURTOMATOR_CHECK_SPENT AURTOMATOR_PUBLISH_BUDGET AURTOMATOR_RECHECK_DELAY; do
+    AURTOMATOR_CHECK_BUDGET AURTOMATOR_CHECK_SPENT AURTOMATOR_PUBLISH_BUDGET AURTOMATOR_RECHECK_DELAY \
+    AURTOMATOR_README_BUDGET AURTOMATOR_REQUIREMENTS_BUDGET; do
     for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 010 1.5 -1 1000000 " 5"; do
       run env "$name=$value" "$TEST_TMPDIR/scripts/check-all.sh"
       [ "$status" -eq 1 ]
@@ -4847,6 +4944,23 @@ arch_out:
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/steps" ]
+  [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
+}
+
+# The check of the arches comes after the alerts and before the requires rules, and it spends the budget
+@test "check-all: starts no step of the requires rules after the time budget of the loop" {
+  create_test_package "pkg" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'
+arch_out:
+  aarch64: '0123456789012345678901234567890123456789'"
+  check_until_budget 2.0.0
+  printf '#!/usr/bin/env bash\necho 2.0.0\n' >"$TEST_TMPDIR/scripts/check-update.sh"
+  rm -f "$TEST_TMPDIR/scripts/check-arch.sh"
+  printf '#!/usr/bin/env bash\necho 1200 >"%s/clock"\n' "$TEST_TMPDIR" >"$TEST_TMPDIR/scripts/check-arch.sh"
+  chmod +x "$TEST_TMPDIR/scripts/check-arch.sh"
+  AURTOMATOR_REQUIREMENTS_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
   [ "$(cat "$TEST_TMPDIR/.status/pkg")" = "unchecked: the check ran out of its 20 minutes in this run" ]
 }
 
@@ -5112,7 +5226,7 @@ current: '1.0.0'"
 
 # Slow sources early in the list would take the budget of the same packages in every run, and
 # the hour of a daily run stays the same
-@test "check-all --verify: starts the loop one package later in each run of the workflow" {
+@test "check-all --verify: starts the loop at another package in each run of the workflow" {
   local name
   for name in a b c; do
     create_test_package "$name" "github-release" "upstream:
@@ -5401,25 +5515,101 @@ EOF
 # === issue_write ===
 
 # GitHub allows 80 writes of content a minute and 500 an hour, and the run keeps the rest of the hour
-@test "issue_write: writes one a second, and fails with 3 past ISSUE_WRITE_MAX" {
-  local bin="$BATS_TEST_TMPDIR/bin" start end
-  mkdir -p "$bin"
-  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s/gh.log"\n' "$BATS_TEST_TMPDIR" >"$bin/gh"
-  chmod +x "$bin/gh"
-  export ISSUE_WRITES="$BATS_TEST_TMPDIR/writes" ISSUE_WRITE_MAX=3 PATH="$bin:$PATH"
+# Writes a gh to $BATS_TEST_TMPDIR/bin that logs its arguments to gh.log, answers GET /rate_limit
+# with the file points, and fails writes with the text of the file error when it exists
+issue_gh() {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat >"$BATS_TEST_TMPDIR/bin/gh" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$GH_DIR/gh.log"
+if [ "$1" = api ]; then
+  cat "$GH_DIR/points" 2>/dev/null
+  exit 0
+fi
+if [ -e "$GH_DIR/error" ]; then
+  cat "$GH_DIR/error" >&2
+  exit 1
+fi
+echo "https://github.com/owner/fork/issues/1"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/gh"
+  export GH_DIR="$BATS_TEST_TMPDIR" PATH="$BATS_TEST_TMPDIR/bin:$PATH" ISSUE_WRITES="$BATS_TEST_TMPDIR/writes"
+}
+
+# A close with a comment makes a comment and a close, two writes of content
+@test "issue_write: paces the writes, counts a close with a comment twice, and fails with 3 past ISSUE_WRITE_MAX" {
+  local start end
+  issue_gh
+  export ISSUE_WRITE_MAX=4 ISSUE_WRITE_PAUSE_MS=300
   start=${EPOCHREALTIME/[.,]/}
-  issue_write issue close 1 --comment a
+  issue_write issue create --title a --body-file - <<<"body"
   issue_write issue close 2 --comment b
-  issue_write issue create --title t --body-file - <<<"body"
+  issue_write issue create --title c --body-file - <<<"body"
   end=${EPOCHREALTIME/[.,]/}
-  (((end - start) >= 2000000))
-  run issue_write issue close 4 --comment d
+  (((end - start) >= 900000))
+  run issue_write issue create --title d --body-file -
   [ "$status" -eq 3 ]
-  [ "$(cat "$BATS_TEST_TMPDIR/gh.log")" = $'issue close 1 --comment a\nissue close 2 --comment b\nissue create --title t --body-file -' ]
+  [ "$(grep -v '^api ' "$BATS_TEST_TMPDIR/gh.log")" = $'issue create --title a --body-file -\nissue close 2 --comment b\nissue create --title c --body-file -' ]
   # The count holds across the steps of the job, which share the file
-  ISSUE_WRITE_MAX=4 run issue_write issue close 4 --comment d
+  ISSUE_WRITE_MAX=5 run issue_write issue close 4 --comment d
+  [ "$status" -eq 3 ]
+  ISSUE_WRITE_MAX=5 run issue_write issue create --title d --body-file -
   [ "$status" -eq 0 ]
-  [ "$(wc -l <"$BATS_TEST_TMPDIR/gh.log")" = 4 ]
+  [ "$(grep -vc '^api ' "$BATS_TEST_TMPDIR/gh.log")" = 4 ]
+}
+
+# The job token has 1000 GraphQL points an hour, and each write takes about 3 of them
+@test "issue_write: keeps ISSUE_POINTS_KEEP GraphQL points and reads them before every tenth write" {
+  local i
+  issue_gh
+  export ISSUE_WRITE_PAUSE_MS=0 ISSUE_POINTS_KEEP=100
+  echo 112 >"$BATS_TEST_TMPDIR/points"
+  for i in 1 2 3 4; do
+    issue_write issue create --title "$i" --body-file - <<<"body"
+  done
+  run issue_write issue create --title 5 --body-file -
+  [ "$status" -eq 3 ]
+  [ "$(grep -c '^issue create' "$BATS_TEST_TMPDIR/gh.log")" = 4 ]
+  [ "$(grep -cx 'api rate_limit --jq .resources.graphql.remaining' "$BATS_TEST_TMPDIR/gh.log")" = 1 ]
+  # The issue of the failed packages past the writes takes the points that the others keep
+  ISSUE_POINTS_KEEP=0 issue_write issue create --title grouped --body-file - <<<"body"
+  [ "$(grep -c '^issue create' "$BATS_TEST_TMPDIR/gh.log")" = 5 ]
+  : >"$BATS_TEST_TMPDIR/gh.log"
+  rm "$ISSUE_WRITES"
+  echo 1000 >"$BATS_TEST_TMPDIR/points"
+  for i in $(seq 1 12); do
+    issue_write issue create --title "$i" --body-file - <<<"body"
+  done
+  [ "$(grep -c '^api rate_limit ' "$BATS_TEST_TMPDIR/gh.log")" = 2 ]
+  # GitHub can fail to say, and the writes go on
+  : >"$BATS_TEST_TMPDIR/points"
+  rm "$ISSUE_WRITES"
+  issue_write issue create --title x --body-file - <<<"body"
+}
+
+@test "issue_write: fails with 3 when GitHub refuses a write for its rate limits" {
+  local error
+  issue_gh
+  export ISSUE_WRITE_PAUSE_MS=0
+  echo 1000 >"$BATS_TEST_TMPDIR/points"
+  for error in 'GraphQL: API rate limit exceeded for installation ID 1. (RATE_LIMITED)' \
+    'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' \
+    'GraphQL: was submitted too quickly (createIssue)'; do
+    echo "$error" >"$BATS_TEST_TMPDIR/error"
+    run issue_write issue create --title t --body-file -
+    [ "$status" -eq 3 ]
+    [ "$output" = "$error" ]
+  done
+  # The next write reads the points again
+  [ "$(grep -c '^api rate_limit ' "$BATS_TEST_TMPDIR/gh.log")" = 3 ]
+  echo 'GraphQL: body is too long (maximum is 65536 characters)' >"$BATS_TEST_TMPDIR/error"
+  run issue_write issue create --title t --body-file -
+  [ "$status" -eq 1 ]
+  [ "$output" = 'GraphQL: body is too long (maximum is 65536 characters)' ]
+  rm "$BATS_TEST_TMPDIR/error"
+  run issue_write issue create --title t --body-file -
+  [ "$status" -eq 0 ]
+  [ "$output" = https://github.com/owner/fork/issues/1 ]
 }
 
 # Errors hold text of upstream, so each goes in a code span without backticks, where @ mentions no one
@@ -5429,10 +5619,10 @@ EOF
   echo "update_failed: $(printf 'x%.0s' {1..300})" >"$TEST_TMPDIR/st/d"
   run grouped_issue_body "$TEST_TMPDIR/st" https://example.invalid/run c d
   [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "GitHub allows a run about 450 writes to issues an hour, so these packages failed without an issue of their own in https://example.invalid/run. The run summary of its step Create issues holds each whole error." ]
+  [ "${lines[0]}" = "The writes of the run to issues reached the limits of GitHub, so these packages failed without an issue of their own in https://example.invalid/run. The log of its step Write the run summary holds each whole error." ]
   [ "${lines[1]}" = "- \`c\`: \`'boom' @octocat [x](https://evil.example)\`" ]
   [ "${lines[2]}" = "- \`d\`: \`$(printf 'x%.0s' {1..200})\`" ]
-  [ "${lines[3]}" = "Auto-created by update workflow, which closes it once each of these packages recovered or has an issue of its own." ]
+  [ "${lines[3]}" = "Auto-created by update workflow, which closes it once each of these packages recovered, has an issue of its own or has no YAML." ]
 }
 
 # GitHub refuses an issue body past 65536 characters
@@ -5447,7 +5637,7 @@ EOF
   run grouped_issue_body "$TEST_TMPDIR/st" https://example.invalid/run "${names[@]}"
   [ "$status" -eq 0 ]
   ((${#output} <= HOST_BODY_MAX))
-  [[ "$output" =~ $'\n'"- and "([0-9]+)" more packages, which the run summary of the step Create issues lists"$'\n' ]]
+  [[ "$output" =~ $'\n'"- and "([0-9]+)" more packages, which the log of the step Write the run summary lists"$'\n' ]]
   [ "$((BASH_REMATCH[1] + $(grep -c '^- `p' <<<"$output")))" = 600 ]
   for i in $(seq 601 1000); do
     printf 'p%s\tpython\n' "$i" >>"$TEST_TMPDIR/req"
@@ -5970,6 +6160,42 @@ c
 EOF
   )
   [ "$output" = "$expected" ]
+}
+
+# GitHub shows no summary of a step past 1 MiB
+@test "run_summary: keeps within RUN_SUMMARY_MAX bytes and counts the errors past it" {
+  local LC_ALL=C
+  make_statuses a="check_failed: $(printf 'x%.0s' {1..300})" b="check_failed: $(printf 'y%.0s' {1..300})" \
+    c="update_failed: $(printf 'z%.0s' {1..300})" d="unchecked: out of time"
+  RUN_SUMMARY_MAX=900 run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  ((${#output} <= 900))
+  [[ "$output" == *'`a`: check failed'* && "$output" != *'`b`: '* && "$output" != *'`c`: '* ]]
+  [[ "$output" == *$'\n\nThe log of the step Write the run summary holds the errors of 2 more packages.\n\nNot checked in this run: `d`.' ]]
+  RUN_SUMMARY_MAX=400 run run_summary "$TEST_TMPDIR/st"
+  [[ "$output" == *$'|\n\nThe log of the step Write the run summary holds the errors of 3 more packages.\n'* ]]
+  rm "$TEST_TMPDIR/st/c"
+  RUN_SUMMARY_MAX=400 run run_summary "$TEST_TMPDIR/st"
+  [[ "$output" == *$'\n\nThe log of the step Write the run summary holds the errors of 2 more packages.\n'* ]]
+  rm "$TEST_TMPDIR/st/b"
+  RUN_SUMMARY_MAX=400 run run_summary "$TEST_TMPDIR/st"
+  [[ "$output" == *$'\n\nThe log of the step Write the run summary holds the error of 1 more package.\n'* ]]
+}
+
+# Errors hold text of upstream, and a line of it can look like a workflow command
+@test "log_errors: prints each whole error with workflow commands stopped" {
+  local token
+  make_statuses a=up_to_date b=$'check_failed: one\n::error::two' c="update_failed: three" d="held: 1.0" _alerts=x
+  run log_errors "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^::stop-commands::([0-9a-f]{32})$'\n' ]]
+  token=${BASH_REMATCH[1]}
+  [ "$output" = "::stop-commands::$token"$'\nb: check failed\none\n::error::two\n\nc: update failed\nthree\n\n'"::$token::" ]
+  rm -rf "$TEST_TMPDIR/st"
+  make_statuses a=up_to_date d="held: 1.0"
+  run log_errors "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "run_summary: names the packages the check did not reach in one line" {

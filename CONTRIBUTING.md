@@ -9,7 +9,7 @@ For anything beyond a typo or a one-line fix, open an issue or a draft PR first 
 ## Development setup
 
 ```sh
-sudo pacman -S --needed git bash shellcheck shfmt actionlint zizmor bats go-yq jq openssh
+sudo pacman -S --needed git bash shellcheck shfmt actionlint zizmor bats go-yq jq openssh python ruby
 git clone https://github.com/staticwire/aurtomator.git
 cd aurtomator
 bats tests/ --recursive
@@ -34,6 +34,8 @@ CI runs these commands:
 ```sh
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh tests/helpers/cov-shims/*
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh tests/helpers/cov-shims/*
+python3 -m py_compile scripts/lib/*.py
+ruby -wc scripts/lib/*.rb
 actionlint
 zizmor --persona pedantic .
 for action in .github/actions/*/action.yml; do yq '.runs.steps[] | select(has("run")) | .run' "$action" | shellcheck -s bash -; done

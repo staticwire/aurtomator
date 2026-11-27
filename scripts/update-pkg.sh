@@ -185,6 +185,11 @@ if [[ "$(_plain_value "${aur_dir}/PKGBUILD" pkgver)" == "$NEW_VERSION" ]] &&
 fi
 
 _edit_parts_ok "$(_pkgbuild_parts "${aur_dir}/PKGBUILD" "$ASSET_VAR")" "AUR PKGBUILD" || exit 1
+# pkgrel goes into a sed replacement
+if ! (LC_ALL=C && [[ "$pkgrel" =~ ^[0-9]+([.][0-9]+)?$ ]]); then
+  log_err "The AUR PKGBUILD has pkgrel=${pkgrel@Q}, which makepkg does not take"
+  exit 1
+fi
 if [[ -n "$ASSET_VAR" ]]; then
   sed -i "s/^${ASSET_VAR}=.*/${ASSET_VAR}=${ASSET}/" "${aur_dir}/PKGBUILD"
 fi
@@ -313,7 +318,13 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   exit 0
 fi
 
-git -C "$aur_dir" add PKGBUILD .SRCINFO || exit 1
+# The checked files enter the index byte for byte, as publish-pkg.sh stages them: git add would pass
+# them through the attributes of the AUR repo or the git config
+git -C "$aur_dir" read-tree HEAD || exit 1
+for file in PKGBUILD .SRCINFO; do
+  blob=$(git -C "$aur_dir" hash-object -w --stdin --no-filters <"${aur_dir}/${file}") || exit 1
+  git -C "$aur_dir" update-index --add --cacheinfo "100644,${blob},${file}" || exit 1
+done
 aur_commit_push "$aur_dir" "$NEW_VERSION" "$strategy" "$pkgrel" || exit 1
 log_ok "Pushed $PKG_NAME $NEW_VERSION to AUR"
 

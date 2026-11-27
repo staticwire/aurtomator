@@ -949,12 +949,13 @@ EOF
 # === check-update.sh ===
 
 # The token outlives the run, and only gitlab-tag sends it; other strategies parse upstream answers
-@test "check-update: gives GITLAB_TOKEN to gitlab-tag alone" {
-  local strategy
+@test "check-update: gives the GitLab tokens to gitlab-tag alone" {
+  local strategy var
   for strategy in gitlab-tag github-release; do
     # The strategies of the test tree link to those of the checkout
     rm -f "$TEST_TMPDIR/strategies/$strategy.sh"
-    printf '#!/usr/bin/env bash\nif [ -n "${GITLAB_TOKEN:-}" ]; then echo 9.0.0; else echo 2.0.0; fi\n' \
+    # 2.0.0 and one more major for each token in the environment
+    printf '#!/usr/bin/env bash\necho "$((2 + $(env | grep -c "^GITLAB_TOKEN_"))).0.0"\n' \
       >"$TEST_TMPDIR/strategies/$strategy.sh"
     chmod +x "$TEST_TMPDIR/strategies/$strategy.sh"
   done
@@ -965,8 +966,12 @@ current: '1.0.0'"
   create_test_package hub github-release "upstream:
   project: owner/repo
 current: '1.0.0'"
-  [ "$(GITLAB_TOKEN=glpat-test "$TEST_TMPDIR/scripts/check-update.sh" lab 2>/dev/null)" = 9.0.0 ]
-  [ "$(GITLAB_TOKEN=glpat-test "$TEST_TMPDIR/scripts/check-update.sh" hub 2>/dev/null)" = 2.0.0 ]
+  for var in GITLAB_TOKEN_GITLAB_COM GITLAB_TOKEN_GITLAB_GNOME_ORG GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG \
+    GITLAB_TOKEN_INVENT_KDE_ORG GITLAB_TOKEN_SALSA_DEBIAN_ORG GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG; do
+    export "$var=glpat-test"
+  done
+  [ "$("$TEST_TMPDIR/scripts/check-update.sh" lab 2>/dev/null)" = 8.0.0 ]
+  [ "$("$TEST_TMPDIR/scripts/check-update.sh" hub 2>/dev/null)" = 2.0.0 ]
 }
 
 @test "check-update: detects new version" {
@@ -3091,7 +3096,8 @@ python_files_db() {
   [ "$output" = "$TEST_TMPDIR/run-cache/aur/ydiskarc.SRCINFO"$'\n'"$TEST_TMPDIR/run-cache/aur/ydiskarc.SRCINFO" ]
   cmp "$TEST_TMPDIR/run-cache/aur/ydiskarc.SRCINFO" "$FIXTURES_DIR/aur/ydiskarc.SRCINFO"
   [ "$(wc -l <"$TEST_TMPDIR/clones")" -eq 1 ]
-  [[ "$(<"$TEST_TMPDIR/clones")" == "clone --depth 1 --no-checkout -q https://aur.archlinux.org/ydiskarc.git "* ]]
+  # The list of the packages that miss a key clones the AUR repository of each, so stalled clones end
+  [[ "$(<"$TEST_TMPDIR/clones")" == "clone --depth 1 --no-checkout -q -c http.lowSpeedLimit=102400 -c http.lowSpeedTime=60 https://aur.archlinux.org/ydiskarc.git "* ]]
   run_archdb 'aur_srcinfo ydiskarc'
   [ "$(wc -l <"$TEST_TMPDIR/clones")" -eq 1 ]
 }
@@ -3104,6 +3110,19 @@ python_files_db() {
   run_archdb 'aur_srcinfo ../x'
   [ "$status" -eq 1 ]
   [[ "$output" == *"../x is not an AUR package name"* ]]
+}
+
+# The list and the metadata reach awk as two inputs, and an empty list is still the first of them
+@test "archdb.sh: aur_screen prints no package for an empty list" {
+  aur_meta '{"Name":"py","PackageBase":"py","Depends":["python"]}'
+  : >"$TEST_TMPDIR/names"
+  run_archdb 'aur_screen "$1"' "$TEST_TMPDIR/names"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  printf 'py\n' >"$TEST_TMPDIR/names"
+  run_archdb 'aur_screen "$1"' "$TEST_TMPDIR/names"
+  [ "$status" -eq 0 ]
+  [ "$output" = py ]
 }
 
 @test "archdb.sh: files_index_python lists the distributions of the repositories once per run" {
@@ -3173,6 +3192,18 @@ python_files_db() {
   [ "$(wc -l <"$PACMAN_ARGS_LOG")" -eq 2 ]
   [ "$(awk '{ if (length($0) > max) max = length($0) } END { print (max < 100000) }' "$PACMAN_ARGS_LOG")" -eq 1 ]
   [ "$(wc -l <"$AURTOMATOR_RUN_CACHE/py-owners-asked")" -eq 15002 ]
+}
+
+# The names join the regular expression of pacman -Fx, so a name of a file of the release can add to it
+@test "pyrules.sh: _python_owners_index asks pacman for no name that is no module name" {
+  python_files_db
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
+  run_archdb '_python_owners_index yaml "a|b" ".*" "x)" 1a && cat "$AURTOMATOR_RUN_CACHE/py-owners-asked"'
+  [ "$status" -eq 0 ]
+  [ "$output" = yaml ]
+  [ "$(wc -l <"$PACMAN_ARGS_LOG")" -eq 1 ]
+  run grep -F -e 'a|b' -e '.*' -e 'x)' -e '1a' "$PACMAN_ARGS_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "rbrules.sh: _ruby_owners fails on an error of pacman and splits long queries" {
@@ -3655,6 +3686,17 @@ demo_wheel() {
   pypi_fake_wheel demo 1.0 "$w"
 }
 
+# Helper: puts a command $1 in front of PATH that appends its arguments to $BATS_TEST_TMPDIR/$1-calls
+# and runs the next $1 of PATH
+record_calls() {
+  local bin="$BATS_TEST_TMPDIR/rec"
+  mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\nprintf '\''%%s\\n'\'' "$*" >>"%s/%s-calls"\nPATH=${PATH#"%s:"}\nexec %s "$@"\n' \
+    "$BATS_TEST_TMPDIR" "$1" "$bin" "$1" >"$bin/$1"
+  chmod +x "$bin/$1"
+  [[ "$PATH" == "$bin:"* ]] || PATH="$bin:$PATH"
+}
+
 # Helper: runs python_imports for package pkg of registry $2 at version $3 with .SRCINFO $1
 run_imports() {
   create_test_package "pkg" "pypi" "upstream:
@@ -3673,6 +3715,22 @@ ${4:-}"
   run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\timport pandas (optional): python-pandas in neither depends nor optdepends\nnotice\timport tqdm: python-tqdm not in depends' ]
+}
+
+# The release under check holds the files that py_imports.py parses, so neither PYTHONPATH, the
+# working directory nor site-packages reach its python3
+@test "pyrules.sh: python_imports runs py_imports.py with -I -S" {
+  local calls="$BATS_TEST_TMPDIR/python3-calls"
+  imports_env
+  demo_wheel
+  printf 'pkgbase = python-demo\n\tpkgver = 1.0\n\tpkgrel = 1\n\tdepends = python\n\npkgname = python-demo\n' \
+    >"$TEST_TMPDIR/demo.SRCINFO"
+  record_calls python3
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"import tqdm: python-tqdm not in depends"* ]]
+  [ "$(grep -c '/py_imports\.py ' "$calls")" -eq 2 ]
+  [ "$(grep -c '^-I -S [^ ]*/scripts/lib/py_imports\.py ' "$calls")" -eq 2 ]
 }
 
 @test "pyrules.sh: python_imports finds the imports of a script of the wheel" {
@@ -4267,6 +4325,41 @@ $1"
   ! grep -q packages-meta "$CURL_ARGS_LOG"
 }
 
+# A repository without packages has no package that misses a key, so the issue closes
+@test "check-all: --rules-later lists no package and reads no AUR without packages" {
+  aur_meta
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_TMPDIR/.status/_requirements" ]
+  [ ! -s "$TEST_TMPDIR/.status/_requirements" ]
+  [[ "$output" != *"Could not read the AUR"* ]]
+  run grep -q packages-meta "$CURL_ARGS_LOG"
+  [ "$status" -ne 0 ]
+}
+
+# The list runs after the loop in the same 30 minutes of the job, so it takes the share of the budget
+# that the loop leaves it, and a run without time for it leaves the issue as it is
+@test "check-all: lists the packages that miss a key within the time the loop leaves it" {
+  local start
+  aur_meta '{"Name":"kube-diagrams","PackageBase":"kube-diagrams","Depends":["bash","python"]}'
+  python_package "" bash python python-yaml
+  AURTOMATOR_CHECK_BUDGET=0 run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMPDIR/.status/_requirements" ]
+  [[ "$output" == *"The run has no time left to list the packages that miss the source of their requirements"* ]]
+  start=$SECONDS
+  MOCK_META_SLEEP=10 AURTOMATOR_CHECK_BUDGET=2 AURTOMATOR_REQUIREMENTS_BUDGET=2 run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  ((SECONDS - start < 8))
+  [ ! -e "$TEST_TMPDIR/.status/_requirements" ]
+  [[ "$output" == *"The run has no time left to list the packages that miss the source of their requirements"* ]]
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "unchecked: the check ran out of its 0 minutes in this run" ]
+  AURTOMATOR_CHECK_BUDGET=60 AURTOMATOR_REQUIREMENTS_BUDGET=60 run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$(cat "$TEST_TMPDIR/.status/kube-diagrams")" = "unchecked: the check ran out of its 1 minutes in this run" ]
+  [ "$(cat "$TEST_TMPDIR/.status/_requirements")" = $'kube-diagrams\tpython' ]
+}
+
 # Writes the GraphQL answer for github-release packages a, at current 1.0.0 with no regex, and b, at
 # 1.0.0 with a regex, of owner/a and owner/b; the mock answers REST /releases/latest with v2.0.0
 graphql_packages() {
@@ -4342,6 +4435,40 @@ current: '1.0.0'"
   run ! grep -q api.github.com/graphql "$CURL_ARGS_LOG"
 }
 
+# yq reads all files in one call, which stops at the first file it cannot read
+@test "check-all: a YAML that yq cannot read keeps the fetches and budgets of the other packages" {
+  local n
+  graphql_packages
+  printf 'strategy: [\n' >"$TEST_TMPDIR/packages/0bad.yml"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 3.0.0" ]
+  [ "$(grep -c api.github.com/graphql "$CURL_ARGS_LOG")" = 1 ]
+  [[ "$output" == *"yq cannot read 'packages/0bad.yml', so the reads before the checks leave it out"* ]]
+  rm "$TEST_TMPDIR"/packages/[ab].yml
+  for n in 1 2; do
+    create_test_package "r$n" repology "upstream:
+  repology: r$n
+current: '1.0.0'"
+  done
+  AURTOMATOR_REPOLOGY_BUDGET=1 GITHUB_RUN_NUMBER=0 run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/r2")" = "unchecked: repology.org takes 1 checks a run, so this package gets its check in a later run" ]
+}
+
+@test "gitlab_prefetch: a YAML that yq cannot read keeps the fetches of the other packages" {
+  local key
+  printf 'strategy: [\n' >"$TEST_TMPDIR/packages/0bad.yml"
+  create_test_package a gitlab-tag "upstream:
+  host: gitlab.com
+  project: group/a"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN_GITLAB_COM=glpat-com gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"yq cannot read 'packages/0bad.yml', so the reads before the checks leave it out"* ]]
+  key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fa/repository/tags?per_page=100' | sha256sum)
+  [ -f "$TEST_TMPDIR/answers/${key%% *}" ]
+}
+
 # The issues count a failed check under the host of its own failed request, which check-all.sh reads
 # from the memory of hosts after the check
 @test "github_prefetch: leaves no failed request to the first check" {
@@ -4360,9 +4487,10 @@ current: '1.0.0'"
   [ "$output" = $'0\n0' ]
 }
 
-# The workflow runs it as root, which parses no answer, so builder parses them without the token
-@test "gitlab_prefetch: keeps the answers of GitLab.com to the gitlab-tag packages, asked with GITLAB_TOKEN" {
-  local key
+# The workflow runs it as root, which parses no answer, so builder parses them without the tokens.
+# Each host of the table gets the token of its own variable, and other hosts get none.
+@test "gitlab_prefetch: asks each GitLab host of the table with its own token" {
+  local key_a key_k
   create_test_package a gitlab-tag "upstream:
   host: gitlab.com
   project: group/a"
@@ -4374,22 +4502,43 @@ current: '1.0.0'"
   create_test_package d gitlab-tag "upstream:
   host: gitlab.com
   project: missing-group/d"
+  create_test_package e gitlab-tag "upstream:
+  host: gitlab.com
+  project: group/.."
+  create_test_package f gitlab-tag "upstream:
+  host: invent-kde.org
+  project: group/f"
+  create_test_package g gitlab-tag "upstream:
+  host: gitlab.example.org
+  project: group/g"
+  create_test_package k gitlab-tag "upstream:
+  host: invent.kde.org
+  project: group/k"
   printf '%s\n' 'name: l' 'strategy: gitlab-tag' 'upstream:' '  host: gitlab.com' '  project: group/l' >"$TEST_TMPDIR/l.yml"
   ln -s "$TEST_TMPDIR/l.yml" "$TEST_TMPDIR/packages/l.yml"
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
-  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  mv "$MOCK_DIR/curl" "$MOCK_DIR/curl-answer"
+  printf '%s\n' '#!/usr/bin/env bash' "cat >>'$TEST_TMPDIR/curl.stdin'" 'exec "${0%/*}/curl-answer" "$@"' >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
+  run bash -c 'source "$0/scripts/lib.sh" &&
+    GITLAB_TOKEN_GITLAB_COM=glpat-com GITLAB_TOKEN_INVENT_KDE_ORG=glpat-kde GITLAB_TOKEN_GITLAB_EXAMPLE_ORG=glpat-example \
+      gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
   [[ "$output" == *"missing-group%2Fd/repository/tags?per_page=100: The requested URL returned error: 404"* ]]
-  key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fa/repository/tags?per_page=100' | sha256sum)
-  [ "$(ls -A "$TEST_TMPDIR/answers")" = "${key%% *}" ]
-  [ "$(cat "$TEST_TMPDIR/answers/${key%% *}")" = '[{"name": "v3.1.0"}, {"name": "v3.0.0"}, {"name": "v2.0.0"}]' ]
-  # curl reads the header from stdin, and asks gitlab.com alone
-  [ "$(grep -c -- ' -H @- ' "$CURL_ARGS_LOG")" = 2 ]
-  [ "$(wc -l <"$CURL_ARGS_LOG")" = 2 ]
-  run ! grep -q glpat-test "$CURL_ARGS_LOG"
-  # Without the token it asks nothing
+  key_a=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fa/repository/tags?per_page=100' | sha256sum)
+  key_k=$(printf '%s' 'https://invent.kde.org/api/v4/projects/group%2Fk/repository/tags?per_page=100' | sha256sum)
+  [ "$(ls -A "$TEST_TMPDIR/answers" | sort)" = "$(printf '%s\n' "${key_a%% *}" "${key_k%% *}" | sort)" ]
+  [ "$(cat "$TEST_TMPDIR/answers/${key_a%% *}")" = '[{"name": "v3.1.0"}, {"name": "v3.0.0"}, {"name": "v2.0.0"}]' ]
+  # curl reads each header from stdin, for no project with a part . or ..
+  [ "$(grep -c -- ' -H @- ' "$CURL_ARGS_LOG")" = 3 ]
+  [ "$(wc -l <"$CURL_ARGS_LOG")" = 3 ]
+  [ "$(grep -c 'https://gitlab.com/' "$CURL_ARGS_LOG")" = 2 ]
+  [ "$(grep -c 'https://invent.kde.org/' "$CURL_ARGS_LOG")" = 1 ]
+  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = $'Authorization: Bearer glpat-com\nAuthorization: Bearer glpat-com\nAuthorization: Bearer glpat-kde' ]
+  run ! grep -q glpat- "$CURL_ARGS_LOG"
+  # Without a token of the table it asks nothing
   rm "$CURL_ARGS_LOG"
-  run bash -c 'source "$0/scripts/lib.sh" && gitlab_prefetch "$0/none" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN_GITLAB_EXAMPLE_ORG=glpat-example gitlab_prefetch "$0/none" "$0"/packages/*.yml' "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_TMPDIR/none" ]
   [ ! -e "$CURL_ARGS_LOG" ]
@@ -4404,12 +4553,12 @@ current: '1.0.0'"
   host: gitlab.com
   project: group/b"
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
-  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test GITLAB_PREFETCH_BUDGET=0 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN_GITLAB_COM=glpat-test GITLAB_PREFETCH_BUDGET=0 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
-  [ "$output" = "::warning::Fetch GitLab tags stopped after 0 s, so the checks ask gitlab.com without GITLAB_TOKEN for 2 of its 2 projects" ]
+  [ "$output" = "::warning::Fetch GitLab tags stopped after 0 s, so the checks ask GitLab without a token for 2 of 2 projects" ]
   [ ! -e "$CURL_ARGS_LOG" ]
   [ -z "$(ls -A "$TEST_TMPDIR/answers")" ]
-  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test GITLAB_PREFETCH_BUDGET=1.5 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
+  run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN_GITLAB_COM=glpat-test GITLAB_PREFETCH_BUDGET=1.5 gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"GITLAB_PREFETCH_BUDGET must be a whole number of seconds from 0 to 999999: '1.5'"* ]]
   [ ! -e "$CURL_ARGS_LOG" ]
@@ -4443,7 +4592,10 @@ current: '1.0.0'"
 current: '1.0.0'"
   MOCK_REST_LEFT=399 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$(cat "$TEST_TMPDIR/.status/t")" = "$reason" ]
-  MOCK_REST_LEFT=400 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  # A check asks at most 15 requests, and the reserve stays after them
+  MOCK_REST_LEFT=414 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "$reason" ]
+  MOCK_REST_LEFT=415 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
   # The limit of local runs without a token is theirs to watch, and an unread limit stops nothing
   rm "$CURL_ARGS_LOG"
@@ -4452,6 +4604,46 @@ current: '1.0.0'"
   run ! grep -q rate_limit "$CURL_ARGS_LOG"
   MOCK_REST_LEFT=fail GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 2.0.0" ]
+}
+
+# The answers of GraphQL in the run cache take no REST request, and the assets of a release take some
+@test "check-all: checks the packages whose releases GraphQL answered when 400 REST requests are left" {
+  graphql_packages
+  create_test_package c github-release "upstream:
+  project: owner/a
+  asset_regex: 'c-.*'
+current: '1.0.0'"
+  MOCK_REST_LEFT=399 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_TMPDIR/.status/a")" = "new_version: 3.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/b")" = "new_version: 5.0.0" ]
+  [ "$(cat "$TEST_TMPDIR/.status/c")" = "unchecked: the run keeps its last 400 GitHub API requests of the hour for the jobs after the check" ]
+  run ! grep -q -e repos/owner/a/releases -e repos/owner/b/releases "$CURL_ARGS_LOG"
+}
+
+# Packages whose releases GraphQL answered take no REST check, so the cache answers each page they read
+@test "check-all: a check of releases that GraphQL answered asks no REST" {
+  local node='{"name":"x","isDraft":false,"isPrerelease":false,"publishedAt":"2026-01-02T00:00:00Z","createdAt":"2026-01-01T00:00:00Z"' nodes="" i
+  create_test_package c github-release "upstream:
+  project: owner/c
+  tag_version_regex: '^v([0-9.]+)\$'
+current: '1.0.0'"
+  create_test_package d github-release "upstream:
+  project: owner/d
+  tag_version_regex: '^release-(.+)\$'
+current: '1.0.0'"
+  # 100 releases fill the first page, so the list reads a second one
+  for i in $(seq 1 100); do
+    nodes+="${nodes:+,}$node,\"tagName\":\"v1.$i.0\"}"
+  done
+  printf '%s\n' "{\"data\":{\"r0\":{\"latestRelease\":null,\"releases\":{\"totalCount\":100,\"nodes\":[$nodes]}},\"r1\":{\"latestRelease\":null,\"releases\":{\"totalCount\":1,\"nodes\":[$node,\"tagName\":\"v2.0.0\"}]}}}}" \
+    >"$MOCK_FILES_DIR/graphql.json"
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$(cat "$TEST_TMPDIR/.status/c")" = "new_version: 1.100.0" ]
+  # No release matches, so the check asks whether the list is empty
+  [[ "$(cat "$TEST_TMPDIR/.status/d")" == "check_failed: "*"No release of owner/d outside pre-releases"* ]]
+  run ! grep -q -e repos/owner/c/releases -e repos/owner/d/releases "$CURL_ARGS_LOG"
 }
 
 # GET /rate_limit counts against no limit, and each check takes a few requests at most
@@ -4465,6 +4657,22 @@ current: '1.0.0'"
   GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
   [ "$(grep -c api.github.com/rate_limit "$CURL_ARGS_LOG")" = 3 ]
+}
+
+# Between two reads each check counts as the 15 requests it can ask at most
+@test "check-all: keeps the REST reserve between two reads of the limit" {
+  local i
+  for i in $(seq 10 30); do
+    create_test_package "p$i" github-release "upstream:
+  project: owner/p$i"
+  done
+  # 430 left: two checks after each read, at 415 and at 400
+  MOCK_REST_LEFT=430 GITHUB_TOKEN=test-token run "$TEST_TMPDIR/scripts/check-all.sh"
+  [ "$status" -eq 0 ]
+  run grep -lx 'unchecked: the run keeps its last 400 GitHub API requests of the hour for the jobs after the check' \
+    "$TEST_TMPDIR"/.status/p*
+  [ "${#lines[@]}" -eq 16 ]
+  [[ "$output" != *"/p10"* && "$output" != *"/p11"* && "$output" != *"/p20"* && "$output" != *"/p21"* && "$output" != *"/p30"* ]]
 }
 
 # Prints the milliseconds that three requests to URL $1 take to begin in a check run
@@ -4493,6 +4701,23 @@ paced_ms() {
   ms=$(paced_ms https://repology.org/api/v1/project)
   echo "repology.org: $ms ms"
   ((ms >= 2000 && ms < 3500))
+}
+
+# The parallel checks of validate-pkg.sh share the pace of each host and keep no other memory
+@test "request_begin: keeps the pace of a host across parallel checks with AURTOMATOR_PACE_DIR" {
+  run bash -c 'source "$0/scripts/lib.sh"
+    export AURTOMATOR_PACE_DIR=$(mktemp -d)
+    start=${EPOCHREALTIME/[.,]/}
+    for p in 1 2; do
+      (for i in 1 2 3; do request_begin "https://rubygems.org/api/$p/$i"; done) &
+    done
+    wait
+    echo $(((${EPOCHREALTIME/[.,]/} - start) / 1000))
+    ls "$AURTOMATOR_PACE_DIR"' "$TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  echo "six requests: ${lines[0]} ms"
+  [ "${lines[0]}" -ge 500 ]
+  [[ "${lines[*]:1}" != *request* && "${lines[*]:1}" != *silent* ]]
 }
 
 # Repology counts more than 1000 requests a day as bulk, and the next run starts where this one stopped
@@ -4526,6 +4751,20 @@ current: '1.0.0'"
   PATH="$bin:$PATH" FAKE_NOW=36000 AURTOMATOR_REPOLOGY_BUDGET=2 run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$(cat "$TEST_TMPDIR/.status/r3")" = "new_version: 5.0.0" ]
   [ "$(cat "$TEST_TMPDIR/.status/r2")" = "$reason" ]
+}
+
+# bash runs $(...) in an array subscript of (( )), so the budget matches a digit pattern first
+@test "check-all: refuses a repology.org budget from the environment that is no number of checks" {
+  local value
+  for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 0 1.5 010; do
+    AURTOMATOR_REPOLOGY_BUDGET=$value run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AURTOMATOR_REPOLOGY_BUDGET must be a number of checks from 1: "* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/pwned" ]
 }
 
 # One request holds 50 repositories
@@ -4563,7 +4802,11 @@ current: '1.0.0'"
     echo up_to_date >"$TEST_TMPDIR/.status/foo"
     : >"$TEST_TMPDIR/.status/_requirements"
     run "$TEST_TMPDIR/scripts/check-all.sh" "--$mode" "$TEST_TMPDIR/out"
-    [ -e "$TEST_TMPDIR/.status/_requirements" ] && [ ! -s "$TEST_TMPDIR/.status/_requirements" ]
+    [ -e "$TEST_TMPDIR/.status/_requirements" ] || {
+      echo "empty list lost by --$mode"
+      return 1
+    }
+    [ ! -s "$TEST_TMPDIR/.status/_requirements" ]
     rm -rf "$TEST_TMPDIR/.status" "$TEST_TMPDIR/out"
     mkdir -p "$TEST_TMPDIR/.status"
     echo up_to_date >"$TEST_TMPDIR/.status/foo"
@@ -5054,6 +5297,20 @@ run_ruby_imports() {
   [ "$output" = $'notice\trequire simplecov: ruby-simplecov not in depends' ]
 }
 
+# The gem under check holds the files that rb_requires.rb parses, so no installed gem loads into its ruby
+@test "rbrules.sh: ruby_imports runs rb_requires.rb with --disable-gems" {
+  local calls="$BATS_TEST_TMPDIR/ruby-calls"
+  gems_env 1.3.2
+  bashcov_gem
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  record_calls ruby
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"require erb (optional)"* ]]
+  [ "$(grep -c '/rb_requires\.rb ' "$calls")" -eq 2 ]
+  [ "$(grep -c '^--disable-gems [^ ]*/scripts/lib/rb_requires\.rb ' "$calls")" -eq 2 ]
+}
+
 @test "rbrules.sh: ruby_imports fails on a gem that does not match its sha256, and notes without ruby" {
   gems_env 1.3.2
   bashcov_gem
@@ -5440,15 +5697,19 @@ $1"
   grep -qF '>alpha</a>' "$TEST_TMPDIR/README.md"
   grep -qF '>beta</a>' "$TEST_TMPDIR/README.md"
   run ! grep -qF '>avocado</a>' "$TEST_TMPDIR/README.md"
-  grep -qxF 'Every package: [0-9](table/0-9.md) [a](table/a.md) [b](table/b.md) [z](table/z.md)' "$TEST_TMPDIR/README.md"
+  # The twelve rows of a pass the limit of one page and take a second part
+  grep -qxF 'Every package: [0-9](table/0-9.md) [a](table/a.md) [a-2](table/a-2.md) [b](table/b.md) [z](table/z.md)' "$TEST_TMPDIR/README.md"
   [ "$(tail -n 1 "$TEST_TMPDIR/README.md")" = end ]
   # Each page holds the rows of its letter
-  grep -qF '>alpha</a>' "$TEST_TMPDIR/table/a.md"
-  grep -qF '>avocado</a>' "$TEST_TMPDIR/table/a.md"
-  run ! grep -qF '>beta</a>' "$TEST_TMPDIR/table/a.md"
+  cat "$TEST_TMPDIR"/table/a*.md | grep -qF '>alpha</a>'
+  cat "$TEST_TMPDIR"/table/a*.md | grep -qF '>avocado</a>'
+  run ! grep -qF '>beta</a>' "$TEST_TMPDIR/table/a.md" "$TEST_TMPDIR/table/a-2.md"
   grep -qF '>0ad</a>' "$TEST_TMPDIR/table/0-9.md"
   grep -qxF '[Back to the README](../README.md)' "$TEST_TMPDIR/table/z.md"
   [ ! -e "$TEST_TMPDIR/table/q.md" ]
+  # The README is written three times here, and each text replaces the one before
+  run find "$TEST_TMPDIR" -maxdepth 1 -name 'README.md.*'
+  [ -z "$output" ]
   # Under the limit the README holds every row again, and the pages go
   run "$TEST_TMPDIR/scripts/update-readme.sh"
   [ "$status" -eq 0 ]
@@ -5472,7 +5733,105 @@ $1"
   (($(wc -c <"$TEST_TMPDIR/README.md") <= 2048))
   [[ "$(cat "$TEST_TMPDIR/README.md")" =~ $'\n'([0-9]+)" more packages need attention, in the pages below"$'\n' ]]
   [ "$((BASH_REMATCH[1] + $(grep -c '<tr><td>' "$TEST_TMPDIR/README.md")))" = 30 ]
-  [ "$(grep -c '<tr><td>' "$TEST_TMPDIR/table/p.md")" = 30 ]
+  [ "$(cat "$TEST_TMPDIR"/table/p*.md | grep -c '<tr><td>')" = 30 ]
+}
+
+# Repositories of thousands of python-* packages would put more on one page than the README takes
+@test "update-readme: splits the page of a letter past the limit into parts" {
+  local i page links="Every package:"
+  for i in $(seq 10 39); do
+    create_test_package "p$i" github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+  done
+  create_test_package zeta github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  mkdir "$TEST_TMPDIR/table"
+  echo "an old part" >"$TEST_TMPDIR/table/p-9.md"
+  git -C "$TEST_TMPDIR" init -q
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_TMPDIR/table/p-2.md" ]
+  [ ! -e "$TEST_TMPDIR/table/p-9.md" ]
+  for page in p $(cd "$TEST_TMPDIR/table" && ls p-*.md | sed 's/\.md$//' | sort -t- -k2 -n); do
+    (($(wc -c <"$TEST_TMPDIR/table/$page.md") <= 2048))
+    links+=" [$page](table/$page.md)"
+  done
+  grep -qxF "$links [z](table/z.md)" "$TEST_TMPDIR/README.md"
+  grep -qxF '# Packages: p, part 2' "$TEST_TMPDIR/table/p-2.md"
+  # Each row stands on one page, in the order of the packages
+  [ "$(for page in p $(cd "$TEST_TMPDIR/table" && ls p-*.md | sed 's/\.md$//' | sort -t- -k2 -n); do
+    grep -o '>p[0-9]*</a>' "$TEST_TMPDIR/table/$page.md"
+  done | tr -d '<>/a' | tr '\n' ' ')" = "$(seq -f 'p%g' 10 39 | tr '\n' ' ')" ]
+  # Under the limit the parts go too
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$(ls -A "$TEST_TMPDIR/table")" ]
+}
+
+# bash runs $(...) in an array subscript of (( )), so the limit matches a digit pattern first
+@test "update-readme: refuses an AURTOMATOR_README_MAX_KIB that is no number of KiB" {
+  local value readme=$'<!-- PACKAGES:START -->\n<!-- PACKAGES:END -->'
+  create_test_package pkg-a github-release $'upstream:\n  project: owner/repo'
+  printf '%s\n' "$readme" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 0 1.5 010; do
+    AURTOMATOR_README_MAX_KIB=$value run "$TEST_TMPDIR/scripts/update-readme.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AURTOMATOR_README_MAX_KIB must be a number of KiB from 1: "* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+  [ "$(cat "$TEST_TMPDIR/README.md")" = "$readme" ]
+}
+
+# Pages written through a link land where the link points
+@test "update-readme: refuses a table that is a link or a file past the limit" {
+  local n readme=$'<!-- PACKAGES:START -->\n<!-- PACKAGES:END -->'
+  for n in $(seq 10 24); do
+    create_test_package "p$n" github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+  done
+  printf '%s\n' "$readme" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  mkdir "$BATS_TEST_TMPDIR/elsewhere"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$TEST_TMPDIR/table"
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"table is a link or no directory, so the pages of the package table have no place"* ]]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
+  rm "$TEST_TMPDIR/table"
+  echo notes >"$TEST_TMPDIR/table"
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"table is a link or no directory, so the pages of the package table have no place"* ]]
+  [ "$(cat "$TEST_TMPDIR/table")" = notes ]
+  [ "$(cat "$TEST_TMPDIR/README.md")" = "$readme" ]
+}
+
+# A page written through a link lands where the link points, and mv moves a page into a directory
+@test "update-readme: refuses a page of the table that is a link or no file" {
+  local n page readme=$'<!-- PACKAGES:START -->\n<!-- PACKAGES:END -->'
+  for n in $(seq 10 24); do
+    create_test_package "p$n" github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+  done
+  printf '%s\n' "$readme" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  for page in p.md p-3.md; do
+    mkdir -p "$TEST_TMPDIR/table"
+    ln -s "$BATS_TEST_TMPDIR/secret" "$TEST_TMPDIR/table/$page"
+    AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"table/$page is a link or no file, so the pages of the package table have no place"* ]]
+    [ "$(cat "$BATS_TEST_TMPDIR/secret")" = secret ]
+    [ "$(cat "$TEST_TMPDIR/README.md")" = "$readme" ]
+    rm -rf "$TEST_TMPDIR/table"
+  done
+  mkdir -p "$TEST_TMPDIR/table/p.md"
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"table/p.md is a link or no file, so the pages of the package table have no place"* ]]
+  [ -z "$(ls -A "$TEST_TMPDIR/table/p.md")" ]
 }
 
 @test "update-readme: writes the version under the package table" {
@@ -7606,6 +7965,29 @@ current: '3.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 2.0.0" ]
 }
 
+# makepkg of update-pkg.sh runs PKGBUILD code, which must never read a GitLab token
+@test "check-all --update: gives the GitLab tokens to check-update.sh alone" {
+  local script var
+  create_test_package pkg-up github-release "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  for script in check-update update-pkg; do
+    rm -f "$TEST_TMPDIR/scripts/$script.sh"
+    printf '#!/usr/bin/env bash\nenv | grep -c "^GITLAB_TOKEN_" >>"%s/%s.tokens"\n' "$TEST_TMPDIR" "$script" \
+      >"$TEST_TMPDIR/scripts/$script.sh"
+    chmod +x "$TEST_TMPDIR/scripts/$script.sh"
+  done
+  echo 'echo 2.0.0' >>"$TEST_TMPDIR/scripts/check-update.sh"
+  for var in GITLAB_TOKEN_GITLAB_COM GITLAB_TOKEN_GITLAB_GNOME_ORG GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG \
+    GITLAB_TOKEN_INVENT_KDE_ORG GITLAB_TOKEN_SALSA_DEBIAN_ORG GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG; do
+    export "$var=glpat-test"
+  done
+
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$(cat "$TEST_TMPDIR/check-update.tokens")" = 6 ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.tokens")" = 0 ]
+}
+
 @test "check-all: writes 'downgrade:' status after successful --update causing downgrade" {
   # Stub update-pkg.sh in the temp workspace always succeeds, so the test
   # covers only how check-all.sh writes the status.
@@ -8421,6 +8803,23 @@ pkgver_dash: ''"
   [[ "$output" == *"No tag of asset-owner/asset-repo gives version 9.9.9"* ]]
 }
 
+@test "check-asset: finds the tag of the version among tags that the regex leaves out" {
+  local version
+  mock_tags
+  create_test_package "mixed" "github-tag" "upstream:
+  project: asset-owner/mixed-repo
+  tag_version_regex: '^v(.+)\$'
+  asset_regex: '^mixed-(.+)\\.tar\\.gz\$'
+  asset_var: _mixed"
+  for version in 1.0.0 1.1.0; do
+    rm -f "$BATS_TEST_TMPDIR/curl-args"
+    CURL_ARGS_LOG="$BATS_TEST_TMPDIR/curl-args" run "$TEST_TMPDIR/scripts/check-asset.sh" mixed "$version"
+    run grep -c '/releases/tags/' "$BATS_TEST_TMPDIR/curl-args"
+    [ "$output" = 1 ]
+    grep -q "/releases/tags/v$version" "$BATS_TEST_TMPDIR/curl-args"
+  done
+}
+
 @test "check-asset: fails when two tags give the version" {
   mock_tags
   create_test_package "twin" "github-tag" "upstream:
@@ -8624,7 +9023,7 @@ current: 28+22"
     [ "$status" -eq 1 ]
     run grep -n -E "${cmd}(makepkg|updpkgsums|eval)[[:space:]]|${cmd}source[[:space:]]+[^|[:space:]]|${dot}\\.[[:space:]]+[^[:space:]]|(ba)?sh[[:space:]]+-c" "$file"
     [ "$status" -le 1 ]
-    run grep -v -E '^[0-9]+:[[:space:]]*source "(\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)|\$SCRIPT_DIR)/lib(/[a-z0-9]+)?\.sh"$|^[0-9]+:[[:space:]]*bounded "\$CHECK_TIMEOUT" bash -c .source "\$1/scripts/lib\.sh" && ' <<<"$output"
+    run grep -v -E '^[0-9]+:[[:space:]]*source "(\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)|\$SCRIPT_DIR)/lib(/[a-z0-9]+)?\.sh"$|^[0-9]+:[[:space:]]*([a-z_]+=\$\()?bounded "\$[a-z_A-Z]+" bash -c .source "\$1/scripts/lib\.sh" && ' <<<"$output"
     [ -z "$output" ]
   done
   [ "$count" -gt 20 ]

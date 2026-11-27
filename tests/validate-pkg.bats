@@ -1687,6 +1687,23 @@ exec "%s" "$@"
   [[ "$output" != *"packages valid"* ]]
 }
 
+# The checks end with 0 or 1 today, and a code above 1 is a failure as well
+@test "validate --all: counts a check that ends with a code above 1 as failed" {
+  local real bin="$BATS_TEST_TMPDIR/bin"
+  real=$(command -v mv)
+  mkdir -p "$bin"
+  printf '#!/bin/bash\nif [[ "$2" == *.rc.part ]]; then echo 2 >"$3" && rm -f -- "$2"; exit; fi\nexec "%s" "$@"\n' \
+    "$real" >"$bin/mv"
+  chmod +x "$bin/mv"
+  create_test_package a github-release "upstream:
+  project: owner/a"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Validation failed: 1/1 packages have errors"* ]]
+}
+
 # The lines of one package stay together, and the packages keep the order of their files
 @test "validate --all: prints the result of each package whole and in order" {
   local i expected=""
@@ -3370,4 +3387,36 @@ $2"
   [ "$status" -eq 0 ]
   [[ "$output" == *"No package to check"* ]]
   [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+# Online checks run eight at a time, and one directory keeps the pace of each host for all of them
+@test "validate --requirements: gives its parallel checks one pace of the hosts" {
+  local names="$BATS_TEST_TMPDIR/names" bin="$BATS_TEST_TMPDIR/rec" cmd
+  requires_package 1.1.0 "" bash python python-yaml
+  echo demo >"$names"
+  aur_meta '{"Name":"demo","PackageBase":"demo","Depends":["python"]}'
+  mkdir -p "$bin"
+  for cmd in curl git; do
+    printf '#!/usr/bin/env bash\necho "%s ${AURTOMATOR_PACE_DIR:-none}" >>"%s/pace-dirs"\nPATH=${PATH#"%s:"}\nexec %s "$@"\n' \
+      "$cmd" "$BATS_TEST_TMPDIR" "$bin" "$cmd" >"$bin/$cmd"
+    chmod +x "$bin/$cmd"
+  done
+  PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+  [ "$status" -eq 1 ]
+  grep -q '^git /' "$BATS_TEST_TMPDIR/pace-dirs"
+}
+
+# bash runs $(...) in an array subscript of (( )), so the budget matches a digit pattern first
+@test "validate --requirements: refuses a budget from the environment that is no number of seconds" {
+  local names="$BATS_TEST_TMPDIR/names" value
+  printf 'demo\n' >"$names"
+  for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 1.5 -1 010 09; do
+    AURTOMATOR_VALIDATE_BUDGET=$value run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AURTOMATOR_VALIDATE_BUDGET must be a whole number of seconds from 0 to 999999: "* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/pwned" ]
 }

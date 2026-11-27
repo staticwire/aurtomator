@@ -143,14 +143,19 @@ secret_lines() {
     secret_lines "$workflow"
   done >"$BATS_TEST_TMPDIR/actual"
   printf '%s\n' \
-    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_GITLAB_COM' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_GITLAB_GNOME_ORG' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_INVENT_KDE_ORG' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_SALSA_DEBIAN_ORG' \
+    'check-updates.yml check/Fetch GitLab tags GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG' \
     'check-updates.yml publish/Setup workspace AUR_GIT_NAME' \
     'check-updates.yml publish/Setup workspace AUR_GIT_EMAIL' \
     'check-updates.yml publish/Setup AUR SSH AUR_SSH_KEY' \
     'check-updates.yml publish/Setup GPG GPG_SIGNING_KEY' \
     'check-updates.yml publish/Publish updates AUR_GIT_NAME' \
     'check-updates.yml publish/Publish updates AUR_GIT_EMAIL' \
-    'check-updates.yml 7' \
+    'check-updates.yml 12' \
     'ci.yml merge-image/Merge image update CI_IMAGE_AUTO_MERGE' \
     'ci.yml 1' \
     'codeql.yml 0' \
@@ -176,7 +181,7 @@ secret_lines() {
     printf '%s %s\n' "${workflow##*/}" "$(yq -o=json -I=0 '.on' "$workflow")"
   done >"$BATS_TEST_TMPDIR/actual"
   printf '%s\n' \
-    'check-updates.yml {"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN":{"required":false}}}}' \
+    'check-updates.yml {"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN_GITLAB_COM":{"required":false},"GITLAB_TOKEN_GITLAB_GNOME_ORG":{"required":false},"GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG":{"required":false},"GITLAB_TOKEN_INVENT_KDE_ORG":{"required":false},"GITLAB_TOKEN_SALSA_DEBIAN_ORG":{"required":false},"GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG":{"required":false}}}}' \
     'ci.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"workflow_dispatch":null}' \
     'codeql.yml {"push":{"branches":["main"]},"pull_request":{"branches":["main"]},"schedule":[{"cron":"41 3 * * 1"}]}' \
     'docs.yml {"push":{"branches":["main"],"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"pull_request":{"paths":["site/**","assets/**","VERSION",".github/workflows/docs.yml"]},"workflow_dispatch":null}' \
@@ -1338,10 +1343,10 @@ action_run() {
   [ "$output" = "::error::Start the run from a branch: it commits its results to the branch it runs on" ]
 }
 
-@test "check-updates: runs only when called, with the five secrets optional" {
+@test "check-updates: runs only when called, with every secret optional" {
   run yq -o=json -I=0 '.on' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
-  [ "$output" = '{"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN":{"required":false}}}}' ]
+  [ "$output" = '{"workflow_call":{"secrets":{"AUR_SSH_KEY":{"required":false},"GPG_SIGNING_KEY":{"required":false},"AUR_GIT_NAME":{"required":false},"AUR_GIT_EMAIL":{"required":false},"GITLAB_TOKEN_GITLAB_COM":{"required":false},"GITLAB_TOKEN_GITLAB_GNOME_ORG":{"required":false},"GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG":{"required":false},"GITLAB_TOKEN_INVENT_KDE_ORG":{"required":false},"GITLAB_TOKEN_SALSA_DEBIAN_ORG":{"required":false},"GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG":{"required":false}}}}' ]
   run yq '.concurrency' "$CHECK_UPDATES"
   [ "$status" -eq 0 ]
   [ "$output" = "null" ]
@@ -1545,7 +1550,7 @@ run_decide_step() {
 # date of a cooldown
 @test "check-updates: Decide publishes a changed, new or removed page of the package table" {
   local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results" case
-  for case in same changed new removed; do
+  for case in same changed new removed part; do
     rm -rf "$ws" "$results"
     mkdir -p "$ws/table" "$results/table"
     echo "page a" >"$ws/table/a.md"
@@ -1555,6 +1560,7 @@ run_decide_step() {
       changed) echo "new page a" >"$results/table/a.md" ;;
       new) echo "page b" >"$results/table/b.md" ;;
       removed) echo "page c" >"$ws/table/c.md" ;;
+      part) echo "page a, part 2" >"$results/table/a-2.md" ;;
     esac
     run run_decide_step pkg="cooldown: 2026-11-12"
     [ "$status" -eq 0 ]
@@ -1632,21 +1638,21 @@ run_decide_step() {
   [ "$output" = $'prepare=true\nwork=true\npackages=true\nto-prepare=["pkg"]\nrules=false\nto-rules=[]' ]
 }
 
-# GitHub starts at most 256 jobs from one matrix
-@test "check-updates: Decide prepares 256 packages and leaves the rest for the next run" {
+# verify and publish take about 10 s a package of their 20 minutes
+@test "check-updates: Decide prepares 100 packages and leaves the rest for the next run" {
   local pairs=() i expected=""
-  for i in $(seq -w 1 258); do
+  for i in $(seq -w 1 102); do
     pairs+=("p$i=new_version: 2.0.0")
   done
-  for i in $(seq -w 1 256); do
+  for i in $(seq -w 1 100); do
     expected+="\"p$i\","
   done
   run run_decide_step "${pairs[@]}"
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "prepare=true" ]
   [ "${lines[3]}" = "to-prepare=[${expected%,}]" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/data/statuses/_deferred")" = $'p257\np258' ]
-  grep -qxF '::warning::2 outdated packages wait for the next run, which prepares at most 256' "$BATS_TEST_TMPDIR/decide.out"
+  [ "$(cat "$BATS_TEST_TMPDIR/data/statuses/_deferred")" = $'p101\np102' ]
+  grep -qxF '::warning::2 outdated packages wait for the next run, which prepares at most 100' "$BATS_TEST_TMPDIR/decide.out"
 }
 
 @test "check-updates: Decide removes the _without and the _deferred of builder" {
@@ -2190,11 +2196,21 @@ builder_steps() {
   [ "${#lines[@]}" -eq 5 ]
 }
 
-# builder parses the answers of upstreams in check, so the token stays with root, which parses none
-@test "check-updates: root fetches the GitLab tags with GITLAB_TOKEN before builder checks" {
-  local step='.jobs.check.steps[] | select(.name == "Fetch GitLab tags")' ws="$BATS_TEST_TMPDIR/ws"
-  run yq -o=json -I=0 "$step | [.id, .env]" "$CHECK_UPDATES"
-  [ "$output" = '["gitlab",{"GITLAB_TOKEN":"${{ secrets.GITLAB_TOKEN }}"}]' ]
+# builder parses the answers of upstreams in check, so the tokens stay with root, which parses none.
+# The step and the secrets of the workflow name the variable of each host of GITLAB_HOSTS.
+@test "check-updates: root fetches the GitLab tags with the GitLab tokens before builder checks" {
+  local step='.jobs.check.steps[] | select(.name == "Fetch GitLab tags")' ws="$BATS_TEST_TMPDIR/ws" vars
+  vars=$(bash -c 'source "$0" && for host in "${GITLAB_HOSTS[@]}"; do gitlab_token_var "$host"; done' \
+    "$BATS_TEST_DIRNAME/../scripts/lib/common.sh")
+  [ "$vars" = $'GITLAB_TOKEN_GITLAB_COM\nGITLAB_TOKEN_GITLAB_GNOME_ORG\nGITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG\nGITLAB_TOKEN_INVENT_KDE_ORG\nGITLAB_TOKEN_SALSA_DEBIAN_ORG\nGITLAB_TOKEN_GITLAB_ARCHLINUX_ORG' ]
+  run yq -r "$step | .env | to_entries | .[] | select(.value == \"\${{ secrets.\" + .key + \" }}\") | .key" "$CHECK_UPDATES"
+  [ "$output" = "$vars" ]
+  run yq "$step | .env | length" "$CHECK_UPDATES"
+  [ "$output" = 6 ]
+  run yq -r '.on.workflow_call.secrets | keys | .[] | select(test("^GITLAB_"))' "$CHECK_UPDATES"
+  [ "$output" = "$vars" ]
+  run yq "$step | .id" "$CHECK_UPDATES"
+  [ "$output" = gitlab ]
   [ "$(step_index check "Add builder")" -lt "$(step_index check "Fetch GitLab tags")" ]
   [ "$(step_index check "Fetch GitLab tags")" -lt "$(step_index check "Check updates")" ]
   run yq '.jobs.check.steps[] | select(.name == "Check updates") | .with.gitlab' "$CHECK_UPDATES"
@@ -2203,13 +2219,13 @@ builder_steps() {
   run yq '.jobs.check.steps[] | select(.name == "Check updates") | .env.AURTOMATOR_CHECK_SPENT' "$CHECK_UPDATES"
   [ "$output" = '${{ steps.gitlab.outputs.spent }}' ]
   mkdir -p "$ws/aurtomator/scripts"
-  printf '%s\n' 'gitlab_prefetch() { printf "%s\n" "$*" >"$CALLS"; }' >"$ws/aurtomator/scripts/lib.sh"
+  printf '%s\n' 'gitlab_prefetch() { sleep 1; printf "%s\n" "$*" >"$CALLS"; }' >"$ws/aurtomator/scripts/lib.sh"
   step_run check "Fetch GitLab tags" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" CALLS="$BATS_TEST_TMPDIR/calls" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
-    bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+  # Container steps without a shell run as sh -e
+  run env -C "$ws" CALLS="$BATS_TEST_TMPDIR/calls" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" sh -e "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/calls")" = "/data/gitlab packages/*.yml" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/output")" = "spent=0" ]
+  [[ "$(cat "$BATS_TEST_TMPDIR/output")" =~ ^spent=[1-9][0-9]*$ ]]
 }
 
 @test "run-as-builder: takes its inputs through the environment" {
@@ -2250,7 +2266,11 @@ if [[ -n "${LATE_OUT:-}" ]]; then
   (exec 2>/dev/null && sleep 0.5 && printf '%s\n' "$LATE_OUT") &
   (exec >/dev/null && sleep 1 && printf '%s\n' "$LATE_OUT" >&2) &
 fi
-[[ "$*" != */update-readme.sh ]] || exit "${README_RC:-${SUDO_RC:-0}}"
+if [[ "$*" == */update-readme.sh ]]; then
+  # update-readme.sh writes the README and its pages in the directory of builder
+  [[ -z "${README_PAGE:-}" ]] || { mkdir -p table && echo "$README_PAGE" >table/a.md && echo table >README.md; }
+  exit "${README_RC:-${SUDO_RC:-0}}"
+fi
 exit "${SUDO_RC:-0}"
 EOF
   chmod +x "$bin/chown" "$bin/git" "$bin/sudo"
@@ -2287,11 +2307,11 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT,AURTOMATOR_GITLAB_ANSWERS,AURTOMATOR_README_BUDGET -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder timeout --kill-after=10 180 $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
     "rules${tab}Run the requires rules${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --rules rules cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
-    "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "publish${tab}Publish updates${tab}--preserve-env=GITHUB_REPOSITORY,GPG_KEY_ID,GIT_AUTHOR_NAME,GIT_AUTHOR_EMAIL,AURTOMATOR_README_BUDGET -u builder $code/check-all.sh --publish handoff cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder timeout --kill-after=10 180 $code/update-readme.sh cwd=$work"
   )
   for entry in "${expected[@]}"; do
     IFS=$'\t' read -r job name want readme <<<"$entry"
@@ -2327,9 +2347,35 @@ sudo_commands() {
     [[ "${lines[i]}" != "::warning::README.md stays as it is"* ]] || warned=$i
   done
   ((resumed >= 0 && warned > resumed))
+  # The step refuses a directory of builder that an earlier step left
+  rm -rf "$BATS_TEST_TMPDIR/work"
   SUDO_OUT=ok README_RC=1 run_builder_step check "Check updates"
   [ "$status" -eq 1 ]
-  [[ "$output" != *"::warning::"* ]]
+  [[ "$output" != *"::warning::"* && "$output" != *"exists already"* ]]
+  # timeout ends with 124 past the share of the README, which check-all.sh left out of its loop
+  rm -rf "$BATS_TEST_TMPDIR/work"
+  SUDO_OUT=ok README_RC=124 run_builder_step publish "Publish updates"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::update-readme.sh ran out of its 180 s in this run"* ]]
+}
+
+# The commit removes the pages that a run with a README did not write, and a script killed in the
+# middle of its pages leaves the README of the checkout beside some of them
+@test "run-as-builder: hands over no README and no page of an update-readme.sh that ran out of time" {
+  local rc
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  for rc in 124 137; do
+    rm -rf "$BATS_TEST_TMPDIR/work"
+    SUDO_OUT=ok README_RC=$rc README_PAGE="half a page" run_builder_step check "Check updates"
+    [ "$status" -eq 0 ]
+    [ ! -e "$BATS_TEST_TMPDIR/work/README.md" ]
+    [ ! -e "$BATS_TEST_TMPDIR/work/table" ]
+  done
+  rm -rf "$BATS_TEST_TMPDIR/work"
+  SUDO_OUT=ok README_PAGE="whole page" run_builder_step check "Check updates"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/work/table/a.md")" = "whole page" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/work/README.md")" = table ]
 }
 
 @test "run-as-builder: gives builder its own directory and runs no git" {
@@ -2435,7 +2481,7 @@ make_builder_inputs() {
   [ -z "$(ls -A "$work")" ]
 }
 
-# Root fetched the answers of GitLab.com with GITLAB_TOKEN, and each is named by the SHA-256 of its URL
+# Root fetched the answers of GitLab with the GitLab tokens, and each is named by the SHA-256 of its URL
 @test "run-as-builder: gives builder the GitLab answers named by 64 hex digits alone" {
   local work="$BATS_TEST_TMPDIR/work" gl="$BATS_TEST_TMPDIR/data/gitlab" key big
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
@@ -2454,6 +2500,12 @@ make_builder_inputs() {
   run bash -c 'cd "$1/.gitlab" && find . -mindepth 1' _ "$work"
   [ "$output" = "./$key" ]
   [ "$(stat -c %a "$work/.gitlab/$key")" = 644 ]
+  # gitlab_api reads the answers from the directory this variable names alone
+  grep -qx "AURTOMATOR_GITLAB_ANSWERS=$work/.gitlab" "$SUDO_LOG"
+  rm -rf "$work"
+  SUDO_OUT=ok run_builder_step verify "Verify checksums"
+  [ "$status" -eq 0 ]
+  run ! grep -q AURTOMATOR_GITLAB_ANSWERS "$SUDO_LOG"
 }
 
 # check-all.sh and update-readme.sh then fail the YAML by its file name, so its issues stay open
@@ -3001,14 +3053,14 @@ make_handoff() {
   local work="$BATS_TEST_TMPDIR/work" results="$BATS_TEST_TMPDIR/results"
   echo secret >"$BATS_TEST_TMPDIR/secret"
   mkdir -p "$work/table/sub"
-  for page in a.md 0-9.md z.md A.md ab.md notes.txt sub/b.md; do
+  for page in a.md a-2.md a-0.md a-.md 0-9.md z.md A.md ab.md notes.txt sub/b.md; do
     echo "page $page" >"$work/table/$page"
   done
   ln -s "$BATS_TEST_TMPDIR/secret" "$work/table/c.md"
   run_hand_over_step
   [ "$status" -eq 0 ]
   run env LC_ALL=C ls -A "$results/table"
-  [ "$output" = $'0-9.md\na.md\nz.md' ]
+  [ "$output" = $'0-9.md\na-2.md\na.md\nz.md' ]
   [ "$(<"$results/table/a.md")" = "page a.md" ]
   # A link to the directory reaches nothing
   rm -rf "$work/table" "$results"
@@ -3224,8 +3276,18 @@ if [[ "$*" == "api repos/$GITHUB_REPOSITORY --jq .has_issues" ]]; then
   echo "${GH_HAS_ISSUES:-true}"
   exit 0
 fi
+if [[ "$*" == "api rate_limit --jq .resources.graphql.remaining" ]]; then
+  echo "${GH_POINTS:-}"
+  exit 0
+fi
 if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_FAIL:-}" ]]; then
-  printf 'GraphQL: was submitted too quickly (createIssue)\nsecond line\n' >&2
+  printf 'HTTP 502: Bad Gateway (https://api.github.com/graphql)\nsecond line\n' >&2
+  exit 1
+fi
+# GitHub refuses each issue of a package for its limit of writes a minute, and the issue of the
+# failed packages past the writes comes after a pause
+if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_LIMIT:-}" && "$*" != *" failed packages of run "* ]]; then
+  printf 'GraphQL: was submitted too quickly (createIssue)\n' >&2
   exit 1
 fi
 if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_FAIL_HOST:-}" && "$*" == *" packages failed to check "* ]]; then
@@ -3236,34 +3298,39 @@ if [[ "$1 $2" == "issue view" ]]; then
   printf '%s\n' "${GH_BODY:-}"
   exit 0
 fi
-[[ "$1 $2" == "issue list" ]] || exit 0
+# gh issue list --label searches, and a search stops at 1000 issues
+[[ "$1 $2" != "issue list" ]] || exit 2
+[[ "$1" == api && "$2" == "repos/$GITHUB_REPOSITORY/issues?labels="* ]] || exit 0
 [[ -z "${GH_FAIL:-}" ]] || exit 1
-limit=30 jq_expr="" emoji=""
-while (($#)); do
-  case "$1" in
-    --limit) limit=$2 && shift ;;
-    --jq) jq_expr=$2 && shift ;;
-    --label)
-      case "$2" in
-        auto-update) emoji="❌" ;;
-        update-held) emoji="✋" ;;
-        update-notice) emoji="🔔" ;;
-        aurtomator-update) emoji="🚀" ;;
-        arch-missing) emoji="⚠️ [a-z0-9]" ;;
-        missing-key) emoji="⚠️ Packages" ;;
-      esac
-      shift
-      ;;
-  esac
-  shift
-done
-titles=$(grep "^$emoji" <<<"${GH_TITLES:-}" | head -n "$limit") || true
-case "$jq_expr" in
-  ".[].title") [[ -z "$titles" ]] || printf '%s\n' "$titles" ;;
-  # Issue numbers start at 41
-  '.[] | "\(.number) \(.title)"') [[ -z "$titles" ]] || awk '{ print NR + 40 " " $0 }' <<<"$titles" ;;
+label=${2#*labels=}
+label=${label%%&*}
+# The first list of label GH_FAIL_LABEL fails, as one answer of HTTP 502 does
+if [[ "$label" == "${GH_FAIL_LABEL:-}" && ! -e "$GH_LOG.failed" ]]; then
+  : >"$GH_LOG.failed"
+  exit 1
+fi
+case "$label" in
+  auto-update) emoji="❌" ;;
+  update-held) emoji="✋" ;;
+  update-notice) emoji="🔔" ;;
+  aurtomator-update) emoji="🚀" ;;
+  arch-missing) emoji="⚠️ [a-z0-9]" ;;
+  missing-key) emoji="⚠️ Packages" ;;
   *) exit 2 ;;
 esac
+per_page=30
+[[ "$2" != *"per_page="* ]] || per_page=${2##*per_page=}
+filter="" paginate=""
+while (($#)); do
+  [[ "$1" != --jq ]] || filter=$2
+  [[ "$1" != --paginate ]] || paginate=1
+  shift
+done
+titles=$(grep "^$emoji" <<<"${GH_TITLES:-}") || true
+# Issue numbers start at 41, and gh reads the pages after the first with --paginate alone
+json=$(jq -Rn '[inputs | select(length > 0)] | to_entries | map({number: (.key + 41), title: .value})' <<<"$titles")
+[[ -n "$paginate" ]] || json=$(jq --argjson n "$per_page" '.[:$n]' <<<"$json")
+jq -r "$filter" <<<"$json"
 EOF
   printf '#!/bin/sh\nexit 97\n' >"$bin/sudo"
   chmod +x "$bin/gh" "$bin/sudo"
@@ -3273,12 +3340,13 @@ EOF
   : >"$GH_LOG"
   : >"$BODY_LOG"
   : >"$GH_BODY_LOG"
-  rm -rf "$BATS_TEST_TMPDIR/runner-temp" "$BATS_TEST_TMPDIR/summary"
+  rm -rf "$BATS_TEST_TMPDIR/runner-temp" "$BATS_TEST_TMPDIR/summary" "$GH_LOG.failed"
   mkdir -p "$BATS_TEST_TMPDIR/runner-temp"
   step_run issues "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
-    GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
+    GH_FAIL="${GH_FAIL:-}" GH_FAIL_LABEL="${GH_FAIL_LABEL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GH_CREATE_FAIL_HOST="${GH_CREATE_FAIL_HOST:-}" GITHUB_REPOSITORY=owner/fork \
+    GH_POINTS="${GH_POINTS:-}" GH_CREATE_LIMIT="${GH_CREATE_LIMIT:-}" \
     GH_BODY_LOG="$GH_BODY_LOG" BIG_BODY="${BIG_BODY:-}" GH_BODY="${GH_BODY:-}" RUN_URL=https://example.invalid/run \
     RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
     GITHUB_RUN_NUMBER=7 GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -3316,6 +3384,11 @@ EOF
   GH_HAS_ISSUES=false run_issue_step _requirements=$'foo\tpython'
   [ "$status" -eq 0 ]
   [ "$output" = "::notice::Issues are disabled in owner/fork, so the run opens no issue" ]
+  # A list that fails stops the step before a second issue with the title opens
+  GH_FAIL_LABEL=missing-key GH_TITLES="$title" run_issue_step _requirements=$'foo\tpython\nbar\truby'
+  [ "$status" -ne 0 ]
+  no_call '^issue create'
+  no_call '^issue edit'
 }
 
 @test "check-updates: an open issue of another package holds back no issue" {
@@ -3346,12 +3419,12 @@ EOF
   [ "$output" = "0" ]
 }
 
-# gh issue list exits 1 in a repository with Issues turned off
+# GH_FAIL fails each list, so the step reads has_issues before any list
 @test "check-updates: the issue step gives a notice when Issues are disabled" {
   GH_HAS_ISSUES=false GH_FAIL=1 run_issue_step foo="update_failed: boom"
   [ "$status" -eq 0 ]
   [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
-  run grep -c '^issue ' "$GH_LOG"
+  run grep -c -e '^issue ' -e '/issues?' "$GH_LOG"
   [ "$output" = "0" ]
 }
 
@@ -3582,11 +3655,11 @@ host_failures() {
   [ "$output" = "5" ]
   run grep -c '^label create auto-update ' "$GH_LOG"
   [ "$output" = "1" ]
-  run grep -c '^issue list --label auto-update ' "$GH_LOG"
+  run grep -c '^api repos/owner/fork/issues?labels=auto-update&' "$GH_LOG"
   [ "$output" = "1" ]
   run grep -c '^label create update-held ' "$GH_LOG"
   [ "$output" = "1" ]
-  run grep -c '^issue list --label update-held ' "$GH_LOG"
+  run grep -c '^api repos/owner/fork/issues?labels=update-held&' "$GH_LOG"
   [ "$output" = "1" ]
 }
 
@@ -3625,12 +3698,27 @@ host_failures() {
 @test "check-updates: a refused issue gives a warning with the error of gh" {
   GH_CREATE_FAIL=1 run_issue_step foo="update_failed: boom" bar="held: 1.0"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"::warning::Could not create the issue ❌ foo: update failed: GraphQL: was submitted too quickly (createIssue) second line"* ]]
-  [[ "$output" == *"::warning::Could not create the issue ✋ bar: update held: GraphQL: was submitted too quickly (createIssue) second line"* ]]
+  [[ "$output" == *"::warning::Could not create the issue ❌ foo: update failed: HTTP 502: Bad Gateway (https://api.github.com/graphql) second line"* ]]
+  [[ "$output" == *"::warning::Could not create the issue ✋ bar: update held: HTTP 502: Bad Gateway (https://api.github.com/graphql) second line"* ]]
+}
+
+# The job token has 1000 GraphQL points an hour, and each write takes about 3 of them
+@test "check-updates: the failed packages past the GraphQL points of the run share one issue" {
+  GH_POINTS=106 run_issue_step a="check_failed: boom" b="check_failed: boom" c="check_failed: boom" d="update_failed: boom"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^issue create' "$GH_LOG" | sed 's/ --label.*//')" = $'issue create --title ❌ a: check failed\nissue create --title ❌ 3 failed packages of run 7' ]
+}
+
+@test "check-updates: the failed packages that GitHub refuses for its rate limits share one issue" {
+  GH_CREATE_LIMIT=1 run_issue_step a="check_failed: boom" b="update_failed: boom"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"::warning::"* ]]
+  grep -qx 'issue create --title ❌ 2 failed packages of run 7 --label auto-update --body-file -' "$GH_LOG"
 }
 
 # Runs the close step of the issues job with the name=status pairs as statuses; gh lists the
-# issues of $GH_OPEN and logs to $GH_LOG, and the issue functions log to $BODY_LOG
+# issues of $GH_OPEN and the pull requests of $GH_PULLS and logs to $GH_LOG, and the issue
+# functions log to $BODY_LOG
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   rm -rf "$ws/.status"
@@ -3651,29 +3739,39 @@ EOF
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
-cmd="$1 $2" limit=30 emoji="" filter=""
+cmd="$1 $2" filter="" paginate=""
 while (($#)); do
-  case "$1" in
-    --limit) limit=$2 ;;
-    --jq) filter=$2 ;;
-    --label)
-      case "$2" in
-        auto-update) emoji="❌" ;;
-        update-held) emoji="✋" ;;
-        aurtomator-update) emoji="🚀" ;;
-        arch-missing) emoji="⚠️" ;;
-      esac
-      ;;
-  esac
+  [[ "$1" != --jq ]] || filter=$2
+  [[ "$1" != --paginate ]] || paginate=1
   shift
 done
+# Lines of number and title as REST issues of the label, with pull_request for pull requests
+rest_issues() {
+  { grep "^[0-9]* $emoji" <<<"$1" || true; } |
+    jq -Rn --argjson pull "$2" '[inputs | capture("^(?<number>[0-9]+) (?<title>.*)$") | .number |= tonumber |
+      if $pull then .pull_request = {} else . end]'
+}
 # gh answers with the JSON of the API and applies --jq to it
 case "$cmd" in
   "api repos/owner/fork") json="{\"has_issues\": ${GH_HAS_ISSUES:-true}}" ;;
-  "issue list")
+  # gh issue list --label searches, and a search stops at 1000 issues
+  "issue list") exit 2 ;;
+  "api repos/owner/fork/issues?labels="*)
     [[ -z "${GH_FAIL:-}" ]] || exit 1
-    json=$({ grep "^[0-9]* $emoji" <<<"${GH_OPEN:-}" || true; } | head -n "$limit" |
-      jq -Rn '[inputs | capture("^(?<number>[0-9]+) (?<title>.*)$") | .number |= tonumber]')
+    label=${cmd#*labels=}
+    label=${label%%&*}
+    case "$label" in
+      auto-update) emoji="❌" ;;
+      update-held) emoji="✋" ;;
+      aurtomator-update) emoji="🚀" ;;
+      arch-missing) emoji="⚠️" ;;
+      *) exit 2 ;;
+    esac
+    per_page=30
+    [[ "$cmd" != *"per_page="* ]] || per_page=${cmd##*per_page=}
+    json=$(jq -n --argjson a "$(rest_issues "${GH_OPEN:-}" false)" --argjson b "$(rest_issues "${GH_PULLS:-}" true)" '$a + $b')
+    # gh reads the pages after the first with --paginate alone
+    [[ -n "$paginate" ]] || json=$(jq --argjson n "$per_page" '.[:$n]' <<<"$json")
     ;;
   "issue view")
     [[ -z "${GH_VIEW_FAIL:-}" ]] || exit 1
@@ -3695,7 +3793,7 @@ EOF
   step_run issues "${CLOSE_STEP:-Close resolved issues}" >"$BATS_TEST_TMPDIR/step.sh"
   rm -rf "$BATS_TEST_TMPDIR/runner-temp"
   mkdir -p "$BATS_TEST_TMPDIR/runner-temp"
-  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" GH_VIEW_FAIL="${GH_VIEW_FAIL:-}" \
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_PULLS="${GH_PULLS:-}" GH_FAIL="${GH_FAIL:-}" GH_VIEW_FAIL="${GH_VIEW_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" GH_BODY="${GH_BODY:-}" \
     RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -3968,18 +4066,19 @@ no_commit() {
 # update-readme.sh writes table/<letter>.md past the limit of the README, and none under it
 @test "check-updates: the commit step adds, changes and removes the pages of the package table" {
   local ws="$BATS_TEST_TMPDIR/ws"
-  make_commit_repo README.md="short table" table/a.md="page a" table/b.md="new page b"
+  make_commit_repo README.md="short table" table/a.md="page a" table/a-2.md="page a, part 2" table/b.md="new page b"
   mkdir "$ws/table"
   echo "old page b" >"$ws/table/b.md"
   echo "old page c" >"$ws/table/c.md"
+  echo "old page c, part 2" >"$ws/table/c-2.md"
   echo "notes" >"$ws/table/notes.txt"
   git -C "$ws" add table
   git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m pages
   echo other >"$BATS_TEST_TMPDIR/results/table/notes.txt"
   run_commit_step
   [ "$status" -eq 0 ]
-  jq -e '[.tree[] | [.path, .sha == null]] == [["README.md", false], ["table/a.md", false], ["table/b.md", false], ["table/c.md", true]]' \
-    "$GH_LOG.tree"
+  jq -e '[.tree[] | [.path, .sha == null]] == [["README.md", false], ["table/a-2.md", false], ["table/a.md", false],
+    ["table/b.md", false], ["table/c-2.md", true], ["table/c.md", true]]' "$GH_LOG.tree"
   # Runs without the copy of README.md wrote no pages, so they remove none
   rm -rf "$ws" "$BATS_TEST_TMPDIR/results"
   make_commit_repo packages/foo.yml="current: 2.0"
@@ -4382,37 +4481,47 @@ run_bare_issues_step() {
     d="update_failed: boom d"
   [ "$status" -eq 0 ]
   [ "$(grep '^issue create' "$GH_LOG" | sed 's/ --label.*//')" = $'issue create --title ❌ a: check failed\nissue create --title ❌ b: check failed\nissue create --title ❌ 2 failed packages of run 7' ]
-  # The run summary holds the whole text of each of them
-  grep -qF 'failure_issue_body .status/c' "$BATS_TEST_TMPDIR/body.log"
-  grep -qF 'failure_issue_body .status/d' "$BATS_TEST_TMPDIR/body.log"
-  grep -qx body "$BATS_TEST_TMPDIR/summary"
+  # The log of the step Write the run summary holds the whole error of each of them
+  [ ! -s "$BATS_TEST_TMPDIR/summary" ]
 }
 
-# The issue of a run closes once each of its packages recovered or has an issue of its own
+# The issue of a run closes once each of its packages recovered, has an issue of its own or
+# has no YAML
 @test "check-updates: closes the issue of the failed packages of a run once each has recovered or its own issue" {
   local group=$'- `c`: `boom`\n- `d`: `boom`'
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7\n6 ❌ d: check failed' \
     run_close_step c=up_to_date d="check_failed: boom"
   [ "$status" -eq 0 ]
-  grep -qx 'issue close 5 --comment Each package of this issue recovered or has an issue of its own in https://example.invalid/run.' "$GH_LOG"
+  grep -qx 'issue close 5 --comment Each package of this issue recovered, has an issue of its own or has no YAML in https://example.invalid/run.' "$GH_LOG"
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="check_failed: boom"
   no_call '^issue close 5'
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="unchecked: out of time"
   no_call '^issue close 5'
   # Cut issues name some of their packages, so they close once no package fails without an issue
-  local cut=$'- `c`: `boom`\n- and 2 more packages, which the run summary of the step Create issues lists'
+  local cut=$'- `c`: `boom`\n- and 2 more packages, which the log of the step Write the run summary lists'
   GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="check_failed: boom"
   no_call '^issue close 5'
-  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="unchecked: out of time"
-  no_call '^issue close 5'
   GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7\n6 ❌ e: check failed' run_close_step c=up_to_date e="check_failed: boom"
+  grep -q '^issue close 5' "$GH_LOG"
+  # Runs of many packages leave some unchecked in each run, and only the named ones keep a cut issue open
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="unchecked: out of time"
+  grep -q '^issue close 5' "$GH_LOG"
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c="unchecked: out of time" e=up_to_date
+  no_call '^issue close 5'
+  # Named packages without a status count as unchecked, unless _packages lacks them
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date _packages=$'c\nd'
+  no_call '^issue close 5'
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date
+  no_call '^issue close 5'
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date _packages=c
+  [ "$status" -eq 0 ]
   grep -q '^issue close 5' "$GH_LOG"
   # Unread bodies stop the step and close nothing
   GH_VIEW_FAIL=1 GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d=up_to_date
   [ "$status" -ne 0 ]
   no_call '^issue close 5'
   # Closes past the writes of the run wait for the next run
-  GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' ISSUE_WRITE_MAX=1 run_close_step foo=up_to_date bar=up_to_date
+  GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' ISSUE_WRITE_MAX=3 run_close_step foo=up_to_date bar=up_to_date
   [ "$status" -eq 0 ]
   [ "$(grep -c '^issue close' "$GH_LOG")" = 1 ]
 }
@@ -4430,6 +4539,14 @@ run_bare_issues_step() {
   GH_TITLES="${titles}❌ foo: check failed" run_issue_step foo="check_failed: boom"
   [ "$status" -eq 0 ]
   ! grep -q '^issue create' "$GH_LOG"
+}
+
+# The REST list of issues holds the pull requests too
+@test "check-updates: the close step leaves the pull requests of a label alone" {
+  GH_PULLS='20 ❌ foo: check failed' GH_OPEN='21 ❌ bar: check failed' run_close_step foo=up_to_date bar=up_to_date
+  [ "$status" -eq 0 ]
+  grep -q '^issue close 21 ' "$GH_LOG"
+  no_call '^issue close 20 '
 }
 
 # Anyone can open an issue in a public repository, and each issue looks up the package its title names
@@ -4774,7 +4891,7 @@ run_find_packages_step() {
 }
 
 # Runs Write the run summary with the name=status pairs as statuses and aurtomator/ linked to
-# this repository, and prints the summary
+# this repository, and prints the summary; the log of the step goes to $BATS_TEST_TMPDIR/step.log
 run_summary_step() {
   local ws="$BATS_TEST_TMPDIR/ws" pair
   mkdir -p "$ws"
@@ -4785,8 +4902,18 @@ run_summary_step() {
   done
   step_run issues "Write the run summary" >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/summary"
-  (cd "$ws" && GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" sh -e "$BATS_TEST_TMPDIR/step.sh")
+  (cd "$ws" && GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" sh -e "$BATS_TEST_TMPDIR/step.sh") >"$BATS_TEST_TMPDIR/step.log"
   cat "$BATS_TEST_TMPDIR/summary"
+}
+
+@test "check-updates: the summary step prints each whole error to its log" {
+  run run_summary_step foo=$'check_failed: one\n::error::two' bar=up_to_date
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'`foo`: check failed'* ]]
+  run cat "$BATS_TEST_TMPDIR/step.log"
+  [[ "${lines[0]}" == "::stop-commands::"* ]]
+  [ "${lines[1]}" = "foo: check failed" ]
+  [ "${lines[3]}" = "::error::two" ]
 }
 
 @test "check-updates: the summary step writes the summary of the statuses" {
@@ -5091,7 +5218,8 @@ NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 }
 
 # Runs the step of notify-failure for run 7 of owner/fork; gh lists the open issues from
-# $GH_TITLES and the failed jobs from $GH_JOBS, and logs every call to $GH_LOG
+# $GH_TITLES beside a pull request with the title of the run issue, and the failed jobs from
+# $GH_JOBS, and logs every call to $GH_LOG
 run_notify_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
@@ -5114,9 +5242,11 @@ case "$cmd" in
     fi
     json=$GH_JOBS_JSON
     ;;
-  "issue list")
+  # gh issue list --label searches, and a search stops at 1000 issues
+  "issue list") exit 2 ;;
+  "api repos/owner/fork/issues?labels=auto-update&state=open&per_page=100")
     [[ -z "${GH_FAIL:-}" ]] || exit 1
-    json=$(jq -Rn '[inputs | select(length > 0) | {title: .}]' <<<"${GH_TITLES:-}")
+    json=$(jq -Rn '[inputs | select(length > 0) | {title: .}] + [{title: "❌ Check AUR Package Updates failed", pull_request: {}}]' <<<"${GH_TITLES:-}")
     ;;
   *) exit 0 ;;
 esac
@@ -5862,7 +5992,7 @@ calling_workflow() {
   run yq -o=json -I=0 '.jobs.check-updates.permissions' "$check"
   [ "$output" = '{"contents":"write","issues":"write"}' ]
   run yq -o=json -I=0 '.jobs.check-updates.secrets | keys | sort' "$check"
-  [ "$output" = '["AUR_GIT_EMAIL","AUR_GIT_NAME","AUR_SSH_KEY","GITLAB_TOKEN","GPG_SIGNING_KEY"]' ]
+  [ "$output" = '["AUR_GIT_EMAIL","AUR_GIT_NAME","AUR_SSH_KEY","GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG","GITLAB_TOKEN_GITLAB_COM","GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG","GITLAB_TOKEN_GITLAB_GNOME_ORG","GITLAB_TOKEN_INVENT_KDE_ORG","GITLAB_TOKEN_SALSA_DEBIAN_ORG","GPG_SIGNING_KEY"]' ]
   run yq '.jobs.check-updates.secrets | to_entries | .[] | select(.value != "${{ secrets." + .key + " }}") | .key' "$check"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
