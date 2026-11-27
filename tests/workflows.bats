@@ -2266,7 +2266,11 @@ if [[ -n "${LATE_OUT:-}" ]]; then
   (exec 2>/dev/null && sleep 0.5 && printf '%s\n' "$LATE_OUT") &
   (exec >/dev/null && sleep 1 && printf '%s\n' "$LATE_OUT" >&2) &
 fi
-[[ "$*" != */update-readme.sh ]] || exit "${README_RC:-${SUDO_RC:-0}}"
+if [[ "$*" == */update-readme.sh ]]; then
+  # update-readme.sh writes the README and its pages in the directory of builder
+  [[ -z "${README_PAGE:-}" ]] || { mkdir -p table && echo "$README_PAGE" >table/a.md && echo table >README.md; }
+  exit "${README_RC:-${SUDO_RC:-0}}"
+fi
 exit "${SUDO_RC:-0}"
 EOF
   chmod +x "$bin/chown" "$bin/git" "$bin/sudo"
@@ -2353,6 +2357,25 @@ sudo_commands() {
   SUDO_OUT=ok README_RC=124 run_builder_step publish "Publish updates"
   [ "$status" -eq 0 ]
   [[ "$output" == *"::warning::update-readme.sh ran out of its 180 s in this run"* ]]
+}
+
+# The commit removes the pages that a run with a README did not write, and a script killed in the
+# middle of its pages leaves the README of the checkout beside some of them
+@test "run-as-builder: hands over no README and no page of an update-readme.sh that ran out of time" {
+  local rc
+  SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
+  for rc in 124 137; do
+    rm -rf "$BATS_TEST_TMPDIR/work"
+    SUDO_OUT=ok README_RC=$rc README_PAGE="half a page" run_builder_step check "Check updates"
+    [ "$status" -eq 0 ]
+    [ ! -e "$BATS_TEST_TMPDIR/work/README.md" ]
+    [ ! -e "$BATS_TEST_TMPDIR/work/table" ]
+  done
+  rm -rf "$BATS_TEST_TMPDIR/work"
+  SUDO_OUT=ok README_PAGE="whole page" run_builder_step check "Check updates"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/work/table/a.md")" = "whole page" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/work/README.md")" = table ]
 }
 
 @test "run-as-builder: gives builder its own directory and runs no git" {

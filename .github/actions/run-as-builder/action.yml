@@ -190,6 +190,8 @@ runs:
           echo "::warning::README.md stays as it is, the log of this step names the reason"
         elif [[ "$readme_rc" -eq 124 || "$readme_rc" -eq 137 ]]; then
           echo "::warning::update-readme.sh ran out of its $AURTOMATOR_README_BUDGET s in this run"
+          # Its pages can stand beside the README of the checkout, so the run hands over neither
+          rm -rf -- "$WORK/README.md" "$WORK/table"
         elif [[ "$readme_rc" -ne 0 ]]; then
           rc=$readme_rc
         fi
