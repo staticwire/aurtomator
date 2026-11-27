@@ -405,17 +405,19 @@ gitlab_tags_url() {
   printf 'https://%s/api/v4/projects/%s/repository/tags?per_page=100\n' "$1" "${2//\//%2F}"
 }
 
-# GET a GitLab API URL. In the workflow builder reads the answer that root fetched with GITLAB_TOKEN,
-# and other runs send the token to GitLab.com alone, from stdin.
+# GET a GitLab API URL. In the workflow builder reads the answer that root fetched with GITLAB_TOKEN
+# from the directory AURTOMATOR_GITLAB_ANSWERS, and other runs send the token to GitLab.com alone, from stdin.
 gitlab_api() {
   local file auth=()
-  file="${AURTOMATOR_DATA_DIR}/.gitlab/$(url_key "$1")"
-  if [[ -f "$file" && ! -L "$file" ]]; then
-    if ! _json_answer "$1" "$(<"$file")"; then
-      request_failed "$1"
-      return 1
+  if [[ -n "${AURTOMATOR_GITLAB_ANSWERS:-}" ]]; then
+    file="${AURTOMATOR_GITLAB_ANSWERS}/$(url_key "$1")"
+    if [[ -f "$file" && ! -L "$file" ]]; then
+      if ! _json_answer "$1" "$(<"$file")"; then
+        request_failed "$1"
+        return 1
+      fi
+      return 0
     fi
-    return 0
   fi
   # On a redirect to another host curl drops the Authorization header alone, so the token goes there
   if [[ -n "${GITLAB_TOKEN:-}" && "$(url_host "$1")" == gitlab.com ]]; then

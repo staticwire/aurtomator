@@ -569,8 +569,31 @@ EOF
   ! grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
 }
 
-# In the workflow root asks GitLab.com with GITLAB_TOKEN, and builder gets the answers in .gitlab/
+# In the workflow root asks GitLab.com with GITLAB_TOKEN, and builder gets the answers in the
+# directory that AURTOMATOR_GITLAB_ANSWERS names
 @test "gitlab-tag: reads the answer that the workflow fetched for it" {
+  local key
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args" AURTOMATOR_GITLAB_ANSWERS="$TEST_TMPDIR/answers"
+  create_test_package "test-gl-tag" "gitlab-tag" "upstream:
+  host: gitlab.com
+  project: group/project"
+  key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100' | sha256sum)
+  mkdir "$TEST_TMPDIR/answers"
+  echo '[{"name": "v9.0.0"}]' >"$TEST_TMPDIR/answers/${key%% *}"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 0 ]
+  [ "$output" = "9.0.0" ]
+  [ ! -e "$CURL_ARGS_LOG" ]
+  # Answers other than JSON fail as fetched ones do
+  echo '<html>' >"$TEST_TMPDIR/answers/${key%% *}"
+  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100: the answer is not JSON"* ]]
+  [ ! -e "$CURL_ARGS_LOG" ]
+}
+
+# Commits can add .gitlab/ to a repository of packages, and local runs ask GitLab all the same
+@test "gitlab-tag: reads no answer from .gitlab/ of the repository" {
   local key
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
@@ -581,14 +604,8 @@ EOF
   echo '[{"name": "v9.0.0"}]' >"$TEST_TMPDIR/.gitlab/${key%% *}"
   run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
   [ "$status" -eq 0 ]
-  [ "$output" = "9.0.0" ]
-  [ ! -e "$CURL_ARGS_LOG" ]
-  # Answers other than JSON fail as fetched ones do
-  echo '<html>' >"$TEST_TMPDIR/.gitlab/${key%% *}"
-  run "$TEST_TMPDIR/strategies/gitlab-tag.sh" "test-gl-tag"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"https://gitlab.com/api/v4/projects/group%2Fproject/repository/tags?per_page=100: the answer is not JSON"* ]]
-  [ ! -e "$CURL_ARGS_LOG" ]
+  [ "$output" = "3.1.0" ]
+  [ "$(wc -l <"$CURL_ARGS_LOG")" = 1 ]
 }
 
 @test "gitlab-tag: tag_version_regex extracts from prefixed tags" {

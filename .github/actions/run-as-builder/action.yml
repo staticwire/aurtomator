@@ -162,6 +162,11 @@ runs:
 
         read -ra check_args <<<"$ARGS"
         keep="GITHUB_REPOSITORY${KEEP_ENV:+,$KEEP_ENV}"
+        # Commits can add .gitlab/ to the repository, so the scripts read answers from the directory this names
+        if [[ -n "$GITLAB_ANSWERS" ]]; then
+          export AURTOMATOR_GITLAB_ANSWERS="$WORK/.gitlab"
+          keep+=,AURTOMATOR_GITLAB_ANSWERS
+        fi
         # The runner ignores workflow commands until it reads the token, which builder never sees.
         # cat ends when no process of builder holds the pipe, so the token comes last.
         token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')

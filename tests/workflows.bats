@@ -2287,7 +2287,7 @@ sudo_commands() {
   local expected entry job name code="$BATS_TEST_TMPDIR/ws/aurtomator/scripts" work="$BATS_TEST_TMPDIR/work" tab=$'\t'
   SUDO_LOG="$BATS_TEST_TMPDIR/sudo.log"
   expected=(
-    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
+    "check${tab}Check updates${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_TOKEN,GITHUB_RUN_NUMBER,AURTOMATOR_CHECK_SPENT,AURTOMATOR_GITLAB_ANSWERS -u builder $code/check-all.sh --rules-later cwd=$work${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/update-readme.sh cwd=$work"
     "prepare${tab}Prepare updates${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --prepare handoff cwd=$work${tab}"
     "rules${tab}Run the requires rules${tab}--preserve-env=GITHUB_REPOSITORY -u builder $code/check-all.sh --rules rules cwd=$work${tab}"
     "verify${tab}Verify checksums${tab}--preserve-env=GITHUB_REPOSITORY,GITHUB_RUN_NUMBER -u builder $code/check-all.sh --verify handoff cwd=$work${tab}"
@@ -2454,6 +2454,12 @@ make_builder_inputs() {
   run bash -c 'cd "$1/.gitlab" && find . -mindepth 1' _ "$work"
   [ "$output" = "./$key" ]
   [ "$(stat -c %a "$work/.gitlab/$key")" = 644 ]
+  # gitlab_api reads the answers from the directory this variable names alone
+  grep -qx "AURTOMATOR_GITLAB_ANSWERS=$work/.gitlab" "$SUDO_LOG"
+  rm -rf "$work"
+  SUDO_OUT=ok run_builder_step verify "Verify checksums"
+  [ "$status" -eq 0 ]
+  run ! grep -q AURTOMATOR_GITLAB_ANSWERS "$SUDO_LOG"
 }
 
 # check-all.sh and update-readme.sh then fail the YAML by its file name, so its issues stay open
