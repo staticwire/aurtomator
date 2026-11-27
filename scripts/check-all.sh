@@ -28,6 +28,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 require_cmd yq
 require_cmd vercmp
 
+# The GitLab tokens stay in this shell for check-update.sh alone, since makepkg runs PKGBUILD code
+for token_var in "${!GITLAB_TOKEN_@}"; do
+  export -n "${token_var?}"
+done
+
 MODE=check
 WORK_DIR=""
 DRY_RUN=""
@@ -87,6 +92,15 @@ bounded_alerts() {
 bounded_rules_needed() {
   # shellcheck disable=SC2016
   bounded "$CHECK_TIMEOUT" bash -c 'source "$1/scripts/lib.sh" && requires_needed "$2"' _ "$AURTOMATOR_DIR" "$1"
+}
+
+# Runs check-update.sh for package $1 under the check timeout, with the GitLab tokens, in a subshell
+bounded_check() {
+  local var
+  for var in "${!GITLAB_TOKEN_@}"; do
+    export "${var?}"
+  done
+  bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-update.sh" "$1"
 }
 
 # Errors keep their last bytes, since a server writes the stderr of git. With the line that
@@ -853,7 +867,7 @@ run_package() {
   if [[ "$MODE" == "prepare" || "$MODE" == "publish" ]]; then
     check_cmd=(checked_version "$pkg_name")
   else
-    check_cmd=(bounded "$CHECK_TIMEOUT" "${AURTOMATOR_DIR}/scripts/check-update.sh" "$pkg_name")
+    check_cmd=(bounded_check "$pkg_name")
   fi
 
   err_file=$(mktemp)
@@ -866,7 +880,7 @@ run_package() {
     log_err "Failed to check $pkg_name: $(status_text "$check_err")"
     status_text "check_failed: ${check_err}" >"${STATUS_DIR}/${pkg_name}"
     note_failed_host "$pkg_name" "$in_flight"
-    if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded ]] && second_pass "$check_rc" "$in_flight"; then
+    if ((pass == 1)) && [[ "${check_cmd[0]}" == bounded_check ]] && second_pass "$check_rc" "$in_flight"; then
       RECHECK+=("$pkg_file")
     fi
     return

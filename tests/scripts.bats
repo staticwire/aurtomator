@@ -7846,6 +7846,29 @@ current: '3.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/pkg-down")" = "downgrade_skipped: 2.0.0" ]
 }
 
+# makepkg of update-pkg.sh runs PKGBUILD code, which must never read a GitLab token
+@test "check-all --update: gives the GitLab tokens to check-update.sh alone" {
+  local script var
+  create_test_package pkg-up github-release "upstream:
+  project: owner/repo
+current: '1.0.0'"
+  for script in check-update update-pkg; do
+    rm -f "$TEST_TMPDIR/scripts/$script.sh"
+    printf '#!/usr/bin/env bash\nenv | grep -c "^GITLAB_TOKEN_" >>"%s/%s.tokens"\n' "$TEST_TMPDIR" "$script" \
+      >"$TEST_TMPDIR/scripts/$script.sh"
+    chmod +x "$TEST_TMPDIR/scripts/$script.sh"
+  done
+  echo 'echo 2.0.0' >>"$TEST_TMPDIR/scripts/check-update.sh"
+  for var in GITLAB_TOKEN_GITLAB_COM GITLAB_TOKEN_GITLAB_GNOME_ORG GITLAB_TOKEN_GITLAB_FREEDESKTOP_ORG \
+    GITLAB_TOKEN_INVENT_KDE_ORG GITLAB_TOKEN_SALSA_DEBIAN_ORG GITLAB_TOKEN_GITLAB_ARCHLINUX_ORG; do
+    export "$var=glpat-test"
+  done
+
+  run "$TEST_TMPDIR/scripts/check-all.sh" --update
+  [ "$(cat "$TEST_TMPDIR/check-update.tokens")" = 6 ]
+  [ "$(cat "$TEST_TMPDIR/update-pkg.tokens")" = 0 ]
+}
+
 @test "check-all: writes 'downgrade:' status after successful --update causing downgrade" {
   # Stub update-pkg.sh in the temp workspace always succeeds, so the test
   # covers only how check-all.sh writes the status.
