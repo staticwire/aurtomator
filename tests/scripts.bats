@@ -4374,18 +4374,25 @@ current: '1.0.0'"
   create_test_package d gitlab-tag "upstream:
   host: gitlab.com
   project: missing-group/d"
+  create_test_package e gitlab-tag "upstream:
+  host: gitlab.com
+  project: group/.."
   printf '%s\n' 'name: l' 'strategy: gitlab-tag' 'upstream:' '  host: gitlab.com' '  project: group/l' >"$TEST_TMPDIR/l.yml"
   ln -s "$TEST_TMPDIR/l.yml" "$TEST_TMPDIR/packages/l.yml"
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  mv "$MOCK_DIR/curl" "$MOCK_DIR/curl-answer"
+  printf '%s\n' '#!/usr/bin/env bash' "cat >>'$TEST_TMPDIR/curl.stdin'" 'exec "${0%/*}/curl-answer" "$@"' >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
   run bash -c 'source "$0/scripts/lib.sh" && GITLAB_TOKEN=glpat-test gitlab_prefetch "$0/answers" "$0"/packages/*.yml' "$TEST_TMPDIR"
   [ "$status" -eq 0 ]
   [[ "$output" == *"missing-group%2Fd/repository/tags?per_page=100: The requested URL returned error: 404"* ]]
   key=$(printf '%s' 'https://gitlab.com/api/v4/projects/group%2Fa/repository/tags?per_page=100' | sha256sum)
   [ "$(ls -A "$TEST_TMPDIR/answers")" = "${key%% *}" ]
   [ "$(cat "$TEST_TMPDIR/answers/${key%% *}")" = '[{"name": "v3.1.0"}, {"name": "v3.0.0"}, {"name": "v2.0.0"}]' ]
-  # curl reads the header from stdin, and asks gitlab.com alone
+  # curl reads the header from stdin, and asks gitlab.com alone, for no project with a part . or ..
   [ "$(grep -c -- ' -H @- ' "$CURL_ARGS_LOG")" = 2 ]
   [ "$(wc -l <"$CURL_ARGS_LOG")" = 2 ]
+  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = $'Authorization: Bearer glpat-test\nAuthorization: Bearer glpat-test' ]
   run ! grep -q glpat-test "$CURL_ARGS_LOG"
   # Without the token it asks nothing
   rm "$CURL_ARGS_LOG"

@@ -538,9 +538,13 @@ EOF
 
 # mesa names its releases mesa-26.2.5
 # GitLab.com plans 60 requests an hour for the traffic of one address without a token, and the
-# token is for GitLab.com alone; curl reads the header from stdin, off the command line
+# token is for GitLab.com alone; curl reads the header from stdin, off the command line, and
+# carries Authorization to no other host of a redirect
 @test "gitlab-tag: sends GITLAB_TOKEN to gitlab.com alone, from stdin" {
   export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  mv "$MOCK_DIR/curl" "$MOCK_DIR/curl-answer"
+  printf '%s\n' '#!/usr/bin/env bash' "cat >>'$TEST_TMPDIR/curl.stdin'" 'exec "${0%/*}/curl-answer" "$@"' >"$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:
   host: gitlab.com
   project: group/project"
@@ -548,6 +552,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$output" = "3.1.0" ]
   grep -q -- ' -H @- ' "$CURL_ARGS_LOG"
+  [ "$(cat "$TEST_TMPDIR/curl.stdin")" = "Authorization: Bearer glpat-test" ]
   run ! grep -q glpat-test "$CURL_ARGS_LOG"
   rm "$CURL_ARGS_LOG"
   create_test_package "test-gl-tag" "gitlab-tag" "upstream:

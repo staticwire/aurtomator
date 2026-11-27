@@ -417,10 +417,11 @@ gitlab_api() {
     fi
     return 0
   fi
+  # On a redirect to another host curl drops the Authorization header alone, so the token goes there
   if [[ -n "${GITLAB_TOKEN:-}" && "$(url_host "$1")" == gitlab.com ]]; then
     auth=(-H @-)
   fi
-  http_get_json "$1" "${auth[@]}" <<<"PRIVATE-TOKEN: ${GITLAB_TOKEN:-}"
+  http_get_json "$1" "${auth[@]}" <<<"Authorization: Bearer ${GITLAB_TOKEN:-}"
 }
 
 # Keep in directory $1 the answers of GitLab.com to the gitlab-tag packages of files $2..., asked with
@@ -442,6 +443,7 @@ gitlab_prefetch() {
   rows=$(yq -N -r '[.strategy // "", .upstream.host // "", .upstream.project // ""] | map(tostring) | join("\t")' "${files[@]}" 2>/dev/null) || return 0
   while IFS=$'\t' read -r strategy host project; do
     [[ "$strategy" == gitlab-tag && "${host,,}" == gitlab.com && "$project" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || continue
+    [[ "/$project/" != */./* && "/$project/" != */../* ]] || continue
     url=$(gitlab_tags_url "$host" "$project")
     [[ -z "${seen[$url]:-}" ]] || continue
     seen[$url]=1
@@ -462,7 +464,7 @@ gitlab_prefetch() {
     fi
     url=${urls[i]}
     part=$(mktemp -p "$dir" .part.XXXXXX) || break
-    if http_get "$url" -H @- -o "$part" <<<"PRIVATE-TOKEN: $GITLAB_TOKEN"; then
+    if http_get "$url" -H @- -o "$part" <<<"Authorization: Bearer $GITLAB_TOKEN"; then
       mv -- "$part" "$dir/$(url_key "$url")"
     else
       rm -f -- "$part"
