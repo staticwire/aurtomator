@@ -98,3 +98,10 @@ Releases after v0.14.0 are immutable. The workflow attaches the archive and its 
 gh release verify vX.Y.Z -R staticwire/aurtomator
 gh release verify-asset vX.Y.Z aurtomator-X.Y.Z.tar.gz -R staticwire/aurtomator
 ```
+
+Job `sign` builds the archive with `git archive --format=tar.gz` at the release commit. Its gzip bytes depend on the git and the zlib of the machine that compresses it, so the same command on your machine gives another `.tar.gz`. The tar inside is the same, and in a clone of aurtomator both commands below print one digest:
+
+```sh
+gunzip -c aurtomator-X.Y.Z.tar.gz | sha256sum
+git archive --format=tar --prefix=aurtomator-X.Y.Z/ vX.Y.Z | sha256sum
+```
