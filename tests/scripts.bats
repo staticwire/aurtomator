@@ -5783,6 +5783,32 @@ $1"
   [ "$(cat "$TEST_TMPDIR/README.md")" = "$readme" ]
 }
 
+# A page written through a link lands where the link points, and mv moves a page into a directory
+@test "update-readme: refuses a page of the table that is a link or no file" {
+  local n page readme=$'<!-- PACKAGES:START -->\n<!-- PACKAGES:END -->'
+  for n in $(seq 10 24); do
+    create_test_package "p$n" github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+  done
+  printf '%s\n' "$readme" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  echo secret >"$BATS_TEST_TMPDIR/secret"
+  for page in p.md p-3.md; do
+    mkdir -p "$TEST_TMPDIR/table"
+    ln -s "$BATS_TEST_TMPDIR/secret" "$TEST_TMPDIR/table/$page"
+    AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"table/$page is a link or no file, so the pages of the package table have no place"* ]]
+    [ "$(cat "$BATS_TEST_TMPDIR/secret")" = secret ]
+    [ "$(cat "$TEST_TMPDIR/README.md")" = "$readme" ]
+    rm -rf "$TEST_TMPDIR/table"
+  done
+  mkdir -p "$TEST_TMPDIR/table/p.md"
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"table/p.md is a link or no file, so the pages of the package table have no place"* ]]
+  [ -z "$(ls -A "$TEST_TMPDIR/table/p.md")" ]
+}
+
 @test "update-readme: writes the version under the package table" {
   create_test_package "pkg-a" "github-release" $'upstream:\n  project: owner/repo'
   echo "0.6.0" >"$TEST_TMPDIR/VERSION"

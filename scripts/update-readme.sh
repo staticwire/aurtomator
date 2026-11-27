@@ -26,8 +26,8 @@ if [[ ! -f "$README" ]]; then
 fi
 
 # Fixed names such as README.md.tmp can be links that a commit added
-new_readme=""
-trap 'rm -f ${new_readme:+"$new_readme"}' EXIT
+new_readme="" new_page=""
+trap 'rm -f ${new_readme:+"$new_readme"} ${new_page:+"$new_page"}' EXIT
 
 # Move file $1, the new text of README.md, over README.md with the mode README.md has
 replace_readme() {
@@ -236,8 +236,12 @@ write_letter_pages() {
     if [[ -n "$rows" ]] && { [[ -z "$row" ]] || ((${#rows} + ${#row} + ${#table_header} + 200 > max)); }; then
       name=$letter title=$letter
       ((part == 1)) || name+="-$part" title+=", part $part"
+      new_page=$(mktemp "$PAGES/.$name.md.XXXXXX")
       printf '# Packages: %s\n\n[Back to the README](../README.md)\n\n%s%s\n</table>\n' "$title" "$table_header" \
-        "$rows" >"$PAGES/$name.md"
+        "$rows" >"$new_page"
+      chmod --reference="$README" "$new_page"
+      mv -f -- "$new_page" "$PAGES/$name.md"
+      new_page=""
       pages["$name.md"]=1
       links+=" [$name](table/$name.md)"
       part=$((part + 1)) rows=""
@@ -259,6 +263,13 @@ if (($(wc -c <"$new_readme") > readme_max * 1024)); then
     exit 1
   fi
   mkdir -p "$PAGES"
+  for page in "$PAGES"/*.md; do
+    file=${page##*/}
+    if [[ "$file" =~ ^(0-9|[a-z])(-[1-9][0-9]*)?\.md$ ]] && [[ -L "$page" || ! -f "$page" ]]; then
+      log_err "table/$file is a link or no file, so the pages of the package table have no place"
+      exit 1
+    fi
+  done
   declare -A page_rows=() counts=()
   marks=()
   for i in "${!row_list[@]}"; do
