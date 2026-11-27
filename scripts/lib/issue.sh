@@ -244,20 +244,42 @@ open_issues() {
     --jq '.[] | select(.pull_request | not) | "\(.number) \(.title)"'
 }
 
-# Run gh with $@, an issue write, ISSUE_WRITE_PAUSE_MS after the last one, while the file ISSUE_WRITES counts
-# fewer than ISSUE_WRITE_MAX of the 500 writes an hour of GitHub; fail with 3 past it
+# Run gh with $@, an issue write, ISSUE_WRITE_PAUSE_MS after the last one, while ISSUE_WRITES counts at most
+# ISSUE_WRITE_MAX writes and ISSUE_POINTS_KEEP GraphQL points stay; fail with 3 past these or GitHub limits
 issue_write() {
-  local count=0 last=0 now wait pause=$((${ISSUE_WRITE_PAUSE_MS:-1000} * 1000))
-  [[ ! -f "${ISSUE_WRITES:?}" ]] || read -r count last <"$ISSUE_WRITES" || true
+  local count=0 last=0 points=- since=10 cost=1 now wait err rc=0 pause=$((${ISSUE_WRITE_PAUSE_MS:-1000} * 1000))
+  [[ ! -f "${ISSUE_WRITES:?}" ]] || read -r count last points since <"$ISSUE_WRITES" || true
   [[ "$count" =~ ^[0-9]+$ && "$last" =~ ^[0-9]+$ ]] || count=0 last=0
-  ((count < ${ISSUE_WRITE_MAX:-450})) || return 3
+  [[ "$since" =~ ^[0-9]+$ ]] || since=10
+  # Closes with a comment write the comment and the close
+  [[ "$1 $2" != "issue close" || " $* " != *" --comment "* ]] || cost=2
+  ((count + cost <= ${ISSUE_WRITE_MAX:-450})) || return 3
+  # Each write takes about 3 points, and GET /rate_limit takes none
+  if ((since >= 10)) || [[ ! "$points" =~ ^[0-9]+$ ]]; then
+    points=$(gh api rate_limit --jq .resources.graphql.remaining 2>/dev/null) || points=-
+    since=0
+  fi
+  if [[ "$points" =~ ^[0-9]+$ ]]; then
+    if ((points - 3 < ${ISSUE_POINTS_KEEP:-100})); then
+      printf '%s %s %s %s\n' "$count" "$last" "$points" "$since" >"$ISSUE_WRITES"
+      return 3
+    fi
+    points=$((points - 3))
+  fi
   now=${EPOCHREALTIME/[.,]/}
-  wait=$((last + pause - now))
+  wait=$((last + pause * cost - now))
   if ((wait > 0)); then
     sleep "$((wait / 1000000)).$(printf '%06d' "$((wait % 1000000))")"
   fi
-  printf '%s %s\n' "$((count + 1))" "${EPOCHREALTIME/[.,]/}" >"$ISSUE_WRITES"
-  gh "$@"
+  printf '%s %s %s %s\n' "$((count + cost))" "${EPOCHREALTIME/[.,]/}" "${points:--}" "$((since + 1))" >"$ISSUE_WRITES"
+  { err=$(gh "$@" 2>&1 >&3 3>&-); } 3>&1 || rc=$?
+  [[ -z "$err" ]] || printf '%s\n' "$err" >&2
+  # The next write reads the points again
+  if ((rc != 0)) && [[ "${err,,}" == *"rate limit"* || "${err,,}" == *"submitted too quickly"* ]]; then
+    printf '%s %s %s 10\n' "$((count + cost))" "${EPOCHREALTIME/[.,]/}" "${points:--}" >"$ISSUE_WRITES"
+    return 3
+  fi
+  return "$rc"
 }
 
 # Print the body of the issue for failed packages $3 on, whose statuses are in directory $1, that the run $2
@@ -265,7 +287,7 @@ issue_write() {
 grouped_issue_body() {
   local dir=$1 run=$2 name error entry head foot items="" kept=0 LC_ALL=C.UTF-8
   shift 2
-  head="GitHub allows a run about 450 writes to issues an hour, so these packages failed without an issue of their own in $run. The run summary of its step Create issues holds each whole error."$'\n\n'
+  head="The writes of the run to issues reached the limits of GitHub, so these packages failed without an issue of their own in $run. The run summary of its step Create issues holds each whole error."$'\n\n'
   foot=$'\nAuto-created by update workflow, which closes it once each of these packages recovered, has an issue of its own or has no YAML.\n'
   for name in "$@"; do
     error=""

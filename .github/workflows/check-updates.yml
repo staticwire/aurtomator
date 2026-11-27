@@ -1362,7 +1362,7 @@ jobs:
           }
 
           # Opens an issue with label $1, title $2 and body $3, which goes on stdin since Linux refuses
-          # one argument over 128 KiB; created=false after a refusal of GitHub, later past the writes
+          # one argument over 128 KiB; created=false after a refusal of GitHub, later past the limits
           create_issue() {
             local out rc=0
             created=true
@@ -1522,6 +1522,6 @@ jobs:
               } >>"$GITHUB_STEP_SUMMARY"
             done
             body=$(lib grouped_issue_body "$STATUS_DIR" "$RUN_URL" "${grouped[@]}")
-            export ISSUE_WRITE_MAX=$((${ISSUE_WRITE_MAX:-450} + 10))
+            export ISSUE_WRITE_MAX=$((${ISSUE_WRITE_MAX:-450} + 10)) ISSUE_POINTS_KEEP=0
             create_issue auto-update "❌ ${#grouped[@]} failed packages of run $GITHUB_RUN_NUMBER" "$body"
           fi

@@ -3245,8 +3245,18 @@ if [[ "$*" == "api repos/$GITHUB_REPOSITORY --jq .has_issues" ]]; then
   echo "${GH_HAS_ISSUES:-true}"
   exit 0
 fi
+if [[ "$*" == "api rate_limit --jq .resources.graphql.remaining" ]]; then
+  echo "${GH_POINTS:-}"
+  exit 0
+fi
 if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_FAIL:-}" ]]; then
-  printf 'GraphQL: was submitted too quickly (createIssue)\nsecond line\n' >&2
+  printf 'HTTP 502: Bad Gateway (https://api.github.com/graphql)\nsecond line\n' >&2
+  exit 1
+fi
+# GitHub refuses each issue of a package for its limit of writes a minute, and the issue of the
+# failed packages past the writes comes after a pause
+if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_LIMIT:-}" && "$*" != *" failed packages of run "* ]]; then
+  printf 'GraphQL: was submitted too quickly (createIssue)\n' >&2
   exit 1
 fi
 if [[ "$1 $2" == "issue create" && -n "${GH_CREATE_FAIL_HOST:-}" && "$*" == *" packages failed to check "* ]]; then
@@ -3305,6 +3315,7 @@ EOF
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
     GH_FAIL="${GH_FAIL:-}" GH_FAIL_LABEL="${GH_FAIL_LABEL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GH_CREATE_FAIL_HOST="${GH_CREATE_FAIL_HOST:-}" GITHUB_REPOSITORY=owner/fork \
+    GH_POINTS="${GH_POINTS:-}" GH_CREATE_LIMIT="${GH_CREATE_LIMIT:-}" \
     GH_BODY_LOG="$GH_BODY_LOG" BIG_BODY="${BIG_BODY:-}" GH_BODY="${GH_BODY:-}" RUN_URL=https://example.invalid/run \
     RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
     GITHUB_RUN_NUMBER=7 GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -3656,8 +3667,22 @@ host_failures() {
 @test "check-updates: a refused issue gives a warning with the error of gh" {
   GH_CREATE_FAIL=1 run_issue_step foo="update_failed: boom" bar="held: 1.0"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"::warning::Could not create the issue ❌ foo: update failed: GraphQL: was submitted too quickly (createIssue) second line"* ]]
-  [[ "$output" == *"::warning::Could not create the issue ✋ bar: update held: GraphQL: was submitted too quickly (createIssue) second line"* ]]
+  [[ "$output" == *"::warning::Could not create the issue ❌ foo: update failed: HTTP 502: Bad Gateway (https://api.github.com/graphql) second line"* ]]
+  [[ "$output" == *"::warning::Could not create the issue ✋ bar: update held: HTTP 502: Bad Gateway (https://api.github.com/graphql) second line"* ]]
+}
+
+# The job token has 1000 GraphQL points an hour, and each write takes about 3 of them
+@test "check-updates: the failed packages past the GraphQL points of the run share one issue" {
+  GH_POINTS=106 run_issue_step a="check_failed: boom" b="check_failed: boom" c="check_failed: boom" d="update_failed: boom"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^issue create' "$GH_LOG" | sed 's/ --label.*//')" = $'issue create --title ❌ a: check failed\nissue create --title ❌ 3 failed packages of run 7' ]
+}
+
+@test "check-updates: the failed packages that GitHub refuses for its rate limits share one issue" {
+  GH_CREATE_LIMIT=1 run_issue_step a="check_failed: boom" b="update_failed: boom"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"::warning::"* ]]
+  grep -qx 'issue create --title ❌ 2 failed packages of run 7 --label auto-update --body-file -' "$GH_LOG"
 }
 
 # Runs the close step of the issues job with the name=status pairs as statuses; gh lists the
@@ -4466,7 +4491,7 @@ run_bare_issues_step() {
   [ "$status" -ne 0 ]
   no_call '^issue close 5'
   # Closes past the writes of the run wait for the next run
-  GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' ISSUE_WRITE_MAX=1 run_close_step foo=up_to_date bar=up_to_date
+  GH_OPEN=$'12 ❌ foo: check failed\n13 ❌ bar: check failed' ISSUE_WRITE_MAX=3 run_close_step foo=up_to_date bar=up_to_date
   [ "$status" -eq 0 ]
   [ "$(grep -c '^issue close' "$GH_LOG")" = 1 ]
 }

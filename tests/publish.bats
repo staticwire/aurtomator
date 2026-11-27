@@ -5401,25 +5401,101 @@ EOF
 # === issue_write ===
 
 # GitHub allows 80 writes of content a minute and 500 an hour, and the run keeps the rest of the hour
-@test "issue_write: writes one a second, and fails with 3 past ISSUE_WRITE_MAX" {
-  local bin="$BATS_TEST_TMPDIR/bin" start end
-  mkdir -p "$bin"
-  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s/gh.log"\n' "$BATS_TEST_TMPDIR" >"$bin/gh"
-  chmod +x "$bin/gh"
-  export ISSUE_WRITES="$BATS_TEST_TMPDIR/writes" ISSUE_WRITE_MAX=3 PATH="$bin:$PATH"
+# Writes a gh to $BATS_TEST_TMPDIR/bin that logs its arguments to gh.log, answers GET /rate_limit
+# with the file points, and fails writes with the text of the file error when it exists
+issue_gh() {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat >"$BATS_TEST_TMPDIR/bin/gh" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$GH_DIR/gh.log"
+if [ "$1" = api ]; then
+  cat "$GH_DIR/points" 2>/dev/null
+  exit 0
+fi
+if [ -e "$GH_DIR/error" ]; then
+  cat "$GH_DIR/error" >&2
+  exit 1
+fi
+echo "https://github.com/owner/fork/issues/1"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/gh"
+  export GH_DIR="$BATS_TEST_TMPDIR" PATH="$BATS_TEST_TMPDIR/bin:$PATH" ISSUE_WRITES="$BATS_TEST_TMPDIR/writes"
+}
+
+# A close with a comment makes a comment and a close, two writes of content
+@test "issue_write: paces the writes, counts a close with a comment twice, and fails with 3 past ISSUE_WRITE_MAX" {
+  local start end
+  issue_gh
+  export ISSUE_WRITE_MAX=4 ISSUE_WRITE_PAUSE_MS=300
   start=${EPOCHREALTIME/[.,]/}
-  issue_write issue close 1 --comment a
+  issue_write issue create --title a --body-file - <<<"body"
   issue_write issue close 2 --comment b
-  issue_write issue create --title t --body-file - <<<"body"
+  issue_write issue create --title c --body-file - <<<"body"
   end=${EPOCHREALTIME/[.,]/}
-  (((end - start) >= 2000000))
-  run issue_write issue close 4 --comment d
+  (((end - start) >= 900000))
+  run issue_write issue create --title d --body-file -
   [ "$status" -eq 3 ]
-  [ "$(cat "$BATS_TEST_TMPDIR/gh.log")" = $'issue close 1 --comment a\nissue close 2 --comment b\nissue create --title t --body-file -' ]
+  [ "$(grep -v '^api ' "$BATS_TEST_TMPDIR/gh.log")" = $'issue create --title a --body-file -\nissue close 2 --comment b\nissue create --title c --body-file -' ]
   # The count holds across the steps of the job, which share the file
-  ISSUE_WRITE_MAX=4 run issue_write issue close 4 --comment d
+  ISSUE_WRITE_MAX=5 run issue_write issue close 4 --comment d
+  [ "$status" -eq 3 ]
+  ISSUE_WRITE_MAX=5 run issue_write issue create --title d --body-file -
   [ "$status" -eq 0 ]
-  [ "$(wc -l <"$BATS_TEST_TMPDIR/gh.log")" = 4 ]
+  [ "$(grep -vc '^api ' "$BATS_TEST_TMPDIR/gh.log")" = 4 ]
+}
+
+# The job token has 1000 GraphQL points an hour, and each write takes about 3 of them
+@test "issue_write: keeps ISSUE_POINTS_KEEP GraphQL points and reads them before every tenth write" {
+  local i
+  issue_gh
+  export ISSUE_WRITE_PAUSE_MS=0 ISSUE_POINTS_KEEP=100
+  echo 112 >"$BATS_TEST_TMPDIR/points"
+  for i in 1 2 3 4; do
+    issue_write issue create --title "$i" --body-file - <<<"body"
+  done
+  run issue_write issue create --title 5 --body-file -
+  [ "$status" -eq 3 ]
+  [ "$(grep -c '^issue create' "$BATS_TEST_TMPDIR/gh.log")" = 4 ]
+  [ "$(grep -cx 'api rate_limit --jq .resources.graphql.remaining' "$BATS_TEST_TMPDIR/gh.log")" = 1 ]
+  # The issue of the failed packages past the writes takes the points that the others keep
+  ISSUE_POINTS_KEEP=0 issue_write issue create --title grouped --body-file - <<<"body"
+  [ "$(grep -c '^issue create' "$BATS_TEST_TMPDIR/gh.log")" = 5 ]
+  : >"$BATS_TEST_TMPDIR/gh.log"
+  rm "$ISSUE_WRITES"
+  echo 1000 >"$BATS_TEST_TMPDIR/points"
+  for i in $(seq 1 12); do
+    issue_write issue create --title "$i" --body-file - <<<"body"
+  done
+  [ "$(grep -c '^api rate_limit ' "$BATS_TEST_TMPDIR/gh.log")" = 2 ]
+  # GitHub can fail to say, and the writes go on
+  : >"$BATS_TEST_TMPDIR/points"
+  rm "$ISSUE_WRITES"
+  issue_write issue create --title x --body-file - <<<"body"
+}
+
+@test "issue_write: fails with 3 when GitHub refuses a write for its rate limits" {
+  local error
+  issue_gh
+  export ISSUE_WRITE_PAUSE_MS=0
+  echo 1000 >"$BATS_TEST_TMPDIR/points"
+  for error in 'GraphQL: API rate limit exceeded for installation ID 1. (RATE_LIMITED)' \
+    'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' \
+    'GraphQL: was submitted too quickly (createIssue)'; do
+    echo "$error" >"$BATS_TEST_TMPDIR/error"
+    run issue_write issue create --title t --body-file -
+    [ "$status" -eq 3 ]
+    [ "$output" = "$error" ]
+  done
+  # The next write reads the points again
+  [ "$(grep -c '^api rate_limit ' "$BATS_TEST_TMPDIR/gh.log")" = 3 ]
+  echo 'GraphQL: body is too long (maximum is 65536 characters)' >"$BATS_TEST_TMPDIR/error"
+  run issue_write issue create --title t --body-file -
+  [ "$status" -eq 1 ]
+  [ "$output" = 'GraphQL: body is too long (maximum is 65536 characters)' ]
+  rm "$BATS_TEST_TMPDIR/error"
+  run issue_write issue create --title t --body-file -
+  [ "$status" -eq 0 ]
+  [ "$output" = https://github.com/owner/fork/issues/1 ]
 }
 
 # Errors hold text of upstream, so each goes in a code span without backticks, where @ mentions no one
@@ -5429,7 +5505,7 @@ EOF
   echo "update_failed: $(printf 'x%.0s' {1..300})" >"$TEST_TMPDIR/st/d"
   run grouped_issue_body "$TEST_TMPDIR/st" https://example.invalid/run c d
   [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "GitHub allows a run about 450 writes to issues an hour, so these packages failed without an issue of their own in https://example.invalid/run. The run summary of its step Create issues holds each whole error." ]
+  [ "${lines[0]}" = "The writes of the run to issues reached the limits of GitHub, so these packages failed without an issue of their own in https://example.invalid/run. The run summary of its step Create issues holds each whole error." ]
   [ "${lines[1]}" = "- \`c\`: \`'boom' @octocat [x](https://evil.example)\`" ]
   [ "${lines[2]}" = "- \`d\`: \`$(printf 'x%.0s' {1..200})\`" ]
   [ "${lines[3]}" = "Auto-created by update workflow, which closes it once each of these packages recovered, has an issue of its own or has no YAML." ]
