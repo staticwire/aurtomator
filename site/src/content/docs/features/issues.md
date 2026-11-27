@@ -25,7 +25,7 @@ Failed checks count for the host of the request they failed on, in lower case, a
 
 Issues close before new ones open, so packages whose check passes and whose update fails get the check issue closed and an update issue opened in one run. Failed steps close nothing, and failed `publish` jobs close host issues alone, since those rest on the checks. In repositories with Issues turned off, the job prints a notice and opens nothing.
 
-GitHub allows 500 writes of content an hour, so the job writes one a second and at most 450 times a run. Closes past that wait for the next run, and the failed packages past that share one issue, `❌ <count> failed packages of run <number>`, with the first line of each error for as many as 60000 characters hold and the count of the rest, while the run summary holds each whole error. That issue closes once each of its packages recovered or has an issue of its own.
+GitHub allows 500 writes of content an hour, so the job writes one a second and at most 450 times a run. Closes past that wait for the next run, and the failed packages past that share one issue, `❌ <count> failed packages of run <number>`, with the first line of each error for as many as 60000 characters hold and the count of the rest, while the run summary holds each whole error. That issue closes once each of its packages recovered, has an issue of its own or has no YAML. Unchecked packages keep it open when it names them.
 
 ## Failed runs
 

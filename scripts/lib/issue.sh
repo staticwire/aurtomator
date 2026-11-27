@@ -266,7 +266,7 @@ grouped_issue_body() {
   local dir=$1 run=$2 name error entry head foot items="" kept=0 LC_ALL=C.UTF-8
   shift 2
   head="GitHub allows a run about 450 writes to issues an hour, so these packages failed without an issue of their own in $run. The run summary of its step Create issues holds each whole error."$'\n\n'
-  foot=$'\nAuto-created by update workflow, which closes it once each of these packages recovered or has an issue of its own.\n'
+  foot=$'\nAuto-created by update workflow, which closes it once each of these packages recovered, has an issue of its own or has no YAML.\n'
   for name in "$@"; do
     error=""
     IFS= read -r error <"$dir/$name" || true

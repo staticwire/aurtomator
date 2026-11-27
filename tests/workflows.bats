@@ -4430,13 +4430,14 @@ run_bare_issues_step() {
   grep -qx body "$BATS_TEST_TMPDIR/summary"
 }
 
-# The issue of a run closes once each of its packages recovered or has an issue of its own
+# The issue of a run closes once each of its packages recovered, has an issue of its own or
+# has no YAML
 @test "check-updates: closes the issue of the failed packages of a run once each has recovered or its own issue" {
   local group=$'- `c`: `boom`\n- `d`: `boom`'
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7\n6 ❌ d: check failed' \
     run_close_step c=up_to_date d="check_failed: boom"
   [ "$status" -eq 0 ]
-  grep -qx 'issue close 5 --comment Each package of this issue recovered or has an issue of its own in https://example.invalid/run.' "$GH_LOG"
+  grep -qx 'issue close 5 --comment Each package of this issue recovered, has an issue of its own or has no YAML in https://example.invalid/run.' "$GH_LOG"
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="check_failed: boom"
   no_call '^issue close 5'
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="unchecked: out of time"
@@ -4445,9 +4446,20 @@ run_bare_issues_step() {
   local cut=$'- `c`: `boom`\n- and 2 more packages, which the run summary of the step Create issues lists'
   GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="check_failed: boom"
   no_call '^issue close 5'
-  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="unchecked: out of time"
-  no_call '^issue close 5'
   GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7\n6 ❌ e: check failed' run_close_step c=up_to_date e="check_failed: boom"
+  grep -q '^issue close 5' "$GH_LOG"
+  # Runs of many packages leave some unchecked in each run, and only the named ones keep a cut issue open
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="unchecked: out of time"
+  grep -q '^issue close 5' "$GH_LOG"
+  GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c="unchecked: out of time" e=up_to_date
+  no_call '^issue close 5'
+  # Named packages without a status count as unchecked, unless _packages lacks them
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date _packages=$'c\nd'
+  no_call '^issue close 5'
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date
+  no_call '^issue close 5'
+  GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date _packages=c
+  [ "$status" -eq 0 ]
   grep -q '^issue close 5' "$GH_LOG"
   # Unread bodies stop the step and close nothing
   GH_VIEW_FAIL=1 GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d=up_to_date

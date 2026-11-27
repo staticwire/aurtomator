@@ -5432,7 +5432,7 @@ EOF
   [ "${lines[0]}" = "GitHub allows a run about 450 writes to issues an hour, so these packages failed without an issue of their own in https://example.invalid/run. The run summary of its step Create issues holds each whole error." ]
   [ "${lines[1]}" = "- \`c\`: \`'boom' @octocat [x](https://evil.example)\`" ]
   [ "${lines[2]}" = "- \`d\`: \`$(printf 'x%.0s' {1..200})\`" ]
-  [ "${lines[3]}" = "Auto-created by update workflow, which closes it once each of these packages recovered or has an issue of its own." ]
+  [ "${lines[3]}" = "Auto-created by update workflow, which closes it once each of these packages recovered, has an issue of its own or has no YAML." ]
 }
 
 # GitHub refuses an issue body past 65536 characters
