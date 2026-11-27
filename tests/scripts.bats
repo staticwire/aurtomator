@@ -4688,7 +4688,11 @@ current: '1.0.0'"
     echo up_to_date >"$TEST_TMPDIR/.status/foo"
     : >"$TEST_TMPDIR/.status/_requirements"
     run "$TEST_TMPDIR/scripts/check-all.sh" "--$mode" "$TEST_TMPDIR/out"
-    [ -e "$TEST_TMPDIR/.status/_requirements" ] && [ ! -s "$TEST_TMPDIR/.status/_requirements" ]
+    [ -e "$TEST_TMPDIR/.status/_requirements" ] || {
+      echo "empty list lost by --$mode"
+      return 1
+    }
+    [ ! -s "$TEST_TMPDIR/.status/_requirements" ]
     rm -rf "$TEST_TMPDIR/.status" "$TEST_TMPDIR/out"
     mkdir -p "$TEST_TMPDIR/.status"
     echo up_to_date >"$TEST_TMPDIR/.status/foo"
