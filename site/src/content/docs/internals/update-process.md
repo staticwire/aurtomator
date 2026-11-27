@@ -22,7 +22,7 @@ verify-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-
 publish-pkg.sh <package-name> <version> <prepared-dir> [--asset <value>] [--arch-out <arches>] [--dry-run]
 check-asset.sh <package-name> <pkgver>
 check-arch.sh <package-name> <version> [--asset <value>]
-check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir>] [--dry-run]
+check-all.sh [--update | --prepare <dir> | --verify <dir> | --publish <dir> | --rules <dir>] [--rules-later] [--dry-run]
 ```
 
 ## Step-by-step
