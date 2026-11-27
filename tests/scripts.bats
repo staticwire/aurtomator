@@ -3112,6 +3112,19 @@ python_files_db() {
   [[ "$output" == *"../x is not an AUR package name"* ]]
 }
 
+# The list and the metadata reach awk as two inputs, and an empty list is still the first of them
+@test "archdb.sh: aur_screen prints no package for an empty list" {
+  aur_meta '{"Name":"py","PackageBase":"py","Depends":["python"]}'
+  : >"$TEST_TMPDIR/names"
+  run_archdb 'aur_screen "$1"' "$TEST_TMPDIR/names"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  printf 'py\n' >"$TEST_TMPDIR/names"
+  run_archdb 'aur_screen "$1"' "$TEST_TMPDIR/names"
+  [ "$status" -eq 0 ]
+  [ "$output" = py ]
+}
+
 @test "archdb.sh: files_index_python lists the distributions of the repositories once per run" {
   python_files_db
   export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
@@ -4271,6 +4284,19 @@ $1"
   run "$TEST_TMPDIR/scripts/check-all.sh"
   [ ! -e "$TEST_TMPDIR/.status/_requirements" ]
   ! grep -q packages-meta "$CURL_ARGS_LOG"
+}
+
+# A repository without packages has no package that misses a key, so the issue closes
+@test "check-all: --rules-later lists no package and reads no AUR without packages" {
+  aur_meta
+  export CURL_ARGS_LOG="$TEST_TMPDIR/curl-args"
+  run "$TEST_TMPDIR/scripts/check-all.sh" --rules-later
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_TMPDIR/.status/_requirements" ]
+  [ ! -s "$TEST_TMPDIR/.status/_requirements" ]
+  [[ "$output" != *"Could not read the AUR"* ]]
+  run grep -q packages-meta "$CURL_ARGS_LOG"
+  [ "$status" -ne 0 ]
 }
 
 # The list runs after the loop in the same 30 minutes of the job, so it takes the share of the budget

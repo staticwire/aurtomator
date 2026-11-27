@@ -217,6 +217,11 @@ requirements_missing() {
     files[$name]=$file
     printf '%s\n' "$name"
   done < <(package_rows '[filename, .name // ""] | map(tostring) | join("\t")' "${regular[@]}") >"$list"
+  # Without names the AUR has nothing to screen
+  if [[ ! -s "$list" ]]; then
+    rm -f -- "$list"
+    return 0
+  fi
   needed=$(aur_screen "$list") || rc=$?
   rm -f -- "$list"
   ((rc == 0)) || return 1

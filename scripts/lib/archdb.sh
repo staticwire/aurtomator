@@ -243,7 +243,7 @@ aur_screen() {
   if ((rc == 0)); then
     # A ] or an escape inside a string would end the list of Depends early, so such a list counts
     gzip -dc -- "$meta" | awk '
-      FNR == NR { if ($0 != "") want[$0] = 1; next }
+      FILENAME == ARGV[1] { if ($0 != "") want[$0] = 1; next }
       $0 == "]" { closed = 1; next }
       {
         i = index($0, "\"PackageBase\":\"")
