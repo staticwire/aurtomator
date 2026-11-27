@@ -3194,6 +3194,18 @@ python_files_db() {
   [ "$(wc -l <"$AURTOMATOR_RUN_CACHE/py-owners-asked")" -eq 15002 ]
 }
 
+# The names join the regular expression of pacman -Fx, so a name of a file of the release can add to it
+@test "pyrules.sh: _python_owners_index asks pacman for no name that is no module name" {
+  python_files_db
+  export PACMAN_ARGS_LOG="$TEST_TMPDIR/pacman-args"
+  run_archdb '_python_owners_index yaml "a|b" ".*" "x)" 1a && cat "$AURTOMATOR_RUN_CACHE/py-owners-asked"'
+  [ "$status" -eq 0 ]
+  [ "$output" = yaml ]
+  [ "$(wc -l <"$PACMAN_ARGS_LOG")" -eq 1 ]
+  run grep -F -e 'a|b' -e '.*' -e 'x)' -e '1a' "$PACMAN_ARGS_LOG"
+  [ "$status" -eq 1 ]
+}
+
 @test "rbrules.sh: _ruby_owners fails on an error of pacman and splits long queries" {
   export MOCK_PACMAN_FILES="$TEST_TMPDIR/pacman-files"
   printf 'extra\truby-rexml\t1-1\tusr/lib/ruby/gems/3.4.0/gems/rexml-3.4.4/lib/rexml/document.rb\n' >"$MOCK_PACMAN_FILES"
@@ -3674,6 +3686,17 @@ demo_wheel() {
   pypi_fake_wheel demo 1.0 "$w"
 }
 
+# Helper: puts a command $1 in front of PATH that appends its arguments to $BATS_TEST_TMPDIR/$1-calls
+# and runs the next $1 of PATH
+record_calls() {
+  local bin="$BATS_TEST_TMPDIR/rec"
+  mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\nprintf '\''%%s\\n'\'' "$*" >>"%s/%s-calls"\nPATH=${PATH#"%s:"}\nexec %s "$@"\n' \
+    "$BATS_TEST_TMPDIR" "$1" "$bin" "$1" >"$bin/$1"
+  chmod +x "$bin/$1"
+  [[ "$PATH" == "$bin:"* ]] || PATH="$bin:$PATH"
+}
+
 # Helper: runs python_imports for package pkg of registry $2 at version $3 with .SRCINFO $1
 run_imports() {
   create_test_package "pkg" "pypi" "upstream:
@@ -3692,6 +3715,22 @@ ${4:-}"
   run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
   [ "$status" -eq 0 ]
   [ "$output" = $'notice\timport pandas (optional): python-pandas in neither depends nor optdepends\nnotice\timport tqdm: python-tqdm not in depends' ]
+}
+
+# The release under check holds the files that py_imports.py parses, so neither PYTHONPATH, the
+# working directory nor site-packages reach its python3
+@test "pyrules.sh: python_imports runs py_imports.py with -I -S" {
+  local calls="$BATS_TEST_TMPDIR/python3-calls"
+  imports_env
+  demo_wheel
+  printf 'pkgbase = python-demo\n\tpkgver = 1.0\n\tpkgrel = 1\n\tdepends = python\n\npkgname = python-demo\n' \
+    >"$TEST_TMPDIR/demo.SRCINFO"
+  record_calls python3
+  run_imports "$TEST_TMPDIR/demo.SRCINFO" demo 1.0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"import tqdm: python-tqdm not in depends"* ]]
+  [ "$(grep -c '/py_imports\.py ' "$calls")" -eq 2 ]
+  [ "$(grep -c '^-I -S [^ ]*/scripts/lib/py_imports\.py ' "$calls")" -eq 2 ]
 }
 
 @test "pyrules.sh: python_imports finds the imports of a script of the wheel" {
@@ -5195,6 +5234,20 @@ run_ruby_imports() {
   rm -rf "$AURTOMATOR_RUN_CACHE"/*
   run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
   [ "$output" = $'notice\trequire simplecov: ruby-simplecov not in depends' ]
+}
+
+# The gem under check holds the files that rb_requires.rb parses, so no installed gem loads into its ruby
+@test "rbrules.sh: ruby_imports runs rb_requires.rb with --disable-gems" {
+  local calls="$BATS_TEST_TMPDIR/ruby-calls"
+  gems_env 1.3.2
+  bashcov_gem
+  unmet_srcinfo "$TEST_TMPDIR/b.SRCINFO" bashcov bash ruby ruby-simplecov
+  record_calls ruby
+  run_ruby_imports "$TEST_TMPDIR/b.SRCINFO"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"require erb (optional)"* ]]
+  [ "$(grep -c '/rb_requires\.rb ' "$calls")" -eq 2 ]
+  [ "$(grep -c '^--disable-gems [^ ]*/scripts/lib/rb_requires\.rb ' "$calls")" -eq 2 ]
 }
 
 @test "rbrules.sh: ruby_imports fails on a gem that does not match its sha256, and notes without ruby" {

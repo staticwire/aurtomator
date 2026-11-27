@@ -1687,6 +1687,23 @@ exec "%s" "$@"
   [[ "$output" != *"packages valid"* ]]
 }
 
+# The checks end with 0 or 1 today, and a code above 1 is a failure as well
+@test "validate --all: counts a check that ends with a code above 1 as failed" {
+  local real bin="$BATS_TEST_TMPDIR/bin"
+  real=$(command -v mv)
+  mkdir -p "$bin"
+  printf '#!/bin/bash\nif [[ "$2" == *.rc.part ]]; then echo 2 >"$3" && rm -f -- "$2"; exit; fi\nexec "%s" "$@"\n' \
+    "$real" >"$bin/mv"
+  chmod +x "$bin/mv"
+  create_test_package a github-release "upstream:
+  project: owner/a"
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 0 ]
+  PATH="$bin:$PATH" run "$TEST_TMPDIR/scripts/validate-pkg.sh" --all
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Validation failed: 1/1 packages have errors"* ]]
+}
+
 # The lines of one package stay together, and the packages keep the order of their files
 @test "validate --all: prints the result of each package whole and in order" {
   local i expected=""
