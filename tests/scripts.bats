@@ -9023,7 +9023,7 @@ current: 28+22"
     [ "$status" -eq 1 ]
     run grep -n -E "${cmd}(makepkg|updpkgsums|eval)[[:space:]]|${cmd}source[[:space:]]+[^|[:space:]]|${dot}\\.[[:space:]]+[^[:space:]]|(ba)?sh[[:space:]]+-c" "$file"
     [ "$status" -le 1 ]
-    run grep -v -E '^[0-9]+:[[:space:]]*source "(\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)|\$SCRIPT_DIR)/lib(/[a-z0-9]+)?\.sh"$|^[0-9]+:[[:space:]]*bounded "\$CHECK_TIMEOUT" bash -c .source "\$1/scripts/lib\.sh" && ' <<<"$output"
+    run grep -v -E '^[0-9]+:[[:space:]]*source "(\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)|\$SCRIPT_DIR)/lib(/[a-z0-9]+)?\.sh"$|^[0-9]+:[[:space:]]*([a-z_]+=\$\()?bounded "\$[a-z_A-Z]+" bash -c .source "\$1/scripts/lib\.sh" && ' <<<"$output"
     [ -z "$output" ]
   done
   [ "$count" -gt 20 ]
