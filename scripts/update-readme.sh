@@ -226,6 +226,26 @@ write_readme() {
 # GitHub cuts a README past 500 KiB. Past the limit, the table goes to pages table/<letter>.md,
 # and the README keeps the packages that need attention.
 readonly PAGES="${AURTOMATOR_DATA_DIR}/table"
+
+# Write rows $3... of letter $1 to table/<letter>.md, and the rows past limit $2 in bytes to
+# table/<letter>-2.md and on; each page goes into pages, and its link into links
+write_letter_pages() {
+  local LC_ALL=C letter=$1 max=$2 part=1 rows="" row name title
+  shift 2
+  for row in "$@" ""; do
+    if [[ -n "$rows" ]] && { [[ -z "$row" ]] || ((${#rows} + ${#row} + ${#table_header} + 200 > max)); }; then
+      name=$letter title=$letter
+      ((part == 1)) || name+="-$part" title+=", part $part"
+      printf '# Packages: %s\n\n[Back to the README](../README.md)\n\n%s%s\n</table>\n' "$title" "$table_header" \
+        "$rows" >"$PAGES/$name.md"
+      pages["$name.md"]=1
+      links+=" [$name](table/$name.md)"
+      part=$((part + 1)) rows=""
+    fi
+    rows+=$row
+  done
+}
+
 readme_max=${AURTOMATOR_README_MAX_KIB:-400}
 if [[ ! "$readme_max" =~ ^[1-9][0-9]{0,5}$ ]]; then
   log_err "AURTOMATOR_README_MAX_KIB must be a number of KiB from 1: ${readme_max@Q}"
@@ -244,7 +264,7 @@ if (($(wc -c <"$new_readme") > readme_max * 1024)); then
   for i in "${!row_list[@]}"; do
     letter=${name_list[i]:0:1}
     [[ "$letter" != [0-9] ]] || letter=0-9
-    page_rows[$letter]+=${row_list[i]}
+    page_rows[$letter]+=" $i"
     [[ -n "${counts[${mark_list[i]}]:-}" ]] || marks+=("${mark_list[i]}")
     counts[${mark_list[i]}]=$((${counts[${mark_list[i]}]:-0} + 1))
   done
@@ -255,10 +275,11 @@ if (($(wc -c <"$new_readme") > readme_max * 1024)); then
   links="Every package:"
   for letter in 0-9 {a..z}; do
     [[ -n "${page_rows[$letter]:-}" ]] || continue
-    pages["$letter.md"]=1
-    printf '# Packages: %s\n\n[Back to the README](../README.md)\n\n%s%s\n</table>\n' "$letter" "$table_header" \
-      "${page_rows[$letter]}" >"$PAGES/$letter.md"
-    links+=" [$letter](table/$letter.md)"
+    read -ra letter_rows <<<"${page_rows[$letter]}"
+    for i in "${!letter_rows[@]}"; do
+      letter_rows[i]=${row_list[letter_rows[i]]}
+    done
+    write_letter_pages "$letter" "$((readme_max * 1024))" "${letter_rows[@]}"
   done
   block="${CARD}"$'\n\n'"${summary%,}"
   if ((${#attention[@]} > 0)); then
@@ -277,11 +298,11 @@ if (($(wc -c <"$new_readme") > readme_max * 1024)); then
   write_readme "$block"$'\n\n'"$links"
 fi
 replace_readme "$new_readme"
-# Pages of letters without packages, and every page under the limit, go
+# Pages and parts of letters without packages, and every page under the limit, go
 if [[ -d "$PAGES" && ! -L "$PAGES" ]]; then
   for page in "$PAGES"/*.md; do
     file=${page##*/}
-    if [[ -f "$page" && ! -L "$page" && "$file" =~ ^(0-9|[a-z])\.md$ && -z "${pages[$file]:-}" ]]; then
+    if [[ -f "$page" && ! -L "$page" && "$file" =~ ^(0-9|[a-z])(-[1-9][0-9]*)?\.md$ && -z "${pages[$file]:-}" ]]; then
       rm -f -- "$page"
     fi
   done

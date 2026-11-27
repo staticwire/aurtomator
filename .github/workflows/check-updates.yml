@@ -248,7 +248,7 @@ jobs:
           if [[ -d "$WORK/table" && ! -L "$WORK/table" ]]; then
             for f in "$WORK"/table/*.md; do
               name=${f##*/}
-              [[ "$name" =~ ^(0-9|[a-z])\.md$ ]] || continue
+              [[ "$name" =~ ^(0-9|[a-z])(-[1-9][0-9]*)?\.md$ ]] || continue
               take "table/$name" "$RESULTS/table/$name" "$results_max"
             done
           fi
@@ -319,7 +319,7 @@ jobs:
           if [[ -f "$RESULTS/README.md" ]]; then
             for page in "$RESULTS"/table/*.md table/*.md; do
               name=${page##*/}
-              [[ -f "$page" && "$name" =~ ^(0-9|[a-z])\.md$ && ! -L "table/$name" ]] || continue
+              [[ -f "$page" && "$name" =~ ^(0-9|[a-z])(-[1-9][0-9]*)?\.md$ && ! -L "table/$name" ]] || continue
               cmp -s "$RESULTS/table/$name" "table/$name" 2>/dev/null || work=true
             done
           fi
@@ -923,7 +923,7 @@ jobs:
             "$RESULTS/stats/events.csv" "$RESULTS/stats/card.svg" "$RESULTS/stats/card-dark.svg"; do
             [[ -f "$copy" ]] || continue
             file=${copy#"$RESULTS"/}
-            [[ "$file" != table/* || "$file" =~ ^table/(0-9|[a-z])\.md$ ]] || continue
+            [[ "$file" != table/* || "$file" =~ ^table/(0-9|[a-z])(-[1-9][0-9]*)?\.md$ ]] || continue
             if [[ "$file" == stats/* || "$file" == table/* ]]; then
               # Paths under a file would replace the file, and those under a link would follow it
               if [[ -L "${file%%/*}" || (-e "${file%%/*}" && ! -d "${file%%/*}") ]]; then
@@ -942,7 +942,7 @@ jobs:
           # Runs that wrote README.md wrote every page that it links, so the pages without a copy go
           if [[ -f "$RESULTS/README.md" && -d table && ! -L table ]]; then
             for file in table/*.md; do
-              if [[ "$file" =~ ^table/(0-9|[a-z])\.md$ && -f "$file" && ! -L "$file" && ! -e "$RESULTS/$file" ]]; then
+              if [[ "$file" =~ ^table/(0-9|[a-z])(-[1-9][0-9]*)?\.md$ && -f "$file" && ! -L "$file" && ! -e "$RESULTS/$file" ]]; then
                 changed+=("$file")
                 removed[$file]=1
               fi

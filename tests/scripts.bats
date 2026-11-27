@@ -5672,12 +5672,13 @@ $1"
   grep -qF '>alpha</a>' "$TEST_TMPDIR/README.md"
   grep -qF '>beta</a>' "$TEST_TMPDIR/README.md"
   run ! grep -qF '>avocado</a>' "$TEST_TMPDIR/README.md"
-  grep -qxF 'Every package: [0-9](table/0-9.md) [a](table/a.md) [b](table/b.md) [z](table/z.md)' "$TEST_TMPDIR/README.md"
+  # The twelve rows of a pass the limit of one page and take a second part
+  grep -qxF 'Every package: [0-9](table/0-9.md) [a](table/a.md) [a-2](table/a-2.md) [b](table/b.md) [z](table/z.md)' "$TEST_TMPDIR/README.md"
   [ "$(tail -n 1 "$TEST_TMPDIR/README.md")" = end ]
   # Each page holds the rows of its letter
-  grep -qF '>alpha</a>' "$TEST_TMPDIR/table/a.md"
-  grep -qF '>avocado</a>' "$TEST_TMPDIR/table/a.md"
-  run ! grep -qF '>beta</a>' "$TEST_TMPDIR/table/a.md"
+  cat "$TEST_TMPDIR"/table/a*.md | grep -qF '>alpha</a>'
+  cat "$TEST_TMPDIR"/table/a*.md | grep -qF '>avocado</a>'
+  run ! grep -qF '>beta</a>' "$TEST_TMPDIR/table/a.md" "$TEST_TMPDIR/table/a-2.md"
   grep -qF '>0ad</a>' "$TEST_TMPDIR/table/0-9.md"
   grep -qxF '[Back to the README](../README.md)' "$TEST_TMPDIR/table/z.md"
   [ ! -e "$TEST_TMPDIR/table/q.md" ]
@@ -5707,7 +5708,38 @@ $1"
   (($(wc -c <"$TEST_TMPDIR/README.md") <= 2048))
   [[ "$(cat "$TEST_TMPDIR/README.md")" =~ $'\n'([0-9]+)" more packages need attention, in the pages below"$'\n' ]]
   [ "$((BASH_REMATCH[1] + $(grep -c '<tr><td>' "$TEST_TMPDIR/README.md")))" = 30 ]
-  [ "$(grep -c '<tr><td>' "$TEST_TMPDIR/table/p.md")" = 30 ]
+  [ "$(cat "$TEST_TMPDIR"/table/p*.md | grep -c '<tr><td>')" = 30 ]
+}
+
+# Repositories of thousands of python-* packages would put more on one page than the README takes
+@test "update-readme: splits the page of a letter past the limit into parts" {
+  local i page links="Every package:"
+  for i in $(seq 10 39); do
+    create_test_package "p$i" github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+  done
+  create_test_package zeta github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+  printf '%s\n' '<!-- PACKAGES:START -->' '<!-- PACKAGES:END -->' >"$TEST_TMPDIR/README.md"
+  mkdir "$TEST_TMPDIR/table"
+  echo "an old part" >"$TEST_TMPDIR/table/p-9.md"
+  git -C "$TEST_TMPDIR" init -q
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_TMPDIR/table/p-2.md" ]
+  [ ! -e "$TEST_TMPDIR/table/p-9.md" ]
+  for page in p $(cd "$TEST_TMPDIR/table" && ls p-*.md | sed 's/\.md$//' | sort -t- -k2 -n); do
+    (($(wc -c <"$TEST_TMPDIR/table/$page.md") <= 2048))
+    links+=" [$page](table/$page.md)"
+  done
+  grep -qxF "$links [z](table/z.md)" "$TEST_TMPDIR/README.md"
+  grep -qxF '# Packages: p, part 2' "$TEST_TMPDIR/table/p-2.md"
+  # Each row stands on one page, in the order of the packages
+  [ "$(for page in p $(cd "$TEST_TMPDIR/table" && ls p-*.md | sed 's/\.md$//' | sort -t- -k2 -n); do
+    grep -o '>p[0-9]*</a>' "$TEST_TMPDIR/table/$page.md"
+  done | tr -d '<>/a' | tr '\n' ' ')" = "$(seq -f 'p%g' 10 39 | tr '\n' ' ')" ]
+  # Under the limit the parts go too
+  run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$(ls -A "$TEST_TMPDIR/table")" ]
 }
 
 # bash runs $(...) in an array subscript of (( )), so the limit matches a digit pattern first

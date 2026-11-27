@@ -1550,7 +1550,7 @@ run_decide_step() {
 # date of a cooldown
 @test "check-updates: Decide publishes a changed, new or removed page of the package table" {
   local ws="$BATS_TEST_TMPDIR/ws" results="$BATS_TEST_TMPDIR/results" case
-  for case in same changed new removed; do
+  for case in same changed new removed part; do
     rm -rf "$ws" "$results"
     mkdir -p "$ws/table" "$results/table"
     echo "page a" >"$ws/table/a.md"
@@ -1560,6 +1560,7 @@ run_decide_step() {
       changed) echo "new page a" >"$results/table/a.md" ;;
       new) echo "page b" >"$results/table/b.md" ;;
       removed) echo "page c" >"$ws/table/c.md" ;;
+      part) echo "page a, part 2" >"$results/table/a-2.md" ;;
     esac
     run run_decide_step pkg="cooldown: 2026-11-12"
     [ "$status" -eq 0 ]
@@ -3029,14 +3030,14 @@ make_handoff() {
   local work="$BATS_TEST_TMPDIR/work" results="$BATS_TEST_TMPDIR/results"
   echo secret >"$BATS_TEST_TMPDIR/secret"
   mkdir -p "$work/table/sub"
-  for page in a.md 0-9.md z.md A.md ab.md notes.txt sub/b.md; do
+  for page in a.md a-2.md a-0.md a-.md 0-9.md z.md A.md ab.md notes.txt sub/b.md; do
     echo "page $page" >"$work/table/$page"
   done
   ln -s "$BATS_TEST_TMPDIR/secret" "$work/table/c.md"
   run_hand_over_step
   [ "$status" -eq 0 ]
   run env LC_ALL=C ls -A "$results/table"
-  [ "$output" = $'0-9.md\na.md\nz.md' ]
+  [ "$output" = $'0-9.md\na-2.md\na.md\nz.md' ]
   [ "$(<"$results/table/a.md")" = "page a.md" ]
   # A link to the directory reaches nothing
   rm -rf "$work/table" "$results"
@@ -4042,18 +4043,19 @@ no_commit() {
 # update-readme.sh writes table/<letter>.md past the limit of the README, and none under it
 @test "check-updates: the commit step adds, changes and removes the pages of the package table" {
   local ws="$BATS_TEST_TMPDIR/ws"
-  make_commit_repo README.md="short table" table/a.md="page a" table/b.md="new page b"
+  make_commit_repo README.md="short table" table/a.md="page a" table/a-2.md="page a, part 2" table/b.md="new page b"
   mkdir "$ws/table"
   echo "old page b" >"$ws/table/b.md"
   echo "old page c" >"$ws/table/c.md"
+  echo "old page c, part 2" >"$ws/table/c-2.md"
   echo "notes" >"$ws/table/notes.txt"
   git -C "$ws" add table
   git -C "$ws" -c user.name=t -c user.email=t@example.invalid commit -q -m pages
   echo other >"$BATS_TEST_TMPDIR/results/table/notes.txt"
   run_commit_step
   [ "$status" -eq 0 ]
-  jq -e '[.tree[] | [.path, .sha == null]] == [["README.md", false], ["table/a.md", false], ["table/b.md", false], ["table/c.md", true]]' \
-    "$GH_LOG.tree"
+  jq -e '[.tree[] | [.path, .sha == null]] == [["README.md", false], ["table/a-2.md", false], ["table/a.md", false],
+    ["table/b.md", false], ["table/c-2.md", true], ["table/c.md", true]]' "$GH_LOG.tree"
   # Runs without the copy of README.md wrote no pages, so they remove none
   rm -rf "$ws" "$BATS_TEST_TMPDIR/results"
   make_commit_repo packages/foo.yml="current: 2.0"
