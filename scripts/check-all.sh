@@ -227,11 +227,28 @@ if [[ "$MODE" =~ ^(prepare|verify|publish|rules)$ ]] && [[ ! -L "$STATUS_DIR" ]]
   done
 fi
 
+# Print the start of a loop over $1 packages in run $2: a step of 0.618 of $1 that shares no factor
+# with it, so the packages that a budget leaves out of one run are near the start of the next
+loop_start() {
+  local count=$1 stride a b rest
+  stride=$((count * 618 / 1000))
+  ((stride > 0)) || stride=1
+  while :; do
+    a=$count b=$stride
+    while ((b > 0)); do
+      rest=$((a % b)) a=$b b=$rest
+    done
+    ((a != 1)) || break
+    stride=$((stride + 1))
+  done
+  echo "$(($2 % count * stride % count))"
+}
+
 # Failed verifies, exit code 3 of a moved AUR repo included, take the update
 # out with update_failed. Only package names from packages/ reach a path.
 if [[ "$MODE" == "verify" ]]; then
   # Slow sources early in the list would take the budget of the same packages in every run, so each
-  # run of the workflow starts the loop one package later, and runs by hand one package each hour
+  # run of the workflow starts the loop at another package, and runs by hand at another one each hour
   verify_files=()
   for pkg_file in "${AURTOMATOR_DATA_DIR}"/packages/*.yml; do
     if [[ -f "$pkg_file" ]]; then
@@ -240,9 +257,9 @@ if [[ "$MODE" == "verify" ]]; then
   done
   verify_start=0
   if ((${#verify_files[@]} > 0)) && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
-    verify_start=$((GITHUB_RUN_NUMBER % ${#verify_files[@]}))
+    verify_start=$(loop_start "${#verify_files[@]}" "$GITHUB_RUN_NUMBER")
   elif ((${#verify_files[@]} > 0)); then
-    verify_start=$(($(date -u +%s) / 3600 % ${#verify_files[@]}))
+    verify_start=$(loop_start "${#verify_files[@]}" "$(($(date -u +%s) / 3600))")
   fi
   # Packages on this list keep the status of the check run in publish, so only this loop writes it
   rm -f "${WORK_DIR}/status/_unverified"
@@ -1196,10 +1213,10 @@ for pkg_file in "${check_files[@]}"; do
   fi
 done
 # Slow hosts early in the list would take the budget of the same packages in
-# every run, so each run of the workflow starts the loop one package later
+# every run, so each run of the workflow starts the loop at another package
 check_start=0
 if [[ "$MODE" == check && ${#plain_files[@]} -gt 0 ]] && (LC_ALL=C && [[ "${GITHUB_RUN_NUMBER:-}" =~ ^(0|[1-9][0-9]{0,8})$ ]]); then
-  check_start=$((GITHUB_RUN_NUMBER % ${#plain_files[@]}))
+  check_start=$(loop_start "${#plain_files[@]}" "$GITHUB_RUN_NUMBER")
 fi
 
 RECHECK=()

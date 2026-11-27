@@ -4687,7 +4687,44 @@ EOF
   [ "$(cat "$TEST_TMPDIR/.status/steady")" = "unchecked: the check ran out of its 2 minutes in this run" ]
 }
 
-@test "check-all: starts the check loop one package later in each run" {
+# Budgets that reach some of the packages leave the rest unchecked, and each run starts far from
+# the start of the run before
+@test "check-all: leaves no package unchecked in more than two runs in a row" {
+  local i run missed=() unchecked=0
+  for i in 0 1 2 3 4 5 6 7 8 9; do
+    create_test_package "p$i" "github-release" "upstream:
+  project: owner/repo
+current: '1.0.0'"
+    missed[i]=0
+  done
+  rm -f "$TEST_TMPDIR/scripts/check-update.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TMPDIR/scripts/check-update.sh"
+  chmod +x "$TEST_TMPDIR/scripts/check-update.sh"
+  # Each read of the clock moves it 100 s on, so a budget of 650 s takes 6 checks
+  printf '%s\n' '#!/bin/sh' 'if [ "$*" = "-u +%s" ]; then' 'n=$(($(cat "$CLOCK" 2>/dev/null || echo 0) + 100))' \
+    'echo "$n" >"$CLOCK"' 'echo "$n"' 'else exec /usr/bin/date "$@"; fi' >"$MOCK_DIR/date"
+  chmod +x "$MOCK_DIR/date"
+  for run in $(seq 0 19); do
+    echo 0 >"$TEST_TMPDIR/clock"
+    CLOCK="$TEST_TMPDIR/clock" AURTOMATOR_CHECK_BUDGET=650 GITHUB_RUN_NUMBER=$run run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 0 ]
+    for i in 0 1 2 3 4 5 6 7 8 9; do
+      if [[ "$(cat "$TEST_TMPDIR/.status/p$i")" == unchecked:* ]]; then
+        missed[i]=$((missed[i] + 1))
+        unchecked=$((unchecked + 1))
+      else
+        missed[i]=0
+      fi
+      ((missed[i] <= 2)) || {
+        echo "p$i unchecked in ${missed[i]} runs in a row up to run $run"
+        return 1
+      }
+    done
+  done
+  [ "$unchecked" -eq 80 ]
+}
+
+@test "check-all: starts the check loop at another package in each run" {
   flaky_check flaky
   GITHUB_RUN_NUMBER=7 run "$TEST_TMPDIR/scripts/check-all.sh"
   [ "$status" -eq 0 ]
@@ -5112,7 +5149,7 @@ current: '1.0.0'"
 
 # Slow sources early in the list would take the budget of the same packages in every run, and
 # the hour of a daily run stays the same
-@test "check-all --verify: starts the loop one package later in each run of the workflow" {
+@test "check-all --verify: starts the loop at another package in each run of the workflow" {
   local name
   for name in a b c; do
     create_test_package "$name" "github-release" "upstream:
