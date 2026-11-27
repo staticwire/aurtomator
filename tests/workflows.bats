@@ -3265,6 +3265,11 @@ while (($#)); do
     --limit) limit=$2 && shift ;;
     --jq) jq_expr=$2 && shift ;;
     --label)
+      # The first list of label GH_FAIL_LABEL fails, as one answer of HTTP 502 does
+      if [[ "$2" == "${GH_FAIL_LABEL:-}" && ! -e "$GH_LOG.failed" ]]; then
+        : >"$GH_LOG.failed"
+        exit 1
+      fi
       case "$2" in
         auto-update) emoji="❌" ;;
         update-held) emoji="✋" ;;
@@ -3294,11 +3299,11 @@ EOF
   : >"$GH_LOG"
   : >"$BODY_LOG"
   : >"$GH_BODY_LOG"
-  rm -rf "$BATS_TEST_TMPDIR/runner-temp" "$BATS_TEST_TMPDIR/summary"
+  rm -rf "$BATS_TEST_TMPDIR/runner-temp" "$BATS_TEST_TMPDIR/summary" "$GH_LOG.failed"
   mkdir -p "$BATS_TEST_TMPDIR/runner-temp"
   step_run issues "Create issues" >"$BATS_TEST_TMPDIR/step.sh"
   run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_TITLES="${GH_TITLES:-}" \
-    GH_FAIL="${GH_FAIL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
+    GH_FAIL="${GH_FAIL:-}" GH_FAIL_LABEL="${GH_FAIL_LABEL:-}" GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GH_API_FAIL="${GH_API_FAIL:-}" \
     GH_CREATE_FAIL="${GH_CREATE_FAIL:-}" GH_CREATE_FAIL_HOST="${GH_CREATE_FAIL_HOST:-}" GITHUB_REPOSITORY=owner/fork \
     GH_BODY_LOG="$GH_BODY_LOG" BIG_BODY="${BIG_BODY:-}" GH_BODY="${GH_BODY:-}" RUN_URL=https://example.invalid/run \
     RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
@@ -3337,6 +3342,11 @@ EOF
   GH_HAS_ISSUES=false run_issue_step _requirements=$'foo\tpython'
   [ "$status" -eq 0 ]
   [ "$output" = "::notice::Issues are disabled in owner/fork, so the run opens no issue" ]
+  # A list that fails stops the step before a second issue with the title opens
+  GH_FAIL_LABEL=missing-key GH_TITLES="$title" run_issue_step _requirements=$'foo\tpython\nbar\truby'
+  [ "$status" -ne 0 ]
+  no_call '^issue create'
+  no_call '^issue edit'
 }
 
 @test "check-updates: an open issue of another package holds back no issue" {

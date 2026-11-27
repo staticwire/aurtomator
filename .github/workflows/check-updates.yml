@@ -1476,8 +1476,10 @@ jobs:
                 awk -F'\t' '{ printf "- `%s`: %s\n", $1, $2 }' "$STATUS_DIR/_requirements"
               } >>"$GITHUB_STEP_SUMMARY"
             fi
-            numbers=$(gh issue list --label missing-key --state open --limit 100000 --json number,title \
-              --jq '.[] | "\(.number) \(.title)"' | awk -v t="$title" 'substr($0, index($0, " ") + 1) == t { print $1 }')
+            # sh -e loses the status of a command left of a pipe, so a failed list stops the step here
+            # before a second issue with the title opens
+            keyed=$(gh issue list --label missing-key --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            numbers=$(awk -v t="$title" 'substr($0, index($0, " ") + 1) == t { print $1 }' <<<"$keyed")
             if [[ -z "$body" ]]; then
               for number in $numbers; do
                 lib issue_write issue close "$number" --comment "No package misses the source of its requirements in $RUN_URL." ||
