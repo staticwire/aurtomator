@@ -5505,7 +5505,7 @@ EOF
   echo "update_failed: $(printf 'x%.0s' {1..300})" >"$TEST_TMPDIR/st/d"
   run grouped_issue_body "$TEST_TMPDIR/st" https://example.invalid/run c d
   [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "The writes of the run to issues reached the limits of GitHub, so these packages failed without an issue of their own in https://example.invalid/run. The run summary of its step Create issues holds each whole error." ]
+  [ "${lines[0]}" = "The writes of the run to issues reached the limits of GitHub, so these packages failed without an issue of their own in https://example.invalid/run. The log of its step Write the run summary holds each whole error." ]
   [ "${lines[1]}" = "- \`c\`: \`'boom' @octocat [x](https://evil.example)\`" ]
   [ "${lines[2]}" = "- \`d\`: \`$(printf 'x%.0s' {1..200})\`" ]
   [ "${lines[3]}" = "Auto-created by update workflow, which closes it once each of these packages recovered, has an issue of its own or has no YAML." ]
@@ -5523,7 +5523,7 @@ EOF
   run grouped_issue_body "$TEST_TMPDIR/st" https://example.invalid/run "${names[@]}"
   [ "$status" -eq 0 ]
   ((${#output} <= HOST_BODY_MAX))
-  [[ "$output" =~ $'\n'"- and "([0-9]+)" more packages, which the run summary of the step Create issues lists"$'\n' ]]
+  [[ "$output" =~ $'\n'"- and "([0-9]+)" more packages, which the log of the step Write the run summary lists"$'\n' ]]
   [ "$((BASH_REMATCH[1] + $(grep -c '^- `p' <<<"$output")))" = 600 ]
   for i in $(seq 601 1000); do
     printf 'p%s\tpython\n' "$i" >>"$TEST_TMPDIR/req"
@@ -6046,6 +6046,42 @@ c
 EOF
   )
   [ "$output" = "$expected" ]
+}
+
+# GitHub shows no summary of a step past 1 MiB
+@test "run_summary: keeps within RUN_SUMMARY_MAX bytes and counts the errors past it" {
+  local LC_ALL=C
+  make_statuses a="check_failed: $(printf 'x%.0s' {1..300})" b="check_failed: $(printf 'y%.0s' {1..300})" \
+    c="update_failed: $(printf 'z%.0s' {1..300})" d="unchecked: out of time"
+  RUN_SUMMARY_MAX=900 run run_summary "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  ((${#output} <= 900))
+  [[ "$output" == *'`a`: check failed'* && "$output" != *'`b`: '* && "$output" != *'`c`: '* ]]
+  [[ "$output" == *$'\n\nThe log of the step Write the run summary holds the errors of 2 more packages.\n\nNot checked in this run: `d`.' ]]
+  RUN_SUMMARY_MAX=400 run run_summary "$TEST_TMPDIR/st"
+  [[ "$output" == *$'|\n\nThe log of the step Write the run summary holds the errors of 3 more packages.\n'* ]]
+  rm "$TEST_TMPDIR/st/c"
+  RUN_SUMMARY_MAX=400 run run_summary "$TEST_TMPDIR/st"
+  [[ "$output" == *$'\n\nThe log of the step Write the run summary holds the errors of 2 more packages.\n'* ]]
+  rm "$TEST_TMPDIR/st/b"
+  RUN_SUMMARY_MAX=400 run run_summary "$TEST_TMPDIR/st"
+  [[ "$output" == *$'\n\nThe log of the step Write the run summary holds the error of 1 more package.\n'* ]]
+}
+
+# Errors hold text of upstream, and a line of it can look like a workflow command
+@test "log_errors: prints each whole error with workflow commands stopped" {
+  local token
+  make_statuses a=up_to_date b=$'check_failed: one\n::error::two' c="update_failed: three" d="held: 1.0" _alerts=x
+  run log_errors "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^::stop-commands::([0-9a-f]{32})$'\n' ]]
+  token=${BASH_REMATCH[1]}
+  [ "$output" = "::stop-commands::$token"$'\nb: check failed\none\n::error::two\n\nc: update failed\nthree\n\n'"::$token::" ]
+  rm -rf "$TEST_TMPDIR/st"
+  make_statuses a=up_to_date d="held: 1.0"
+  run log_errors "$TEST_TMPDIR/st"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "run_summary: names the packages the check did not reach in one line" {

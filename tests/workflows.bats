@@ -4449,10 +4449,8 @@ run_bare_issues_step() {
     d="update_failed: boom d"
   [ "$status" -eq 0 ]
   [ "$(grep '^issue create' "$GH_LOG" | sed 's/ --label.*//')" = $'issue create --title ❌ a: check failed\nissue create --title ❌ b: check failed\nissue create --title ❌ 2 failed packages of run 7' ]
-  # The run summary holds the whole text of each of them
-  grep -qF 'failure_issue_body .status/c' "$BATS_TEST_TMPDIR/body.log"
-  grep -qF 'failure_issue_body .status/d' "$BATS_TEST_TMPDIR/body.log"
-  grep -qx body "$BATS_TEST_TMPDIR/summary"
+  # The log of the step Write the run summary holds the whole error of each of them
+  [ ! -s "$BATS_TEST_TMPDIR/summary" ]
 }
 
 # The issue of a run closes once each of its packages recovered, has an issue of its own or
@@ -4468,7 +4466,7 @@ run_bare_issues_step() {
   GH_BODY=$group GH_OPEN=$'5 ❌ 2 failed packages of run 7' run_close_step c=up_to_date d="unchecked: out of time"
   no_call '^issue close 5'
   # Cut issues name some of their packages, so they close once no package fails without an issue
-  local cut=$'- `c`: `boom`\n- and 2 more packages, which the run summary of the step Create issues lists'
+  local cut=$'- `c`: `boom`\n- and 2 more packages, which the log of the step Write the run summary lists'
   GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7' run_close_step c=up_to_date e="check_failed: boom"
   no_call '^issue close 5'
   GH_BODY=$cut GH_OPEN=$'5 ❌ 3 failed packages of run 7\n6 ❌ e: check failed' run_close_step c=up_to_date e="check_failed: boom"
@@ -4861,7 +4859,7 @@ run_find_packages_step() {
 }
 
 # Runs Write the run summary with the name=status pairs as statuses and aurtomator/ linked to
-# this repository, and prints the summary
+# this repository, and prints the summary; the log of the step goes to $BATS_TEST_TMPDIR/step.log
 run_summary_step() {
   local ws="$BATS_TEST_TMPDIR/ws" pair
   mkdir -p "$ws"
@@ -4872,8 +4870,18 @@ run_summary_step() {
   done
   step_run issues "Write the run summary" >"$BATS_TEST_TMPDIR/step.sh"
   : >"$BATS_TEST_TMPDIR/summary"
-  (cd "$ws" && GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" sh -e "$BATS_TEST_TMPDIR/step.sh")
+  (cd "$ws" && GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary" sh -e "$BATS_TEST_TMPDIR/step.sh") >"$BATS_TEST_TMPDIR/step.log"
   cat "$BATS_TEST_TMPDIR/summary"
+}
+
+@test "check-updates: the summary step prints each whole error to its log" {
+  run run_summary_step foo=$'check_failed: one\n::error::two' bar=up_to_date
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'`foo`: check failed'* ]]
+  run cat "$BATS_TEST_TMPDIR/step.log"
+  [[ "${lines[0]}" == "::stop-commands::"* ]]
+  [ "${lines[1]}" = "foo: check failed" ]
+  [ "${lines[3]}" = "::error::two" ]
 }
 
 @test "check-updates: the summary step writes the summary of the statuses" {

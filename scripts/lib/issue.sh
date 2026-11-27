@@ -287,7 +287,7 @@ issue_write() {
 grouped_issue_body() {
   local dir=$1 run=$2 name error entry head foot items="" kept=0 LC_ALL=C.UTF-8
   shift 2
-  head="The writes of the run to issues reached the limits of GitHub, so these packages failed without an issue of their own in $run. The run summary of its step Create issues holds each whole error."$'\n\n'
+  head="The writes of the run to issues reached the limits of GitHub, so these packages failed without an issue of their own in $run. The log of its step Write the run summary holds each whole error."$'\n\n'
   foot=$'\nAuto-created by update workflow, which closes it once each of these packages recovered, has an issue of its own or has no YAML.\n'
   for name in "$@"; do
     error=""
@@ -300,7 +300,7 @@ grouped_issue_body() {
     items+=$entry
     kept=$((kept + 1))
   done
-  printf '%s%s%s' "$head" "$items$(_issue_items_left $(($# - kept)))" "$foot"
+  printf '%s%s%s' "$head" "$items$(_issue_items_left $(($# - kept)) "the log of the step Write the run summary")" "$foot"
 }
 
 # Succeed when item $2 fits in a body of HOST_BODY_MAX characters beside text $1 and the line of
@@ -310,9 +310,9 @@ _issue_item_fits() {
   ((${#1} + ${#2} + 100 <= HOST_BODY_MAX))
 }
 
-# Print the line of the $1 packages that a body has no room for, and nothing for none
+# Print the line of the $1 packages that a body has no room for, which place $2 lists, and nothing for none
 _issue_items_left() {
-  (($1 == 0)) || printf -- '- and %s more packages, which the run summary of the step Create issues lists\n' "$1"
+  (($1 == 0)) || printf -- '- and %s more packages, which %s lists\n' "$1" "$2"
 }
 
 # Print the body of the issue for the packages of requirements file $1, lines of a name and python or
@@ -336,7 +336,7 @@ requirements_issue_body() {
     fi
   done <"$1"
   ((kept > 0)) || return 0
-  printf '%s%s%s' "$head" "$items$(_issue_items_left "$left")" "$foot"
+  printf '%s%s%s' "$head" "$items$(_issue_items_left "$left" "the run summary of the step Create issues")" "$foot"
 }
 
 # Print the body of the issue of package $1, published at version $2 without

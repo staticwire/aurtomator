@@ -1117,8 +1117,11 @@ jobs:
         id: clean
         run: bash -c 'source ./aurtomator/scripts/lib.sh && clean_statuses .status'
 
+      # The summary holds the errors that fit, and the log of the step each whole error
       - name: Write the run summary
-        run: bash -c 'source ./aurtomator/scripts/lib.sh && run_summary .status' >>"$GITHUB_STEP_SUMMARY"
+        run: |
+          bash -c 'source ./aurtomator/scripts/lib.sh && run_summary .status' >>"$GITHUB_STEP_SUMMARY"
+          bash -c 'source ./aurtomator/scripts/lib.sh && log_errors .status'
 
       # Runs before Create issues, since an open issue of a package holds back a new one. After
       # a failed publish it does not run, so a status that publish did not write closes no issue.
@@ -1209,7 +1212,7 @@ jobs:
             done <<<"$names"
             # Cut bodies name some of their packages, so each failed package of this run counts too.
             # Runs of many packages leave some unchecked in each run, and those count only when named.
-            if [[ "$body" == *" more packages, which the run summary of the step Create issues lists"* ]]; then
+            if [[ "$body" == *" more packages, which the log of the step Write the run summary lists"* ]]; then
               for pkg_name in "${!statuses[@]}"; do
                 case "${statuses[$pkg_name]}" in
                   check_failed:* | update_failed:*) owned "$pkg_name" || left=1 ;;
@@ -1513,14 +1516,8 @@ jobs:
           fi
 
           # Failed packages past the writes of the run share one issue, beyond the limit of the other
-          # writes, and the run summary of the step holds each whole error
+          # writes, and the log of the step Write the run summary holds each whole error
           if ((${#grouped[@]} > 0)); then
-            for pkg_name in "${grouped[@]}"; do
-              {
-                lib failure_issue_body "$STATUS_DIR/$pkg_name" "$RUN_URL"
-                echo
-              } >>"$GITHUB_STEP_SUMMARY"
-            done
             body=$(lib grouped_issue_body "$STATUS_DIR" "$RUN_URL" "${grouped[@]}")
             export ISSUE_WRITE_MAX=$((${ISSUE_WRITE_MAX:-450} + 10)) ISSUE_POINTS_KEEP=0
             create_issue auto-update "❌ ${#grouped[@]} failed packages of run $GITHUB_RUN_NUMBER" "$body"
