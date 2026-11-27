@@ -237,8 +237,13 @@ host_close_comment() {
   printf 'Fewer than %s packages of `%s` failed to check in %s.\n' "$HOST_ISSUE_MIN" "$1" "$2"
 }
 
-# Print the body of the issue of package $1, published at version $2 without
-# the arches $3, for run URL $4
+# Print the number and title of each open issue of label $1, one a line. gh issue list --label
+# searches, which stops at 1000 issues, and the REST list pages without a cap
+open_issues() {
+  gh api "repos/${GITHUB_REPOSITORY:?}/issues?labels=$1&state=open&per_page=100" --paginate \
+    --jq '.[] | select(.pull_request | not) | "\(.number) \(.title)"'
+}
+
 # Run gh with $@, an issue write, ISSUE_WRITE_PAUSE_MS after the last one, while the file ISSUE_WRITES counts
 # fewer than ISSUE_WRITE_MAX of the 500 writes an hour of GitHub; fail with 3 past it
 issue_write() {
@@ -312,6 +317,8 @@ requirements_issue_body() {
   printf '%s%s%s' "$head" "$items$(_issue_items_left "$left")" "$foot"
 }
 
+# Print the body of the issue of package $1, published at version $2 without
+# the arches $3, for run URL $4
 arch_issue_body() {
   # The backticks are Markdown code around the package, version and arches
   # shellcheck disable=SC2016

@@ -611,7 +611,8 @@ verify_workflow() {
 # without a failed job closes
 warn_run_issue() {
   local number
-  number=$(gh issue list -R "$1" --label auto-update --state open --limit 1000 --json number,title --jq '.[] | select(.title == "❌ Check AUR Package Updates failed") | .number' 2>/dev/null) || true
+  # gh issue list --label searches, which stops at 1000 issues, and the REST list pages without a cap
+  number=$(gh api "repos/$1/issues?labels=auto-update&state=open&per_page=100" --paginate --jq '.[] | select(.pull_request == null and .title == "❌ Check AUR Package Updates failed") | .number' 2>/dev/null) || true
   [[ -z "$number" ]] || warn "Run issue #${number%%$'\n'*} is open: a run without a failed job closes it"
 }
 

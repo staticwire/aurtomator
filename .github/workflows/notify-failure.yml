@@ -27,15 +27,15 @@ jobs:
         run: |
           title="❌ Check AUR Package Updates failed"
 
-          # gh issue list fails in a repository with Issues turned off
           has_issues=$(gh api "repos/$GH_REPO" --jq .has_issues)
           if [[ "$has_issues" == "false" ]]; then
             echo "::notice::Issues are disabled in $GH_REPO, so the failed run gets no issue"
             exit 0
           fi
 
-          # Exact titles, as in the Create issues step of check-updates.yml
-          titles=$(gh issue list --label auto-update --state open --limit 100000 --json title --jq '.[].title')
+          # Exact titles, as in the Create issues step of check-updates.yml. gh issue list --label
+          # searches, which stops at 1000 issues, and the REST list pages without a cap.
+          titles=$(gh api "repos/$GH_REPO/issues?labels=auto-update&state=open&per_page=100" --paginate --jq '.[] | select(.pull_request | not) | .title')
           if grep -qxF -e "$title" <<<"$titles"; then
             echo "Issue already open, skipping"
             exit 0

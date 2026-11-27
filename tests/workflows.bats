@@ -3257,39 +3257,39 @@ if [[ "$1 $2" == "issue view" ]]; then
   printf '%s\n' "${GH_BODY:-}"
   exit 0
 fi
-[[ "$1 $2" == "issue list" ]] || exit 0
+# gh issue list --label searches, and a search stops at 1000 issues
+[[ "$1 $2" != "issue list" ]] || exit 2
+[[ "$1" == api && "$2" == "repos/$GITHUB_REPOSITORY/issues?labels="* ]] || exit 0
 [[ -z "${GH_FAIL:-}" ]] || exit 1
-limit=30 jq_expr="" emoji=""
-while (($#)); do
-  case "$1" in
-    --limit) limit=$2 && shift ;;
-    --jq) jq_expr=$2 && shift ;;
-    --label)
-      # The first list of label GH_FAIL_LABEL fails, as one answer of HTTP 502 does
-      if [[ "$2" == "${GH_FAIL_LABEL:-}" && ! -e "$GH_LOG.failed" ]]; then
-        : >"$GH_LOG.failed"
-        exit 1
-      fi
-      case "$2" in
-        auto-update) emoji="❌" ;;
-        update-held) emoji="✋" ;;
-        update-notice) emoji="🔔" ;;
-        aurtomator-update) emoji="🚀" ;;
-        arch-missing) emoji="⚠️ [a-z0-9]" ;;
-        missing-key) emoji="⚠️ Packages" ;;
-      esac
-      shift
-      ;;
-  esac
-  shift
-done
-titles=$(grep "^$emoji" <<<"${GH_TITLES:-}" | head -n "$limit") || true
-case "$jq_expr" in
-  ".[].title") [[ -z "$titles" ]] || printf '%s\n' "$titles" ;;
-  # Issue numbers start at 41
-  '.[] | "\(.number) \(.title)"') [[ -z "$titles" ]] || awk '{ print NR + 40 " " $0 }' <<<"$titles" ;;
+label=${2#*labels=}
+label=${label%%&*}
+# The first list of label GH_FAIL_LABEL fails, as one answer of HTTP 502 does
+if [[ "$label" == "${GH_FAIL_LABEL:-}" && ! -e "$GH_LOG.failed" ]]; then
+  : >"$GH_LOG.failed"
+  exit 1
+fi
+case "$label" in
+  auto-update) emoji="❌" ;;
+  update-held) emoji="✋" ;;
+  update-notice) emoji="🔔" ;;
+  aurtomator-update) emoji="🚀" ;;
+  arch-missing) emoji="⚠️ [a-z0-9]" ;;
+  missing-key) emoji="⚠️ Packages" ;;
   *) exit 2 ;;
 esac
+per_page=30
+[[ "$2" != *"per_page="* ]] || per_page=${2##*per_page=}
+filter="" paginate=""
+while (($#)); do
+  [[ "$1" != --jq ]] || filter=$2
+  [[ "$1" != --paginate ]] || paginate=1
+  shift
+done
+titles=$(grep "^$emoji" <<<"${GH_TITLES:-}") || true
+# Issue numbers start at 41, and gh reads the pages after the first with --paginate alone
+json=$(jq -Rn '[inputs | select(length > 0)] | to_entries | map({number: (.key + 41), title: .value})' <<<"$titles")
+[[ -n "$paginate" ]] || json=$(jq --argjson n "$per_page" '.[:$n]' <<<"$json")
+jq -r "$filter" <<<"$json"
 EOF
   printf '#!/bin/sh\nexit 97\n' >"$bin/sudo"
   chmod +x "$bin/gh" "$bin/sudo"
@@ -3377,12 +3377,12 @@ EOF
   [ "$output" = "0" ]
 }
 
-# gh issue list exits 1 in a repository with Issues turned off
+# GH_FAIL fails each list, so the step reads has_issues before any list
 @test "check-updates: the issue step gives a notice when Issues are disabled" {
   GH_HAS_ISSUES=false GH_FAIL=1 run_issue_step foo="update_failed: boom"
   [ "$status" -eq 0 ]
   [[ "$output" == *"::notice::Issues are disabled in owner/fork"* ]]
-  run grep -c '^issue ' "$GH_LOG"
+  run grep -c -e '^issue ' -e '/issues?' "$GH_LOG"
   [ "$output" = "0" ]
 }
 
@@ -3613,11 +3613,11 @@ host_failures() {
   [ "$output" = "5" ]
   run grep -c '^label create auto-update ' "$GH_LOG"
   [ "$output" = "1" ]
-  run grep -c '^issue list --label auto-update ' "$GH_LOG"
+  run grep -c '^api repos/owner/fork/issues?labels=auto-update&' "$GH_LOG"
   [ "$output" = "1" ]
   run grep -c '^label create update-held ' "$GH_LOG"
   [ "$output" = "1" ]
-  run grep -c '^issue list --label update-held ' "$GH_LOG"
+  run grep -c '^api repos/owner/fork/issues?labels=update-held&' "$GH_LOG"
   [ "$output" = "1" ]
 }
 
@@ -3661,7 +3661,8 @@ host_failures() {
 }
 
 # Runs the close step of the issues job with the name=status pairs as statuses; gh lists the
-# issues of $GH_OPEN and logs to $GH_LOG, and the issue functions log to $BODY_LOG
+# issues of $GH_OPEN and the pull requests of $GH_PULLS and logs to $GH_LOG, and the issue
+# functions log to $BODY_LOG
 run_close_step() {
   local ws="$BATS_TEST_TMPDIR/ws" bin="$BATS_TEST_TMPDIR/bin" pair
   rm -rf "$ws/.status"
@@ -3682,29 +3683,39 @@ EOF
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
-cmd="$1 $2" limit=30 emoji="" filter=""
+cmd="$1 $2" filter="" paginate=""
 while (($#)); do
-  case "$1" in
-    --limit) limit=$2 ;;
-    --jq) filter=$2 ;;
-    --label)
-      case "$2" in
-        auto-update) emoji="❌" ;;
-        update-held) emoji="✋" ;;
-        aurtomator-update) emoji="🚀" ;;
-        arch-missing) emoji="⚠️" ;;
-      esac
-      ;;
-  esac
+  [[ "$1" != --jq ]] || filter=$2
+  [[ "$1" != --paginate ]] || paginate=1
   shift
 done
+# Lines of number and title as REST issues of the label, with pull_request for pull requests
+rest_issues() {
+  { grep "^[0-9]* $emoji" <<<"$1" || true; } |
+    jq -Rn --argjson pull "$2" '[inputs | capture("^(?<number>[0-9]+) (?<title>.*)$") | .number |= tonumber |
+      if $pull then .pull_request = {} else . end]'
+}
 # gh answers with the JSON of the API and applies --jq to it
 case "$cmd" in
   "api repos/owner/fork") json="{\"has_issues\": ${GH_HAS_ISSUES:-true}}" ;;
-  "issue list")
+  # gh issue list --label searches, and a search stops at 1000 issues
+  "issue list") exit 2 ;;
+  "api repos/owner/fork/issues?labels="*)
     [[ -z "${GH_FAIL:-}" ]] || exit 1
-    json=$({ grep "^[0-9]* $emoji" <<<"${GH_OPEN:-}" || true; } | head -n "$limit" |
-      jq -Rn '[inputs | capture("^(?<number>[0-9]+) (?<title>.*)$") | .number |= tonumber]')
+    label=${cmd#*labels=}
+    label=${label%%&*}
+    case "$label" in
+      auto-update) emoji="❌" ;;
+      update-held) emoji="✋" ;;
+      aurtomator-update) emoji="🚀" ;;
+      arch-missing) emoji="⚠️" ;;
+      *) exit 2 ;;
+    esac
+    per_page=30
+    [[ "$cmd" != *"per_page="* ]] || per_page=${cmd##*per_page=}
+    json=$(jq -n --argjson a "$(rest_issues "${GH_OPEN:-}" false)" --argjson b "$(rest_issues "${GH_PULLS:-}" true)" '$a + $b')
+    # gh reads the pages after the first with --paginate alone
+    [[ -n "$paginate" ]] || json=$(jq --argjson n "$per_page" '.[:$n]' <<<"$json")
     ;;
   "issue view")
     [[ -z "${GH_VIEW_FAIL:-}" ]] || exit 1
@@ -3726,7 +3737,7 @@ EOF
   step_run issues "${CLOSE_STEP:-Close resolved issues}" >"$BATS_TEST_TMPDIR/step.sh"
   rm -rf "$BATS_TEST_TMPDIR/runner-temp"
   mkdir -p "$BATS_TEST_TMPDIR/runner-temp"
-  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_FAIL="${GH_FAIL:-}" GH_VIEW_FAIL="${GH_VIEW_FAIL:-}" \
+  run env -C "$ws" PATH="$bin:$PATH" GH_LOG="$GH_LOG" BODY_LOG="$BODY_LOG" GH_OPEN="${GH_OPEN:-}" GH_PULLS="${GH_PULLS:-}" GH_FAIL="${GH_FAIL:-}" GH_VIEW_FAIL="${GH_VIEW_FAIL:-}" \
     GH_HAS_ISSUES="${GH_HAS_ISSUES:-}" GITHUB_REPOSITORY=owner/fork RUN_OK="${RUN_OK:-true}" GH_BODY="${GH_BODY:-}" \
     RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp" ISSUE_WRITE_PAUSE_MS=0 ISSUE_WRITE_MAX="${ISSUE_WRITE_MAX:-450}" \
     RUN_URL=https://example.invalid/run sh -e "$BATS_TEST_TMPDIR/step.sh"
@@ -4463,6 +4474,14 @@ run_bare_issues_step() {
   ! grep -q '^issue create' "$GH_LOG"
 }
 
+# The REST list of issues holds the pull requests too
+@test "check-updates: the close step leaves the pull requests of a label alone" {
+  GH_PULLS='20 ❌ foo: check failed' GH_OPEN='21 ❌ bar: check failed' run_close_step foo=up_to_date bar=up_to_date
+  [ "$status" -eq 0 ]
+  grep -q '^issue close 21 ' "$GH_LOG"
+  no_call '^issue close 20 '
+}
+
 # Anyone can open an issue in a public repository, and each issue looks up the package its title names
 @test "check-updates: reads the package from the title of each issue" {
   GH_OPEN=$'12 ❌ g++: check failed\n13 ❌ foo: check failed: again\n14 ❌ $(touch x): check failed\n15 ❌ ../foo: check failed\n16 ❌  foo: check failed\n17 ❌ foo:check failed\n18 Foo: ❌ foo: check failed\n19 ❌ foo: check failed' \
@@ -5122,7 +5141,8 @@ NOTIFY="$GITHUB_DIR/workflows/notify-failure.yml"
 }
 
 # Runs the step of notify-failure for run 7 of owner/fork; gh lists the open issues from
-# $GH_TITLES and the failed jobs from $GH_JOBS, and logs every call to $GH_LOG
+# $GH_TITLES beside a pull request with the title of the run issue, and the failed jobs from
+# $GH_JOBS, and logs every call to $GH_LOG
 run_notify_step() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
@@ -5145,9 +5165,11 @@ case "$cmd" in
     fi
     json=$GH_JOBS_JSON
     ;;
-  "issue list")
+  # gh issue list --label searches, and a search stops at 1000 issues
+  "issue list") exit 2 ;;
+  "api repos/owner/fork/issues?labels=auto-update&state=open&per_page=100")
     [[ -z "${GH_FAIL:-}" ]] || exit 1
-    json=$(jq -Rn '[inputs | select(length > 0) | {title: .}]' <<<"${GH_TITLES:-}")
+    json=$(jq -Rn '[inputs | select(length > 0) | {title: .}] + [{title: "❌ Check AUR Package Updates failed", pull_request: {}}]' <<<"${GH_TITLES:-}")
     ;;
   *) exit 0 ;;
 esac

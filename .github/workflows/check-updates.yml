@@ -1134,13 +1134,12 @@ jobs:
 
           has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
           [[ "$has_issues" != "false" ]] || exit 0
-          # gh reads pages of 100 over GraphQL up to --limit, which no count of open issues reaches
-          open=$(gh issue list --label "auto-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
-          held=$(gh issue list --label "update-held" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
 
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
+          open=$(lib open_issues auto-update)
+          held=$(lib open_issues update-held)
           # The steps of the job count their writes to issues in one file, and closes past the writes
           # of the run wait for the next run
           export ISSUE_WRITES="$RUNNER_TEMP/issue-writes"
@@ -1209,7 +1208,7 @@ jobs:
           # The issues of a package whose YAML is gone close, since no check of it closes them; a
           # run without the list of packages closes none
           if [[ -f "$STATUS_DIR/_packages" ]]; then
-            arched=$(gh issue list --label "arch-missing" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            arched=$(lib open_issues arch-missing)
             name_re='[a-z0-9][a-z0-9.+_-]*'
             failed_re="^❌ (${name_re}): (check|update) failed\$"
             held_re="^✋ (${name_re}): update held\$"
@@ -1237,7 +1236,7 @@ jobs:
           # Arch issues close when _without no longer lists their package. Only publish writes
           # _without, so runs without publish close none.
           if [[ -f "$STATUS_DIR/_without" ]]; then
-            arched=$(gh issue list --label "arch-missing" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            arched=$(lib open_issues arch-missing)
             title_re='^⚠️ ([a-z0-9][a-z0-9.+_-]*): '
             while read -r number title; do
               [[ -n "$number" && "$title" =~ $title_re ]] || continue
@@ -1252,7 +1251,7 @@ jobs:
           # could not read the latest release have no _upstream and close none.
           if [[ -f "$STATUS_DIR/_upstream" ]]; then
             upstream=$(cat "$STATUS_DIR/_upstream")
-            releases=$(gh issue list --label "aurtomator-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            releases=$(lib open_issues aurtomator-update)
             while read -r number title; do
               [[ -n "$number" && "$title" != "🚀 aurtomator ${upstream#newer: } available" ]] || continue
               close_issue "$number" "The aurtomator release status is \`$upstream\` in $RUN_URL."
@@ -1281,11 +1280,11 @@ jobs:
 
           has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)
           [[ "$has_issues" != "false" ]] || exit 0
-          open=$(gh issue list --label "auto-update" --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
 
           lib() {
             bash -c 'source ./aurtomator/scripts/lib.sh && "$@"' _ "$@"
           }
+          open=$(lib open_issues auto-update)
           export ISSUE_WRITES="$RUNNER_TEMP/issue-writes"
 
           # Host issues close when fewer than HOST_ISSUE_MIN packages of the host failed to check
@@ -1309,8 +1308,8 @@ jobs:
           STATUS_DIR=".status"
           [[ -d "$STATUS_DIR" ]] || exit 0
 
-          # gh issue list fails when Issues are turned off, so the step reads has_issues first and
-          # ends with a notice. Any other failure of the list fails the step.
+          # Repositories can have Issues turned off, so the step reads has_issues first and ends with
+          # a notice. Any failure of a list fails the step.
           kinds=false
           for f in "$STATUS_DIR"/*; do
             [[ -f "$f" ]] || continue
@@ -1343,7 +1342,9 @@ jobs:
           use_label() {
             [[ -z "${titles[$1]+set}" ]] || return 0
             lib issue_write label create "$1" --color "$2" --description "$3" 2>/dev/null || true
-            titles[$1]=$(gh issue list --label "$1" --state open --limit 100000 --json title --jq '.[].title')
+            # sh -e loses the status of a command left of a pipe, so the list goes into a variable first
+            listed=$(lib open_issues "$1")
+            titles[$1]=$(cut -d ' ' -f 2- <<<"$listed")
           }
 
           # Opens an issue with label $1, title $2 and body $3, which goes on stdin since Linux refuses
@@ -1478,7 +1479,7 @@ jobs:
             fi
             # sh -e loses the status of a command left of a pipe, so a failed list stops the step here
             # before a second issue with the title opens
-            keyed=$(gh issue list --label missing-key --state open --limit 100000 --json number,title --jq '.[] | "\(.number) \(.title)"')
+            keyed=$(lib open_issues missing-key)
             numbers=$(awk -v t="$title" 'substr($0, index($0, " ") + 1) == t { print $1 }' <<<"$keyed")
             if [[ -z "$body" ]]; then
               for number in $numbers; do
