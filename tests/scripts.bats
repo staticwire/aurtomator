@@ -4653,6 +4653,20 @@ current: '1.0.0'"
   [ "$(cat "$TEST_TMPDIR/.status/r2")" = "$reason" ]
 }
 
+# bash runs $(...) in an array subscript of (( )), so the budget matches a digit pattern first
+@test "check-all: refuses a repology.org budget from the environment that is no number of checks" {
+  local value
+  for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 0 1.5 010; do
+    AURTOMATOR_REPOLOGY_BUDGET=$value run "$TEST_TMPDIR/scripts/check-all.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AURTOMATOR_REPOLOGY_BUDGET must be a number of checks from 1: "* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
+
 # One request holds 50 repositories
 @test "check-all: asks GraphQL for 50 repositories a request" {
   local i
@@ -5605,6 +5619,47 @@ $1"
   [[ "$(cat "$TEST_TMPDIR/README.md")" =~ $'\n'([0-9]+)" more packages need attention, in the pages below"$'\n' ]]
   [ "$((BASH_REMATCH[1] + $(grep -c '<tr><td>' "$TEST_TMPDIR/README.md")))" = 30 ]
   [ "$(grep -c '<tr><td>' "$TEST_TMPDIR/table/p.md")" = 30 ]
+}
+
+# bash runs $(...) in an array subscript of (( )), so the limit matches a digit pattern first
+@test "update-readme: refuses an AURTOMATOR_README_MAX_KIB that is no number of KiB" {
+  local value readme=$'<!-- PACKAGES:START -->\n<!-- PACKAGES:END -->'
+  create_test_package pkg-a github-release $'upstream:\n  project: owner/repo'
+  printf '%s\n' "$readme" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 0 1.5 010; do
+    AURTOMATOR_README_MAX_KIB=$value run "$TEST_TMPDIR/scripts/update-readme.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AURTOMATOR_README_MAX_KIB must be a number of KiB from 1: "* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+  [ "$(cat "$TEST_TMPDIR/README.md")" = "$readme" ]
+}
+
+# Pages written through a link land where the link points
+@test "update-readme: refuses a table that is a link or a file past the limit" {
+  local n readme=$'<!-- PACKAGES:START -->\n<!-- PACKAGES:END -->'
+  for n in $(seq 10 24); do
+    create_test_package "p$n" github-release $'upstream:\n  project: owner/repo\ncurrent: \'1.0.0\''
+  done
+  printf '%s\n' "$readme" >"$TEST_TMPDIR/README.md"
+  git -C "$TEST_TMPDIR" init -q
+  mkdir "$BATS_TEST_TMPDIR/elsewhere"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$TEST_TMPDIR/table"
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"table is a link or no directory, so the pages of the package table have no place"* ]]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
+  rm "$TEST_TMPDIR/table"
+  echo notes >"$TEST_TMPDIR/table"
+  AURTOMATOR_README_MAX_KIB=2 run "$TEST_TMPDIR/scripts/update-readme.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"table is a link or no directory, so the pages of the package table have no place"* ]]
+  [ "$(cat "$TEST_TMPDIR/table")" = notes ]
+  [ "$(cat "$TEST_TMPDIR/README.md")" = "$readme" ]
 }
 
 @test "update-readme: writes the version under the package table" {

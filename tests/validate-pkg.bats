@@ -3371,3 +3371,18 @@ $2"
   [[ "$output" == *"No package to check"* ]]
   [ ! -e "$CURL_ARGS_LOG" ]
 }
+
+# bash runs $(...) in an array subscript of (( )), so the budget matches a digit pattern first
+@test "validate --requirements: refuses a budget from the environment that is no number of seconds" {
+  local names="$BATS_TEST_TMPDIR/names" value
+  printf 'demo\n' >"$names"
+  for value in "BASH_VERSINFO[\$(touch $TEST_TMPDIR/pwned)]" 1.5 -1; do
+    AURTOMATOR_VALIDATE_BUDGET=$value run "$TEST_TMPDIR/scripts/validate-pkg.sh" --requirements "$names"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AURTOMATOR_VALIDATE_BUDGET must be a number of seconds: "* ]] || {
+      echo "taken: $value"
+      return 1
+    }
+  done
+  [ ! -e "$TEST_TMPDIR/pwned" ]
+}
