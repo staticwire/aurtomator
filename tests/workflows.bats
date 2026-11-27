@@ -2218,13 +2218,13 @@ builder_steps() {
   run yq '.jobs.check.steps[] | select(.name == "Check updates") | .env.AURTOMATOR_CHECK_SPENT' "$CHECK_UPDATES"
   [ "$output" = '${{ steps.gitlab.outputs.spent }}' ]
   mkdir -p "$ws/aurtomator/scripts"
-  printf '%s\n' 'gitlab_prefetch() { printf "%s\n" "$*" >"$CALLS"; }' >"$ws/aurtomator/scripts/lib.sh"
+  printf '%s\n' 'gitlab_prefetch() { sleep 1; printf "%s\n" "$*" >"$CALLS"; }' >"$ws/aurtomator/scripts/lib.sh"
   step_run check "Fetch GitLab tags" >"$BATS_TEST_TMPDIR/step.sh"
-  run env -C "$ws" CALLS="$BATS_TEST_TMPDIR/calls" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" \
-    bash --noprofile --norc -eo pipefail "$BATS_TEST_TMPDIR/step.sh"
+  # Container steps without a shell run as sh -e
+  run env -C "$ws" CALLS="$BATS_TEST_TMPDIR/calls" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" sh -e "$BATS_TEST_TMPDIR/step.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/calls")" = "/data/gitlab packages/*.yml" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/output")" = "spent=0" ]
+  [[ "$(cat "$BATS_TEST_TMPDIR/output")" =~ ^spent=[1-9][0-9]*$ ]]
 }
 
 @test "run-as-builder: takes its inputs through the environment" {
