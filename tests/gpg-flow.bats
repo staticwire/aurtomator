@@ -108,7 +108,14 @@ MOCKEOF
 }
 
 teardown() {
+  local dir
   gpgconf --kill gpg-agent 2>/dev/null || true
+  # The keyrings of the extra socket test, whose sockets gpg keeps under /run/user for a user
+  [[ ! -d "$TEST_TMPDIR/split/root" ]] || gpgconf --homedir "$TEST_TMPDIR/split/root" --kill gpg-agent 2>/dev/null || true
+  for dir in "$TEST_TMPDIR/split/root" "$TEST_TMPDIR/split/builder"; do
+    [[ ! -d "$dir" || "$(gpgconf --homedir "$dir" --list-dirs socketdir)" == "$dir" ]] ||
+      gpgconf --homedir "$dir" --remove-socketdir 2>/dev/null || true
+  done
   unset GNUPGHOME
   teardown_test_env
 }
@@ -331,6 +338,27 @@ stage_aur_update() {
   [ "$status" -eq 0 ]
   [ "$(git -C "$TEST_TMPDIR/aur-remote.git" log -1 --format=%s)" = "2.0.0 release from test" ]
   git -C "$TEST_TMPDIR/aur-remote.git" verify-commit HEAD
+}
+
+# Setup GPG of publish gives builder a keyring with the public key alone, and a redirect to the
+# extra socket of the agent of root
+@test "aur_commit_push: signs through the extra socket of another keyring" {
+  local dir="$TEST_TMPDIR/split" sock
+  source "$TEST_TMPDIR/scripts/lib.sh"
+  stage_aur_update
+  mkdir -m 0700 "$dir" "$dir/builder"
+  cp -a "$GNUPGHOME" "$dir/root"
+  printf '%s\n' "extra-socket $dir/S.extra" "pinentry-program /usr/bin/false" >>"$dir/root/gpg-agent.conf"
+  gpg-connect-agent --homedir "$dir/root" /bye
+  printf '%s\n' no-autostart quiet >"$dir/builder/gpg.conf"
+  sock=$(gpgconf --homedir "$dir/builder" --list-dirs agent-socket)
+  mkdir -p -m 0700 "${sock%/*}"
+  printf '%%Assuan%%\nsocket=%s\n' "$dir/S.extra" >"$sock"
+  gpg --homedir "$dir/root" --batch --export "$NOPASS_SUBKEY_ID" | gpg --homedir "$dir/builder" --batch --import
+  GNUPGHOME="$dir/builder" GPG_KEY_ID="$NOPASS_SUBKEY_ID" run aur_commit_push "$AUR_DIR" 2.0.0 test
+  [ "$status" -eq 0 ]
+  git -C "$TEST_TMPDIR/aur-remote.git" verify-commit HEAD
+  [ -z "$(ls -A "$dir/builder/private-keys-v1.d" 2>/dev/null)" ]
 }
 
 # gpg-signing.md promises a signature on every commit while a key is set
