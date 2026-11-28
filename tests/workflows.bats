@@ -668,8 +668,8 @@ run_lint_images() {
   [ "$output" = false ]
 }
 
-# A test file left out of the parts never runs in CI, and a filter without its negative
-# leaves out the rest of its file
+# A test file left out of the parts never runs in CI, subdirectories included, and a filter
+# without its negative leaves out the rest of its file
 @test "ci: the test parts run every test file of tests/ once" {
   local ci="$GITHUB_DIR/workflows/ci.yml" include file entries
   include=$(yq -o=json -I=0 '.jobs["test-part"].strategy.matrix.include' "$ci")
@@ -681,8 +681,8 @@ run_lint_images() {
       return 1
     }
   done < <(jq -r '.[].files | split(" ")[]' <<<"$include")
-  for file in "$BATS_TEST_DIRNAME"/*.bats; do
-    file=tests/${file##*/}
+  while read -r file; do
+    file=tests/${file#"$BATS_TEST_DIRNAME"/}
     entries=$(jq -c --arg f "$file" '[.[] | select(.files | split(" ") | index($f)) | [.filter, .["negative-filter"]]]' <<<"$include")
     [ "$entries" = '[[null,null]]' ] ||
       jq -e 'length == 2 and (map(select(.[0] != null and .[1] == null)) | length) == 1 and
@@ -691,7 +691,7 @@ run_lint_images() {
       echo "$file: $entries"
       return 1
     }
-  done
+  done < <(find "$BATS_TEST_DIRNAME" -name '*.bats' | sort)
 }
 
 # The ruleset requires the check test, and the parts report checks of other names
