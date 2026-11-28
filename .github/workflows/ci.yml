@@ -208,6 +208,8 @@ jobs:
           files: coverage/coverage.xml,coverage/python.xml,coverage/ruby.xml
           # The search of the CLI would take tests/coverage.bats for a report
           disable_search: true
+          # pycoverage would write a coverage.xml of coverage/.coverage over the report of bashcov
+          plugins: noop
           fail_ci_if_error: false
           binary: /opt/codecov/bin/codecovcli
 

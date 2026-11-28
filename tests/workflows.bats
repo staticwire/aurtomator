@@ -326,6 +326,14 @@ secret_lines() {
   [ "$output" = '["coverage/coverage.xml,coverage/python.xml,coverage/ruby.xml",true]' ]
 }
 
+# The pycoverage plugin of the CLI finds coverage/.coverage and writes its own coverage.xml over
+# the report of bashcov
+@test "ci: Codecov runs none of the plugins of its CLI" {
+  run yq '.jobs["test-part"].steps[] | select(.name == "Upload coverage to Codecov") | .with.plugins' \
+    "$GITHUB_DIR/workflows/ci.yml"
+  [ "$output" = noop ]
+}
+
 # bashcov-bats.sh measures scripts/lib/py_imports.py with coverage.py of the image
 @test "ci: the test job installs coverage.py, and lint compiles the Python helpers" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
