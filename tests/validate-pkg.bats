@@ -1519,6 +1519,14 @@ alerts:
   [[ "$output" == *"requires 'upstream.registry'"* ]]
 }
 
+# rubygems.sh reads a missing registry as null, which passes the name rule of gems
+@test "validate: rubygems fails without upstream.registry" {
+  create_test_package "mypkg" "rubygems" ""
+  run "$TEST_TMPDIR/scripts/validate-pkg.sh" "mypkg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"requires 'upstream.registry'"* ]]
+}
+
 @test "validate: webpage-scrape passes with upstream.user_agent" {
   create_test_package "mypkg" "webpage-scrape" "upstream:
   url: https://example.com/releases
