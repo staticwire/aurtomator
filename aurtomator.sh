@@ -160,8 +160,8 @@ tag_commit() {
     awk -v ref="refs/tags/$1" '$2 == ref || $2 == ref "^{}" { sha = $1 } END { print sha }'
 }
 
-# Stop unless the tag $1 of the repository has a published release, immutable after v0.14.0:
-# tags stand before their release is published, and stay when the release run stops
+# Stop unless the tag $1 of the repository has a published immutable release: tags stand
+# before their release is published, and stay when the release run stops
 check_published() {
   local auth=() answer code body message
   [[ -z "${GITHUB_TOKEN:-}" ]] || auth=(-H @-)
@@ -187,9 +187,8 @@ check_published() {
     echo "No published release $1 of $repo; pins name the commit of a published release" >&2
     exit 1
   fi
-  if [[ "$(printf '%s\n' v0.14.0 "$1" | sort -V | tail -n 1)" != v0.14.0 &&
-  "$(yq -p json -r '.immutable == true' <<<"$body" 2>/dev/null)" != true ]]; then
-    echo "GitHub shows the release $1 of $repo as mutable, and aurtomator publishes every release after v0.14.0 as immutable" >&2
+  if [[ "$(yq -p json -r '.immutable == true' <<<"$body" 2>/dev/null)" != true ]]; then
+    echo "GitHub shows the release $1 of $repo as mutable, and aurtomator publishes every release as immutable" >&2
     exit 1
   fi
 }
