@@ -18,7 +18,7 @@ Before it touches issues, the job writes the run summary, which the run page sho
 | `⚠️ Packages need a python or ruby key` | `missing-key` | packages whose YAML names no source of their requirements, see [Update alerts](/features/update-alerts/) | every YAML has its key |
 | `❌ Check AUR Package Updates failed` | `auto-update` | failed jobs, see [Failed runs](#failed-runs) | next run without failed jobs |
 
-The issue of missing keys names every such package, and each check run edits it to its own list. Runs that could not read the AUR or ran out of time leave it as it is.
+The issue of missing keys names such packages as far as 60000 characters hold them, the run summary of the step Create issues names every one, and each check run edits the issue to its own list. Runs that could not read the AUR or ran out of time leave it as it is.
 
 Packages with `upstream.pin_from` that only wait for the package of their project get no `update held` issue, and the issue of a held update of that package names them, see [pypi](/strategies/#pypi). Packages get no second issue of the same kind while one is open, and issues closed while their package still fails come back in the next run. Each body links the run. Errors hold text from upstream, so they stand in a code block, where links, images and mentions do not render, and keep their last 3900 bytes after a line `[first <n> bytes cut]`. Closing comments name the run and show the new status.
 
