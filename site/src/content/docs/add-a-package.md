@@ -53,7 +53,7 @@ The dry run runs AUR PKGBUILD on your machine: the audit, the source URL check, 
 
 ## 6. Push
 
-Commit the package YAML and push it to your repository. Pushes to `main` run `Validate packages`. `Check AUR Package Updates` runs on the schedule `17 * * * *` of `.github/workflows/check-updates.yml`, and GitHub starts only part of those runs: in October 2026 a repository with this schedule got about five a day. Actions > Check AUR Package Updates > Run workflow starts a run at once. Runs started by hand on a branch other than the default one read the package YAMLs of that branch, push their updates to the AUR and commit their results to that branch. The schedule runs on the default branch alone.
+Commit the package YAML and push it to your repository. Pushes to `main` run `Validate packages`. `Check AUR Package Updates` runs on the schedule `17 * * * *` of `.github/workflows/check-updates.yml`, and GitHub starts only part of those runs: a repository with this schedule gets two to five runs a day. Actions > Check AUR Package Updates > Run workflow starts a run at once. Runs started by hand on a branch other than the default one read the package YAMLs of that branch, push their updates to the AUR and commit their results to that branch. The schedule runs on the default branch alone.
 
 ## Draft a package
 

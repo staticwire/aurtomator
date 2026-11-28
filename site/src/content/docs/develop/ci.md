@@ -4,7 +4,7 @@ title: CI quality gate
 
 `ci.yml` runs on every push and pull request to `main`. Pushes to a pull request cancel its older runs. Runs of pushes to `main` and of `workflow_dispatch` never cancel each other, so every merge gets its whole run with `pipeline` and the upload to Codecov.
 
-`codeql.yml`, `scorecard.yml` and `spec-watch.yml` also run on a schedule, and GitHub starts such runs late and only part of them, as it does for the calling workflows of user repositories, see [The workflow](/internals/workflow/). The Monday run of CodeQL on 2026-11-23 started at 13:38 UTC, ten hours after its time.
+`codeql.yml`, `scorecard.yml` and `spec-watch.yml` also run on a schedule, and GitHub starts such runs late and only part of them, as it does for the calling workflows of user repositories, see [The workflow](/internals/workflow/).
 
 ## Lint job
 
