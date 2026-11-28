@@ -2,7 +2,7 @@
 title: Strategies
 ---
 
-aurtomator has 17 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree: the streamrip PKGBUILD builds the git tag `v2.2.0` from GitHub while PyPI still holds `2.1.0`, so `pypi` would report a downgrade in every run. Vendor pages can also sit behind a bot check that their download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
+aurtomator has 17 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree: for a PKGBUILD that builds a git tag from GitHub newer than the release on PyPI, `pypi` reports a downgrade in every run. Vendor pages can also sit behind a bot check that their download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
 
 | Strategy | Source | Best for | Pre-releases |
 |---|---|---|---|
