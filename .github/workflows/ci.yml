@@ -190,10 +190,6 @@ jobs:
           [[ -z "$FILTER" ]] || args+=(--filter "$FILTER")
           [[ -z "$NEGATIVE_FILTER" ]] || args+=(--negative-filter "$NEGATIVE_FILTER")
           bundle exec bashcov -- tests/helpers/bashcov-bats.sh "${args[@]}" "${files[@]}"
-          # Fix absolute paths in Cobertura XML so Codecov can match files
-          if [ -f coverage/coverage.xml ]; then
-            sed -i "s|<source>.*</source>|<source>.</source>|g" coverage/coverage.xml
-          fi
 
       # codecov-action downloads the newest CLI unless it gets one, and Dependabot moves the
       # versions and hashes of requirements.txt
