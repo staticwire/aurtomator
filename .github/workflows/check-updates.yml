@@ -815,6 +815,7 @@ jobs:
           sudo -u builder git config --global user.email "${AUR_GIT_EMAIL:-aurtomator@users.noreply.github.com}"
 
       - name: Setup AUR SSH
+        id: ssh
         if: steps.handoff.outputs.packages == 'true'
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
@@ -825,15 +826,13 @@ jobs:
           fi
           SSH_DIR="/home/builder/.ssh"
           mkdir -m 0700 "$SSH_DIR"
-          echo "$AUR_SSH_KEY" > "$SSH_DIR/aur"
-          chmod 600 "$SSH_DIR/aur"
           # https://aur.archlinux.org lists the fingerprint of this host key as
           # Ed25519 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
           echo "aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN" > "$SSH_DIR/known_hosts"
 
           printf '%s\n' \
             "Host aur.archlinux.org" \
-            "  IdentityFile $SSH_DIR/aur" \
+            "  IdentityAgent $SSH_DIR/agent.sock" \
             "  User aur" \
             "  ConnectTimeout 30" \
             "  StrictHostKeyChecking yes" \
@@ -842,6 +841,26 @@ jobs:
             "  ControlPersist 600" \
             > "$SSH_DIR/config"
           chown -R builder:builder "$SSH_DIR"
+          # ssh-agent keeps the key in memory that other processes of builder cannot read
+          agent=$(sudo -u builder ssh-agent -s -a "$SSH_DIR/agent.sock")
+          pid=$(sed -n 's/^SSH_AGENT_PID=\([0-9][0-9]*\);.*/\1/p' <<<"$agent")
+          if [[ -z "$pid" ]]; then
+            echo "::error::ssh-agent printed no pid"
+            exit 1
+          fi
+          echo "agent-pid=$pid" >>"$GITHUB_OUTPUT"
+          if sudo -u builder head -c 1 "/proc/$pid/environ" >/dev/null 2>&1; then
+            echo "::error::builder can read the memory of ssh-agent"
+            exit 1
+          fi
+          if ! printf '%s\n' "$AUR_SSH_KEY" | sudo -u builder env SSH_AUTH_SOCK="$SSH_DIR/agent.sock" ssh-add -q -; then
+            echo "::error::ssh-add could not load AUR_SSH_KEY, a key with a passphrase cannot load in CI"
+            exit 1
+          fi
+          if [[ "$(sudo -u builder env SSH_AUTH_SOCK="$SSH_DIR/agent.sock" ssh-add -l | wc -l)" -ne 1 ]]; then
+            echo "::error::The agent of builder holds other than one key"
+            exit 1
+          fi
 
       - name: Setup GPG
         if: steps.handoff.outputs.packages == 'true'

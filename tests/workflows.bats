@@ -8,6 +8,13 @@ setup() {
   export GIT_CONFIG_GLOBAL="$BATS_TEST_TMPDIR/gitconfig" GIT_CONFIG_NOSYSTEM=1
 }
 
+# Tests of the key steps of publish run agents in KEYS_DIR, which make_keys_dir makes
+teardown() {
+  [[ -n "${KEYS_DIR:-}" ]] || return 0
+  stop_key_agents
+  rm -rf -- "$KEYS_DIR"
+}
+
 # Prints the run blocks of every step in workflow $1
 run_blocks() {
   yq '.jobs[].steps[] | select(has("run")) | .run' "$1"
@@ -4890,55 +4897,174 @@ run_bare_issues_step() {
   [ "$output" = "packages=false" ]
 }
 
-@test "check-updates: Setup AUR SSH fails on an empty key" {
-  local step="$BATS_TEST_TMPDIR/step.sh" bin="$BATS_TEST_TMPDIR/bin" ssh_dir="$BATS_TEST_TMPDIR/ssh" block
-  block=$(step_run publish "Setup AUR SSH")
-  run grep -o -F /home/builder/.ssh <<<"$block"
-  [ "${#lines[@]}" -eq 1 ]
-  printf '%s\n' "${block//"/home/builder/.ssh"/"$ssh_dir"}" >"$step"
-  mkdir -p "$bin"
-  printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
-  chmod +x "$bin/chown"
-  run env AUR_SSH_KEY= PATH="$bin:$PATH" sh -e "$step"
-  [ "$status" -eq 1 ]
-  [ "$output" = "::error::The secret AUR_SSH_KEY is empty" ]
-  [ ! -e "$ssh_dir" ]
-  run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" sh -e "$step"
-  [ "$status" -eq 0 ]
-  [ "$(cat "$ssh_dir/aur")" = "key-text" ]
-  [ -f "$ssh_dir/known_hosts" ]
+# Makes KEYS_DIR with the home of builder and stubs of sudo, chown and chgrp; builder must
+# enter it, and the temporary directory of bats has mode 0700
+make_keys_dir() {
+  KEYS_DIR=$(mktemp -d /tmp/aurtomator-keys.XXXXXX)
+  chmod 0755 "$KEYS_DIR"
+  mkdir -m 0755 "$KEYS_DIR/bin" "$KEYS_DIR/home"
+  # Under root, as in CI, builder is nobody, so the tests run two real uids
+  cat >"$KEYS_DIR/bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1 $2" == "-u builder" ]] || exit 97
+shift 2
+home="${0%/bin/sudo}/home"
+if ((EUID == 0)); then
+  exec setpriv --reuid=65534 --regid=65534 --clear-groups env HOME="$home" "$@"
+fi
+exec env HOME="$home" "$@"
+EOF
+  cat >"$KEYS_DIR/bin/chown" <<'EOF'
+#!/usr/bin/env bash
+((EUID == 0)) || exit 0
+args=()
+for arg; do
+  case "$arg" in
+    builder) arg=nobody ;;
+    builder:builder) arg=nobody:nobody ;;
+  esac
+  args+=("$arg")
+done
+exec "/usr/bin/${0##*/}" "${args[@]}"
+EOF
+  chmod 0755 "$KEYS_DIR/bin/sudo" "$KEYS_DIR/bin/chown"
+  ln -s chown "$KEYS_DIR/bin/chgrp"
+  "$KEYS_DIR/bin/chown" builder:builder "$KEYS_DIR/home"
 }
 
-# Runs Setup AUR SSH with AUR_SSH_KEY=key-text and $BATS_TEST_TMPDIR/ssh in place of its SSH_DIR;
-# the test above pins the directory of the step, and this helper reads it from SSH_DIR
+# Ends the agents that the key steps of a test started
+stop_key_agents() {
+  local pid
+  for pid in $(sed -n 's/^agent-pid=\([1-9][0-9]*\)$/\1/p' "$BATS_TEST_TMPDIR/output" 2>/dev/null); do
+    kill "$pid" 2>/dev/null || true
+  done
+}
+
+# Prints the path of an Ed25519 key with passphrase $1, none by default
+make_ssh_key() {
+  local key="$BATS_TEST_TMPDIR/ssh-key-${1:-plain}"
+  [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N "${1:-}" -C lab -f "$key" </dev/null
+  echo "$key"
+}
+
+# Runs Setup AUR SSH with AUR_SSH_KEY=$1, the key of make_ssh_key by default, and SSH_DIR in
+# the home of builder in KEYS_DIR; the step runs with no terminal, as in CI
 run_setup_ssh_step() {
-  local step="$BATS_TEST_TMPDIR/step.sh" bin="$BATS_TEST_TMPDIR/bin" block dir
+  local step="$BATS_TEST_TMPDIR/step.sh" key="${1-}" block dir
+  [[ -n "${KEYS_DIR:-}" ]] || make_keys_dir
+  stop_key_agents
+  rm -rf -- "$KEYS_DIR/home/.ssh"
+  [[ $# -gt 0 ]] || key=$(<"$(make_ssh_key)")
   block=$(step_run publish "Setup AUR SSH")
   dir=$(sed -n 's/^ *SSH_DIR="\(.*\)"$/\1/p' <<<"$block")
-  [ -n "$dir" ]
-  printf '%s\n' "${block//"$dir"/"$BATS_TEST_TMPDIR/ssh"}" >"$step"
-  mkdir -p "$bin"
-  printf '#!/bin/sh\nexit 0\n' >"$bin/chown"
-  chmod +x "$bin/chown"
-  run env AUR_SSH_KEY=key-text PATH="$bin:$PATH" sh -e "$step"
+  [ "$dir" = /home/builder/.ssh ]
+  printf '%s\n' "${block//"$dir"/"$KEYS_DIR/home/.ssh"}" >"$step"
+  : >"$BATS_TEST_TMPDIR/output"
+  run env -u SSH_AUTH_SOCK -u SSH_AGENT_PID -u DISPLAY -u WAYLAND_DISPLAY PATH="$KEYS_DIR/bin:$PATH" \
+    GITHUB_OUTPUT="$BATS_TEST_TMPDIR/output" AUR_SSH_KEY="$key" setsid -w timeout 60 sh -e "$step"
+}
+
+# Prints the keys that the agent of Setup AUR SSH holds, as builder
+list_agent_keys() {
+  env -u SSH_AUTH_SOCK PATH="$KEYS_DIR/bin:$PATH" sudo -u builder \
+    env SSH_AUTH_SOCK="$KEYS_DIR/home/.ssh/agent.sock" ssh-add -l
+}
+
+@test "check-updates: Setup AUR SSH fails on an empty key" {
+  run grep -o -F /home/builder <<<"$(step_run publish "Setup AUR SSH")"
+  [ "${#lines[@]}" -eq 1 ]
+  run_setup_ssh_step ""
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::The secret AUR_SSH_KEY is empty" ]
+  [ ! -e "$KEYS_DIR/home/.ssh" ]
+  [ ! -s "$BATS_TEST_TMPDIR/output" ]
+}
+
+@test "check-updates: Setup AUR SSH loads the key into an agent of builder and writes no key file" {
+  local key ssh_dir
+  key=$(make_ssh_key)
+  run_setup_ssh_step
+  [ "$status" -eq 0 ]
+  [[ "$(<"$BATS_TEST_TMPDIR/output")" =~ ^agent-pid=[1-9][0-9]*$ ]]
+  run list_agent_keys
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$(cut -d' ' -f2 <<<"$output")" = "$(ssh-keygen -lf "$key.pub" | cut -d' ' -f2)" ]
+  ssh_dir="$KEYS_DIR/home/.ssh"
+  [ "$(ls "$ssh_dir")" = $'agent.sock\nconfig\nknown_hosts' ]
+  sed '/^-----/d' "$key" >"$BATS_TEST_TMPDIR/key-lines"
+  [ -s "$BATS_TEST_TMPDIR/key-lines" ]
+  run grep -r -l -F -D skip -f "$BATS_TEST_TMPDIR/key-lines" "$ssh_dir"
+  [ "$status" -eq 1 ]
+}
+
+@test "check-updates: Setup AUR SSH points ssh at the agent" {
+  local ssh_dir
+  run_setup_ssh_step
+  [ "$status" -eq 0 ]
+  ssh_dir="$KEYS_DIR/home/.ssh"
+  grep -qxF "  IdentityAgent $ssh_dir/agent.sock" "$ssh_dir/config"
+  run grep -c IdentityFile "$ssh_dir/config"
+  [ "$output" = 0 ]
+  run env PATH="$KEYS_DIR/bin:$PATH" sudo -u builder ssh -G -F "$ssh_dir/config" aur.archlinux.org
+  [ "$status" -eq 0 ]
+  grep -qxF "identityagent $ssh_dir/agent.sock" <<<"$output"
 }
 
 # ssh waits for a silent host as long as TCP does, minutes past the timeout of a publish
 @test "check-updates: Setup AUR SSH gives up a connection after 30 seconds" {
   run_setup_ssh_step
   [ "$status" -eq 0 ]
-  grep -qx '  ConnectTimeout 30' "$BATS_TEST_TMPDIR/ssh/config"
+  grep -qx '  ConnectTimeout 30' "$KEYS_DIR/home/.ssh/config"
 }
 
 # https://aur.archlinux.org lists the Ed25519 host key as SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
-@test "check-updates: Setup AUR SSH trusts the AUR host key alone and keeps the key to builder" {
-  local ssh_dir="$BATS_TEST_TMPDIR/ssh"
+@test "check-updates: Setup AUR SSH trusts the AUR host key alone" {
+  local ssh_dir
   run_setup_ssh_step
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a "$ssh_dir" "$ssh_dir/aur")" = $'700\n600' ]
+  ssh_dir="$KEYS_DIR/home/.ssh"
+  [ "$(stat -c %a "$ssh_dir")" = 700 ]
   run ssh-keygen -lf "$ssh_dir/known_hosts"
   [ "$output" = "256 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4 aur.archlinux.org (ED25519)" ]
   grep -qx '  StrictHostKeyChecking yes' "$ssh_dir/config"
+}
+
+# Code of builder could read the key from an agent whose memory it can read
+@test "check-updates: Setup AUR SSH fails when builder can read the memory of the agent" {
+  make_keys_dir
+  printf '%s\n' '#!/bin/sh' 'sleep 300 >/dev/null 2>&1 3>&- &' 'echo "SSH_AGENT_PID=$!; export SSH_AGENT_PID;"' \
+    >"$KEYS_DIR/bin/ssh-agent"
+  chmod 0755 "$KEYS_DIR/bin/ssh-agent"
+  run_setup_ssh_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::builder can read the memory of ssh-agent" ]
+  [[ "$(<"$BATS_TEST_TMPDIR/output")" =~ ^agent-pid=[1-9][0-9]*$ ]]
+}
+
+# ssh-add finds no terminal for a passphrase in CI
+@test "check-updates: Setup AUR SSH fails on a key that ssh-add cannot load" {
+  local kind key
+  for kind in junk secret; do
+    echo "$kind"
+    key=junk
+    [[ "$kind" == junk ]] || key=$(<"$(make_ssh_key secret)")
+    run_setup_ssh_step "$key"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::ssh-add could not load AUR_SSH_KEY, a key with a passphrase cannot load in CI" ]]
+    run list_agent_keys
+    [ "$output" = "The agent has no identities." ]
+  done
+}
+
+@test "check-updates: Setup AUR SSH fails when the agent holds another key" {
+  make_keys_dir
+  printf '%s\n' '#!/bin/sh' '[ "$1" != -l ] || echo "256 SHA256:other lab (ED25519)"' 'exec /usr/bin/ssh-add "$@"' \
+    >"$KEYS_DIR/bin/ssh-add"
+  chmod 0755 "$KEYS_DIR/bin/ssh-add"
+  run_setup_ssh_step
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::The agent of builder holds other than one key" ]
 }
 
 # Runs before setup secrets push nothing and commit the README
