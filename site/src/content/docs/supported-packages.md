@@ -40,7 +40,7 @@ sha256sums=('SKIP')
 b2sums_aarch64=('SKIP')
 ```
 
-`SKIP` at any position makes aurtomator skip `updpkgsums`, which would replace the `SKIP` of a download with a real hash and clone every VCS source. The `SKIP` of a signature does not count, see [Sources with a signature](#sources-with-a-signature), and neither does the `SKIP` that makepkg gives a VCS source itself, see [Mixed SKIP and real checksums](#mixed-skip-and-real-checksums-blocked). Source URLs are checked either way, see [Source URL returns HTML](#source-url-returns-html-blocked).
+`SKIP` at any position makes aurtomator skip `updpkgsums`, which would replace the `SKIP` of a download with a real hash and clone every VCS source, when no remote source has a real checksum; PKGBUILDs with both follow [Mixed SKIP and real checksums](#mixed-skip-and-real-checksums-blocked). The `SKIP` of a VCS source counts, and the `SKIP` of a signature does not, see [Sources with a signature](#sources-with-a-signature). Source URLs are checked either way, see [Source URL returns HTML](#source-url-returns-html-blocked).
 
 ### Sources with a signature
 
