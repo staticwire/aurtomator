@@ -84,6 +84,8 @@ bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
 ```bash
 shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/helpers/*.sh tests/helpers/cov-shims/*
 shfmt -d -i 2 -ci scripts/*.sh scripts/lib/*.sh strategies/*.sh tests/*.bats tests/helpers/*.sh tests/helpers/cov-shims/*
+python3 -m py_compile scripts/lib/*.py
+ruby -wc scripts/lib/*.rb
 actionlint
 zizmor --persona pedantic .
 ```
