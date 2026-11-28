@@ -1,3 +1,8 @@
+# Each of the six parts of job test-part in ci.yml uploads its own reports
+codecov:
+  notify:
+    after_n_builds: 6
+
 coverage:
   status:
     project:
@@ -11,6 +16,7 @@ coverage:
 comment:
   layout: "condensed_header, condensed_files, condensed_footer"
   require_changes: true
+  after_n_builds: 6
 
 ignore:
   - "tests/**"

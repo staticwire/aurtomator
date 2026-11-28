@@ -121,12 +121,34 @@ jobs:
           persona: pedantic
           advanced-security: false
 
-  test:
-    name: test
+  # Runs the suite in parts, each on a runner of its own. --filter and --negative-filter of one
+  # regex split a file, and tests/workflows.bats checks that the parts run every test file once
+  test-part:
+    name: test-part (${{ matrix.part }})
     needs: image
     runs-on: ubuntu-latest
     container: ${{ needs.image.outputs.ref }} # zizmor: ignore[unpinned-images] the image job accepts only pins by digest
-    timeout-minutes: 45
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: "scripts: check-all, lib.sh"
+            files: tests/scripts.bats
+            filter: '^(check-all|lib\.sh)'
+          - part: "scripts: the rest"
+            files: tests/scripts.bats
+            negative-filter: '^(check-all|lib\.sh)'
+          - part: "publish: check"
+            files: tests/publish.bats
+            filter: "^check"
+          - part: "publish: the rest"
+            files: tests/publish.bats
+            negative-filter: "^check"
+          - part: validate-pkg, strategies
+            files: tests/validate-pkg.bats tests/strategies.bats
+          - part: the other files
+            files: tests/workflows.bats tests/draft.bats tests/runner.bats tests/setup.bats tests/gpg-flow.bats tests/stats.bats tests/coverage.bats
     # bundler installs the gems of the lock and stops on a gem whose checksum differs from it. The
     # bundler of the image runs, whatever version the lock names.
     env:
@@ -157,8 +179,17 @@ jobs:
         run: bundle install
 
       - name: Run BATS tests with coverage
+        shell: bash
+        env:
+          FILES: ${{ matrix.files }}
+          FILTER: ${{ matrix.filter }}
+          NEGATIVE_FILTER: ${{ matrix.negative-filter }}
         run: |
-          bundle exec bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive
+          read -ra files <<<"$FILES"
+          args=()
+          [[ -z "$FILTER" ]] || args+=(--filter "$FILTER")
+          [[ -z "$NEGATIVE_FILTER" ]] || args+=(--negative-filter "$NEGATIVE_FILTER")
+          bundle exec bashcov -- tests/helpers/bashcov-bats.sh "${args[@]}" "${files[@]}"
           # Fix absolute paths in Cobertura XML so Codecov can match files
           if [ -f coverage/coverage.xml ]; then
             sed -i "s|<source>.*</source>|<source>.</source>|g" coverage/coverage.xml
@@ -179,6 +210,24 @@ jobs:
           disable_search: true
           fail_ci_if_error: false
           binary: /opt/codecov/bin/codecovcli
+
+  # The ruleset requires this check, so the parts can change without a change of the ruleset
+  test:
+    name: test
+    needs: test-part
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+
+    steps:
+      - name: Fail unless every part passed
+        if: needs.test-part.result != 'success'
+        env:
+          RESULT: ${{ needs.test-part.result }}
+        run: |
+          echo "::error::The test parts ended with $RESULT"
+          exit 1
 
   # Runs the validator of this commit as a packages repository runs it
   # from its pin
@@ -326,7 +375,7 @@ jobs:
   # skips. always(): a skipped job counts as passed.
   ci-ok:
     name: ci-ok
-    needs: [image, lint, zizmor, test, validate, pipeline, dependency-review, vulnerability-issue]
+    needs: [image, lint, zizmor, test-part, test, validate, pipeline, dependency-review, vulnerability-issue]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
