@@ -15,7 +15,7 @@ aurtomator has one maintainer, who makes the final decisions on changes, release
 
 ## Decisions
 
-Changes reach `main` only through pull requests, and the maintainer merges them once the required checks `lint`, `test` and `ci-ok` pass. The Dependabot updates of `ci-image/` are the exception: job `merge-image` merges them once their checks and the review of their dependencies pass, see [CI image updates](/develop/ci/#ci-image-updates). Pull requests are squash-merged and hold one logical change each. The [roadmap](/project/roadmap/) lists what the project plans and what it does not.
+Changes reach `main` only through pull requests, and the maintainer merges them once the required checks `lint`, `test` and `ci-ok` pass. The Dependabot updates of `ci-image/` are the exception: job `merge-image` merges them once their checks and the review of their dependencies pass and their branch holds the head of `main`, see [CI image updates](/develop/ci/#ci-image-updates). Pull requests are squash-merged and hold one logical change each. The [roadmap](/project/roadmap/) lists what the project plans and what it does not.
 
 ## Continuity
 

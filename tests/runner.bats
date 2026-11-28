@@ -594,7 +594,7 @@ shape() {
 }
 
 # Tags stand before sign publishes their release, and stay when a run stops in between
-@test "runner: refuses a pin whose release is unpublished, or mutable after v0.14.0" {
+@test "runner: refuses a pin whose release is unpublished or mutable" {
   rm "$MOCK_FILES_DIR/repos/staticwire/aurtomator/releases/tags/v1.0.0"
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 1 ]
@@ -604,7 +604,7 @@ shape() {
   release staticwire/aurtomator v1.0.0 false
   run "$REPO/aurtomator.sh" sample
   [ "$status" -eq 1 ]
-  [ "$output" = "GitHub shows the release v1.0.0 of staticwire/aurtomator as mutable, and aurtomator publishes every release after v0.14.0 as immutable" ]
+  [ "$output" = "GitHub shows the release v1.0.0 of staticwire/aurtomator as mutable, and aurtomator publishes every release as immutable" ]
   [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 
   # An answer of another tag or of a draft is no published release of the tag
@@ -618,26 +618,22 @@ shape() {
   [ "$output" = "No published release v1.0.0 of staticwire/aurtomator; pins name the commit of a published release" ]
 }
 
-@test "runner: takes a mutable release up to v0.14.0" {
+@test "runner: refuses a mutable release whatever its version" {
   git -C "$TEST_TMPDIR/work" tag v0.9.0 "$PINNED"
   git -C "$TEST_TMPDIR/work" tag v0.14.0 "$PINNED"
-  git -C "$TEST_TMPDIR/work" tag v0.14.1 "$PINNED"
   publish staticwire/aurtomator "$TEST_TMPDIR/work"
   release staticwire/aurtomator v0.9.0 false
   release staticwire/aurtomator v0.14.0 false
-  release staticwire/aurtomator v0.14.1 false
   pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v0.9.0
-  run "$REPO/aurtomator.sh" check-pins
-  [ "$status" -eq 0 ]
-  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v0.14.0
-  run "$REPO/aurtomator.sh" sample
-  [ "$status" -eq 0 ]
-  [ "$output" = "name: pinned" ]
-
-  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v0.14.1
   GITHUB_TOKEN=secret run "$REPO/aurtomator.sh" check-pins
   [ "$status" -eq 1 ]
-  [ "$output" = "GitHub shows the release v0.14.1 of staticwire/aurtomator as mutable, and aurtomator publishes every release after v0.14.0 as immutable" ]
+  [ "$output" = "GitHub shows the release v0.9.0 of staticwire/aurtomator as mutable, and aurtomator publishes every release as immutable" ]
+
+  pin "staticwire/aurtomator/.github/workflows/check-updates.yml@$PINNED" v0.14.0
+  run "$REPO/aurtomator.sh" sample
+  [ "$status" -eq 1 ]
+  [ "$output" = "GitHub shows the release v0.14.0 of staticwire/aurtomator as mutable, and aurtomator publishes every release as immutable" ]
+  [ ! -e "$XDG_CACHE_HOME/aurtomator" ]
 }
 
 # Runners share the addresses that the GitHub API limits to 60 requests an hour without a token, and the

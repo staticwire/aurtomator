@@ -2,7 +2,7 @@
 title: Strategies
 ---
 
-aurtomator has 17 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree: the streamrip PKGBUILD builds the git tag `v2.2.0` from GitHub while PyPI still holds `2.1.0`, so `pypi` would report a downgrade in every run. Vendor pages can also sit behind a bot check that their download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
+aurtomator has 17 version detection strategies. Pick the one that reads the source the PKGBUILD downloads, because two sources of one project can disagree: for a PKGBUILD that builds a git tag from GitHub newer than the release on PyPI, `pypi` reports a downgrade in every run. Vendor pages can also sit behind a bot check that their download host does not have, see [Upstreams behind a bot check](#upstreams-behind-a-bot-check).
 
 | Strategy | Source | Best for | Pre-releases |
 |---|---|---|---|
@@ -530,7 +530,7 @@ Gems list each release once per platform, so nokogiri 1.19.7 appears eleven time
 |---|---|---|
 | `upstream.repology` | no | Repology project, the package `name` by default. It holds the characters `A-Z`, `a-z`, `0-9`, `@`, `.`, `_`, `+`, `:` and `-` and starts with none of `.`, `-` and `:`, since it goes into the path of the API URL |
 
-**Version:** the version of the first `newest` entry outside the AUR, since the AUR entries hold the version of this package. When only the AUR is newest, the newest `outdated` version outside the AUR, and `current` values above it read as a downgrade. The version is the normalized `version` of Repology: the OpenBSD entry of qodem gives `1.0.1` for its `1.0.1p1`. It lags until a distribution other than the AUR packages the release. The request sends `User-Agent: aurtomator/1.0`, as Repology asks.
+**Version:** the version of the first `newest` entry outside the AUR, since the AUR entries hold the version of this package. When only the AUR is newest, the newest `outdated` version outside the AUR, and `current` values above it read as a downgrade. The version is the normalized `version` of Repology: the OpenBSD entry of qodem gives `1.0.1` for its `1.0.1p1`. It lags until a distribution other than the AUR packages the release. The request sends `User-Agent: aurtomator/1.0 (+https://github.com/staticwire/aurtomator)`, as Repology asks.
 
 Unknown projects fail with `Project <name> not found on Repology`, and projects without a `newest` or `outdated` entry outside the AUR with `No version found on Repology for <name> outside the AUR`. Repology names libraries of Python, Ruby, Perl or Haskell `<language>:<name>`, such as `ruby:rmagick`, and the search at `https://repology.org/projects/?search=rmagick` lists them:
 

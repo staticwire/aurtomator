@@ -1029,7 +1029,7 @@ validate_pkg() {
         ((errors++))
       fi
       ;;
-    pypi | npm | crates)
+    pypi | npm | crates | rubygems)
       local registry
       registry=$(pkg_get "$file" '.upstream.registry // ""')
       if [[ -z "$registry" || "$registry" == "null" ]]; then

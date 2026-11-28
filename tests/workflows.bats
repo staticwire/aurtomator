@@ -221,6 +221,17 @@ secret_lines() {
   [ "$(printf '%s\n' "${lines[@]}" | sed 's/.*@//' | sort -u | wc -l)" -eq 1 ]
 }
 
+# merge-image merges only a branch that holds the head of main, so the updates of ci-image/ come
+# in one pull request a month
+@test "dependabot: updates the image, the Python packages and the gems of ci-image/ in one pull request" {
+  local file="$GITHUB_DIR/dependabot.yml"
+  run yq -o=json -I=0 '.["multi-ecosystem-groups"]' "$file"
+  [ "$output" = '{"ci-image":{"schedule":{"interval":"monthly"}}}' ]
+  run yq -o=json -I=0 '[.updates[] | select(.directory == "/ci-image") |
+    [.["package-ecosystem"], .["multi-ecosystem-group"], .patterns, has("schedule"), has("groups")]]' "$file"
+  [ "$output" = '[["docker","ci-image",["*"],false,false],["uv","ci-image",["*"],false,false],["bundler","ci-image",["*"],false,false]]' ]
+}
+
 # The token a checkout leaves in .git/config would reach builder, which owns the workspace
 @test "workflows: no checkout keeps its credentials" {
   local workflow count=0

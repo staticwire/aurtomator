@@ -16,7 +16,7 @@ Every job checks out aurtomator at `job.workflow_sha`, the commit that the calli
 
 | Job | Permissions | Secrets |
 |---|---|---|
-| `check-updates` of your calling workflow | `contents: write` and `issues: write`, the most any job below gets | passes the five secrets by name |
+| `check-updates` of your calling workflow | `contents: write` and `issues: write`, the most any job below gets | passes the ten secrets by name |
 | `image` | `contents: read` | none |
 | `check` | `contents: read` | the `GITLAB_TOKEN_*` secrets, in the root step Fetch GitLab tags |
 | `prepare` | `contents: read` | none |

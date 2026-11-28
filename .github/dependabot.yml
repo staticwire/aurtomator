@@ -1,4 +1,10 @@
 version: 2
+# merge-image merges only a branch that holds the head of main, so one pull request a month
+# brings every update of /ci-image
+multi-ecosystem-groups:
+  ci-image:
+    schedule:
+      interval: "monthly"
 updates:
   # Hostile releases get a week to be found and pulled before Dependabot proposes them; its security
   # updates skip that week, and merge-image merges the updates of /ci-image without review
@@ -14,28 +20,22 @@ updates:
         patterns: ["github/codeql-action*"]
   - package-ecosystem: "docker"
     directory: "/ci-image"
-    schedule:
-      interval: "monthly"
+    multi-ecosystem-group: "ci-image"
+    patterns: ["*"]
     cooldown:
       default-days: 7
   - package-ecosystem: "uv"
     directory: "/ci-image"
-    schedule:
-      interval: "monthly"
+    multi-ecosystem-group: "ci-image"
+    patterns: ["*"]
     cooldown:
       default-days: 7
-    groups:
-      codecov:
-        patterns: ["*"]
   - package-ecosystem: "bundler"
     directory: "/ci-image"
-    schedule:
-      interval: "monthly"
+    multi-ecosystem-group: "ci-image"
+    patterns: ["*"]
     cooldown:
       default-days: 7
-    groups:
-      coverage:
-        patterns: ["*"]
   - package-ecosystem: "npm"
     directory: "/site"
     schedule:

@@ -13,7 +13,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 - Strategies fetch the answers of upstreams over HTTPS only, with limits on size and time, and a new version passes only with the characters `A-Za-z0-9._+` and within a length limit.
 - `validate-pkg.sh` refuses unknown keys and values in package YAML, and package names match `^[a-z0-9][a-z0-9.+_-]*$`.
 - Pushes to the AUR go over SSH to its pinned host key. With a GPG signing subkey set, every AUR commit carries its signature, see [GPG signing](/gpg-signing/).
-- Your repository runs aurtomator at the commit of a release, which its calling workflows pin by SHA, and `aurtomator.sh` fetches that commit over HTTPS. Releases after v0.13.0 carry an archive of the release commit with a Sigstore signature of the release workflow, see [Verify a release](#verify-a-release).
+- Your repository runs aurtomator at the commit of a release, which its calling workflows pin by SHA, and `aurtomator.sh` fetches that commit over HTTPS. Releases carry an archive of the release commit with a Sigstore signature of the release workflow, see [Verify a release](#verify-a-release).
 
 ## What aurtomator does not protect against
 
@@ -69,7 +69,7 @@ This page says what users can and cannot expect from aurtomator in terms of secu
 
 ## Verify a release
 
-Releases after v0.13.0 carry `aurtomator-X.Y.Z.tar.gz`, an archive of the release commit. The release workflow signs it through Sigstore with `actions/attest`: each run gets a short-lived certificate for its own identity, so the project keeps no signing key. Job `sign` of the workflow signs and holds no token of the App, so no step of release-please can ask for the OIDC token that signs. Runs of the workflow wait for each other, so two runs never create the same release. The attestation names the workflow, the branch and the commit of the run, and the GitHub CLI checks all three:
+Releases carry `aurtomator-X.Y.Z.tar.gz`, an archive of the release commit. The release workflow signs it through Sigstore with `actions/attest`: each run gets a short-lived certificate for its own identity, so the project keeps no signing key. Job `sign` of the workflow signs and holds no token of the App, so no step of release-please can ask for the OIDC token that signs. Runs of the workflow wait for each other, so two runs never create the same release. The attestation names the workflow, the branch and the commit of the run, and the GitHub CLI checks all three:
 
 ```sh
 gh release download vX.Y.Z -R staticwire/aurtomator -p 'aurtomator-X.Y.Z.tar.gz'
@@ -92,7 +92,7 @@ gh attestation verify aurtomator-X.Y.Z.tar.gz -R staticwire/aurtomator \
 
 `aurtomator-X.Y.Z.tar.gz.intoto.jsonl` holds the SLSA provenance of the archive as an in-toto bundle: the DSSE envelope of the same attestation, on one line.
 
-Releases after v0.14.0 are immutable. The workflow attaches the archive and its attestation files to a draft and publishes it last, and GitHub then locks the tag and the files of the release and adds a release attestation of the tag, the commit and the files. The release page shows it as **Release attestation**, and the GitHub CLI checks it, for the release and for a downloaded file:
+Releases are immutable. The workflow attaches the archive and its attestation files to a draft and publishes it last, and GitHub then locks the tag and the files of the release and adds a release attestation of the tag, the commit and the files. The release page shows it as **Release attestation**, and the GitHub CLI checks it, for the release and for a downloaded file:
 
 ```sh
 gh release verify vX.Y.Z -R staticwire/aurtomator

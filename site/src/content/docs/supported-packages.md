@@ -40,7 +40,7 @@ sha256sums=('SKIP')
 b2sums_aarch64=('SKIP')
 ```
 
-`SKIP` at any position makes aurtomator skip `updpkgsums`, which would replace the `SKIP` of a download with a real hash and clone every VCS source. The `SKIP` of a signature does not count, see [Sources with a signature](#sources-with-a-signature), and neither does the `SKIP` that makepkg gives a VCS source itself, see [Mixed SKIP and real checksums](#mixed-skip-and-real-checksums-blocked). Source URLs are checked either way, see [Source URL returns HTML](#source-url-returns-html-blocked).
+`SKIP` at any position makes aurtomator skip `updpkgsums`, which would replace the `SKIP` of a download with a real hash and clone every VCS source, when no remote source has a real checksum; PKGBUILDs with both follow [Mixed SKIP and real checksums](#mixed-skip-and-real-checksums-blocked). The `SKIP` of a VCS source counts, and the `SKIP` of a signature does not, see [Sources with a signature](#sources-with-a-signature). Source URLs are checked either way, see [Source URL returns HTML](#source-url-returns-html-blocked).
 
 ### Sources with a signature
 
@@ -171,7 +171,7 @@ provides=("demo=${pkgver}")
 
 Checksum arrays below the first line of the PKGBUILD that holds more than assignments and comments, such as a command, a function, a condition or a here-document, and text after the `)` of a checksum array. Assignments may hold `$(...)` of a plain command, one without quotes, `$`, pipes, redirections, `#` or shell keywords such as `case`, as `_date="$(date -u +%Y%m%d)"` does.
 
-**Detection:** verify and publish read the PKGBUILD as text, and only the assignments at its top show what bash assigns without running it: arrays inside a function, a string or a here-document read the same as arrays at the top. Updates of such a PKGBUILD stop in prepare, verify and publish with a message that names the line.
+**Detection:** verify and publish read the PKGBUILD as text, and only the assignments at its top show what bash assigns without running it: arrays inside a function, a string or a here-document read the same as arrays at the top. Updates of such a PKGBUILD stop in verify and publish with a message that names the line.
 
 **Correct approach:** keep the checksum arrays among the assignments above the first function:
 
