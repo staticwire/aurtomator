@@ -932,6 +932,34 @@ jobs:
           statuses: /data/status
           handoff: /data/handoff
 
+      # Code of builder may outlive Publish updates, so the agents that push and sign end first
+      - name: Stop the key agents
+        if: always()
+        env:
+          AGENT_PID: ${{ steps.ssh.outputs.agent-pid }}
+        run: |
+          KEYS="/run/aurtomator"
+          if [[ -d "$KEYS/gnupg" ]]; then
+            gpgconf --homedir "$KEYS/gnupg" --kill gpg-agent || true
+          fi
+          if [[ "$AGENT_PID" =~ ^[1-9][0-9]*$ ]]; then
+            kill "$AGENT_PID" 2>/dev/null || true
+          fi
+          # Returns 0 while an agent runs: pid 1 of a job container never reaps a zombie, and code
+          # of builder can start a process with the command line of the agent of root
+          alive() {
+            if [[ "$AGENT_PID" =~ ^[1-9][0-9]*$ ]] && [[ "$(ps -o stat= -p "$AGENT_PID")" =~ ^[^Z] ]]; then
+              return 0
+            fi
+            pgrep -u "$(id -u)" -f -- "--homedir $KEYS/gnupg" >/dev/null
+          }
+          for _ in $(seq 10); do
+            alive || exit 0
+            sleep 1
+          done
+          echo "::error::A key agent of publish is still running"
+          exit 1
+
       - name: Stop builder
         id: stop
         if: always()

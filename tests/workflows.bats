@@ -2174,12 +2174,19 @@ step_index() {
 # Root reads what builder wrote only once no process of builder runs, and
 # the post step of a checkout comes after the last step of the job
 @test "check-updates: Stop builder and Hand over follow the step of builder, and the checkouts go last" {
-  local job builder
+  local job builder stop
   for job in check prepare verify publish; do
     echo "$job"
     builder=$(yq ".jobs.$job.steps | to_entries | map(select(.value.uses == \"./aurtomator/.github/actions/run-as-builder\")) | .[0].key" "$CHECK_UPDATES")
+    stop=$((builder + 1))
+    # The agents that push and sign end first, while code of builder may still run
+    if [[ "$job" == publish ]]; then
+      run yq -o=json -I=0 ".jobs.$job.steps[$stop] | [.name, .if]" "$CHECK_UPDATES"
+      [ "$output" = '["Stop the key agents","always()"]' ]
+      stop=$((stop + 1))
+    fi
     # Hand over reads nothing while a process of builder may still run
-    run yq -o=json -I=0 "[.jobs.$job.steps[$((builder + 1))], .jobs.$job.steps[$((builder + 2))], .jobs.$job.steps[-1]] | map([.name, .if, .id])" "$CHECK_UPDATES"
+    run yq -o=json -I=0 "[.jobs.$job.steps[$stop], .jobs.$job.steps[$((stop + 1))], .jobs.$job.steps[-1]] | map([.name, .if, .id])" "$CHECK_UPDATES"
     [ "$status" -eq 0 ]
     [ "$output" = "[[\"Stop builder\",\"always()\",\"stop\"],[\"Hand over\",\"always() && steps.stop.outcome == 'success'\",null],[\"Drop the checkouts\",\"always()\",null]]" ]
     [ "$(step_run "$job" "Hand over")" = "$(step_run check "Hand over")" ]
@@ -4940,15 +4947,25 @@ end_gpg_agent() {
     gpgconf --homedir "$1" --remove-socketdir 2>/dev/null || true
 }
 
-# Ends the agents that the key steps of a test started
-stop_key_agents() {
-  local pid dir
+# Ends the agents that Setup AUR SSH started in a test
+stop_ssh_agents() {
+  local pid
   for pid in $(sed -n 's/^agent-pid=\([1-9][0-9]*\)$/\1/p' "$BATS_TEST_TMPDIR/output" 2>/dev/null); do
     kill "$pid" 2>/dev/null || true
   done
+}
+
+# Ends the agent that Setup GPG started in a test
+stop_gpg_agents() {
+  local dir
   for dir in "$KEYS_DIR/run/gnupg" "$KEYS_DIR/gnupg"; do
     [[ ! -d "$dir" ]] || end_gpg_agent "$dir"
   done
+}
+
+stop_key_agents() {
+  stop_ssh_agents
+  stop_gpg_agents
 }
 
 # Runs a command as builder through the stub of make_keys_dir
@@ -4969,7 +4986,7 @@ make_ssh_key() {
 run_setup_ssh_step() {
   local step="$BATS_TEST_TMPDIR/step.sh" key="${1-}" block dir
   [[ -n "${KEYS_DIR:-}" ]] || make_keys_dir
-  stop_key_agents
+  stop_ssh_agents
   rm -rf -- "$KEYS_DIR/home/.ssh"
   [[ $# -gt 0 ]] || key=$(<"$(make_ssh_key)")
   block=$(step_run publish "Setup AUR SSH")
@@ -5319,7 +5336,7 @@ exit "${PACMAN_RC:-0}"
 run_setup_gpg_step() {
   local step="$BATS_TEST_TMPDIR/step.sh" block keys gnupg
   [[ -n "${KEYS_DIR:-}" ]] || make_keys_dir
-  stop_key_agents
+  stop_gpg_agents
   rm -rf -- "$KEYS_DIR/run" "$KEYS_DIR/gnupg" "$KEYS_DIR/home/.gitconfig"
   block=$(step_run publish "Setup GPG")
   keys=$(sed -n 's/^ *KEYS="\(.*\)"$/\1/p' <<<"$block")
@@ -5477,6 +5494,68 @@ EOF
   [[ "$output" == *"::error::gpg-agent opened no socket at $KEYS_DIR/run/S.gpg-agent.extra" ]]
   [[ "$output" != *"holds no secret key"* ]]
   [ ! -s "$BATS_TEST_TMPDIR/env" ]
+}
+
+# Runs Stop the key agents with AGENT_PID=$1, /run/aurtomator in KEYS_DIR and a wait of $2
+# seconds, 10 by default
+run_stop_agents_step() {
+  local block
+  [[ -n "${KEYS_DIR:-}" ]] || make_keys_dir
+  block=$(step_run publish "Stop the key agents")
+  [[ "$block" == *'KEYS="/run/aurtomator"'* && "$block" == *'$(seq 10)'* ]]
+  block=${block//'KEYS="/run/aurtomator"'/"KEYS=\"$KEYS_DIR/run\""}
+  printf '%s\n' "${block//'$(seq 10)'/"\$(seq ${2:-10})"}" >"$BATS_TEST_TMPDIR/step.sh"
+  run env PATH="$KEYS_DIR/bin:$PATH" AGENT_PID="$1" sh -e "$BATS_TEST_TMPDIR/step.sh"
+}
+
+@test "check-updates: Stop the key agents ends both agents" {
+  local key pid
+  key=$(make_gpg_key secret)
+  run_setup_ssh_step
+  [ "$status" -eq 0 ]
+  run_setup_gpg_step "$key"
+  [ "$status" -eq 0 ]
+  pid=$(sed -n 's/^agent-pid=//p' "$BATS_TEST_TMPDIR/output")
+  [[ "$(ps -o stat= -p "$pid")" == [^Z]* ]]
+  pgrep -f -- "--homedir $KEYS_DIR/run/gnupg" >/dev/null
+  run_stop_agents_step "$pid"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [[ "$(ps -o stat= -p "$pid")" =~ ^(Z.*)?$ ]]
+  run pgrep -f -- "--homedir $KEYS_DIR/run/gnupg"
+  [ "$status" -eq 1 ]
+  [ ! -e "$KEYS_DIR/run/S.gpg-agent.extra" ]
+  [ ! -e "$KEYS_DIR/home/.ssh/agent.sock" ]
+}
+
+# Runs that push nothing set up no agent
+@test "check-updates: Stop the key agents does nothing without agents" {
+  run_stop_agents_step ""
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "check-updates: Stop the key agents fails while an agent lives" {
+  local key pid
+  # A process that ignores SIGTERM stands for ssh-agent
+  pid=$(
+    trap '' TERM
+    sleep 30 >/dev/null 2>&1 3>&- &
+    echo "$!"
+  )
+  run_stop_agents_step "$pid" 2
+  kill -HUP "$pid"
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::A key agent of publish is still running" ]
+  # gpgconf that ends no agent leaves gpg-agent of root running
+  key=$(make_gpg_key secret)
+  run_setup_gpg_step "$key"
+  [ "$status" -eq 0 ]
+  printf '%s\n' '#!/bin/sh' 'exit 0' >"$KEYS_DIR/bin/gpgconf"
+  chmod 0755 "$KEYS_DIR/bin/gpgconf"
+  run_stop_agents_step "" 2
+  [ "$status" -eq 1 ]
+  [ "$output" = "::error::A key agent of publish is still running" ]
 }
 
 # Branch names can hold # and %, which a URL path reads as a fragment and an escape
