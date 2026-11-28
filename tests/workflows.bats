@@ -52,7 +52,8 @@ permission_lines() {
     'ci.yml ["image",null]' \
     'ci.yml ["lint",null]' \
     'ci.yml ["zizmor",null]' \
-    'ci.yml ["test",null]' \
+    'ci.yml ["test-part",null]' \
+    'ci.yml ["test",{}]' \
     'ci.yml ["validate",{"contents":"read"}]' \
     'ci.yml ["pipeline",{"contents":"write","issues":"write"}]' \
     'ci.yml ["dependency-review",{"contents":"read"}]' \
@@ -97,6 +98,7 @@ permission_lines() {
     'ci.yml image image' \
     'ci.yml lint lint' \
     'ci.yml zizmor zizmor' \
+    'ci.yml test-part test-part (${{ matrix.part }})' \
     'ci.yml test test' \
     'ci.yml validate -' \
     'ci.yml pipeline -' \
@@ -309,9 +311,9 @@ secret_lines() {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.updates[] | select(.["package-ecosystem"] == "uv") | .directory' "$GITHUB_DIR/dependabot.yml"
   [ "$output" = "/ci-image" ]
-  run yq '.jobs.test.steps[] | select(.name == "Install the Codecov CLI") | .run' "$ci"
+  run yq '.jobs["test-part"].steps[] | select(.name == "Install the Codecov CLI") | .run' "$ci"
   [[ "$output" == *"/opt/codecov/bin/pip install --require-hashes --no-deps -r ci-image/requirements.txt"* ]]
-  run yq '.jobs.test.steps[] | select(.name == "Upload coverage to Codecov") | .with.binary' "$ci"
+  run yq '.jobs["test-part"].steps[] | select(.name == "Upload coverage to Codecov") | .with.binary' "$ci"
   [ "$output" = "/opt/codecov/bin/codecovcli" ]
   grep -q '^codecov-cli==' "$GITHUB_DIR/../ci-image/requirements.txt"
   grep -q -- '--hash=sha256:' "$GITHUB_DIR/../ci-image/requirements.txt"
@@ -319,15 +321,23 @@ secret_lines() {
 
 # The search of the CLI takes tests/coverage.bats for a report, by its name
 @test "ci: Codecov uploads the reports of bashcov, coverage.py and SimpleCov alone" {
-  run yq -o=json -I=0 '.jobs.test.steps[] | select(.name == "Upload coverage to Codecov") | .with | [.files, .disable_search]' \
+  run yq -o=json -I=0 '.jobs["test-part"].steps[] | select(.name == "Upload coverage to Codecov") | .with | [.files, .disable_search]' \
     "$GITHUB_DIR/workflows/ci.yml"
   [ "$output" = '["coverage/coverage.xml,coverage/python.xml,coverage/ruby.xml",true]' ]
+}
+
+# The pycoverage plugin of the CLI finds coverage/.coverage and writes its own coverage.xml over
+# the report of bashcov
+@test "ci: Codecov runs none of the plugins of its CLI" {
+  run yq '.jobs["test-part"].steps[] | select(.name == "Upload coverage to Codecov") | .with.plugins' \
+    "$GITHUB_DIR/workflows/ci.yml"
+  [ "$output" = noop ]
 }
 
 # bashcov-bats.sh measures scripts/lib/py_imports.py with coverage.py of the image
 @test "ci: the test job installs coverage.py, and lint compiles the Python helpers" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
-  run yq '.jobs.test.steps[] | select(.name == "Install dependencies") | .run' "$ci"
+  run yq '.jobs["test-part"].steps[] | select(.name == "Install dependencies") | .run' "$ci"
   [[ "$output" == *" python-coverage"* ]]
   run yq '.jobs.lint.steps[] | select(.name == "Compile the Python helpers") | .run' "$ci"
   [ "$output" = "python3 -m py_compile scripts/lib/*.py" ]
@@ -645,28 +655,76 @@ run_lint_images() {
   [ "$count" -gt 0 ]
 }
 
-@test "ci: the test job runs the suite once, under bashcov, and fails with it" {
-  run yq '[.jobs.test.steps[] | select(has("run")) | .run | select(test("tests/"))] | length' "$GITHUB_DIR/workflows/ci.yml"
+@test "ci: each test part runs its files once, under bashcov, and fails with them" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq '[.jobs["test-part"].steps[] | select(has("run")) | .run | select(test("tests/"))] | length' "$ci"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
-  run yq '.jobs.test.steps[] | select(has("run")) | .run | select(test("tests/"))' "$GITHUB_DIR/workflows/ci.yml"
+  run yq '.jobs["test-part"].steps[] | select(has("run")) | .run | select(test("tests/"))' "$ci"
   [ "$status" -eq 0 ]
-  [[ "$output" == "bundle exec bashcov -- tests/helpers/bashcov-bats.sh tests/ --recursive"* ]]
+  [[ "$output" == *'bundle exec bashcov -- tests/helpers/bashcov-bats.sh "${args[@]}" "${files[@]}"'* ]]
   [[ "$output" != *"|| true"* ]]
+  run yq -o=json -I=0 '.jobs["test-part"].strategy["fail-fast"]' "$ci"
+  [ "$output" = false ]
+}
+
+# A test file left out of the parts never runs in CI, subdirectories included, and a filter
+# without its negative leaves out the rest of its file
+@test "ci: the test parts run every test file of tests/ once" {
+  local ci="$GITHUB_DIR/workflows/ci.yml" include file entries
+  include=$(yq -o=json -I=0 '.jobs["test-part"].strategy.matrix.include' "$ci")
+  [ "$(jq length <<<"$include")" -ge 2 ]
+  [ "$(jq '[.[] | select(has("filter") and has("negative-filter"))] | length' <<<"$include")" = 0 ]
+  while read -r file; do
+    [ -f "$BATS_TEST_DIRNAME/../$file" ] || {
+      echo "no such file: $file"
+      return 1
+    }
+  done < <(jq -r '.[].files | split(" ")[]' <<<"$include")
+  while read -r file; do
+    file=tests/${file#"$BATS_TEST_DIRNAME"/}
+    entries=$(jq -c --arg f "$file" '[.[] | select(.files | split(" ") | index($f)) | [.filter, .["negative-filter"]]]' <<<"$include")
+    [ "$entries" = '[[null,null]]' ] ||
+      jq -e 'length == 2 and (map(select(.[0] != null and .[1] == null)) | length) == 1 and
+        (map(select(.[0] == null and .[1] != null)) | length) == 1 and (map(.[0] // .[1]) | unique | length) == 1' \
+        <<<"$entries" >/dev/null || {
+      echo "$file: $entries"
+      return 1
+    }
+  done < <(find "$BATS_TEST_DIRNAME" -name '*.bats' | sort)
+}
+
+# The ruleset requires the check test, and the parts report checks of other names
+@test "ci: job test fails unless every test part passed" {
+  local ci="$GITHUB_DIR/workflows/ci.yml"
+  run yq -o=json -I=0 '.jobs.test | [.needs, .if, (.steps | length), .steps[0].if]' "$ci"
+  [ "$output" = "[\"test-part\",\"always()\",1,\"needs.test-part.result != 'success'\"]" ]
+  yq '.jobs.test.steps[0].run' "$ci" >"$BATS_TEST_TMPDIR/step.sh"
+  run env RESULT=failure bash "$BATS_TEST_TMPDIR/step.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"::error::"*"failure"* ]]
+}
+
+# Codecov sets its statuses after the first upload of a commit unless it waits for the others
+@test "codecov: waits for the upload of every test part" {
+  local parts
+  parts=$(yq '.jobs["test-part"].strategy.matrix.include | length' "$GITHUB_DIR/workflows/ci.yml")
+  run yq '[.codecov.notify.after_n_builds, .comment.after_n_builds] | join(" ")' "$BATS_TEST_DIRNAME/../codecov.yml"
+  [ "$output" = "$parts $parts" ]
 }
 
 # The lock holds every gem at its version with its checksum, and bundler stops on a gem
 # whose checksum differs; the bundler of the image runs, whatever version the lock names
 @test "ci: the test job installs the gems of ci-image/Gemfile.lock as the lock holds them" {
   local ci="$GITHUB_DIR/workflows/ci.yml" lock="$GITHUB_DIR/../ci-image/Gemfile.lock" gem
-  run yq -o=json -I=0 '.jobs.test.env' "$ci"
+  run yq -o=json -I=0 '.jobs["test-part"].env' "$ci"
   [ "$output" = '{"BUNDLE_GEMFILE":"ci-image/Gemfile","BUNDLE_FROZEN":"true","BUNDLE_PATH":"/opt/gems","BUNDLE_VERSION":"system"}' ]
-  run yq '[.jobs.test.steps[] | select(has("run")) | .run | select(test("gem install"))] | length' "$ci"
+  run yq '[.jobs["test-part"].steps[] | select(has("run")) | .run | select(test("gem install"))] | length' "$ci"
   [ "$output" = 0 ]
-  run yq -r '.jobs.test.steps[] | select(.name == "Install the coverage tools") | .run' "$ci"
+  run yq -r '.jobs["test-part"].steps[] | select(.name == "Install the coverage tools") | .run' "$ci"
   [ "$output" = "bundle install" ]
-  [ "$(step_index_in "$ci" test "Install the coverage tools")" -gt "$(step_index_in "$ci" test actions/checkout)" ]
-  run yq -r '.jobs.test.steps[] | select(.name == "Install dependencies") | .run' "$ci"
+  [ "$(step_index_in "$ci" test-part "Install the coverage tools")" -gt "$(step_index_in "$ci" test-part actions/checkout)" ]
+  run yq -r '.jobs["test-part"].steps[] | select(.name == "Install dependencies") | .run' "$ci"
   [[ "$output" == *" ruby ruby-erb ruby-bundler"* ]]
   run sed -n '/^  specs:$/,/^$/s/^    \([^ ]*\) (\(.*\))$/\1 \2/p' "$lock"
   [ "${#lines[@]}" -ge 4 ]
@@ -680,12 +738,12 @@ run_lint_images() {
 
 # Prints the index of the step of job $2 in workflow $1 that is named $3 or uses action $3
 step_index_in() {
-  yq ".jobs.$2.steps | to_entries | map(select(.value.name == \"$3\" or (.value.uses // \"\" | sub(\"@.*\"; \"\")) == \"$3\")) | .[0].key" "$1"
+  yq ".jobs[\"$2\"].steps | to_entries | map(select(.value.name == \"$3\" or (.value.uses // \"\" | sub(\"@.*\"; \"\")) == \"$3\")) | .[0].key" "$1"
 }
 
 @test "ci: the test job runs no validate step and the validate job calls the reusable workflow" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
-  run yq '.jobs.test.steps[] | select(has("run")) | .run' "$ci"
+  run yq '.jobs["test-part"].steps[] | select(has("run")) | .run' "$ci"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
   [[ "$output" != *"validate-pkg.sh"* ]]
@@ -987,14 +1045,16 @@ VULNERABLE_CHANGES='[{"change_type":"added","manifest":"ci-image/Gemfile.lock","
   [ "$output" = "5" ]
 }
 
-@test "ci: lint has 10 minutes, zizmor 5 and test 45" {
+@test "ci: lint has 10 minutes, zizmor 5, each test part 20 and test 5" {
   local ci="$GITHUB_DIR/workflows/ci.yml"
   run yq '.jobs.lint["timeout-minutes"]' "$ci"
   [ "$output" = "10" ]
   run yq '.jobs.zizmor["timeout-minutes"]' "$ci"
   [ "$output" = "5" ]
+  run yq '.jobs["test-part"]["timeout-minutes"]' "$ci"
+  [ "$output" = "20" ]
   run yq '.jobs.test["timeout-minutes"]' "$ci"
-  [ "$output" = "45" ]
+  [ "$output" = "5" ]
 }
 
 # === release-please.yml ===

@@ -471,14 +471,15 @@ stub_git_latest() {
   done
 }
 
-# One check of the whole file in place of a subshell for each of its lines
+# One check of the whole file in place of a subshell for each of its lines. The trace of bashcov
+# costs more per line than that subshell, so the timed run goes without it
 @test "draft: reads a .SRCINFO of 20,000 lines in a few seconds" {
   local -a deps
   mapfile -t deps < <(seq -f 'depends = dep%g' 1 20000)
   aur_package demo 1.0.0 "source = https://github.com/o/demo/archive/v1.0.0.tar.gz" "${deps[@]}"
   cd "$TEST_TMPDIR"
   SECONDS=0
-  run "$TEST_TMPDIR/scripts/draft.sh" demo
+  run env -u SHELLOPTS -u BASH_ENV -u BASH_XTRACEFD -u PS4 "$TEST_TMPDIR/scripts/draft.sh" demo
   [ "$SECONDS" -lt 10 ]
   [ -e "$TEST_TMPDIR/packages/demo.yml" ]
 }
