@@ -44,13 +44,14 @@ Without `gh`, set the secrets in the web UI, see [Manual setup](/setup/#manual-s
 
 ## Secrets not set / workflow fails with missing secret
 
-**Symptom:** the `publish` job fails in `Setup AUR SSH` with `The secret AUR_SSH_KEY is empty`, or with an SSH key error.
+**Symptom:** the `publish` job fails in `Setup AUR SSH` with `The secret AUR_SSH_KEY is empty` or `ssh-add could not load AUR_SSH_KEY, a key with a passphrase cannot load in CI`, or with an SSH key error.
 
 **Fixes:**
 
 1. Settings > Secrets and variables > Actions of your repository lists `AUR_SSH_KEY`, `AUR_GIT_NAME`, `AUR_GIT_EMAIL` and, with GPG, `GPG_SIGNING_KEY`.
 2. `./aurtomator.sh setup secrets` sets them again.
 3. Job `check-updates` of `.github/workflows/check-updates.yml` passes each secret by name, as [The calling workflows](/setup/#the-calling-workflows) shows. `secrets: inherit` passes none, see [Required](/setup/#required).
+4. The secret `AUR_SSH_KEY` holds a key with a passphrase, or no private key. `./aurtomator.sh setup ssh secrets` refuses both, and for a key with a passphrase it prints the commands that make a copy without it.
 
 ## Invalid workflow file: a nested job requests more permissions
 
