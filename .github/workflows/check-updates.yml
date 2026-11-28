@@ -871,17 +871,47 @@ jobs:
             echo "No GPG key configured, skipping signing"
             exit 0
           fi
-          if ! printf '%s\n' "$GPG_SIGNING_KEY" | sudo -u builder gpg --batch --import; then
+          KEYS="/run/aurtomator"
+          BUILDER_GNUPG="/home/builder/.gnupg"
+          # builder reaches the extra socket of the agent alone, which signs and exports no key
+          install -d -m 0750 "$KEYS"
+          chgrp builder "$KEYS"
+          install -d -m 0700 "$KEYS/gnupg"
+          printf '%s\n' "extra-socket $KEYS/S.gpg-agent.extra" "pinentry-program /usr/bin/false" >"$KEYS/gnupg/gpg-agent.conf"
+          export GNUPGHOME="$KEYS/gnupg"
+          if ! printf '%s\n' "$GPG_SIGNING_KEY" | gpg --batch --import; then
             echo "::error::gpg could not import GPG_SIGNING_KEY"
             exit 1
           fi
-          keys=$(sudo -u builder gpg --batch --with-colons --list-secret-keys)
+          keys=$(gpg --batch --with-colons --list-secret-keys)
           GPG_KEY_ID=$(awk -F: '$1 == "sec" { print $5; exit }' <<<"$keys")
           # Public key blocks import with no secret key, and expired keys or keys with a
           # passphrase cannot sign in batch mode
           if [[ ! "$GPG_KEY_ID" =~ ^[0-9A-F]{16}$ ]] ||
-            ! printf 'aurtomator\n' | sudo -u builder gpg --batch --local-user "$GPG_KEY_ID" --sign >/dev/null; then
+            ! printf 'aurtomator\n' | gpg --batch --local-user "$GPG_KEY_ID" --sign >/dev/null; then
             echo "::error::GPG_SIGNING_KEY holds no secret key that can sign"
+            exit 1
+          fi
+          if [[ ! -S "$KEYS/S.gpg-agent.extra" ]]; then
+            echo "::error::gpg-agent opened no socket at $KEYS/S.gpg-agent.extra"
+            exit 1
+          fi
+          chgrp builder "$KEYS/S.gpg-agent.extra"
+          chmod 0660 "$KEYS/S.gpg-agent.extra"
+          install -d -m 0700 "$BUILDER_GNUPG"
+          printf '%s\n' no-autostart quiet >"$BUILDER_GNUPG/gpg.conf"
+          chown -R builder:builder "$BUILDER_GNUPG"
+          # gpg of builder finds the agent through this file, so it goes in before the import
+          sock=$(sudo -u builder gpgconf --homedir "$BUILDER_GNUPG" --list-dirs agent-socket)
+          sudo -u builder mkdir -p -m 0700 -- "${sock%/*}"
+          printf '%%Assuan%%\nsocket=%s\n' "$KEYS/S.gpg-agent.extra" | sudo -u builder tee -- "$sock" >/dev/null
+          gpg --batch --armor --export "$GPG_KEY_ID" | sudo -u builder gpg --homedir "$BUILDER_GNUPG" --batch --import
+          if ! printf 'aurtomator\n' | sudo -u builder gpg --homedir "$BUILDER_GNUPG" --batch --local-user "$GPG_KEY_ID" --sign >/dev/null; then
+            echo "::error::builder cannot sign through $KEYS/S.gpg-agent.extra"
+            exit 1
+          fi
+          if [[ -n "$(sudo -u builder gpg --homedir "$BUILDER_GNUPG" --batch --export-secret-subkeys 2>/dev/null)" ]]; then
+            echo "::error::builder can export the GPG key"
             exit 1
           fi
           echo "GPG_KEY_ID=$GPG_KEY_ID" >>"$GITHUB_ENV"

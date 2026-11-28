@@ -4932,12 +4932,29 @@ EOF
   "$KEYS_DIR/bin/chown" builder:builder "$KEYS_DIR/home"
 }
 
+# Ends the agent of keyring $1, and removes the socket directory that gpg makes for the keyring
+# under /run/user for a test user and that the agent leaves behind
+end_gpg_agent() {
+  gpgconf --homedir "$1" --kill gpg-agent 2>/dev/null || true
+  [[ "$(gpgconf --homedir "$1" --list-dirs socketdir)" == "$1" ]] ||
+    gpgconf --homedir "$1" --remove-socketdir 2>/dev/null || true
+}
+
 # Ends the agents that the key steps of a test started
 stop_key_agents() {
-  local pid
+  local pid dir
   for pid in $(sed -n 's/^agent-pid=\([1-9][0-9]*\)$/\1/p' "$BATS_TEST_TMPDIR/output" 2>/dev/null); do
     kill "$pid" 2>/dev/null || true
   done
+  for dir in "$KEYS_DIR/run/gnupg" "$KEYS_DIR/gnupg"; do
+    [[ ! -d "$dir" ]] || end_gpg_agent "$dir"
+  done
+}
+
+# Runs a command as builder through the stub of make_keys_dir
+as_builder() {
+  env -u SSH_AUTH_SOCK -u GNUPGHOME -u GIT_CONFIG_GLOBAL -u XDG_CONFIG_HOME PATH="$KEYS_DIR/bin:$PATH" \
+    sudo -u builder "$@"
 }
 
 # Prints the path of an Ed25519 key with passphrase $1, none by default
@@ -4966,8 +4983,7 @@ run_setup_ssh_step() {
 
 # Prints the keys that the agent of Setup AUR SSH holds, as builder
 list_agent_keys() {
-  env -u SSH_AUTH_SOCK PATH="$KEYS_DIR/bin:$PATH" sudo -u builder \
-    env SSH_AUTH_SOCK="$KEYS_DIR/home/.ssh/agent.sock" ssh-add -l
+  as_builder env SSH_AUTH_SOCK="$KEYS_DIR/home/.ssh/agent.sock" ssh-add -l
 }
 
 @test "check-updates: Setup AUR SSH fails on an empty key" {
@@ -5006,7 +5022,7 @@ list_agent_keys() {
   grep -qxF "  IdentityAgent $ssh_dir/agent.sock" "$ssh_dir/config"
   run grep -c IdentityFile "$ssh_dir/config"
   [ "$output" = 0 ]
-  run env PATH="$KEYS_DIR/bin:$PATH" sudo -u builder ssh -G -F "$ssh_dir/config" aur.archlinux.org
+  run as_builder ssh -G -F "$ssh_dir/config" aur.archlinux.org
   [ "$status" -eq 0 ]
   grep -qxF "identityagent $ssh_dir/agent.sock" <<<"$output"
 }
@@ -5298,21 +5314,23 @@ exit "${PACMAN_RC:-0}"
   [ "$output" = "/data" ]
 }
 
-# Runs Setup GPG with GPG_SIGNING_KEY=$1 in a new keyring; sudo runs the command of
-# -u builder as the test user, and the agent has no pinentry
+# Runs Setup GPG with GPG_SIGNING_KEY=$1, with /run/aurtomator and the keyring of builder in KEYS_DIR;
+# gpg of a test user gives ~/.gnupg the socket of the user's own agent, so the keyring stays out of it
 run_setup_gpg_step() {
-  local bin="$BATS_TEST_TMPDIR/bin" home="$BATS_TEST_TMPDIR/home"
-  rm -rf "$home"
-  mkdir -p "$bin" "$home/gnupg"
-  chmod 0700 "$home/gnupg"
-  echo "pinentry-program /usr/bin/false" >"$home/gnupg/gpg-agent.conf"
-  printf '#!/usr/bin/env bash\n[[ "$1 $2" == "-u builder" ]] || exit 97\nshift 2\nexec "$@"\n' >"$bin/sudo"
-  chmod +x "$bin/sudo"
-  step_run publish "Setup GPG" >"$BATS_TEST_TMPDIR/step.sh"
+  local step="$BATS_TEST_TMPDIR/step.sh" block keys gnupg
+  [[ -n "${KEYS_DIR:-}" ]] || make_keys_dir
+  stop_key_agents
+  rm -rf -- "$KEYS_DIR/run" "$KEYS_DIR/gnupg" "$KEYS_DIR/home/.gitconfig"
+  block=$(step_run publish "Setup GPG")
+  keys=$(sed -n 's/^ *KEYS="\(.*\)"$/\1/p' <<<"$block")
+  gnupg=$(sed -n 's/^ *BUILDER_GNUPG="\(.*\)"$/\1/p' <<<"$block")
+  [ "$keys $gnupg" = "/run/aurtomator /home/builder/.gnupg" ]
+  block=${block//"$keys"/"$KEYS_DIR/run"}
+  printf '%s\n' "${block//"$gnupg"/"$KEYS_DIR/gnupg"}" >"$step"
   : >"$BATS_TEST_TMPDIR/env"
-  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_CONFIG_HOME -u GIT_CONFIG_GLOBAL PATH="$bin:$PATH" HOME="$home" \
-    GNUPGHOME="$home/gnupg" GITHUB_ENV="$BATS_TEST_TMPDIR/env" GPG_SIGNING_KEY="$1" sh -e "$BATS_TEST_TMPDIR/step.sh"
-  gpgconf --homedir "$home/gnupg" --kill gpg-agent 2>/dev/null || true
+  run env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE -u XDG_CONFIG_HOME -u GIT_CONFIG_GLOBAL -u GNUPGHOME \
+    PATH="$KEYS_DIR/bin:$PATH" HOME="$BATS_TEST_TMPDIR" GITHUB_ENV="$BATS_TEST_TMPDIR/env" GPG_SIGNING_KEY="$1" \
+    sh -e "$step"
 }
 
 # Prints the armored key $2 of a new key: secret, public or protected
@@ -5327,7 +5345,7 @@ make_gpg_key() {
   else
     GNUPGHOME="$dir" gpg --batch --pinentry-mode loopback --passphrase "${pass[1]:-}" --armor --export-secret-keys || rc=$?
   fi
-  gpgconf --homedir "$dir" --kill gpg-agent 2>/dev/null || true
+  end_gpg_agent "$dir"
   return "$rc"
 }
 
@@ -5337,8 +5355,79 @@ make_gpg_key() {
   run_setup_gpg_step "$key"
   [ "$status" -eq 0 ]
   [[ "$(<"$BATS_TEST_TMPDIR/env")" =~ ^GPG_KEY_ID=[0-9A-F]{16}$ ]]
-  [ "$(env -u XDG_CONFIG_HOME -u GIT_CONFIG_GLOBAL HOME="$BATS_TEST_TMPDIR/home" git config --global user.signingkey)" = \
-    "$(cut -d= -f2 "$BATS_TEST_TMPDIR/env")" ]
+  [ "$(as_builder git config --global user.signingkey)" = "$(cut -d= -f2 "$BATS_TEST_TMPDIR/env")" ]
+}
+
+@test "check-updates: Setup GPG keeps the secret key in the keyring of root" {
+  local key id
+  key=$(make_gpg_key secret)
+  run_setup_gpg_step "$key"
+  [ "$status" -eq 0 ]
+  id=$(cut -d= -f2 "$BATS_TEST_TMPDIR/env")
+  run gpg --homedir "$KEYS_DIR/run/gnupg" --batch --with-colons --list-secret-keys "$id"
+  [ "$status" -eq 0 ]
+  [ "$(awk -F: '$1 == "sec" { print $5 }' <<<"$output")" = "$id" ]
+  run as_builder gpg --homedir "$KEYS_DIR/gnupg" --batch --with-colons --list-keys "$id"
+  [ "$status" -eq 0 ]
+  [ "$(awk -F: '$1 == "pub" { print $5 }' <<<"$output")" = "$id" ]
+  [ -z "$(ls -A "$KEYS_DIR/gnupg/private-keys-v1.d" 2>/dev/null)" ]
+}
+
+@test "check-updates: Setup GPG lets builder sign through the extra socket" {
+  local key id
+  key=$(make_gpg_key secret)
+  run_setup_gpg_step "$key"
+  [ "$status" -eq 0 ]
+  id=$(cut -d= -f2 "$BATS_TEST_TMPDIR/env")
+  as_builder gpg --homedir "$KEYS_DIR/gnupg" --batch --local-user "$id" --sign <<<x >"$BATS_TEST_TMPDIR/signed" \
+    2>"$BATS_TEST_TMPDIR/sign-err"
+  [ ! -s "$BATS_TEST_TMPDIR/sign-err" ]
+  run gpg --homedir "$KEYS_DIR/run/gnupg" --batch --status-fd 1 --verify <"$BATS_TEST_TMPDIR/signed"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[GNUPG:] GOODSIG $id "* ]]
+}
+
+@test "check-updates: Setup GPG gives builder no way to export the key" {
+  local key opt rc
+  key=$(make_gpg_key secret)
+  run_setup_gpg_step "$key"
+  [ "$status" -eq 0 ]
+  for opt in --export-secret-keys --export-secret-subkeys; do
+    echo "$opt"
+    rc=0
+    as_builder gpg --homedir "$KEYS_DIR/gnupg" --batch "$opt" >"$BATS_TEST_TMPDIR/exported" \
+      2>"$BATS_TEST_TMPDIR/export-err" || rc=$?
+    [ "$rc" -ne 0 ]
+    [ ! -s "$BATS_TEST_TMPDIR/exported" ]
+    grep -q Forbidden "$BATS_TEST_TMPDIR/export-err"
+  done
+}
+
+@test "check-updates: Setup GPG fails when builder can export the key" {
+  local key
+  key=$(make_gpg_key secret)
+  make_keys_dir
+  printf '%s\n' '#!/bin/sh' 'for arg; do [ "$arg" != --export-secret-subkeys ] || { echo secret; exit 0; }; done' \
+    'exec /usr/bin/gpg "$@"' >"$KEYS_DIR/bin/gpg"
+  chmod 0755 "$KEYS_DIR/bin/gpg"
+  run_setup_gpg_step "$key"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::builder can export the GPG key" ]]
+  [ ! -s "$BATS_TEST_TMPDIR/env" ]
+}
+
+# Mode 0000 closes a socket to its owner too, so builder cannot connect as nobody or as the
+# test user
+@test "check-updates: Setup GPG fails when builder cannot sign through the socket" {
+  local key
+  key=$(make_gpg_key secret)
+  make_keys_dir
+  printf '%s\n' '#!/bin/sh' '[ "$1" != 0660 ] || set -- 0000 "$2"' 'exec /usr/bin/chmod "$@"' >"$KEYS_DIR/bin/chmod"
+  chmod 0755 "$KEYS_DIR/bin/chmod"
+  run_setup_gpg_step "$key"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::builder cannot sign through $KEYS_DIR/run/S.gpg-agent.extra" ]]
+  [ ! -s "$BATS_TEST_TMPDIR/env" ]
 }
 
 # Public key blocks import with no secret key, and git would then sign nothing
@@ -5361,8 +5450,9 @@ make_gpg_key() {
 
 # GPG_KEY_ID goes to GITHUB_ENV, where a value of another form could set other variables
 @test "check-updates: Setup GPG takes a key ID of 16 hex digits alone" {
-  local id bin="$BATS_TEST_TMPDIR/bin"
-  mkdir -p "$bin"
+  local id bin
+  make_keys_dir
+  bin="$KEYS_DIR/bin"
   cat >"$bin/gpg" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$*" == "--batch --with-colons --list-secret-keys" ]]; then
@@ -5380,10 +5470,13 @@ EOF
     [[ "$output" == *"::error::GPG_SIGNING_KEY holds no secret key that can sign"* ]]
     [ ! -s "$BATS_TEST_TMPDIR/env" ]
   done
+  # The ID passes, and the stub starts no agent
   export FAKE_ID=0123456789ABCDEF
   run_setup_gpg_step key
-  [ "$status" -eq 0 ]
-  [ "$(cat "$BATS_TEST_TMPDIR/env")" = GPG_KEY_ID=0123456789ABCDEF ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::gpg-agent opened no socket at $KEYS_DIR/run/S.gpg-agent.extra" ]]
+  [[ "$output" != *"holds no secret key"* ]]
+  [ ! -s "$BATS_TEST_TMPDIR/env" ]
 }
 
 # Branch names can hold # and %, which a URL path reads as a fragment and an escape
